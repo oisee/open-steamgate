@@ -50,6 +50,9 @@ CLASS zcl_osd_adt_source IMPLEMENTATION.
     DATA lv_body TYPE string.
     DATA lv_uri TYPE string.
     DATA lx_error TYPE REF TO zcx_osd_adt.
+    DATA lv_pool TYPE string.
+    DATA lt_properties TYPE tihttpnvp.
+    DATA ls_property TYPE ihttpnvp.
     lv_type = source_type( is_request-pattern ).
     READ TABLE is_request-params WITH KEY name = `name` INTO ls_param.
     lv_name = ls_param-value.
@@ -63,6 +66,46 @@ CLASS zcl_osd_adt_source IMPLEMENTATION.
     ENDIF.
     zcl_osd_adt_package=>query( EXPORTING is_request = is_request iv_name = `version` IMPORTING ev_value = lv_version ).
     ls_read = read( iv_type = lv_type iv_name = lv_name iv_include = lv_include iv_version = lv_version ).
+    IF lv_type = `CLAS` AND ls_read-empty = abap_true.
+      CASE lv_include.
+        WHEN `testclasses`.
+          IF is_request-pattern CP `*/includes/:include/source/main`.
+            rs_response-status = 404.
+            rs_response-content_type = `text/plain; charset=utf-8`.
+            rs_response-body = `No suitable resource found`.
+            RETURN.
+          ENDIF.
+          lv_pool = to_upper( ls_read-name ).
+          WHILE strlen( lv_pool ) < 30.
+            lv_pool = lv_pool && `=`.
+          ENDWHILE.
+          lv_pool = lv_pool && `CCAU`.
+          ls_property-name = `T100KEY-ID`.
+          ls_property-value = `ED`.
+          APPEND ls_property TO lt_properties.
+          ls_property-name = `T100KEY-NO`.
+          ls_property-value = `170`.
+          APPEND ls_property TO lt_properties.
+          ls_property-name = `T100KEY-V1`.
+          ls_property-value = lv_pool.
+          APPEND ls_property TO lt_properties.
+          CREATE OBJECT lx_error EXPORTING iv_status = 404 iv_type = `ExceptionResourceNotFound`
+            iv_message = lv_pool && ` does not have any inactive version` it_properties = lt_properties.
+          RAISE EXCEPTION lx_error.
+        WHEN `definitions`.
+          ls_read-source = |*"* use this source file for any type of declarations (class\r\n|
+            && |*"* definitions, interfaces or type declarations) you need for\r\n|
+            && |*"* components in the private section\r\n|.
+        WHEN `macros`.
+          ls_read-source = |*"* use this source file for any macro definitions you need\r\n|
+            && |*"* in the implementation part of the class\r\n|.
+        WHEN `implementations`.
+          ls_read-source = |*"* use this source file for the definition and implementation of\r\n|
+            && |*"* local helper classes, interface definitions and type\r\n|
+            && |*"* declarations\r\n|.
+      ENDCASE.
+      ls_read-etag = zcl_osd_adt_entity=>tag( ls_read-source ).
+    ENDIF.
     lv_accept = zcl_osd_adt_csrf=>header( it_headers = is_request-headers iv_name = `accept` ).
     IF is_request-pattern CP `*/includes/:include` AND find( val = lv_accept sub = `application/vnd.sap.adt.oo.classes.includes.` ) >= 0.
       lv_uri = `/sap/bc/adt/oo/classes/` && zcl_osd_adt_uri=>encode_component( to_lower( lv_name ) )

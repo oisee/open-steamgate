@@ -1,7 +1,7 @@
 import {prepareActivation, publishActivation} from "./osd-publish-activation.mjs";
 import {unitResultDocument, unitResultOptions} from "./adt-unit-result.mjs";
 import {validateCreation, validationDocument} from "./adt-create-validation.mjs";
-import {requestElements, elementsNamed, attributeValue, namespaces} from "./adt-request-xml.mjs";
+import {requestElements, elementsNamed, attributeValue, namespaces, objectXMLRoots, invalidObjectXML} from "./adt-request-xml.mjs";
 import {requestXMLProfile, readRequestXML, RequestXMLError, XML_ERROR_TYPE, XML_ERROR_MESSAGE} from "./adt-request-xml.mjs";
 import {segwRegistrationsOf} from "./osd-store-destination.mjs";
 import {xrefFact} from "./adt-xref-facts.mjs";
@@ -51,7 +51,7 @@ import {SOURCE_PROPERTY_MIME, sourcePropertiesDocument} from "./adt-source-prope
 import {ObjectStore, TYPES, INCLUDES as CLASS_INCLUDES, NotFound, ReadOnly, NotSupported, Conflict, InvalidName} from "./osd-store.mjs";
 import {cdsEntityOf} from "./adt-cds.mjs";
 import {hashOf, liveHash} from "./osd-build.mjs";
-import {emptyFeedDocument, uriOf, ADT_TYPE, dataElementDocument, tableFieldsOf, tableDocument, tableSourceDocument, TREE_FOLDER, TREE_CATEGORY, TREE_TYPE_LABEL, TREE_CATEGORY_LABEL, classDocument, activationSuccessDocument, namedItemsDocument, objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, packageOf, nodeStructureDocument, nodePathDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, lockedByOtherDocument, activationFailureDocument, inactiveObjectsDocument, objectReferencesIn, objectFromUri, checkReportDocument, checkObjectsIn, transportCheckDocument, transportCheckRequest} from "./adt-documents.mjs";
+import {classIncludeTemplates, missingTestInclude, emptyFeedDocument, uriOf, ADT_TYPE, dataElementDocument, tableFieldsOf, tableDocument, tableSourceDocument, TREE_FOLDER, TREE_CATEGORY, TREE_TYPE_LABEL, TREE_CATEGORY_LABEL, classDocument, activationSuccessDocument, namedItemsDocument, objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, packageOf, nodeStructureDocument, nodePathDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, lockedByOtherDocument, activationFailureDocument, inactiveObjectsDocument, objectReferencesIn, objectFromUri, checkReportDocument, checkObjectsIn, transportCheckDocument, transportCheckRequest} from "./adt-documents.mjs";
 import {checkRunReport} from "./adt-checkrun.mjs";
 import {identity as osdIdentity} from "./osd-identity.mjs";
 import {gitObjectRevision, gitObjectState} from "./osd-git-history.mjs";
@@ -1683,6 +1683,11 @@ export function adtRouter(options = {}) {
           throw new NotFound(type, `${name} include ${include}`);
         }
         const part = store.read(type, name, include, req.query.version);
+        if (part.empty && include === "testclasses") {
+          const missing = missingTestInclude(part.name);
+          return void refuse(res, 404, "ExceptionResourceNotFound", missing.message, missing);
+        }
+        if (part.empty && classIncludeTemplates[include]) { part.source = classIncludeTemplates[include]; part.etag = entityTag(part.source); }
         // VSP and the source links in class properties use this URL directly
         // with */*. Only an explicit include-property request wants XML.
         if (!String(req.headers.accept ?? "").includes("application/vnd.sap.adt.oo.classes.includes.")) {
@@ -1702,6 +1707,10 @@ export function adtRouter(options = {}) {
           throw new NotFound(type, `${req.params.name} include ${req.params.include}`);
         }
         const part = store.read(type, req.params.name, req.params.include, req.query.version);
+        if (part.empty && req.params.include === "testclasses") {
+          return void res.status(404).type("text/plain; charset=utf-8").send("No suitable resource found");
+        }
+        if (part.empty && classIncludeTemplates[req.params.include]) { part.source = classIncludeTemplates[req.params.include]; part.etag = entityTag(part.source); }
         const source = part.source;
         res.type("text/plain; charset=utf-8");
         sendEntity(req, res, source, part.etag);
@@ -2074,6 +2083,12 @@ export function adtRouter(options = {}) {
         return;
       }
 
+      if (req.query._action === undefined && objectXMLRoots[type]) {
+        const invalid = invalidObjectXML(type, await rawBody(req));
+        if (invalid) return void refuse(res, 400, "ExceptionInvalidData", invalid.message, invalid);
+        return void refuse(res, 501, "ExceptionResourceNoAccess", "object XML updates are not supported here");
+      }
+
       if (action === "LOCK") {
         // Program offers measured 2026-10-04 ignore q and dataname, returning Result.
         // Our policies: case-insensitive media types, wildcards, and empty
@@ -2167,17 +2182,19 @@ export function adtRouter(options = {}) {
       rawBody(req).then((body) => {
         answer(res, async () => {
           const include = req.params.include ?? "main";
-          // Validate the include name before writing. Known empty includes may
-          // be created, but arbitrary suffixes are not repository objects.
-          if (include !== "main") {
-            store.read(type, req.params.name, include);
+          // ADT requires explicit creation of testclasses. STORE WRITE remains
+          // an implicit create for the non-ADT dev API.
+          const part = store.read(type, req.params.name, include);
+          if (type === "CLAS" && include === "testclasses" && part.empty) {
+            const missing = missingTestInclude(part.name);
+            return void refuse(res, 500, "ExceptionResourceSaveFailure", missing.message, missing);
           }
           // The handle proves this request belongs to the locking session; it
           // does not exclude Git, a watcher, another session or another
           // process from changing the file. Compare immediately beside the write: an earlier
           // preflight GET leaves a race in which the newer source is lost.
           const expected = req.headers["if-match"];
-          const current = store.read(type, req.params.name, include).source;
+          const current = part.empty && classIncludeTemplates[include] ? classIncludeTemplates[include] : part.source;
           if (expected !== undefined && normalizedTag(expected) !== "*" &&
               normalizedTag(expected) !== entityTag(current)) {
             res.status(412).type("application/xml").send(exceptionDocument(

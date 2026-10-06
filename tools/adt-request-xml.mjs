@@ -44,6 +44,23 @@ export function requestXMLProfile(method, path) {
   if (/^(?:oo\/(?:classes|interfaces)|programs\/(?:programs|includes)|ddic\/(?:ddl|srvd)\/sources|packages)\/[^/]+$/.test(path)) return [];
   return undefined;
 }
+// Object XML POST uses the same obvious root names as collection creation.
+export const objectXMLRoots = {
+  CLAS: [namespaces.class, "abapClass"], INTF: [namespaces.intf, "abapInterface"],
+  PROG: [namespaces.program, "abapProgram"], INCL: [namespaces.include, "abapInclude"],
+  DDLS: [namespaces.ddl, "ddlSource"], SRVD: [namespaces.srvd, "serviceDefinition"],
+};
+export function invalidObjectXML(type, body) {
+  const expected = objectXMLRoots[type];
+  if (!expected) return undefined;
+  const root = requestElements(body).find(e => e.parent === 0);
+  if (root?.uri === expected[0] && root.local === expected[1]) return undefined;
+  const message = `System expected the element '{${expected[0]}}${expected[1]}'`;
+  return {message, properties: [["XML_PATH", root ? `${root.local}(1)` : ""],
+    ["XML_OFFSET", `${body.length} `], ["T100KEY-ID", "00"], ["T100KEY-NO", "001"],
+    ["T100KEY-V1", message.slice(0, 48)], ["T100KEY-V2", message.slice(48)]]};
+}
+
 // XML 1.0 fifth-edition NameStartChar/NameChar, with colon excluded
 // for namespace NCNames. PI targets also use NCName (Namespaces 1.0).
 const startChar = cp => cp === 95 || cp >= 65 && cp <= 90 || cp >= 97 && cp <= 122 ||

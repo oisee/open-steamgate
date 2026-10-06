@@ -78,6 +78,12 @@ CLASS zcl_osd_adt_lock IMPLEMENTATION.
     DATA ls_object TYPE zcl_osd_adt_host=>ty_object.
     DATA ls_param TYPE zif_osd_adt_route=>ty_param.
     DATA lx_error TYPE REF TO zcx_osd_adt.
+    DATA lv_uri TYPE string.
+    DATA lv_element TYPE string.
+    DATA ls_root TYPE zif_osd_adt_xml=>ty_element.
+    DATA lt_properties TYPE tihttpnvp.
+    DATA ls_property TYPE ihttpnvp.
+    DATA lv_length TYPE i.
 
     lv_type = zcl_osd_adt_types=>type_of_path( is_request-path ).
     READ TABLE is_request-params INTO ls_param WITH KEY name = `name`.
@@ -90,6 +96,64 @@ CLASS zcl_osd_adt_lock IMPLEMENTATION.
       lv_text = |{ lv_type } { lv_name } does not exist|.
       lx_error = zcx_osd_adt=>not_found( lv_text ).
       RAISE EXCEPTION lx_error.
+    ENDIF.
+
+*   No _action means an object XML write, irrespective of Accept.
+    READ TABLE is_request-query WITH KEY name = `_action` TRANSPORTING NO FIELDS.
+    IF sy-subrc <> 0.
+      CASE lv_type.
+        WHEN `CLAS`.
+          lv_uri = `http://www.sap.com/adt/oo/classes`.
+          lv_element = `abapClass`.
+        WHEN `INTF`.
+          lv_uri = `http://www.sap.com/adt/oo/interfaces`.
+          lv_element = `abapInterface`.
+        WHEN `PROG`.
+          lv_uri = `http://www.sap.com/adt/programs/programs`.
+          lv_element = `abapProgram`.
+        WHEN `INCL`.
+          lv_uri = `http://www.sap.com/adt/programs/includes`.
+          lv_element = `abapInclude`.
+        WHEN `DDLS`.
+          lv_uri = `http://www.sap.com/adt/ddic/ddlsources`.
+          lv_element = `ddlSource`.
+        WHEN `SRVD`.
+          lv_uri = `http://www.sap.com/adt/ddic/srvd`.
+          lv_element = `serviceDefinition`.
+      ENDCASE.
+      IF lv_element IS NOT INITIAL.
+        READ TABLE is_request-xml INDEX 1 INTO ls_root.
+        IF ls_root-uri = lv_uri AND ls_root-local = lv_element.
+          CREATE OBJECT lx_error EXPORTING iv_status = 501 iv_type = `ExceptionResourceNoAccess`
+            iv_message = `object XML updates are not supported here`.
+          RAISE EXCEPTION lx_error.
+        ENDIF.
+        lv_text = |System expected the element '\{{ lv_uri }\}{ lv_element }'|.
+        ls_property-name = `XML_PATH`.
+        IF ls_root-local IS NOT INITIAL.
+          ls_property-value = ls_root-local && `(1)`.
+        ENDIF.
+        APPEND ls_property TO lt_properties.
+        ls_property-name = `XML_OFFSET`.
+        lv_length = xstrlen( is_request-body ).
+        ls_property-value = |{ lv_length } |.
+        APPEND ls_property TO lt_properties.
+        ls_property-name = `T100KEY-ID`.
+        ls_property-value = `00`.
+        APPEND ls_property TO lt_properties.
+        ls_property-name = `T100KEY-NO`.
+        ls_property-value = `001`.
+        APPEND ls_property TO lt_properties.
+        ls_property-name = `T100KEY-V1`.
+        ls_property-value = substring( val = lv_text len = 48 ).
+        APPEND ls_property TO lt_properties.
+        ls_property-name = `T100KEY-V2`.
+        ls_property-value = substring( val = lv_text off = 48 ).
+        APPEND ls_property TO lt_properties.
+        CREATE OBJECT lx_error EXPORTING iv_status = 400 iv_type = `ExceptionInvalidData`
+          iv_message = lv_text it_properties = lt_properties.
+        RAISE EXCEPTION lx_error.
+      ENDIF.
     ENDIF.
 
     CASE lv_action.
