@@ -1,6 +1,6 @@
 # An ABAP development API inside OSG, and GENERATE SUBROUTINE POOL on top of it
 
-*Design note, 2026-10-02. Nothing here is built. Backlog: [adt.md](backlog/adt.md#an-abap-development-api-and-generate-subroutine-pool-2026-10-02), **should**, 0.7 or later.*
+*Design note, 2026-10-02; PIA integration plan updated 2026-10-05. The public development API below is not implemented; existing STORE and ADT mechanisms are listed separately. Backlog: [adt.md](backlog/adt.md#an-abap-development-api-and-generate-subroutine-pool-2026-10-02), **should**, 0.7 or later.*
 
 ## Why
 
@@ -39,19 +39,20 @@ transpiler still emits `throw new Error("GenerateSubroutine, not supported, tran
   (`tools/osd-serve.mjs:389`).
 - **WAIT.** `WAIT` commits, rolls out (snapshots the ICF shim's static server), releases the FIFO lock and
   takes it back afterwards (`tools/osd-dialog-step.mjs:239-345`, #438). Session memory stays where it is.
-- **ZOSD_STORE ACTIVATE.** It already awaits `publish()` inside the calling step
-  (`tools/osd-store-destination.mjs:399`). It says so when the process serving the screen keeps its old code
-  (`:414`).
+- **ZOSD_STORE ACTIVATE.** `tools/osd-store-destination.mjs` checks activation and publishes directly
+  unless the calling context supplies `deferActivate`. With that binding it schedules publication after
+  the step and returns `EV_ACTIVE = X`, `EV_LIVE` initial, and the note "live after the step".
+  That verdict is not confirmation that a subsequent test sees the new generation.
 - **The ABAP ADT façade.** It lives in `src/adt/`: `ZCL_OSD_ADT_HANDLER`, `_ROUTER`, `_HOST` (the one host
   seam, `ZOSD_STORE DESTINATION 'STORE'`), `_LOCK` (`ENQUEUE_EZOSD_ADT_OBJ`, `zcl_osd_adt_lock.clas.abap:199`),
-  `_SESSION` and `ZCX_OSD_ADT`. Port-map section 3 adds the store commands CREATE, DELETE and OBJECT, and
-  extends ACTIVATE (`docs/adt-abap-port/port-map.md:262-290`). Port-map risk 2 (`:537-541`) already says that
+  `_SESSION` and `ZCX_OSD_ADT`. OBJECT is exposed through STORE; CREATE and DELETE now appear in the local destination COMMANDS list through P2a below;
+  this delivery is not merged, and the public development class remains planned. Port-map risk 2 (`:537-541`) already says that
   a swap or recycle happens after the response, never during it.
-- **Slice 3, option B** (`docs/adt-abap-port/slice-3-front.md:107-129`). On `feat/adt-front-up` (**not merged**,
-  in progress) a HOST verdict carries `ZIF_OSD_ADT_ROUTE=>TY_CONTINUATION` (kind, JSON payload). Node runs the
-  handler registered with `registerContinuation(kind, handler)` (`tools/adt-abap-front.mjs`) after the step,
-  outside the lock. stoker's 4b design (**not merged**, not yet in a tracked file) uses this: ABAP gives the
-  activation verdict, and the host publishes after the step. P3 depends on both.
+- **Slice 3, option B** (`docs/adt-abap-port/slice-3-front.md`). The continuation registry exists in
+  `tools/adt-abap-front.mjs`: a HOST verdict carries kind and JSON payload, host work runs outside the
+  work-process lock, and `resume()` enters a fresh ABAP step. P3 can reuse this mechanism. A generic,
+  queryable activation completion contract for ABAP callers and an after-step path for every entry
+  (including jobs, APC and OData) still need implementation.
 - **The kernel oracle** (PR #467, `test/fixtures/kernel-oracle`, P7). A good pool returns subrc 0, NAME
   `%_T002O3` (generated, different on every run), and `PERFORM f IN PROGRAM (name)` works. A semantic error
   returns subrc 4 with MESSAGE `Field "UNDEFINED_X" is unknown.`, LINE 3 and WORD `UNDEFINED_X`. A syntax
@@ -115,6 +116,123 @@ built while the step is rolled out and loaded into the serving process once the 
 without a swap or a recycle. `activate` answers `live = abap_true` only in that case, and otherwise says
 "active, live after this step", as `ZOSD_STORE` ACTIVATE already does. (b) is left to HTTP clients that
 want a job id (the port-map's JOB command).
+
+## 2.1 PIA integration contract (agreed plan, 2026-10-05)
+
+PIA is a headless ABAP agent with a local OSG backend and an ADT backend. Its M2 needs explicit
+CREATE/DELETE through STORE (W2), activation completion (W6), and a local ABAP Unit entry (W3).
+The agreed order is **P2a → P3a → P3b → P4**. These are planned interfaces, not current capabilities.
+
+### P2a: repository operations (W2)
+
+Expose CREATE and DELETE in STORE COMMANDS and CAPABILITIES, with type/name and, for CREATE,
+package/description/source. Reuse ObjectStore and the ADT lock and error rules. Direct callers must not
+bypass an Eclipse editor's lock; author identity comes from the caller's session. The ABAP development
+class is the common operation layer for local callers and ADT adapters, rather than a second write path.
+CREATE is limited to the six existing creatable types; FUGR/FUNC remain P6.
+
+Local P2a delivery: STORE CREATE/DELETE and their capabilities are implemented in this branch.
+CHECK and ACTIVATE also return JSON `{active, live, note, issues}` alongside their existing
+scalar/table fields. The ABAP host wrapper imports JSON/SOURCE only; callers must inspect
+`active` and `issues`, since a syntax refusal does not raise a transport exception. `active: true`
+with `live: false` still does not confirm publication. P3a will add the durable operation state below.
+Use IV_TYPE and IV_NAME; CREATE accepts IV_JSON `{ "package": "$TMP", "description": "..." }`
+and optional IV_SOURCE. Omitted package defaults to $TMP. EV_JSON contains the ObjectStore result
+or the standard error envelope. Author comes from the live ENQ session. PROG/INCL locks are both
+checked, and an IPC mutation keeps the caller's lock until the parent acknowledges; a queued mutation
+is cancelled when the calling session ends. CREATE rejects any source containing @KERNEL in this
+local version. It cannot yet opt in. A source-owning ObjectStore is required; built-only hosts refuse.
+The shared ZCL_OSD_DEVELOPMENT class, its dev-system policy and migration of ADT WRITE logic are
+still planned. Existing WRITE behavior is unchanged by this local delivery.
+
+### P3a: activation completion (W6)
+
+The shared result has `{state, op_id, generation_id}`. State vocabulary for the first implementation:
+
+| state | meaning | may PIA run tests on the requested revision? |
+|---|---|---|
+| `checked` | Validation succeeded; publication has not been requested/completed | No |
+| `pending` | Publication is scheduled or running; leave the calling step | No |
+| `published` | The checked source revision was published and its generation is available for a new execution context | Yes, in that generation |
+| `failed` | Validation, build, promotion or publication failed | No |
+
+`op_id` identifies the activation operation, not merely the object. `generation_id` is initial until
+publication is confirmed and names the published generation afterwards. Diagnostics distinguish a
+validation refusal, build failure and source revision conflict. Polling completion through a local API
+is sufficient for the first version; AMC notification may supplement it and is not the source of truth.
+### P3a wire contract for implementation
+
+These additions are agreed implementation targets; they are not yet advertised by COMMANDS.
+ACTIVATE will return the operation document in EV_JSON. Keep `active`, `live`, `note` and `issues`
+for current callers, and add `state`, `op_id`, `generation_id`, `type`, `name`, `created_at`,
+`updated_at`, `completed_at`, and `failure_stage`. IDs and timestamps are strings; timestamps are UTC ISO 8601.
+`generation_id` and `failure_stage` are empty strings until applicable. `failure_stage` is one of
+`validation`, `step`, `build`, `promotion`, `revision`, or `recovery` for a failed operation.
+Issues retain the existing OBJ_TYPE/OBJ_NAME/LINE/COL/RULE/MESSAGE rows.
+
+The corresponding ABAP result type uses STRING for these fields, ABAP_BOOL for active/live,
+and ZOSD_ISSUE_T for issues. This type belongs to the planned development API; existing
+ZCL_OSD_ADT_HOST=>TY_ANSWER stays a JSON/SOURCE carrier.
+
+- **Lookup:** STORE `ACTIVATION_STATUS`, IV_JSON `{ "op_id": "..." }`. The result is the same
+  operation document. It is read-only and never schedules publication. Missing/expired IDs return
+  the standard NOT_FOUND error envelope; malformed requests return INVALID_NAME.
+- **Ownership:** the source-owning host creates and records the operation before returning pending.
+  Its journal lives outside generated modules and outside the serving child. Serving-child recycle
+  preserves the journal. Journals are scoped by source root and HTTP instance port, with a single
+  source-host owner; another live owner for the same root/port is refused. Resume/lookup must address
+  the same instance, and a restart must retain its port. A source-host restart conservatively fails unfinished entries with
+  `failure_stage: recovery`; it must not infer publication from a build directory alone.
+- **Retention:** keep completed published/failed entries for at least 24 hours from completion.
+  Never expire checked/pending entries during a live host's work. Cleanup is lazy on journal access;
+  no entry is evicted early merely to satisfy a count limit. After expiry, NOT_FOUND means the caller
+  must reconcile its checkpoint and the active object; it does not mean activation succeeded.
+- **Completion:** published requires promotion of the exact checked revision and confirmation that
+  its generation is available to a new execution context. A changed source, dumped calling step,
+  failed build, failed promotion or lost unfinished work produces failed with diagnostics.
+
+Repeated lookup is idempotent. A repeated ACTIVATE is a new operation, rather than a lookup;
+PIA persists op_id before leaving its calling step and uses ACTIVATION_STATUS after resuming.
+ACTIVATE allocates an op_id even for a validation refusal: checked is its intermediate validated
+state, followed by pending and then published/failed. Refusal can go directly to failed.
+CHECK remains a validation-only response without a tracked operation. `completed_at` is empty
+until published/failed, then immutable; lookup does not change timestamps or extend retention.
+Run-test readiness is determined by `state == published`, not the legacy active/live flags.
+Published is historical: a later activation may replace that generation. RUN_TESTS must still
+check expected_generation and refuse an unavailable generation explicitly; this contract does
+not promise to keep every published generation loaded for the journal's retention period.
+
+OSG owns operation status, the checked revision, publication and generation identification. PIA owns
+persisting its checkpoint, leaving the step, and resuming in a new step. Operation status must survive
+any serving-process recycle needed to finish publication. Querying the same operation must not enqueue
+another activation. `published` does not mean that stack frames already running in the old generation
+have changed. No serialization of PIA's call stack is promised by this API.
+
+### P3b: local ABAP Unit (W3)
+
+Expose RUN_TESTS through the local development backend, without an HTTP request back into OSG.
+The call names the object and expected published generation, and uses an isolated test execution
+context so test changes do not share the agent's LUW. Reuse the existing Unit runner and report model.
+A generation mismatch must be reported explicitly; testing an older active revision is not success.
+
+Return execution status separately from test verdict: a completed run can contain failed assertions;
+a runner failure is not an assertion failure. Structured results include test class/method, verdict,
+duration and diagnostics with source locations where available. Execution that needs the work-process
+lock must start after the caller releases it; "local" does not imply an unsafe nested dialog step.
+
+### Joint acceptance and interim path
+
+From ABAP: create a class, write an intentionally failing test, activate, checkpoint and leave the step,
+wait for `published`, resume and obtain the failing assertion. Fix the test, repeat activation and get
+a passing result. Delete the disposable object and confirm its absence. Exercise the same repository
+operations through ADT to check lock, revision and error compatibility. PIA adopts this as M2 acceptance;
+OSG adds focused coverage for each phase. Use an external ADT activator until P3a exists.
+
+Existing content edits already have a measured warm path: PR #618's isolated lifecycle run measured
+median CLAS/INTF/INCL activation around 2.3–2.4 s, while REPORT/DDLS remained around 27 s locally.
+PIA's separate live probe measured roughly 29 s for its edit/activation cycle; that observation alone
+does not establish a warm-path regression without matching generation, mode and compiler readiness.
+P4's new-object acceleration remains separate from the completion contract.
 
 ## 3. Speed: the fast path for a new standalone object
 
@@ -228,7 +346,10 @@ activate through ADT, so the API gives such a client nothing new. The new risks 
 | P0 | A4H probes (below) | S | none |
 | P1 | M1 refusal, JS and Go | S | in progress |
 | P2 | `ZCL_OSD_DEVELOPMENT` over CREATE, WRITE, DELETE, OBJECT and ACTIVATE (verdict only), `ZCX_OSD_DEVELOPMENT`, ENQ, the dev-only gate; ADT group A routes moved onto it | M | slice 3 adapter, group A host commands |
-| P3 | publish after the step: a `publish` continuation (front-up) and the after-step queue in `osd-dialog-step` | M | slice 3 B and the continuation registry (`feat/adt-front-up`), 4b; neither merged |
+| P3 | publish after the step through the continuation registry and an after-step queue for other entries | M | existing slice 3 continuation mechanism; generic entry coverage remains |
+| P2a | PIA W2: CREATE/DELETE through STORE, capabilities, shared operation and lock/error rules | M | existing ObjectStore and ADT session/lock mechanisms; first delivery of P2 |
+| P3a | PIA W6: activation status `{state, op_id, generation_id}`, completion lookup across recycle | M | P2a; existing continuations; before P3b |
+| P3b | PIA W3: local RUN_TESTS on the expected generation, isolated execution and structured verdicts | M | P3a; existing Unit runner |
 | P4 | fast path for a new standalone object, with its own verify | M | transpiler #1899, #1900 and #1921 on npm or linked |
 | P4a | progress heartbeats from `prime()` (none today), so a waiter can tell slow from silent | S | P4 |
 | P5 | GENERATE: kernel hook, pool area, cache, error mapping, lifetime, PERFORM USING fix | M | P0, P4, P4a |

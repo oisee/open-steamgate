@@ -71,6 +71,7 @@ async function call(destination, importing = {}) {
       ev_source: box("x"), EV_FILE: box("x"), ev_package: box("x"), EV_VERSION: box("x"),
       ev_writable: box("x"), EV_ACTIVE: box("x"), ev_live: box("x"), EV_NOTE: box("x"),
       ev_count: box("x"), EV_MS: box("x"), ev_error: box("x"),
+      EV_JSON: box("x"),
     },
     tables: {
       et_object: rows(["TYPE", "NAME", "PACKAGE", "FILE", "WRITABLE", "VERSION", "CHANGED_AT"]),
@@ -240,6 +241,22 @@ describe("the store, as the destination an editor screen calls", function () {
     expect(answer.EV_ACTIVE).to.equal("X");
   });
 
+  it("CHECK, CHECKRUN and ACTIVATE reject a mangled static call through the JSON seam", async () => {
+    const broken = CLEAN.replace("rv_answer = 42.", "rv_answer = zcl_store_dest_probe=u003eanswer( ).");
+    const written = await call(destination, {IV_COMMAND: "WRITE", IV_NAME: NAME, IV_TYPE: "CLAS", IV_SOURCE: broken});
+    expect(written.EV_ERROR).to.equal("");
+    const check = await call(destination, {IV_COMMAND: "CHECK", IV_NAME: NAME, IV_TYPE: "CLAS"});
+    expect(JSON.parse(check.EV_JSON).active).to.equal(false);
+    expect(JSON.parse(check.EV_JSON).issues).to.have.length.greaterThan(0);
+    const report = await call(destination, {IV_COMMAND: "CHECKRUN", IV_NAME: NAME, IV_TYPE: "CLAS"});
+    expect(JSON.parse(report.EV_JSON).status).to.equal("processed");
+    expect(JSON.parse(report.EV_JSON).issues).to.have.length.greaterThan(0);
+    const activation = await call(destination, {IV_COMMAND: "ACTIVATE", IV_NAME: NAME, IV_TYPE: "CLAS"});
+    expect(activation.EV_ACTIVE).to.equal("");
+    expect(JSON.parse(activation.EV_JSON).active).to.equal(false);
+    expect(JSON.parse(activation.EV_JSON).issues).to.have.length.greaterThan(0);
+  });
+
   it("ACTIVATE refuses over a CALLER, and says which one", async () => {
     // the case activation exists for, and the one a check of the object
     // alone reports clean: the object stays self-consistent while the
@@ -386,7 +403,7 @@ ENDCLASS.
     // without CHECK and ACTIVATE and the editor then offers neither
     const answer = await call(destination, {IV_COMMAND: "CAPABILITIES"});
     expect(answer.EV_ERROR).to.equal("");
-    expect(answer.EV_NOTE.split(" ")).to.deep.equal(["LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "HISTORY", "REVISION", "CHECKRUN", "PARSE"]);
+    expect(answer.EV_NOTE.split(" ")).to.deep.equal(["LIST", "READ", "WRITE", "CREATE", "DELETE", "CHECK", "ACTIVATE", "ACTIVATION_STATUS", "HISTORY", "REVISION", "CHECKRUN", "PARSE"]);
   });
 
   it("an object nobody has is NAMED, not answered with an empty source", async () => {
@@ -396,8 +413,8 @@ ENDCLASS.
   });
 
   it("a command nobody implemented is NAMED, not answered with the list", async () => {
-    const answer = await call(destination, {IV_COMMAND: "DELETE"});
-    expect(answer.EV_ERROR).to.match(/unknown store command DELETE/);
+    const answer = await call(destination, {IV_COMMAND: "UNIMPLEMENTED"});
+    expect(answer.EV_ERROR).to.match(/unknown store command UNIMPLEMENTED/);
     expect(answer.ET_OBJECT).to.have.length(0);
   });
 
@@ -460,5 +477,371 @@ describe("request-bound STORE commands", () => {
       }, {store});
       expect(calls).to.deep.equal(["check", "activate", "publish", "complete"].map((command) => [command, name]));
     }
+  });
+});
+
+describe('STORE CREATE/DELETE repository lifecycle', function () {
+  this.timeout(60000);
+  let root, store, destination, abap;
+  const name = 'ZCL_STORE_CRUD_PROBE';
+  const owner = 'store-crud-owner', other = 'store-crud-other';
+  before(async () => {
+    const {initializeABAP} = await import('../output/init.mjs');
+    await initializeABAP();
+    abap = globalThis.abap;
+  });
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'store-crud-'));
+    mkdirSync(join(root, 'src'), {recursive: true});
+    writeFileSync(join(root, 'abap_transpile.json'), JSON.stringify({input_folder: ['src']}));
+    store = new ObjectStore({root, libs: []});
+    destination = new StoreDestination({store});
+  });
+  afterEach(async () => {
+    const {endEnqSession} = await import('../tools/osd-enq-host.mjs');
+    endEnqSession(owner); endEnqSession(other);
+    rmSync(root, {recursive: true, force: true});
+  });
+  async function execute(command, {user = 'CREATOR', session = owner, json = '{}', source} = {}) {
+    const {dialogStep} = await import('../tools/osd-dialog-step.mjs');
+    const {bindEnqSession, reviveEnqSession} = await import('../tools/osd-enq-host.mjs');
+    reviveEnqSession(session);
+    return dialogStep(async () => {
+      bindEnqSession(session, {user});
+      abap.builtin.sy.get().uname.set(user);
+      return destination.execute({IV_COMMAND: box(command), IV_TYPE: box('CLAS'), IV_NAME: box(name),
+        IV_JSON: box(json), ...(source === undefined ? {} : {IV_SOURCE: box(source)})});
+    }, 'STORE CRUD probe');
+  }
+  it('creates inactive abapGit source with caller ownership, reads it and deletes both files', async () => {
+    const result = await execute('CREATE', {json:'{"description":"STORE probe"}', source:CLEAN.replaceAll('zcl_store_dest_probe', name.toLowerCase())});
+    expect(result.EV_ERROR).to.equal('');
+    const made = JSON.parse(result.EV_JSON);
+    expect(made).to.include({created:true, changedBy:'CREATOR', package:'$TMP', version:'inactive'});
+    expect(readFileSync(join(root, made.file), 'utf8')).to.contain('rv_answer = 42.');
+    expect(existsSync(join(root, made.file.replace('.abap','.xml')))).to.equal(true);
+    expect((await execute('CREATE')).EV_ERROR).to.contain('already exists');
+    expect((await execute('DELETE')).EV_ERROR).to.equal('');
+    expect(store.find('CLAS', name)).to.equal(undefined);
+    expect(existsSync(join(root, made.file))).to.equal(false);
+    expect(existsSync(join(root, made.file.replace('.abap','.xml')))).to.equal(false);
+    expect(JSON.parse((await execute('DELETE')).EV_JSON).error.code).to.equal('NOT_FOUND');
+  });
+  it('refuses deletion under an Eclipse lock and preserves source bytes', async () => {
+    const made = JSON.parse((await execute('CREATE')).EV_JSON);
+    const before = readFileSync(join(root,made.file));
+    const {enqTake, enqDrop, reviveEnqSession} = await import('../tools/osd-enq-host.mjs');
+    reviveEnqSession(other);
+    const input = {mode_zosd_adt_lock:'X', objtype:'CLAS', objname:name, x_objtype:'X', x_objname:'X', _scope:'1'};
+    expect(enqTake(other,'EDITOR','ZOSD_ADT_LOCK','EZOSD_ADT_OBJ',input).subrc).to.equal(0);
+    const refusal = await execute('DELETE');
+    expect(JSON.parse(refusal.EV_JSON).error.code).to.equal('CONFLICT');
+    expect(readFileSync(join(root,made.file))).to.deep.equal(before);
+    enqDrop(other,'ZOSD_ADT_LOCK','EZOSD_ADT_OBJ',input);
+    expect((await execute('DELETE')).EV_ERROR).to.equal('');
+  });
+  it('creates and deletes through the actual ABAP CALL FUNCTION destination', async () => {
+    const {dialogStep} = await import('../tools/osd-dialog-step.mjs');
+    const {bindEnqSession, reviveEnqSession} = await import('../tools/osd-enq-host.mjs');
+    const previous = abap.context.RFCDestinations.STORE;
+    abap.context.RFCDestinations.STORE = destination;
+    try {
+      await dialogStep(async () => {
+        reviveEnqSession(owner); bindEnqSession(owner,{user:'ABAPCALLER'});
+        abap.builtin.sy.get().uname.set('ABAPCALLER');
+        const json = new abap.types.String(), error = new abap.types.String();
+        const exporting = command => ({iv_command:new abap.types.String().set(command),
+          iv_type:new abap.types.String().set('CLAS'), iv_name:new abap.types.String().set(name)});
+        await abap.statements.callFunction({name:'ZOSD_STORE',destination:'STORE',
+          exporting:exporting('CREATE'), importing:{ev_json:json,ev_error:error}});
+        expect(error.get()).to.equal('');
+        expect(JSON.parse(json.get())).to.include({created:true,changedBy:'ABAPCALLER'});
+        await abap.statements.callFunction({name:'ZOSD_STORE',destination:'STORE',
+          exporting:exporting('DELETE'), importing:{ev_json:json,ev_error:error}});
+        expect(error.get()).to.equal('');
+        expect(JSON.parse(json.get())).to.include({deleted:true,name});
+      }, 'ABAP STORE CRUD');
+      expect(store.find('CLAS',name)).to.equal(undefined);
+    } finally {abap.context.RFCDestinations.STORE = previous;}
+  });
+  it('forwards guarded IPC creation with the caller identity and refuses a locked delete before sending', async () => {
+    const {EventEmitter} = await import('node:events');
+    const {StoreIPCClient} = await import('../tools/osd-store-ipc.mjs');
+    const {dialogStep} = await import('../tools/osd-dialog-step.mjs');
+    const {bindEnqSession, reviveEnqSession, enqTake, enqDrop} = await import('../tools/osd-enq-host.mjs');
+    const channel = new EventEmitter();
+    channel.connected = true;
+    const sent = [];
+    channel.send = message => {
+      if (message.type !== 'store-request') return;
+      sent.push(message);
+      queueMicrotask(() => channel.emit('message', {type:'store-response', id:message.id,
+        values:{EV_JSON:JSON.stringify({created:true, changedBy:message.repositoryUser}), EV_ERROR:''}}));
+    };
+    const client = new StoreIPCClient(channel);
+    const invoke = command => dialogStep(async () => {
+      reviveEnqSession(owner); bindEnqSession(owner, {user:'IPCCALLER'});
+      abap.builtin.sy.get().uname.set('IPCCALLER');
+      const signature = {exporting:{IV_COMMAND:box(command), IV_TYPE:box('CLAS'), IV_NAME:box(name)},
+        importing:{EV_ERROR:box(''),EV_JSON:box('')}};
+      await client.call('ZOSD_STORE', signature);
+      return answerOf(signature);
+    }, 'STORE CRUD IPC probe');
+    const input = {mode_zosd_adt_lock:'X',objtype:'CLAS',objname:name,x_objtype:'X',x_objname:'X',_scope:'1'};
+    try {
+      expect(JSON.parse((await invoke('CREATE')).EV_JSON)).to.include({created:true,changedBy:'IPCCALLER'});
+      expect(sent).to.have.length(1);
+      reviveEnqSession(other);
+      expect(enqTake(other,'EDITOR','ZOSD_ADT_LOCK','EZOSD_ADT_OBJ',input).subrc).to.equal(0);
+      expect(JSON.parse((await invoke('DELETE')).EV_JSON).error.code).to.equal('CONFLICT');
+      expect(sent).to.have.length(1);
+      enqDrop(other,'ZOSD_ADT_LOCK','EZOSD_ADT_OBJ',input);
+    } finally {client.close();}
+  });
+  it('records bound session ownership despite a changed sy-uname', async () => {
+    const {dialogStep} = await import('../tools/osd-dialog-step.mjs');
+    const {bindEnqSession, reviveEnqSession} = await import('../tools/osd-enq-host.mjs');
+    const result = await dialogStep(async () => {
+      reviveEnqSession(owner); bindEnqSession(owner,{user:'BOUNDOWNER'});
+      abap.builtin.sy.get().uname.set('SPOOF');
+      return destination.execute({IV_COMMAND:box('CREATE'),IV_TYPE:box('CLAS'),IV_NAME:box(name)});
+    }, 'STORE bound author');
+    expect(JSON.parse(result.EV_JSON).changedBy).to.equal('BOUNDOWNER');
+  });
+  it('refuses INCL deletion of a PROG whose editor lock is held', async () => {
+    const {dialogStep} = await import('../tools/osd-dialog-step.mjs');
+    const {bindEnqSession, reviveEnqSession, enqTake, enqDrop} = await import('../tools/osd-enq-host.mjs');
+    const made = store.create('PROG','ZSTORE_ALIAS',{package:'$TMP'});
+    const input = {mode_zosd_adt_lock:'X',objtype:'PROG',objname:'ZSTORE_ALIAS',x_objtype:'X',x_objname:'X',_scope:'1'};
+    reviveEnqSession(other);
+    expect(enqTake(other,'EDITOR','ZOSD_ADT_LOCK','EZOSD_ADT_OBJ',input).subrc).to.equal(0);
+    const result = await dialogStep(async () => {
+      reviveEnqSession(owner); bindEnqSession(owner,{user:'CREATOR'});
+      return destination.execute({IV_COMMAND:box('DELETE'),IV_TYPE:box('INCL'),IV_NAME:box('ZSTORE_ALIAS')});
+    }, 'STORE alias lock');
+    expect(JSON.parse(result.EV_JSON).error.code).to.equal('CONFLICT');
+    expect(existsSync(join(root,made.file))).to.equal(true);
+    enqDrop(other,'ZOSD_ADT_LOCK','EZOSD_ADT_OBJ',input);
+  });
+  it('cancels queued parent mutation when the child session ends', async () => {
+    const {EventEmitter} = await import('node:events');
+    const {StoreIPCClient,attachStoreIPC} = await import('../tools/osd-store-ipc.mjs');
+    const {withSourceLock} = await import('../tools/osd-store-source-lock.mjs');
+    const {dialogStep} = await import('../tools/osd-dialog-step.mjs');
+    const {bindEnqSession,reviveEnqSession,endEnqSession} = await import('../tools/osd-enq-host.mjs');
+    const parent = new EventEmitter(), channel = new EventEmitter();
+    parent.connected = channel.connected = true;
+    let sent;
+    const dispatched = new Promise(resolve => {sent=resolve;});
+    parent.send = message => queueMicrotask(() => channel.emit('message',message));
+    channel.send = message => queueMicrotask(() => {
+      parent.emit('message',message);
+      if(message.type==='store-request') sent();
+    });
+    attachStoreIPC(parent,{storeDestination:destination});
+    const client=new StoreIPCClient(channel);
+    let release;
+    const hold=new Promise(resolve=>{release=resolve;});
+    const locked=withSourceLock(store,()=>hold);
+    await new Promise(resolve=>setImmediate(resolve));
+    const result=dialogStep(async()=>{
+      reviveEnqSession(owner);bindEnqSession(owner,{user:'CALLER'});
+      const signature={exporting:{IV_COMMAND:box('create'),IV_TYPE:box('CLAS'),IV_NAME:box(name)},
+        importing:{EV_ERROR:box(''),EV_JSON:box('')}};
+      await client.call('ZOSD_STORE',signature);
+      return answerOf(signature);
+    },'STORE cancel parent');
+    try {
+      await dispatched;
+      endEnqSession(owner);
+      await new Promise(resolve=>setImmediate(resolve));
+      release();await locked;
+      expect(JSON.parse((await result).EV_JSON).error.code).to.equal('CONFLICT');
+      expect(store.find('CLAS',name)).to.equal(undefined);
+    } finally {release();client.close();parent.connected=false;parent.emit('disconnect');}
+  });
+  it('cancels queued local creation when the caller session ends', async () => {
+    const {withSourceLock} = await import('../tools/osd-store-source-lock.mjs');
+    const {endEnqSession} = await import('../tools/osd-enq-host.mjs');
+    let release;
+    const hold=new Promise(resolve=>{release=resolve;});
+    const locked=withSourceLock(store,()=>hold);
+    await new Promise(resolve=>setImmediate(resolve));
+    const creating=execute('CREATE');
+    await new Promise(resolve=>setImmediate(resolve));
+    endEnqSession(owner);
+    release();await locked;
+    expect(JSON.parse((await creating).EV_JSON).error.code).to.equal('CONFLICT');
+    expect(store.find('CLAS',name)).to.equal(undefined);
+  });
+  it('reports invalid creation options and refuses executable kernel source before mutation', async () => {
+    expect(JSON.parse((await execute('CREATE',{json:'[]'})).EV_JSON).error.code).to.equal('INVALID_NAME');
+    expect(JSON.parse((await execute('CREATE',{json:'{"package":4}'})).EV_JSON).error.code).to.equal('INVALID_NAME');
+    for (const source of ["WRITE '@KERNEL console.log(1);'.", "WRITE / '@KERNEL console.log(1);'.", "WRITE: '@KERNEL console.log(1);'."]) {
+      expect(JSON.parse((await execute('CREATE',{source})).EV_JSON).error.code).to.equal('NOT_SUPPORTED');
+    }
+    expect(store.find('CLAS',name)).to.equal(undefined);
+  });
+});
+
+describe('STORE activation operation tracking', function () {
+  let root;
+  beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'activation-operation-')); });
+  afterEach(() => { rmSync(root, {recursive: true, force: true}); });
+  it('returns pending, publishes after the step, and lookup never publishes again', async () => {
+    let continuation, publishes = 0;
+    const store = {root,
+      activate: () => ({active: true, issues: [], revision: 'source-1'}),
+      publish: async () => { publishes++; return {ok: true, generation: 'generation-1', recycled: true, transpile: {built: {}}}; },
+      completeActivation: () => true};
+    const destination = new StoreDestination({store: () => store});
+    const answer = await withSystem(() => {}, () => destination.execute({IV_COMMAND: 'ACTIVATE', IV_TYPE: 'CLAS', IV_NAME: 'ZOP'}),
+      {store, deferActivate: work => { continuation = work; }});
+    const pending = JSON.parse(answer.EV_JSON);
+    expect(pending.state).to.equal('pending');
+    expect(pending.op_id).to.be.a('string').and.not.equal('');
+    expect(pending.generation_id).to.equal('');
+    expect(publishes).to.equal(0);
+    await continuation();
+    const lookup = () => destination.execute({IV_COMMAND: 'ACTIVATION_STATUS', IV_JSON: JSON.stringify({op_id: pending.op_id})});
+    const published = JSON.parse((await lookup()).EV_JSON);
+    expect(published.state).to.equal('published');
+    expect(published.generation_id).to.equal('generation-1');
+    expect(JSON.parse((await lookup()).EV_JSON)).to.deep.equal(published);
+    expect(publishes).to.equal(1);
+  });
+  it('retains validation refusal diagnostics and marks a dumped step failed', async () => {
+    let continuation;
+    const store = {root, activate: () => ({active: false, issues: [{message: 'bad source', line: 2}]})};
+    const destination = new StoreDestination({store: () => store});
+    const rejected = JSON.parse((await destination.execute({IV_COMMAND: 'ACTIVATE', IV_TYPE: 'CLAS', IV_NAME: 'ZOP'})).EV_JSON);
+    expect(rejected.state).to.equal('failed');
+    expect(rejected.failure_stage).to.equal('validation');
+    expect(rejected.issues[0].MESSAGE).to.equal('bad source');
+    store.activate = () => ({active: true, issues: []});
+    const pending = JSON.parse((await withSystem(() => {}, () => destination.execute({IV_COMMAND: 'ACTIVATE', IV_TYPE: 'CLAS', IV_NAME: 'ZOP'}),
+      {store, deferActivate: work => { continuation = work; }})).EV_JSON);
+    continuation.fail('activation step dumped');
+    const failed = JSON.parse((await destination.execute({IV_COMMAND: 'ACTIVATION_STATUS', IV_JSON: JSON.stringify({op_id: pending.op_id})})).EV_JSON);
+    expect(failed.state).to.equal('failed');
+    expect(failed.failure_stage).to.equal('step');
+  });
+  it('recovers unfinished operations conservatively and expires terminal entries after 24h', async () => {
+    const {ActivationJournal} = await import('../tools/osd-activation-journal.mjs');
+    let time = Date.now();
+    const first = new ActivationJournal(root, {now: () => time});
+    const pending = first.create('CLAS', 'ZOP');
+    first.update(pending.op_id, {state: 'pending'});
+    const restarted = new ActivationJournal(root, {now: () => time});
+    const failed = restarted.lookup(pending.op_id);
+    expect(failed.state).to.equal('failed');
+    expect(failed.failure_stage).to.equal('recovery');
+    const completed = failed.completed_at;
+    time += 23 * 60 * 60 * 1000;
+    expect(restarted.lookup(pending.op_id).completed_at).to.equal(completed);
+    time += 60 * 60 * 1000;
+    expect(() => restarted.lookup(pending.op_id)).to.throw('not found or expired');
+    expect(() => restarted.lookup('')).to.throw('needs op_id');
+  });
+  it('returns an operation ID even when validation throws', async () => {
+    const destination = new StoreDestination({store: () => ({root, activate: () => {
+      throw Object.assign(new Error('object not found'), {code: 'NOT_FOUND'});
+    }})});
+    const response = await destination.execute({IV_COMMAND: 'ACTIVATE', IV_TYPE: 'CLAS', IV_NAME: 'ZMISSING'});
+    const operation = JSON.parse(response.EV_JSON);
+    expect(operation.state).to.equal('failed');
+    expect(operation.op_id).to.be.a('string').and.not.equal('');
+    expect(operation.error.code).to.equal('NOT_FOUND');
+  });
+  it('fails a pending operation if its publication scheduler throws', async () => {
+    const store = {root, activate: () => ({active: true, issues: []})};
+    const destination = new StoreDestination({store: () => store});
+    const {activationJournal} = await import('../tools/osd-activation-journal.mjs');
+    const response = await withSystem(() => {}, () => destination.execute({IV_COMMAND: 'ACTIVATE', IV_TYPE: 'CLAS', IV_NAME: 'ZOP'}),
+      {store, deferActivate: () => { throw new Error('scheduler lost'); }});
+    expect(response.EV_ERROR).to.contain('scheduler lost');
+    const operations = Object.values(activationJournal(store).entries);
+    expect(operations[0].state).to.equal('failed');
+    expect(operations[0].failure_stage).to.equal('step');
+  });
+  it('fails a deferred operation on IPC disconnect without waiting for exit', async () => {
+    const {EventEmitter} = await import('node:events');
+    const {attachStoreIPC} = await import('../tools/osd-store-ipc.mjs');
+    const child = new EventEmitter();
+    child.connected = true;
+    const store = {root, activate: () => ({active: true, issues: []})};
+    const destination = new StoreDestination({store: () => store});
+    const response = new Promise(resolve => { child.send = resolve; });
+    attachStoreIPC(child, {storeDestination: destination});
+    child.emit('message', {type: 'store-request', id: 1, name: 'ZOSD_STORE', step: 1,
+      parameters: {IV_COMMAND: 'ACTIVATE', IV_TYPE: 'CLAS', IV_NAME: 'ZOP'}});
+    const pending = JSON.parse((await response).values.EV_JSON);
+    child.connected = false;
+    child.emit('disconnect');
+    const status = JSON.parse((await destination.execute({IV_COMMAND: 'ACTIVATION_STATUS', IV_JSON: JSON.stringify({op_id: pending.op_id})})).EV_JSON);
+    expect(status.state).to.equal('failed');
+    expect(status.failure_stage).to.equal('step');
+  });
+  it('isolates journals for different instance ports', async () => {
+    const {ActivationJournal} = await import('../tools/osd-activation-journal.mjs');
+    const first = new ActivationJournal(root, {host: 'http-8090'});
+    const pending = first.create('CLAS', 'ZOP');
+    first.update(pending.op_id, {state: 'pending'});
+    const other = new ActivationJournal(root, {host: 'http-8091'});
+    expect(Object.keys(other.entries)).to.have.length(0);
+    expect(first.lookup(pending.op_id).state).to.equal('pending');
+  });
+  it('refuses direct in-step publication before a caller can dump', async () => {
+    await import('../output/init.mjs');
+    const {exclusive} = await import('../tools/osd-dialog-step.mjs');
+    let publishes = 0, response;
+    const destination = new StoreDestination({store: () => ({root,
+      activate: () => ({active: true, issues: []}),
+      publish: () => { publishes++; throw new Error('unsafe publish'); }})});
+    try {
+      await exclusive(async () => {
+        response = await destination.execute({IV_COMMAND: 'ACTIVATE', IV_TYPE: 'CLAS', IV_NAME: 'ZOP'});
+        throw new Error('caller dumped');
+      }, 'activation caller', {dialog: true});
+    } catch (error) { expect(error.message).to.equal('caller dumped'); }
+    expect(publishes).to.equal(0);
+    expect(JSON.parse(response.EV_JSON).state).to.equal('failed');
+    expect(JSON.parse(response.EV_JSON).failure_stage).to.equal('step');
+  });
+  it('returns the failed ticket when publication throws', async () => {
+    const destination = new StoreDestination({store: () => ({root,
+      activate: () => ({active: true, issues: []}),
+      publish: () => { throw new Error('compiler stopped'); }})});
+    const response = await destination.execute({IV_COMMAND: 'ACTIVATE', IV_TYPE: 'CLAS', IV_NAME: 'ZOP'});
+    const operation = JSON.parse(response.EV_JSON);
+    expect(operation.state).to.equal('failed');
+    expect(operation.failure_stage).to.equal('build');
+    expect(operation.op_id).to.be.a('string').and.not.equal('');
+    const lookedUp = JSON.parse((await destination.execute({IV_COMMAND: 'ACTIVATION_STATUS', IV_JSON: JSON.stringify({op_id: operation.op_id})})).EV_JSON);
+    expect(lookedUp).to.deep.equal(operation);
+  });
+  it('fails when IPC disconnects before continuation registration', async () => {
+    const {EventEmitter} = await import('node:events');
+    const {attachStoreIPC} = await import('../tools/osd-store-ipc.mjs');
+    const {activationJournal} = await import('../tools/osd-activation-journal.mjs');
+    const child = new EventEmitter();
+    child.connected = true;
+    child.send = () => {};
+    let open;
+    const store = {root, activate: () => ({active: true, issues: []})};
+    const opened = new Promise(resolve => { open = resolve; });
+    const destination = new StoreDestination({store: () => opened});
+    attachStoreIPC(child, {storeDestination: destination});
+    child.emit('message', {type: 'store-request', id: 1, name: 'ZOSD_STORE', step: 1,
+      parameters: {IV_COMMAND: 'ACTIVATE', IV_TYPE: 'CLAS', IV_NAME: 'ZOP'}});
+    child.connected = false;
+    child.emit('disconnect');
+    open(store);
+    await new Promise(resolve => setImmediate(resolve));
+    await new Promise(resolve => setImmediate(resolve));
+    const operations = Object.values(activationJournal(store).entries);
+    expect(operations).to.have.length(1);
+    expect(operations[0].state).to.equal('failed');
+    expect(operations[0].failure_stage).to.equal('step');
   });
 });
