@@ -129,7 +129,9 @@ const referenceCases = process.env.OSD_REFERENCE_CASES ? JSON.parse(process.env.
 // reply and discards the session, token and handles. Database rows mask
 // that loss until a cold build changes the schema and setup replaces the
 // file. The timeout must bound the IPC wait, not the work done at boot.
+bootStep(process.env.OSD_ADT_CARRY === "1" ? "waiting for ADT state" : "ADT carry disabled");
 const initial = await initialAdtState;
+bootStep("importing the generation");
 
 const {initializeABAP} = await from("init.mjs");
 const {cl_express_icf_shim} = await from("cl_express_icf_shim.clas.mjs");
