@@ -42,8 +42,8 @@ describe("CI ADT lifecycle gate", () => {
     expect(needsLifecycle(["src/readme.md"])).to.equal(true);
   });
 
-  it("keeps a webapp-only change set skipped", () => {
-    expect(needsLifecycle(["webapp/x.js", "webapp/controller/List.view.xml"])).to.equal(false);
+  it("runs for a webapp-only change set: activation runs the BSP generator over webapp/", () => {
+    expect(needsLifecycle(["webapp/x.js", "webapp/controller/List.view.xml"])).to.equal(true);
   });
 
   it("keeps an e2e-only change set skipped", () => {

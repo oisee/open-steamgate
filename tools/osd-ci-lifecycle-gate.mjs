@@ -7,7 +7,8 @@ import {execFileSync} from "node:child_process";
 // The rule fails closed: needsLifecycle runs the measurements unless every
 // changed path is provably unrelated to the lifecycle job, meaning it
 // matches one exemption below. Anything else runs -- all of src/, tools/,
-// test/ outside e2e, scripts/, bin/, the in-tree packs/, data/, root
+// test/ outside e2e, webapp/ (activation runs the BSP generator, which
+// reads its pages and manifests), scripts/, bin/, the in-tree packs/, data/, root
 // configuration and lock files, .github/ci/, tools/abapfs-conformance/ --
 // because the job executes the built server and both clients end to end,
 // a needlessly measured PR costs minutes, and a silently skipped
@@ -17,9 +18,6 @@ const unrelatedPaths = [
   // root AGENDA/README/ANORMALIES notes and editor CHANGELOGs).
   /^docs\//,
   /^(?!src\/).*\.md$/,
-  // The browser webapp: served pages, never part of the ABAP server the
-  // lifecycle job drives.
-  /^webapp\//,
   // The VS Code editor, except the launcher entry point installs execute
   // and the resources they ship.
   /^editors\/(?!vscode\/launcher\.js$|vscode\/resources\/)/,
