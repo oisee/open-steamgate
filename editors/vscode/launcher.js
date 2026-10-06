@@ -45,6 +45,8 @@ function classify(logText, error) {
     typeof error?.code === "string" ? error.code : "",
     typeof error?.message === "string" ? error.message : "",
   ].filter(Boolean).join("\n");
+  const mismatch = text.match(/osd: (?:layer|pack) [^\r\n]+ needs osd >= \d+\.\d+\.\d+; this system is \d+\.\d+\.\d+ — update the extension \(or the binary\)/);
+  if (mismatch) return {kind: "version-mismatch", message: mismatch[0], actions: ["Update"]};
   if (/\bUNFETCHED\b/.test(text)) {
     return {kind: "unfetched", message: "Some packs have not been fetched.", actions: ["Fetch packs"]};
   }
