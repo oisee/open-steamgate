@@ -192,6 +192,14 @@ registry is primed again.
   larger than at the first swap, or a minute without a save
   (`OSD_WARM_SWAPS`, `OSD_WARM_HEAP_MB`, `OSD_WARM_QUIET_MS`), the process
   is replaced by one started on the live generation, and `build/hot/` goes.
+  A recycle cuts every APC WebSocket, so the swap count and the quiet
+  minute wait while a client holds one (counted by the upgrade proxy,
+  `tools/osd-proxy.mjs`, released at the close or the end of either side).
+  The quiet recycle is asked again every quiet period while a socket is open
+  (so it may come soon after the last one closes), and the swap count at the
+  next swap. With several work processes each one's heap growth counts. The
+  heap limit does not wait: it is the safety limit. PIA's terminal dropped
+  in 1-2 turns of 15 while a turn waited on its model (2026-10-06).
 - **One activation per save, answered once it is live.** `publish()` runs
   one at a time per store, and a caller whose tree is the one already
   queued, or the one a build in flight named its generation after, takes
