@@ -674,11 +674,32 @@ describe("tools/osd-warm: an activation answers once its source is live", () => 
     }
   });
 
-  it("a pool's swap reports the largest heap of its work processes", async () => {
+  it("a pool's swap reports the heap of every work process", async () => {
     const pool = new RuntimePool({size: 2});
     pool.runtimes[0].hot = async () => ({ms: 1, swaps: 1, heap: 100});
     pool.runtimes[1].hot = async () => ({ms: 1, swaps: 1, heap: 800});
-    expect(await pool.hot({})).to.include({heap: 800, swaps: 1});
+    expect(await pool.hot({})).to.deep.include({swaps: 1, heaps: [100, 800]});
+  });
+
+  it("the heap limit sees any work process grow, past an open APC socket", async () => {
+    const MB = 1024 * 1024;
+    for (const [first, later] of [[[100, 1000], [800, 1000]], [[100, 100], [100, 700]]]) {
+      const {store, src, events, done} = setup();
+      try {
+        store.served.openChannels = 1;
+        let heaps = first;
+        const hot = store.served.hot;
+        store.served.hot = async function (swap) { return {...await hot.call(this, swap), heaps: heaps.map((h) => h * MB)}; };
+        src.text = "rv = 2.";
+        await activate(store);
+        heaps = later;
+        src.text = "rv = 3.";
+        await activate(store);
+        expect(events.map((e) => e.what), `${first} -> ${later}`).to.deep.equal(["swap g1->g2", "swap g2->g3", "recycle"]);
+      } finally {
+        done();
+      }
+    }
   });
 
   it("the APC upgrade proxy releases a socket whose client only half-closes", async () => {

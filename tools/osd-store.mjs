@@ -1175,8 +1175,12 @@ export class ObjectStore {
   // replace it with one started on the live generation
   #afterSwap(hash, swap = {}) {
     const w = this.warm();
-    w.heapBase ??= swap.heap;
-    const grown = (swap.heap ?? 0) - (w.heapBase ?? 0);
+    // one heap per work process (a pool reports each, tools/osd-pool.mjs),
+    // each measured against its own at the first swap
+    const heaps = swap.heaps ?? [swap.heap];
+    w.heapBase ??= heaps;
+    const grown = Math.max(0, ...heaps.map((heap, i) =>
+      typeof heap === "number" && typeof w.heapBase[i] === "number" ? heap - w.heapBase[i] : 0));
     if (w.compiler?.unverified.has(hash)) {
       w.next = hash;
       this.#verifyNext();
