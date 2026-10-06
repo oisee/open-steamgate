@@ -557,10 +557,12 @@ export class WarmCompiler {
       for (const o of this.reg.getObjects()) for (const f of o.getFiles()) this.owner.set(f.getFilename(), o);
       this.reads = new Map();
       this.readers = new Map();
+      this.unresolved = new Set();
     }
     const objects = only === undefined ? [...this.reg.getObjects()] : only;
     for (const o of objects) {
       if (!(o instanceof core.ABAPObject)) continue;
+      this.unresolved.delete(o);
       for (const t of this.reads.get(key(o)) ?? []) this.readers.get(t)?.delete(o);
       const reads = new Set();
       // INCLUDE is a dependency even when its body declares no identifier
@@ -576,6 +578,7 @@ export class WarmCompiler {
       while (stack.length > 0) {
         const n = stack.pop();
         for (const r of n.getData().references) {
+          if (r.resolved === undefined) this.unresolved.add(o);
           const t = this.owner.get(r.resolved?.getFilename?.());
           if (t !== undefined && t !== o) reads.add(key(t));
         }

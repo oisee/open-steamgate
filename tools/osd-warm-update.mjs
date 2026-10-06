@@ -56,7 +56,10 @@ export async function updateRegistry(c, activating, {viewOf, closure, index, rul
     if (reason) refuse(reason);
   }
   const old = [...edits, ...removed].map(e => e.before && c.owner.get(e.before.filename)).filter(Boolean);
-  const affectedKeys = new Set([...closure([...old, ...c.pending])].map(key));
+  // A missing target has no resolved edge in the old graph. On additions,
+  // reparse every unresolved consumer and its readers before re-indexing.
+  const unresolved = edits.some(e => !e.before) ? [...c.unresolved] : [];
+  const affectedKeys = new Set([...closure([...old, ...c.pending, ...unresolved])].map(key));
   // Restore the native iterator while mutating object membership.
   delete c.reg.getObjects;
   for (const {before} of removed) c.reg.removeFile(c.reg.getFileByName(before.filename));

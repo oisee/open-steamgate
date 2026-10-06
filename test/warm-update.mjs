@@ -32,6 +32,32 @@ describe("kept registry after a cold publication", function () {
   });
   afterEach(() => { compiler?.drop(); rmSync(root, {recursive: true, force: true}); });
 
+  it("resolves previously missing types after creation and rebuilds their consumers on later edits", async () => {
+    const path = join(root, "abap_transpile.json"), config = JSON.parse(readFileSync(path, "utf8"));
+    config.options.unknownTypes = "runtimeError";
+    writeFileSync(path, JSON.stringify(config));
+    writeFileSync(file("zcl_b"), source("zcl_b", "DATA value TYPE zcl_new=>ty. value = '12'. rv = value.")
+      .replace("VALUE(rv) TYPE i", "VALUE(rv) TYPE string"));
+    await cold();
+    compiler.drop();
+    await compiler.prime();
+    const reg = compiler.reg, syntax = reg.getObject("CLAS", "ZCL_A").syntaxResult;
+    expect(compiler.readersOf("CLAS", "ZCL_NEW")).to.equal(undefined);
+    const typed = length => source("zcl_new").replace("PUBLIC SECTION.", `PUBLIC SECTION. TYPES ty TYPE c LENGTH ${length}.`);
+    writeFileSync(file("zcl_new"), typed(1));
+    await cold();
+    await compiler.update();
+    expect(compiler.reg).to.equal(reg);
+    expect(reg.getObject("CLAS", "ZCL_A").syntaxResult).to.equal(syntax);
+    expect(compiler.readersOf("CLAS", "ZCL_NEW").map(o => o.name)).to.include("ZCL_B");
+    writeFileSync(file("zcl_new"), typed(2));
+    const warm = await compiler.build();
+    expect(warm.modules).to.include("zcl_b.clas.mjs");
+    expect((await compiler.verify(warm.hash)).verdict).to.equal("same");
+    expect(logs.filter(line => line.includes("warm: primed"))).to.have.length(2);
+    expect(logs.join("\n")).not.to.include("warm: re-prime:");
+  });
+
   it("adds files, reparses dependents, removes objects and keeps config and unrelated syntax", async () => {
     const reg = compiler.reg, config = reg.getConfig();
     writeFileSync(file("zcl_new"), source("zcl_new"));

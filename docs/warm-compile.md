@@ -154,7 +154,10 @@ sources). A new or removed file, DDIC, CDS, SICF, IWSV, a YAML, a library,
 the config, a page or a generator is the cold build, after which a bounded delta advances the compiler child's kept registry. Up to
 100 added, changed or removed class/interface/include files (and their object
 XML) use abaplint add/update/remove, reparse their dependent closure, and prove
-the affected outputs and scripts against the cold publication. The kept config
+the affected outputs and scripts against the cold publication. An added file
+also invalidates every object with any unresolved syntax reference and its
+dependent closure: missing targets have no resolved edge in the old graph.
+Re-indexing then records newly resolved readers for later warm edits. The kept config
 and unrelated syntax results survive (#1921). `warm: updated ...` reports its
 cost. Config/layer/library/toolchain changes, generator inputs such as AMDP or
 `INTERFACES`, larger deltas, or a failed byte premise log `warm: re-prime: ...`
