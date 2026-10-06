@@ -31,6 +31,7 @@ import {ObjectStore, NotFound} from "./osd-store.mjs";
 import {runsAs} from "./osd-main.mjs";
 import {UnitRisk, scheduledRisk} from "./osd-unit-risk.mjs";
 import {hookDatabase} from "./osd-dialog-step.mjs";
+import {sendIPC} from "./osd-ipc.mjs";
 
 // ADT's own words for what a class declares
 const RISK = {HARMLESS: "harmless", DANGEROUS: "dangerous", CRITICAL: "critical"};
@@ -462,23 +463,25 @@ export class UnitRun {
       // A parent watchdog can interrupt a synchronous ABAP loop. The
       // child's Promise deadline alone cannot run while its event loop is busy.
       child.on("message", message => {
-        if (timedOut) return;
-        if (message.kind === "unit-method-start") {
-          current = message;
-          methodStarted = Date.now();
-          stage = "setup";
-          if (options.timeout > 0) testTimer = setTimeout(() => {
-            timedOut = {...current, stage, ms: Date.now() - methodStarted};
-            abort();
-          }, options.timeout);
-        } else if (message.kind === "unit-stage") stage = message.stage;
-        else if (message.kind === "unit-method-end") {
-          clearTimeout(testTimer);
-          methods.push(message.method);
-        } else if (message.kind === "unit-class-end") {
-          completed.push(message.testClass);
-          methods.length = 0;
-        }
+        try {
+          if (timedOut) return;
+          if (message.kind === "unit-method-start") {
+            current = message;
+            methodStarted = Date.now();
+            stage = "setup";
+            if (options.timeout > 0) testTimer = setTimeout(() => {
+              timedOut = {...current, stage, ms: Date.now() - methodStarted};
+              abort();
+            }, options.timeout);
+          } else if (message.kind === "unit-stage") stage = message.stage;
+          else if (message.kind === "unit-method-end") {
+            clearTimeout(testTimer);
+            methods.push(message.method);
+          } else if (message.kind === "unit-class-end") {
+            completed.push(message.testClass);
+            methods.length = 0;
+          }
+        } catch (error) { abort(); reject(error); }
       });
       options.signal?.addEventListener("abort", abort, {once: true});
       if (options.signal?.aborted) abort();
@@ -503,51 +506,56 @@ export class UnitRun {
         err += d.toString();
       });
       child.on("close", (code) => {
-        options.signal?.removeEventListener("abort", abort);
-        clearTimeout(killTimer);
-        clearTimeout(testTimer);
-        tidy();
-        if (options.signal?.aborted) {
-          reject(new Error("ABAP Unit run cancelled"));
-          return;
-        }
-        if (timedOut) {
-          const declared = plan.classes.find(c => c.name === timedOut.testClass);
-          const selected = declared.testMethods.filter(m => options.method === undefined || m.name === String(options.method).toUpperCase());
-          const at = selected.findIndex(m => m.name === timedOut.method);
-          const testMethods = [...methods, {name: timedOut.method, ms: timedOut.ms, alerts: [{
-            kind: "timeout", severity: "fatal", stage: timedOut.stage,
-            title: `${timedOut.method} did not finish within ${options.timeout} ms`, details: [], stack: [],
-          }]}, ...selected.slice(at + 1).map(m => ({name: m.name, ms: 0, skipped: true, alerts: []}))];
-          const testClasses = [...completed, {...declared, alerts: [], testMethods}];
-          const allMethods = testClasses.flatMap(c => c.testMethods);
-          resolve({program: {name, type: ADT_TYPE[type] ?? type, objectType: type}, testClasses, ok: false,
-            counts: {classes: testClasses.length, methods: allMethods.length,
-              passed: allMethods.filter(m => !m.skipped && !m.alerts.length).length,
-              failed: allMethods.filter(m => m.alerts.length).length,
-              classAlerts: testClasses.reduce((n, c) => n + c.alerts.length, 0)}, ms: Date.now() - started});
-          return;
-        }
-        const start = out.indexOf("{");
-        if (start < 0) {
-          const failure = new RunFailed(code, `${out}${err}`.slice(-2000));
-          const selected = plan.classes.filter(c => options.testClass === undefined || c.name === String(options.testClass).toUpperCase());
-          if (selected.length === 1) {
-            // A boot crash belongs to the sole class in this child. Other
-            // targets can still run in fresh children; malformed JSON and
-            // process/pipe failures remain runner/transport failures.
-            resolve({program: {name, type: ADT_TYPE[type] ?? type, objectType: type}, ok: false,
-              testClasses: [{...selected[0], testMethods: [], alerts: [{kind: "shortDump", severity: "fatal",
-                stage: "execution", title: failure.message, details: [], stack: []}]}],
-              counts: {classes: 1, methods: 0, passed: 0, failed: 0, classAlerts: 1}, ms: Date.now() - started});
-          } else reject(failure);
-          return;
-        }
         try {
-          resolve(JSON.parse(out.slice(start)));
-        } catch (error) {
-          reject(new RunFailed(code, `${error.message}: ${`${out}${err}`.slice(-2000)}`));
-        }
+          options.signal?.removeEventListener("abort", abort);
+          clearTimeout(killTimer);
+          clearTimeout(testTimer);
+          tidy();
+          if (options.signal?.aborted) {
+            reject(new Error("ABAP Unit run cancelled"));
+            return;
+          }
+          // A watchdog can fire after the child printed its final result,
+          // before close is delivered. Only an explicit run abort overrides JSON.
+          const start = out.indexOf("{");
+          if (start >= 0) {
+            try { resolve(JSON.parse(out.slice(start))); return; }
+            catch (error) {
+              if (!timedOut) throw new RunFailed(code, `${error.message}: ${`${out}${err}`.slice(-2000)}`);
+            }
+          }
+          if (timedOut) {
+            const declared = plan.classes.find(c => c.name === timedOut.testClass);
+            const selected = declared.testMethods.filter(m => options.method === undefined || m.name === String(options.method).toUpperCase());
+            const at = selected.findIndex(m => m.name === timedOut.method);
+            const testMethods = [...methods, {name: timedOut.method, ms: timedOut.ms, alerts: [{
+              kind: "timeout", severity: "fatal", stage: timedOut.stage,
+              title: `${timedOut.method} did not finish within ${options.timeout} ms`, details: [], stack: [],
+            }]}, ...selected.slice(at + 1).map(m => ({name: m.name, ms: 0, skipped: true, alerts: []}))];
+            const testClasses = [...completed, {...declared, alerts: [], testMethods}];
+            const allMethods = testClasses.flatMap(c => c.testMethods);
+            resolve({program: {name, type: ADT_TYPE[type] ?? type, objectType: type}, testClasses, ok: false,
+              counts: {classes: testClasses.length, methods: allMethods.length,
+                passed: allMethods.filter(m => !m.skipped && !m.alerts.length).length,
+                failed: allMethods.filter(m => m.alerts.length).length,
+                classAlerts: testClasses.reduce((n, c) => n + c.alerts.length, 0)}, ms: Date.now() - started});
+            return;
+          }
+          if (start < 0) {
+            const failure = new RunFailed(code, `${out}${err}`.slice(-2000));
+            const selected = plan.classes.filter(c => options.testClass === undefined || c.name === String(options.testClass).toUpperCase());
+            if (selected.length === 1) {
+              // A boot crash belongs to the sole class in this child. Other
+              // targets can still run in fresh children; malformed JSON and
+              // process/pipe failures remain runner/transport failures.
+              resolve({program: {name, type: ADT_TYPE[type] ?? type, objectType: type}, ok: false,
+                testClasses: [{...selected[0], testMethods: [], alerts: [{kind: "shortDump", severity: "fatal",
+                  stage: "execution", title: failure.message, details: [], stack: []}]}],
+                counts: {classes: 1, methods: 0, passed: 0, failed: 0, classAlerts: 1}, ms: Date.now() - started});
+            } else reject(failure);
+            return;
+          }
+        } catch (error) { reject(error); }
       });
       child.on("error", error => {
         options.signal?.removeEventListener("abort", abort);
@@ -701,7 +709,7 @@ export async function main(args) {
     const i = args.indexOf(flag);
     return i < 0 ? undefined : args[i + 1];
   };
-  const send = message => { if (process.connected) process.send?.(message); };
+  const send = message => { if (process.send) sendIPC(process, message); };
   const options = {testClass: at("--class"), method: at("--method"),
     ...(at("--timeout") !== undefined ? {timeout: Number(at("--timeout"))} : {}),
     onMethodStart: (testClass, method) => send({kind: "unit-method-start", testClass, method}),

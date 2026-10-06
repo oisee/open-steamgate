@@ -429,7 +429,8 @@ describe("tools/osd-runtime: the process that can be replaced", function () {
     await late.stop();
     const first = await coming;
     if (first instanceof Error) {
-      expect(first.message).to.equal("stopped while starting");
+      // Active-source preparation can still be running before child spawn.
+      expect(first.message).to.be.oneOf(["stopped while building", "stopped while starting"]);
     } else {
       expect(alive(first.pid), "the child that was coming up is stopped too").to.equal(false);
     }

@@ -732,6 +732,45 @@ describe("B4 switched-off door", function () {
 });
 
 describe("STORE IPC lifecycle", () => {
+  it("returns a serialization error to the child and keeps later callbacks usable", async () => {
+    const child = new EventEmitter();
+    child.connected = true;
+    const channel = new EventEmitter();
+    channel.connected = true;
+    channel.send = message => child.emit("message", message);
+    child.send = message => {
+      JSON.stringify(message); // Node's default IPC serialization, including BigInt refusal
+      channel.emit("message", message);
+    };
+    const runtime = {adtContexts: new Map([[1, {callback: () => ({unserializable: 1n})}],
+      [2, {callback: () => ({ok: true})}]])};
+    attachStoreIPC(child, runtime);
+    const client = new StoreIPCClient(channel);
+    try {
+      const error = await withStoreIPC(1, () => client.request({}, "OSD_SESSION_CALLBACK")).catch(e => e);
+      expect(error.message).to.contain("BigInt");
+      expect(await withStoreIPC(2, () => client.request({}, "OSD_SESSION_CALLBACK"))).to.deep.equal({ok: true});
+      expect(client.pending.size).to.equal(0);
+    } finally { client.close(); child.emit("exit"); }
+  });
+  for (const asynchronous of [false, true]) it(`rejects child requests and clears session bookkeeping on ${asynchronous ? "asynchronous" : "synchronous"} EPIPE`, async () => {
+    const channel = new EventEmitter();
+    channel.connected = true;
+    const failure = Object.assign(new Error("write EPIPE"), {code: "EPIPE"});
+    let emitLateError;
+    channel.send = (_message, callback) => {
+      if (!asynchronous) throw failure;
+      setImmediate(() => { callback(failure); emitLateError = () => channel.emit("error", failure); });
+    };
+    const client = new StoreIPCClient(channel);
+    try {
+      const error = await client.request({IV_COMMAND: "CREATE"}, "ZOSD_STORE", "TEST", "session").catch(e => e);
+      expect(error).to.be.instanceOf(Error);
+      expect(client.pending.size).to.equal(0);
+      expect(client.repositorySessions.size).to.equal(0);
+    } finally { client.close(); }
+    emitLateError?.(); // the process listener must survive client.close()
+  });
   it("correlates concurrent JSON replies and refuses pending calls on disconnect", async () => {
     const channel = new EventEmitter();
     channel.connected = true;
@@ -813,18 +852,18 @@ describe("step response decoding", () => {
 
 describe("STORE long commands and non-dialog activation", () => {
   it("BUILD and ACTIVATE wait for reply or disconnect without a 120 s timer", async () => {
-    const channel = new EventEmitter();
-    channel.connected = true;
-    channel.send = () => {};
-    const client = new StoreIPCClient(channel);
-    try {
-      for (const parameters of [{IV_COMMAND: "ACTIVATE"}, {IV_COMMAND: "SYSTEM", IV_TYPE: "BUILD"}]) {
+    for (const parameters of [{IV_COMMAND: "ACTIVATE"}, {IV_COMMAND: "SYSTEM", IV_TYPE: "BUILD"}]) {
+      const channel = new EventEmitter();
+      channel.connected = true;
+      channel.send = () => {};
+      const client = new StoreIPCClient(channel);
+      try {
         const pending = client.request(parameters).catch(e => e.message);
         expect(client.pending.get(client.seq).timer).to.equal(undefined);
         channel.emit("disconnect");
         expect(await pending).to.contain("disconnected");
-      }
-    } finally { client.close(); }
+      } finally { client.close(); }
+    }
   });
 
   it("ACTIVATE without a child step publishes immediately", async () => {
@@ -833,7 +872,7 @@ describe("STORE long commands and non-dialog activation", () => {
     let published = false;
     const runtime = {storeDestination: new StoreDestination({store: {root: "/tmp",
       activate: () => ({active: true, issues: []}), completeActivation: () => true,
-      publish: async () => { published = true; return {ok: true}; }}})};
+      publish: async () => { published = true; return {ok: true, generation: "non-dialog-test"}; }}})};
     attachStoreIPC(child, runtime);
     const reply = new Promise(resolve => { child.send = resolve; });
     child.emit("message", {type: "store-request", id: 1,

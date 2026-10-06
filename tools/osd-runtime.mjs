@@ -20,6 +20,7 @@
 // assumes there is one of them. Two of these can run side by side over two
 // worktrees, which is what a branch under test would be.
 import {randomBytes} from "node:crypto";
+import {sendIPC, onIPCFailure} from "./osd-ipc.mjs";
 import {attachStoreIPC} from "./osd-store-ipc.mjs";
 // The serving supervisor launches runtime children while handling the local ADT session.
 import {spawn} from "./osd-child-process.mjs";
@@ -79,8 +80,9 @@ function reapOnExit() {
         const limit = child.osdDatabaseStep === true ? (Number(process.env.OSD_BOOT_TIMEOUT_MS) || 15 * 60 * 1000) : 55000;
         const timer = setTimeout(() => { child.kill("SIGKILL"); resolve(); }, limit);
         child.once("exit", () => { clearTimeout(timer); resolve(); });
-        try { child.send({type: "quiesce", grace: 45000}); }
-        catch { child.kill("SIGTERM"); }
+        sendIPC(child, {type: "quiesce", grace: 45000}, error => {
+          if (error) child.kill("SIGTERM");
+        });
       })));
       process.exit(0);
     });
@@ -264,7 +266,12 @@ export class ServingRuntime {
         }
       };
       child.on("message", onMessage);
-      child.send({type: "hot", id, generation: swap.generation, modules: swap.modules, only: swap.only, xrefRows: swap.xrefRows, verified: swap.verified === true});
+      sendIPC(child, {type: "hot", id, generation: swap.generation, modules: swap.modules, only: swap.only, xrefRows: swap.xrefRows, verified: swap.verified === true}, error => {
+        if (!error) return;
+        child.off("message", onMessage);
+        clearTimeout(timer);
+        reject(error);
+      });
     });
     this.generation = swap.generation;
     this.swaps = done.swaps;
@@ -364,7 +371,13 @@ export class ServingRuntime {
       };
       child.on("message", onMessage);
       child.once("exit", onExit);
-      child.send({type: "inspector", id, open: true, port});
+      sendIPC(child, {type: "inspector", id, open: true, port}, error => {
+        if (!error) return;
+        child.off("message", onMessage);
+        child.off("exit", onExit);
+        clearTimeout(timer);
+        reject(error);
+      });
     }).then((done) => {
       child.osdInspectPort = done.port;
       return {open: done.open, port: done.port, url: done.url};
@@ -374,7 +387,7 @@ export class ServingRuntime {
   // a cold transpile of the same inputs gave the same bytes (osd-warm verify)
   verified(generation) {
     if (this.running === true && this.generation === generation) {
-      this.child.send({type: "verified", generation});
+      sendIPC(this.child, {type: "verified", generation});
     }
   }
 
@@ -598,11 +611,11 @@ export class ServingRuntime {
         if (message?.type === "adt-carry") this.adtCarry = message.state;
         if (message?.type === "adt-state-request") {
           snapshot.then((state) => {
-            if (child.connected) child.send({type: "adt-state", state: state ?? this.adtCarry,
+            sendIPC(child, {type: "adt-state", state: state ?? this.adtCarry,
               replace: state !== undefined});
           }, (error) => {
             console.error(`ADT snapshot failed: ${error.message}`);
-            if (child.connected) child.send({type: "adt-state"});
+            sendIPC(child, {type: "adt-state"});
           });
         }
       });
@@ -749,8 +762,15 @@ export class ServingRuntime {
         resolve(answer);
       };
       child.on("message", onMessage);
+      const unhookChannel = onIPCFailure(child, error => {
+        // A spawned process still owns its database until exit. Keep the
+        // start pending while it leaves so ensure cannot overlap two owners.
+        if (child.pid !== undefined) child.kill("SIGTERM");
+        else { stopTimers(); reject(error); } // spawn failed: no exit follows
+      });
 
       child.once("exit", (code, signal) => {
+        unhookChannel();
         stopTimers();
         CHILDREN.delete(child);
         registryUpdate(this.root, (list) => list.filter((e) => e.pid !== child.pid));
@@ -797,12 +817,10 @@ export class ServingRuntime {
         child.kill("SIGKILL");
       }, this.grace + 8000);
       child.once("exit", done);
-      try {
-        child.send({type: "quiesce", grace: this.grace});
-      } catch {
+      sendIPC(child, {type: "quiesce", grace: this.grace}, error => {
         // the channel is already gone; SIGTERM still lets the database save
-        child.kill("SIGTERM");
-      }
+        if (error) child.kill("SIGTERM");
+      });
     });
     this.exiting = exiting;
     const clear = () => {

@@ -807,6 +807,49 @@ describe('STORE activation operation tracking', function () {
     expect(status.state).to.equal('failed');
     expect(status.failure_stage).to.equal('step');
   });
+  it('survives an asynchronous EPIPE event and fails the pending publication', async () => {
+    const {EventEmitter} = await import('node:events');
+    const {attachStoreIPC} = await import('../tools/osd-store-ipc.mjs');
+    const {ActivationJournal} = await import('../tools/osd-activation-journal.mjs');
+    const child = new EventEmitter();
+    child.connected = true;
+    const failure = Object.assign(new Error('write EPIPE'), {code: 'EPIPE'});
+    const store = {root, activationJournal: new ActivationJournal(root), activate: () => ({active: true, issues: []})};
+    let attempted;
+    const done = new Promise(resolve => {
+      child.send = (message, callback) => {
+        attempted = message;
+        setImmediate(() => { callback?.(failure); child.emit('error', failure); resolve(); });
+        return true;
+      };
+    });
+    attachStoreIPC(child, {storeDestination: new StoreDestination({store})});
+    child.emit('message', {type: 'store-request', id: 7, step: 1,
+      parameters: {IV_COMMAND: 'ACTIVATE', IV_TYPE: 'CLAS', IV_NAME: 'ZOP'}});
+    await done;
+    expect(attempted.id).to.equal(7);
+    const operation = JSON.parse(attempted.values.EV_JSON);
+    expect(store.activationJournal.lookup(operation.op_id)).to.include({state: 'failed', failure_stage: 'step'});
+    child.emit('exit');
+  });
+  it('survives a real SIGKILL before a slow STORE answer and serves a later request', async () => {
+    const {spawn} = await import('node:child_process');
+    const child = spawn(process.execPath, [resolve('test/helpers/store-ipc-killed-peer.mjs'), 'parent', root],
+      {stdio: ['ignore', 'pipe', 'pipe']});
+    let out = '', err = '';
+    child.stdout.on('data', data => { out += data; });
+    child.stderr.on('data', data => { err += data; });
+    const code = await new Promise((resolve, reject) => {
+      child.on('error', reject);
+      child.on('close', resolve);
+    });
+    expect(code, err).to.equal(0);
+    const result = JSON.parse(out.trim());
+    expect(result.survived).to.equal(true);
+    expect(result.sendError).to.equal('EPIPE');
+    expect(result.status).to.include({state: 'failed', failure_stage: 'step', active: false});
+    expect(result.status.completed_at).to.not.equal('');
+  });
   it('isolates journals for different instance ports', async () => {
     const {ActivationJournal} = await import('../tools/osd-activation-journal.mjs');
     const first = new ActivationJournal(root, {host: 'http-8090'});

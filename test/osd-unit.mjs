@@ -290,3 +290,33 @@ describe("tools/osd-unit: unitChildEnv (runDetached's own database, or a differe
     expect(env).to.include({STG_DB: "postgres", PGDATABASE: "osd_test", PGHOST: "pghost"});
   });
 });
+
+
+describe("tools/osd-unit: detached child event races", function () {
+  this.timeout(10000);
+  const run = async mode => {
+    const {spawn} = await import('node:child_process');
+    const child = spawn(process.execPath, [resolve('test/helpers/unit-child-events.mjs')],
+      {env: {...process.env, UNIT_EVENT_CASE: mode}, stdio: ['ignore', 'pipe', 'pipe']});
+    let out = '', err = '';
+    child.stdout.on('data', data => { out += data; });
+    child.stderr.on('data', data => { err += data; });
+    const code = await new Promise((resolve, reject) => {
+      child.on('error', reject); child.on('close', resolve);
+    });
+    expect(code, err).to.equal(0);
+    return JSON.parse(out.trim());
+  };
+  it('rejects if watchdog result reconstruction throws, instead of escaping close', async () => {
+    expect((await run('reconstruct')).error).to.match(/filter/);
+  });
+  it('rejects if a progress message handler throws, instead of escaping message', async () => {
+    expect((await run('message')).error).to.match(/kind/);
+  });
+  it('prefers child JSON when the watchdog fires before close', async () => {
+    expect((await run('race')).result).to.deep.equal({ok: true, marker: 'child-result'});
+  });
+  it('an explicit run abort still overrides parseable child JSON', async () => {
+    expect((await run('cancel')).error).to.equal('ABAP Unit run cancelled');
+  });
+});

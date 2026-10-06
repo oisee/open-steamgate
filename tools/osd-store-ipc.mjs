@@ -4,6 +4,7 @@ import {AsyncLocalStorage} from "node:async_hooks";
 import {fill, givenText} from "./osd-destination.mjs";
 import {toJson} from "./rfc-replay.mjs";
 import {currentStepToken, onEveryStep} from "./osd-dialog-step.mjs";
+import {sendIPC, onIPCFailure} from "./osd-ipc.mjs";
 
 import {PARENT_SYSTEM_KINDS, CHILD_SYSTEM_KINDS} from "./osd-system-kinds.mjs";
 export {PARENT_SYSTEM_KINDS, CHILD_SYSTEM_KINDS};
@@ -38,14 +39,14 @@ export class StoreIPCClient {
       this.repositorySessions.clear();
     };
     channel.on("message", this.receive);
-    channel.on("disconnect", this.disconnected);
+    this.unhookChannel = onIPCFailure(channel, this.disconnected);
     this.unhook = onEveryStep({onEnd: (token, {dumped}) => {
-      if (token.storeIPC !== undefined && channel.connected) channel.send({type: "store-step-ended", step: token.storeIPC, ok: !dumped});
+      if (token.storeIPC !== undefined) sendIPC(channel, {type: "store-step-ended", step: token.storeIPC, ok: !dumped});
     }});
   }
   close() {
     this.channel.off("message", this.receive);
-    this.channel.off("disconnect", this.disconnected);
+    this.unhookChannel();
     this.unhook();
     this.unhookRepository?.();
     this.disconnected();
@@ -61,18 +62,20 @@ export class StoreIPCClient {
       const long = command === "CREATE" || command === "DELETE" || command === "ACTIVATE" || command === "RUN_TESTS" || (command === "SYSTEM" && String(parameters.IV_TYPE).toUpperCase() === "BUILD");
       const timer = long ? undefined : setTimeout(() => {
         this.pending.delete(id);
-        if (name === "OSD_SESSION_CALLBACK" && this.channel.connected) {
-          this.channel.send({type: "store-context-ended", context: contextID});
+        this.repositorySessions.delete(id);
+        if (name === "OSD_SESSION_CALLBACK") {
+          sendIPC(this.channel, {type: "store-context-ended", context: contextID});
         }
         reject(new Error("STORE IPC request timed out"));
       }, 120000);
       this.pending.set(id, {resolve, reject, timer});
       if (repositorySession !== undefined) this.repositorySessions.set(id, repositorySession);
-      this.channel.send({type: "store-request", id, context: contextID, step: token?.storeIPC, name, parameters, repositoryUser}, (error) => {
+      sendIPC(this.channel, {type: "store-request", id, context: contextID, step: token?.storeIPC, name, parameters, repositoryUser}, (error) => {
         if (!error) return;
         const pending = this.pending.get(id);
         if (!pending) return;
         this.pending.delete(id);
+        this.repositorySessions.delete(id);
         clearTimeout(timer);
         reject(error);
       });
@@ -93,7 +96,7 @@ export class StoreIPCClient {
       const {onRepositorySessionEnd, repositorySessionKey, repositoryCaller} = await import("./osd-enq-host.mjs");
       if (!this.unhookRepository) this.unhookRepository = onRepositorySessionEnd(key => {
         for (const [id, session] of this.repositorySessions) if (session === key && this.channel.connected) {
-          this.channel.send({type: "store-mutation-cancel", id});
+          sendIPC(this.channel, {type: "store-mutation-cancel", id});
         }
       });
       // Guard in the runtime that owns the caller and the repository ENQ
@@ -125,15 +128,29 @@ export class StoreIPCClient {
 export function attachStoreIPC(child, runtime) {
   const deferred = new Map();
   const activeMutations = new Set();
+  const contexts = new Map();
+  let channelFailed = false;
   const failDeferred = reason => {
     for (const work of deferred.values()) for (const item of work) {
-      item.continuation.fail?.(reason);
-      item.resolve({EV_ACTIVE: "", EV_NOTE: reason, type: item.type, name: item.name});
+      try { item.continuation.fail?.(reason); }
+      catch (error) { console.warn(`STORE activation failure could not be recorded: ${error.message}`); }
+      finally { item.resolve({EV_ACTIVE: "", EV_NOTE: reason, type: item.type, name: item.name}); }
     }
     deferred.clear();
   };
-  child.on("disconnect", () => { activeMutations.clear(); failDeferred("activation child disconnected"); });
-  child.on("exit", () => activeMutations.clear());
+  const unhookChannel = onIPCFailure(child, () => {
+    channelFailed = true;
+    activeMutations.clear();
+    for (const id of contexts.keys()) runtime.adtContexts?.delete(id);
+    contexts.clear();
+    failDeferred("activation child disconnected");
+  });
+  const replyError = (id, error) => sendIPC(child, {type: "store-response", id, error: String(error.message ?? error)});
+  const reply = (id, values) => sendIPC(child, {type: "store-response", id, values}, error => {
+    // Serialization can fail while the pipe is healthy (e.g. BigInt in a
+    // callback result). The child must receive the error and end its step.
+    if (error && !channelFailed) replyError(id, error);
+  });
   const receive = async (message) => {
     if (message?.type === "store-mutation-cancel") { activeMutations.delete(message.id); return; }
     if (message?.type === "store-context-ended") {
@@ -150,6 +167,8 @@ export function attachStoreIPC(child, runtime) {
       return;
     }
     if (message?.type !== "store-request") return;
+    if (channelFailed) return;
+    if (message.context !== undefined) contexts.set(message.context, (contexts.get(message.context) ?? 0) + 1);
     const mutation = ["CREATE", "DELETE"].includes(String(message.parameters?.IV_COMMAND ?? "").toUpperCase());
     if (mutation) activeMutations.add(message.id);
     try {
@@ -171,9 +190,9 @@ export function attachStoreIPC(child, runtime) {
         values = await withSystem(context?.system ?? runtime.systemAnswers ?? (() => undefined),
           () => destination.execute(message.parameters), {store: context?.store, oneRuntime: true,
             repositoryUser: message.repositoryUser,
-            repositoryGuard: mutation ? () => child.connected && activeMutations.has(message.id) : undefined,
+            repositoryGuard: mutation ? () => !channelFailed && child.connected && activeMutations.has(message.id) : undefined,
             deferActivate: message.step === undefined ? undefined : (continuation) => {
-              if (!child.connected) throw new Error("activation child disconnected before scheduling");
+              if (channelFailed || !child.connected) throw new Error("activation child disconnected before scheduling");
               const list = deferred.get(message.step) ?? [];
               let resolve;
               const promise = new Promise(r => { resolve = r; });
@@ -182,14 +201,20 @@ export function attachStoreIPC(child, runtime) {
               deferred.set(message.step, list);
             }});
       }
-      if (child.connected) child.send({type: "store-response", id: message.id, values});
+      reply(message.id, values);
     } catch (error) {
-      if (child.connected) child.send({type: "store-response", id: message.id, error: String(error.message ?? error)});
-    } finally {activeMutations.delete(message.id);}
+      replyError(message.id, error);
+    } finally {
+      activeMutations.delete(message.id);
+      const remaining = (contexts.get(message.context) ?? 0) - 1;
+      if (remaining > 0) contexts.set(message.context, remaining);
+      else contexts.delete(message.context);
+    }
   };
   child.on("message", receive);
   child.once("exit", () => {
     failDeferred("activation child exited");
+    unhookChannel();
     child.off("message", receive);
   });
 }
