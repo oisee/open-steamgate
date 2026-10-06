@@ -792,6 +792,18 @@ describe("STORE IPC lifecycle", () => {
   });
 });
 
+// A store stub's root is where the activation journal lives
+// (.local/activation/http-<port>). A shared root such as /tmp keeps a
+// journal and its owner.pid across runs, and a later run then meets an
+// "owner" that is some unrelated live pid and refuses to publish.
+const storeRoots = [];
+function storeRoot() {
+  const dir = mkdtempSync(join(tmpdir(), "osd-one-runtime-store-"));
+  storeRoots.push(dir);
+  return dir;
+}
+after(() => { for (const dir of storeRoots.splice(0)) rmSync(dir, {recursive: true, force: true}); });
+
 describe("remote activation publication", () => {
   for (const entry of ["ANSWER", "RESUME"]) for (const failure of ["publish", "promotion"]) {
     it(`${entry} waits for ${failure} failure and returns the ADT failure document`, async () => {
@@ -802,7 +814,7 @@ describe("remote activation publication", () => {
       const entered = new Promise(r => { started = r; });
       const go = new Promise(r => { release = r; });
       const runtime = {child, url: "http://unused", ensure: async () => {}};
-      runtime.storeDestination = new StoreDestination({store: {root: "/tmp",
+      runtime.storeDestination = new StoreDestination({store: {root: storeRoot(),
         activate: () => ({active: true, issues: []}),
         publish: async () => { started(); await go; return {ok: failure !== "publish", transpile: {error: "build failed"}}; },
         completeActivation: () => failure !== "promotion"}});
@@ -870,7 +882,7 @@ describe("STORE long commands and non-dialog activation", () => {
     const child = new EventEmitter();
     child.connected = true;
     let published = false;
-    const runtime = {storeDestination: new StoreDestination({store: {root: "/tmp",
+    const runtime = {storeDestination: new StoreDestination({store: {root: storeRoot(),
       activate: () => ({active: true, issues: []}), completeActivation: () => true,
       publish: async () => { published = true; return {ok: true, generation: "non-dialog-test"}; }}})};
     attachStoreIPC(child, runtime);

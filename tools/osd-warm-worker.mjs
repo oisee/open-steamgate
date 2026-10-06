@@ -4,13 +4,14 @@ import {checkView} from "./osd-store-compile-view.mjs";
 import {warmOverlay} from "./osd-warm-overlay.mjs";
 import {runsAs} from "./osd-main.mjs";
 import {join} from "node:path";
+import {sendIPC} from "./osd-ipc.mjs";
 
 export function main({beforeCompile = () => {}, afterCompile = () => {}, heapLimit = 512 * 1048576} = {}) {
   let inactive = [];
   let folder;
   const root = process.env.OSD_ROOT ?? process.cwd();
   const compiler = new WarmCompiler({root,
-    log: text => process.send({type: "log", text}),
+    log: text => sendIPC(process, {type: "log", text}),
     inactiveSources: activating => inactive.filter(entry => !activating.has(entry.key)),
     keyOf: file => inactive.find(entry => entry.files.some(f => join(f.file) === join(file)))?.key,
     overlay: activating => warmOverlay(root, folder,
@@ -40,10 +41,10 @@ export function main({beforeCompile = () => {}, afterCompile = () => {}, heapLim
         const result = await compiler[message.method](message.method === "check" ? message.check : new Set(message.activating));
         await afterCompile(message, result);
         if (message.method === "prime") heapBase = process.memoryUsage().heapUsed;
-        process.send({id: message.id, result, state: state()});
+        sendIPC(process, {id: message.id, result, state: state()});
       } catch (e) {
         const error = {message: e.message, code: e.code, check: e.check, issues: e.issues, output: e.output};
-        process.send({id: message.id, error, state: state()});
+        sendIPC(process, {id: message.id, error, state: state()});
       }
     }).catch(() => process.exit(1));
   });

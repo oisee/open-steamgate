@@ -766,7 +766,7 @@ export class ServingRuntime {
         // A spawned process still owns its database until exit. Keep the
         // start pending while it leaves so ensure cannot overlap two owners.
         if (child.pid !== undefined) child.kill("SIGTERM");
-        else { stopTimers(); reject(error); } // spawn failed: no exit follows
+        else { stopTimers(); CHILDREN.delete(child); reject(error); } // spawn failed: no exit follows
       });
 
       child.once("exit", (code, signal) => {
