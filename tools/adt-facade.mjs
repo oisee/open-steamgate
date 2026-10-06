@@ -1,3 +1,4 @@
+import {unitResultDocument, unitResultOptions} from "./adt-unit-result.mjs";
 import {validateCreation, validationDocument} from "./adt-create-validation.mjs";
 import {requestElements, elementsNamed, attributeValue, namespaces} from "./adt-request-xml.mjs";
 import {requestXMLProfile, readRequestXML, RequestXMLError, XML_ERROR_TYPE, XML_ERROR_MESSAGE} from "./adt-request-xml.mjs";
@@ -49,7 +50,7 @@ import {SOURCE_PROPERTY_MIME, sourcePropertiesDocument} from "./adt-source-prope
 import {ObjectStore, TYPES, INCLUDES as CLASS_INCLUDES, NotFound, ReadOnly, NotSupported, Conflict, InvalidName} from "./osd-store.mjs";
 import {cdsEntityOf} from "./adt-cds.mjs";
 import {hashOf, liveHash} from "./osd-build.mjs";
-import {emptyFeedDocument, uriOf, ADT_TYPE, dataElementDocument, tableFieldsOf, tableDocument, tableSourceDocument, TREE_FOLDER, TREE_CATEGORY, TREE_TYPE_LABEL, TREE_CATEGORY_LABEL, classDocument, activationSuccessDocument, namedItemsDocument, objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, packageOf, nodeStructureDocument, nodePathDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, lockedByOtherDocument, activationFailureDocument, inactiveObjectsDocument, objectReferencesIn, objectFromUri, checkReportDocument, checkObjectsIn, unitResultDocument, transportCheckDocument, transportCheckRequest} from "./adt-documents.mjs";
+import {emptyFeedDocument, uriOf, ADT_TYPE, dataElementDocument, tableFieldsOf, tableDocument, tableSourceDocument, TREE_FOLDER, TREE_CATEGORY, TREE_TYPE_LABEL, TREE_CATEGORY_LABEL, classDocument, activationSuccessDocument, namedItemsDocument, objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, packageOf, nodeStructureDocument, nodePathDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, lockedByOtherDocument, activationFailureDocument, inactiveObjectsDocument, objectReferencesIn, objectFromUri, checkReportDocument, checkObjectsIn, transportCheckDocument, transportCheckRequest} from "./adt-documents.mjs";
 import {checkRunReport} from "./adt-checkrun.mjs";
 import {identity as osdIdentity} from "./osd-identity.mjs";
 import {gitObjectRevision, gitObjectState} from "./osd-git-history.mjs";
@@ -2599,10 +2600,9 @@ export function adtRouter(options = {}) {
   };
 
   // abap-adt-api follows every unit-test class and method with this request
-  // before it can publish the result into VS Code's Testing tree. OSD already
-  // puts an exact #start=line,column fragment in each navigationUri. Returning
-  // an empty, well-formed marker collection tells the client to keep that
-  // authoritative URI; a missing endpoint aborts the otherwise successful
+  // before it can publish the result into VS Code's Testing tree. Returning
+  // an empty, well-formed marker collection tells the client to keep the
+  // result's navigation selector; a missing endpoint aborts the successful
   // run and leaves the UI at 0/0.
   router.post(`${BASE}/abapsource/occurencemarkers`, async (req, res) => {
     await rawBody(req);
@@ -2636,7 +2636,7 @@ export function adtRouter(options = {}) {
       const runner = await store.unit();
       const run = await runner.runDetached(named[0].type, named[0].name);
       res.status(200).type(unitResultType(req, "evaluation.result"))
-        .send(unitResultDocument(run, {base: `${BASE}/${TYPES[named[0].type]?.adt ?? "oo/classes"}/${encodeURIComponent(named[0].name.toLowerCase())}`}));
+        .send(unitResultDocument(run, unitResultOptions(body, named[0])));
     } catch (e) {
       res.status(e?.code === "NOT_FOUND" ? 404 : 500).type("application/xml")
         .send(exceptionDocument("ExceptionTestRunFailed", String(e?.message ?? e)));
@@ -2676,7 +2676,7 @@ export function adtRouter(options = {}) {
       // ...api.junit.run-result.v1+xml" for the name vsp asks by. A client
       // that asks for the junit name still gets it.
       res.status(200).type(unitResultType(req, "result"))
-        .send(unitResultDocument(run, {base: `${BASE}/${TYPES[named[0].type]?.adt ?? "oo/classes"}/${encodeURIComponent(named[0].name.toLowerCase())}`}));
+        .send(unitResultDocument(run, unitResultOptions(body, named[0])));
     } catch (e) {
       const invalid = e instanceof URIError || e?.code === "INVALID_REQUEST";
       const missing = e?.code === "NOT_FOUND";

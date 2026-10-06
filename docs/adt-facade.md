@@ -594,9 +594,14 @@ returns program, test classes, test methods and the alerts under each
 method, which is exactly the nesting of an `aunit:runResult`: a method with
 no alert passed, a method with one did not. A class carries the `riskLevel`
 and `durationCategory` it declares in ABAP, a method carries `executionTime`
-in seconds, and both carry the line and column they are written at, so the
-façade builds a navigation URI into the include without parsing anything
-itself. `classes()` answers what tests exist without running them, and
+in seconds. For CLAS results, the program URI names the class, test identities
+use `#testclass=...;testmethod=...`, and source navigation uses the include
+resource with `#type=CLAS%2FOCL;name=...` for classes or `CLAS%2FOLD` and a
+class name padded to 30 characters for methods. Methods are alphabetical;
+passing methods are self-closing without alerts. `withNavigationUri`
+disabled removes both navigation attributes and the CLAS/OL or CLAS/OLI
+types; the answer remains semantic even if the request asks for technical
+URIs. `classes()` answers what tests exist without running them, and
 `{testClass}` or `{method}` narrows a run to one. An alert is one of three
 kinds: `failedAssertion` for an assertion that did not hold, with the
 assert's message as the title and expected and actual as details;
@@ -605,7 +610,19 @@ the runtime. Every alert carries a stack read back through the transpiler's
 source maps, so an entry names the ABAP include and line rather than the
 generated module. The result document is the classic `aunit:runResult`,
 named by what the client asked for: `abapunit.testruns.result.v2` for
-Eclipse, the junit name for vsp.
+Eclipse, the junit name for vsp. In CLAS results, assertion details retain
+the available expected/actual text inside `Different values/details/detail`
+(negative numeric values use a trailing sign), followed by the test and
+class-pool name. Class stack URIs use the class/include resource and
+`#start=line,0`, with the include type and description. No class runResult
+URI has a `/source/main` suffix. GET of an include resource serves source
+unless include-property XML is explicitly requested; fragments are resolved
+by the client. PROG/other result shapes are unchanged except that disabling
+navigation is honoured. Activation and check diagnostics retain their
+existing source suffix. These CLAS facts come from the supplied 2026-10-06 protocol
+measurement; the regression fixtures use synthetic names.
+Result rendering and configuration options live in `tools/adt-unit-result.mjs`;
+`adt-documents.mjs` retains its existing result/frame exports.
 
 The run happens in a child process. A test writes to the database, and the
 database is the one the gateway is serving from, so a run inside the server
