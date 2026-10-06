@@ -1101,7 +1101,7 @@ describe("tools/osd-warm: the build view, with other objects inactive", function
   let store;
   const A = "ZCL_WV_A";
   const B = "ZCL_WV_B";
-  const src = (name, v) => `CLASS ${name.toLowerCase()} DEFINITION PUBLIC CREATE PUBLIC.\n  PUBLIC SECTION.\n    CLASS-METHODS v RETURNING VALUE(rv) TYPE i.\nENDCLASS.\nCLASS ${name.toLowerCase()} IMPLEMENTATION.\n  METHOD v.\n    rv = ${v}.\n  ENDMETHOD.\nENDCLASS.\n`;
+  const src = (name, v) => `CLASS ${name.toLowerCase()} DEFINITION PUBLIC CREATE PUBLIC.\n  PUBLIC SECTION.\n    CLASS-METHODS class_constructor.\n    CLASS-METHODS v RETURNING VALUE(rv) TYPE i.\nENDCLASS.\nCLASS ${name.toLowerCase()} IMPLEMENTATION.\n  METHOD class_constructor.\n  ENDMETHOD.\n  METHOD v.\n    rv = ${v}.\n  ENDMETHOD.\nENDCLASS.\n`;
   const out = (name) => readFileSync(join(root, "output", `${name.toLowerCase()}.clas.mjs`), "utf8");
   const activate = async (name) => {
     const checked = store.warmActivation("CLAS", name);
@@ -1219,6 +1219,30 @@ describe("tools/osd-warm: the build view, with other objects inactive", function
     expect((await prime).code).to.equal("CLOSED");
     expect(compiler.primed).to.equal(false);
   });
+
+  it("activating B while A stays on its active copy matches real cold script ordering", async () => {
+    const activeA = out(A);
+    store.write("CLAS", A, src(A, 40));
+    store.write("CLAS", B, src(B, 21));
+    const r = await activate(B);
+    expect(r.ok, JSON.stringify(r.transpile)).to.equal(true);
+    expect(r.transpile.warm, store.warmState.reason).to.equal(true);
+    expect((await store.warmState.compiler.verify(r.transpile.hash)).verdict).to.equal("same");
+    const scripts = ["init.mjs", "_init.mjs"];
+    const warmScripts = scripts.map(file => readFileSync(join(root, "output", file), "utf8"));
+    const frozen = JSON.parse(readFileSync(join(root, "build", "by-input", r.transpile.hash, "compile-inputs.json"), "utf8"));
+    // An independent cold build uses the store's actual view, not the
+    // verifier's potentially incorrect recorded order.
+    const cold = await build({root, generators: false, force: true, replace: true, overlay: store.overlay()});
+    expect(cold.hash).to.equal(r.transpile.hash);
+    for (const [i, file] of scripts.entries()) expect(warmScripts[i], file).to.equal(readFileSync(join(root, "output", file), "utf8"));
+    const sources = frozen.files.map(f => f.source);
+    expect(sources.indexOf("src/zcl_wv_b.clas.abap")).to.be.lessThan(sources.indexOf("src/zcl_wv_a.clas.abap"));
+    expect(out(A)).to.equal(activeA);
+    expect(out(B)).to.include("IntegerFactory.get(21)");
+    expect((await store.warmState.compiler.verify(r.transpile.hash)).verdict).to.equal("same");
+  });
+
 
 });
 

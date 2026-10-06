@@ -1,8 +1,9 @@
 // A fresh registry over one generation's frozen inputs. No live tree reads.
 import {mkdirSync, readFileSync, rmSync, writeFileSync} from "node:fs";
-import {join, resolve} from "node:path";
+import {basename, join, resolve} from "node:path";
 import {layout} from "./osd-build.mjs";
 import {selectedModules, outputFiles, isBinaryFilename} from "./osd-transpile.mjs";
+import {pinVerification} from "./osd-verify-pin.mjs";
 import {readCompileInputs, MissingCompileInputs} from "./osd-compile-snapshot.mjs";
 import {compareGenerations} from "./osd-generation-diff.mjs";
 import {assertToolchain} from "./osd-transpiler.mjs";
@@ -13,7 +14,9 @@ export async function verifyGeneration(hash, root = resolve(process.env.OSD_ROOT
   const paths = layout(root), generation = join(paths.byInput, hash);
   const tmp = join(paths.tmp, `${hash}.${process.pid}.verify`);
   const started = Date.now();
+  let unpin;
   try {
+    unpin = await pinVerification(root, hash, basename(tmp));
     const {config, files, libs} = readCompileInputs(root, generation);
     const loaded = selectedModules(root);
     assertToolchain(root, loaded);
@@ -34,10 +37,15 @@ export async function verifyGeneration(hash, root = resolve(process.env.OSD_ROOT
       writeFileSync(f.path, f.contents, isBinaryFilename(f.path) ? {encoding: "latin1"} : undefined);
     }
     const v = compareGenerations(join(generation, "output"), join(tmp, "output"));
+    if (v.missing || v.files === 0) return {verdict: "inconclusive", why: v.missing
+      ? `missing output under verification: ${v.missing}` : "zero output files compared under verification"};
     const differing = [...v.differing, ...v.onlyInA, ...v.onlyInB];
     return {verdict: differing.length ? "differs" : "same", files: v.files, differing: differing.slice(0, 20), count: differing.length, ms: Date.now() - started};
   } catch (error) {
     if (error instanceof MissingCompileInputs) return {verdict: "inconclusive", why: error.message};
     throw error;
-  } finally { rmSync(tmp, {recursive: true, force: true}); }
+  } finally {
+    rmSync(tmp, {recursive: true, force: true});
+    unpin?.();
+  }
 }

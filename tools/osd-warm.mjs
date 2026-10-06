@@ -41,6 +41,7 @@ import {runsAs} from "./osd-main.mjs";
 import {toolCommand} from "./osd-host.mjs";
 import {isBinaryFilename, listFiles, loadLibs, selectedModules, outputFiles, readAll} from "./osd-transpile.mjs";
 import {lowerNarrowSubmit} from "./osd-narrow-submit.mjs";
+import {orderRegistry} from "./osd-warm-order.mjs";
 import {updateRegistry} from "./osd-warm-update.mjs";
 import {warmVerdict} from "./osd-hot.mjs";
 
@@ -725,6 +726,12 @@ export class WarmCompiler {
         return {ok: true, hash, cached: true, warm: true, live: true, ms: Date.now() - started, modules: [], hostHeld: [], stale: 0, from,
           closure: [], xrefRows: {CROSS: [], WBCROSSGT: [], WBCROSSGTX: [], D010INC: []}};
       }
+      const files = new Map([...actual.keys()].map(path => [path, this.files.get(path)]));
+      orderRegistry(this, files);
+      const sources = [...files].map(([path, f]) => {
+        const edit = edits.find(e => e.path === path);
+        return located(path, edit ? {...f, contents: edit.after, sourceDigest: digests.get(path)} : f);
+      });
       const names = new Set([...stale].map(key));
       let output;
       try {
@@ -748,9 +755,7 @@ export class WarmCompiler {
 
       // the modules this replaces, and the check that nothing else holds one
       const liveOut = join(paths.byInput, from, "output");
-      const written = outputFiles(output, this.own, liveOut, [...this.files].map(([path, f]) => located(path, f)));
-      // the modules a serving process loads: not the scripts, and not the test
-      // classes, which only a unit run imports
+      const written = outputFiles(output, this.own, liveOut, sources);
       const modules = written.map((f) => basename(f.path))
         .filter((f) => f.endsWith(".mjs") && !SCRIPTS.has(f) && !f.endsWith(".testclasses.mjs"));
       const refusal = importerRefusal(this.importers, written.map((f) => basename(f.path)));
@@ -785,8 +790,6 @@ export class WarmCompiler {
             writeFileSync(join(tmp, "output", basename(f.path)), f.contents, isBinaryFilename(f.path) ? {encoding: "latin1"} : undefined);
           }
           linkOrCopy(join(paths.byInput, from, "abap_transpile.json"), join(tmp, "abap_transpile.json"), this.link);
-          // the manifest a cold build of these inputs writes: the same fields in
-          // the same order, so the comparison in verify() is of the output
           assertToolchain(root, this.loaded);
           const manifest = JSON.parse(readFileSync(join(paths.byInput, from, "manifest.json"), "utf8"));
           writeFileSync(join(tmp, "manifest.json"), JSON.stringify({
@@ -796,10 +799,7 @@ export class WarmCompiler {
           const sharedSources = keepSourceInputs(root, tmp, digests, actual, overlay,
             {generation: join(paths.byInput, from), digests: this.digests});
           if (!sharedSources) linkGeneratedSources(root, join(paths.byInput, from), tmp);
-          keepCompileInputs(root, tmp, this.own, [...this.files].map(([path, f]) => {
-            const edit = edits.find(e => e.path === path);
-            return located(path, edit ? {...f, contents: edit.after, sourceDigest: digests.get(path)} : f);
-          }), this.libs, overlay);
+          keepCompileInputs(root, tmp, this.own, sources, this.libs, overlay);
           completeSourceSnapshot(tmp);
           linkRoots(root, tmp, this.config, undefined, {wanted});
           mkdirSync(paths.byInput, {recursive: true});

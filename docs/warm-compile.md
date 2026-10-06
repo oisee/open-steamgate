@@ -177,10 +177,15 @@ and require a full prime.
   rebuilds cold and recycles. Measured: 2529 files, 0 differing, 8.5 s in
   the background. `compile-inputs.json` retains the exact source/library order,
   config and source-map locations, with raw bytes addressed by `source-inputs.json`
-  in `build/source-by-digest`. The verifier builds a fresh registry solely from
+  in `build/source-by-digest`. Normal warm builds order the kept registry and
+  frozen inputs by the cold view's name groups, including active-copy overlays;
+  constructor script order therefore matches a real cold build. The verifier
+  builds a fresh registry solely from
   these inputs. Live edits, cold publications and library/config changes cannot
-  invalidate it. Only genuinely missing frozen inputs are `inconclusive`, with
-  the source and digest logged; corrupt provenance is a failure. **It runs no
+  invalidate it. Missing frozen inputs or output, and zero compared files, are
+  `inconclusive` with a reason; corrupt provenance is a failure. A verifier pins
+  its generation and scratch directory under the build lock until comparison
+  finishes, so concurrent GC retains both and their frozen source bytes. **It runs no
   generators**: it compares the transpile of the frozen
   `gen/`, so it checks the warm build and not the rule of what is warm; a
   generator reading something the rule lets through would go unseen by it
@@ -246,8 +251,11 @@ and require a full prime.
   Measured on a create, two edits and a delete, twice
   (`OSD_WARM=1 STG_DEV=1`): 290 s and 10 recycles before, 83-90 s and 2
   recycles after, both edits warm (1.3-1.5 s).
-- **The prime waits for a runtime changing hands**. Every warm generation is
-  queued for a frozen comparison; cold builds keep those comparisons running,
+- **The prime waits for a runtime changing hands**. Frozen comparisons keep
+  at most two pending generations alongside one running comparison. The current
+  generation takes the next turn; older pending work beyond the limit, and work
+  deleted by GC, is logged as "superseded, not verified". Unchecked generations
+  keep their disk verdict. Cold builds keep the running comparison alive,
   and front shutdown explicitly terminates the verification child. The
   prime formerly blocked the process that supervises the runtime; landing
   in the middle of a recycle made that recycle read 17-30 s slower. It now

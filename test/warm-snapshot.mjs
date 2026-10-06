@@ -5,7 +5,7 @@ import {existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, w
 import {tmpdir} from "node:os";
 import {join, resolve} from "node:path";
 import {pathToFileURL} from "node:url";
-import {build} from "../tools/osd-build.mjs";
+import {build, gc} from "../tools/osd-build.mjs";
 import {WarmCompiler} from "../tools/osd-warm.mjs";
 import {verifyNext} from "../tools/osd-store-verify.mjs";
 
@@ -133,13 +133,123 @@ Transpiler.prototype.run = async function(...args) {
     expect(result.why).to.include("src/zcl_snap.clas.abap").and.include(digest);
   });
 
-  it("queues every generation instead of replacing pending verification with the latest save", async () => {
-    const seen = [];
-    const state = {next: new Set(["g1", "g2", "g3"]), compiler: {verify: async hash => {seen.push(hash); return {verdict: "same", files: 1, ms: 1};}}};
-    const store = {warm: () => state};
-    verifyNext(store);
-    while (state.verifying) await state.verifying;
-    expect(seen).to.deep.equal(["g1", "g2", "g3"]);
-    expect(state.next.size).to.equal(0);
+  const pauseVerification = async () => {
+    const ready = join(root, "verify-ready"), release = join(root, "verify-release");
+    const preload = join(root, "pause-output-verify.mjs");
+    writeFileSync(preload, `import {modulesOf} from ${JSON.stringify(new URL("../tools/osd-transpile.mjs", import.meta.url).href)};
+import {existsSync, writeFileSync} from 'node:fs';
+const {Transpiler} = modulesOf(${JSON.stringify(root)}), run = Transpiler.prototype.run;
+Transpiler.prototype.run = async function(...args) {
+ writeFileSync(${JSON.stringify(ready)}, 'ready');
+ while (!existsSync(${JSON.stringify(release)})) await new Promise(r => setTimeout(r, 20));
+ return run.apply(this, args);
+};`);
+    process.env.NODE_OPTIONS = `${nodeOptions ?? ""} --import=${pathToFileURL(preload).href}`;
+    const verifying = compiler.verify(generation);
+    for (let i = 0; i < 200 && !existsSync(ready); i++) await sleep(20);
+    if (!existsSync(ready)) { writeFileSync(release, "resume"); throw new Error("verifier did not reach transpile"); }
+    return {verifying, resume: () => writeFileSync(release, "resume")};
+  };
+
+  it("never certifies output removed during its cold transpile", async () => {
+    const {verifying, resume} = await pauseVerification();
+    rmSync(join(root, "build", "by-input", generation, "output"), {recursive: true});
+    resume();
+    const result = await verifying;
+    expect(result.verdict, JSON.stringify(result)).to.equal("inconclusive");
+    expect(result.why).to.include("missing").and.include("output");
+    expect(JSON.parse(readFileSync(side(generation), "utf8")).verified).to.equal(false);
+  });
+
+  it("reports zero compared output files as inconclusive", async () => {
+    const output = join(root, "build", "by-input", generation, "output");
+    rmSync(output, {recursive: true});
+    mkdirSync(output);
+    const result = await compiler.verify(generation);
+    expect(result.verdict, JSON.stringify(result)).to.equal("inconclusive");
+    expect(result.why).to.include("zero output files");
+    expect(JSON.parse(readFileSync(side(generation), "utf8")).verified).to.equal(false);
+  });
+
+  it("pins a superseded generation and its verification scratch across concurrent GC", async () => {
+    writeFileSync(input, source("zcl_snap", 3));
+    await compiler.build();
+    const {verifying, resume} = await pauseVerification();
+    const scratch = join(root, "build", "tmp", `${generation}.${compiler.verifying.pid}.verify`);
+    mkdirSync(scratch, {recursive: true});
+    const marker = join(scratch, "gc-probe");
+    writeFileSync(marker, "verification in progress");
+    let removed, retainedScratch;
+    try {
+      removed = gc(root, {keep: 0});
+      retainedScratch = existsSync(marker);
+    } finally { resume(); }
+    const result = await verifying;
+    expect(removed).to.not.include(generation);
+    expect(retainedScratch).to.equal(true);
+    expect(existsSync(scratch)).to.equal(false);
+    expect(result.verdict, JSON.stringify(result)).to.equal("same");
+    expect(gc(root, {keep: 0})).to.include(generation);
+  });
+
+  it("bounds an activation storm and verifies the latest generation ahead of retained older work", async () => {
+    const seen = [], release = [], logs = [];
+    const state = {next: new Set(), compiler: {verify: hash => {
+      seen.push(hash);
+      return new Promise(done => release.push(() => done({verdict: "same", files: 1, ms: 1})));
+    }}};
+    const store = {root, warm: () => state, served: {generation: "g0"}};
+    const log = console.log;
+    console.log = line => logs.push(line);
+    try {
+      for (let i = 0; i < 20; i++) {
+        const hash = `g${i}`, dir = join(root, "build", "by-input", hash);
+        mkdirSync(dir, {recursive: true});
+        writeFileSync(join(dir, "manifest.json"), JSON.stringify({hash, builtAt: new Date().toISOString()}));
+        store.served.generation = hash;
+        state.next.add(hash);
+        verifyNext(store);
+        expect(state.next.size, `activation ${i}`).to.be.at.most(2);
+      }
+      expect(seen).to.deep.equal(["g0"]);
+      release.shift()();
+      await state.verifying;
+      expect(seen[1]).to.equal("g19");
+      release.shift()();
+      await state.verifying;
+      expect(state.last).to.include({hash: "g19", verdict: "same"});
+      expect(logs.some(line => line.includes("superseded, not verified"))).to.equal(true);
+    } finally {
+      state.closed = true;
+      release.forEach(done => done());
+      await state.verifying;
+      console.log = log;
+    }
+  });
+
+  it("releases verification pins after an inconclusive comparison", async () => {
+    writeFileSync(input, source("zcl_snap", 3));
+    await compiler.build();
+    const {verifying, resume} = await pauseVerification();
+    rmSync(join(root, "build", "by-input", generation, "output"), {recursive: true});
+    resume();
+    expect((await verifying).verdict).to.equal("inconclusive");
+    expect(gc(root, {keep: 0})).to.include(generation);
+  });
+
+  it("drops queued generations deleted by GC rather than trying to verify them", async () => {
+    const seen = [], logs = [], log = console.log;
+    const state = {next: new Set(["gone", generation]), compiler: {verify: async hash => {
+      seen.push(hash); return {verdict: "same", files: 1, ms: 1};
+    }}};
+    const store = {root, warm: () => state, served: {generation}};
+    console.log = line => logs.push(line);
+    try {
+      verifyNext(store);
+      while (state.verifying) await state.verifying;
+      expect(seen).to.deep.equal([generation]);
+      expect(logs.some(line => line.includes("gone superseded, not verified"))).to.equal(true);
+      expect(state.next.size).to.equal(0);
+    } finally { console.log = log; }
   });
 });

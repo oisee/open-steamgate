@@ -8,6 +8,7 @@ import {generatorIdentity, hashOf, inputsOf, layout, liveHash, prepare, rootsWan
 import {assertToolchain} from "./osd-transpiler.mjs";
 import {checkRead, checkView} from "./osd-store-compile-view.mjs";
 import {outputFiles, readAll, isBinaryFilename} from "./osd-transpile.mjs";
+import {orderRegistry} from "./osd-warm-order.mjs";
 import {lowerNarrowSubmit} from "./osd-narrow-submit.mjs";
 
 const key = o => `${o.getType()} ${o.getName()}`;
@@ -71,22 +72,7 @@ export async function updateRegistry(c, activating, {viewOf, closure, index, rul
     const file = replacements.get(path) ?? c.files.get(path);
     return [path, {...file, path: actual, relative: relative(out, dirname(actual))}];
   }));
-  // Script order must match a cold registry even for a new object's tests
-  // and class constructor. Reorder iteration, retaining every object/cache.
-  const rank = new Map(), names = new Map();
-  for (const f of [...files.values(), ...c.libs]) {
-    const memory = new c.core.MemoryFile(f.filename, f.contents);
-    const id = `${memory.getObjectType()} ${memory.getObjectName().toUpperCase()}`;
-    const name = memory.getObjectName().toUpperCase();
-    if (!names.has(name)) names.set(name, names.size);
-    if (!rank.has(id)) rank.set(id, rank.size);
-  }
-  // Registry groups all types of a name at its first occurrence, including
-  // library objects that share a name with an earlier source object.
-  const ordered = [...c.reg.getObjects()].sort((a, b) =>
-    (names.get(a.getName()) ?? Infinity) - (names.get(b.getName()) ?? Infinity) ||
-    (rank.get(key(a)) ?? Infinity) - (rank.get(key(b)) ?? Infinity));
-  c.reg.getObjects = function* () { yield* ordered; };
+  orderRegistry(c, files);
   const affected = [...c.reg.getObjects()].filter(o => affectedKeys.has(key(o)));
   for (const o of affected) o.setDirty();
   // #1921: keep the registry's config and unrelated syntax results intact.
