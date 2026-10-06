@@ -10,12 +10,14 @@ import {checkRead, checkView} from "./osd-store-compile-view.mjs";
 import {outputFiles, readAll, isBinaryFilename} from "./osd-transpile.mjs";
 import {orderRegistry} from "./osd-warm-order.mjs";
 import {lowerNarrowSubmit} from "./osd-narrow-submit.mjs";
+import {TMP_FOLDER, TMP_AUTHORS} from "./osd-tmp.mjs";
 
 const key = o => `${o.getType()} ${o.getName()}`;
 export const UPDATE_LIMIT = 100;
 
 export async function updateRegistry(c, activating, {viewOf, closure, index, rule, importersOf, NotWarm}) {
   const started = Date.now(), root = c.root;
+  const authorSidecar = path => relative(root, path) === join(TMP_FOLDER, TMP_AUTHORS);
   const refuse = reason => { throw new NotWarm(reason); };
   if (!c.primed) refuse("no kept registry");
   const {config, stack} = prepare(root);
@@ -49,6 +51,9 @@ export async function updateRegistry(c, activating, {viewOf, closure, index, rul
   if (changed.size > UPDATE_LIMIT) refuse(`delta ${changed.size} files exceeds ${UPDATE_LIMIT}`);
   for (const {path, before, after} of [...edits, ...removed]) {
     const name = basename(path);
+    // Creation/deletion updates $TMP authors; Registry admits no object for
+    // this sidecar. Keep its bytes/order in the proof without reparsing it.
+    if (authorSidecar(path)) continue;
     // Metadata travels with new/deleted source objects. Other object types
     // remain conservative until their generator contracts are established.
     if (/\.(clas|intf|prog)\.xml$/i.test(name)) continue;
@@ -62,8 +67,9 @@ export async function updateRegistry(c, activating, {viewOf, closure, index, rul
   const affectedKeys = new Set([...closure([...old, ...c.pending, ...unresolved])].map(key));
   // Restore the native iterator while mutating object membership.
   delete c.reg.getObjects;
-  for (const {before} of removed) c.reg.removeFile(c.reg.getFileByName(before.filename));
-  for (const {before, after} of edits) {
+  for (const {path, before} of removed) if (!authorSidecar(path)) c.reg.removeFile(c.reg.getFileByName(before.filename));
+  for (const {path, before, after} of edits) {
+    if (authorSidecar(path)) continue;
     const file = new c.core.MemoryFile(after.filename, after.contents);
     if (before) c.reg.updateFile(file); else c.reg.addFile(file);
     affectedKeys.add(`${file.getObjectType()} ${file.getObjectName().toUpperCase()}`);

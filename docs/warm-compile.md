@@ -158,7 +158,9 @@ the affected outputs and scripts against the cold publication. An added file
 also invalidates every object with any unresolved syntax reference and its
 dependent closure: missing targets have no resolved edge in the old graph.
 Re-indexing then records newly resolved readers for later warm edits. The kept config
-and unrelated syntax results survive (#1921). `warm: updated ...` reports its
+and unrelated syntax results survive (#1921). The `$TMP` author sidecar
+`local/tmp/tadir.json` is retained in the byte proof but never passed to registry
+mutation: abaplint admits no object for it, and VSP creation changes it. `warm: updated ...` reports its
 cost. Config/layer/library/toolchain changes, generator inputs such as AMDP or
 `INTERFACES`, larger deltas, or a failed byte premise log `warm: re-prime: ...`
 and require a full prime.

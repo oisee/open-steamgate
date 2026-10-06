@@ -85,6 +85,33 @@ describe("kept registry after a cold publication", function () {
     expect(logs.filter(line => line.includes("warm: primed"))).to.have.length(1);
   });
 
+  it("keeps the registry through repeated $TMP creates that change the author sidecar", async () => {
+    const folder = join(root, "local", "tmp"), authors = join(folder, "tadir.json");
+    mkdirSync(folder, {recursive: true});
+    const config = join(root, "abap_transpile.json"), settings = JSON.parse(readFileSync(config, "utf8"));
+    settings.input_folder = ["src", "local/tmp"];
+    writeFileSync(config, JSON.stringify(settings));
+    writeFileSync(authors, "{}");
+    await cold();
+    compiler.drop();
+    await compiler.prime();
+    const reg = compiler.reg;
+    for (const name of ["zcl_tmp_a", "zcl_tmp_b"]) {
+      const file = join(folder, `${name}.clas.abap`);
+      writeFileSync(file, source(name));
+      writeFileSync(authors, JSON.stringify({[name]: {author: "OSD"}}));
+      await cold();
+      await compiler.update();
+      expect(compiler.reg).to.equal(reg);
+      writeFileSync(file, source(name, "rv = 2."));
+      const warm = await compiler.build();
+      expect(warm.modules).to.include(`${name}.clas.mjs`);
+      expect((await compiler.verify(warm.hash)).verdict).to.equal("same");
+    }
+    expect(logs.filter(line => line.includes("warm: primed"))).to.have.length(2);
+    expect(logs.join("\n")).not.to.include("warm: re-prime:");
+  });
+
   it("retains cold iteration order when a new class constructor precedes existing objects", async () => {
     const constructor = name => source(name).replace("PUBLIC SECTION.", "PUBLIC SECTION. CLASS-METHODS class_constructor.")
       .replace(`CLASS ${name} IMPLEMENTATION.`, `CLASS ${name} IMPLEMENTATION. METHOD class_constructor. ENDMETHOD.`);
