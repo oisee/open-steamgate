@@ -3706,3 +3706,31 @@ SNAPSHOT_MISMATCH and the doctor retry.
 - Regression: the common `test/fixtures/adt-request-xml-corpus.json` exercises both references, literal pairs, text and attributes through Node and the transpiled ABAP class.
 - Upstream: needs an issue in open-abap-core; no upstream filing requested.
 - Upstream version containing a fix: unknown.
+
+### ANOMALY-2026-10-06-http-client-send-synchronous - cl_http_client send( ) blocks, receive( ) does nothing
+
+- Status: `open`
+- Discovery: PIA's fan-out probe (ZCL_PIA_PROBE_FAN), measured on A4H (SAP 7.58, background job) and on an OSG instance. It was reported by the PIA session on 2026-10-06; dell confirmed the source.
+- Affected path: open-abap-core `src/http/cl_http_client.clas.abap` (pin 8b397be). `if_http_client~send` awaits the whole request (`await postData(...)`, around line 195) and fills the response there. `if_http_client~receive` is empty ("handled in send()").
+- Reproducer: create three clients for `http://httpbin.org/delay/2`. Call `send( )` on each, then `receive( )` on each.
+- Expected SAP behaviour: `send( )` returns immediately and `receive( )` waits for its own response, so the three requests overlap. On A4H the send phase took 1 ms, the receives 2174 / 1 / 58 ms, and the fan-out 2234 ms in total, against 6525 ms sequentially.
+- Actual local behaviour: each `send( )` completes its request (about 7 s for all three) and every `receive( )` returns at once, so a fan-out runs sequentially. Code written in the ZLLM style gains nothing.
+- Possible fix: `send` keeps the pending promise without awaiting it; `receive` awaits it and fills the response. `http_communication_failure` then moves from `send` to `receive`, as on SAP. The per-client agent uses `maxSockets: 1`, which is fine per client.
+- Workaround: none in the tree. PIA runs its turn in a background unit and makes one LLM call per step. Whether two background units run concurrently in OSG has not been measured.
+- Regression: none yet.
+- Upstream: needs an issue in open-abap-core, after our critic pass; no upstream filing requested.
+- Upstream version containing a fix: unknown.
+
+### ANOMALY-2026-10-06-get-run-time-delta - GET RUN TIME returns ms since the previous call
+
+- Status: `open`
+- Discovery: the same probe printed "A sequential: 6525 ms" on A4H and "7 ms" on OSG, while the OSG wall clock was 13.6 s for six 2-second requests. dell confirmed the source.
+- Affected path: `@abaplint/runtime` `build/src/statements/get_run_time.js`. It keeps a module-level `prev`. The first call sets 0; every later call sets `Date.now() - prev` and moves `prev`.
+- Expected SAP behaviour: the first `GET RUN TIME FIELD` returns 0 and fixes the origin. Every later call returns the microseconds elapsed since that origin, so the value only grows. After `WAIT UP TO 1 SECONDS` twice, the three calls give 0, about 1000000 and about 2000000.
+- Actual local behaviour: milliseconds since the previous call, which here gives 0, about 1000 and about 1000. `( t1 - t0 ) / 1000` yields seconds labelled as milliseconds, and differences between non-adjacent calls are meaningless. The origin is also module-global, shared by every session in the Node process, while on SAP it belongs to the internal session.
+- Reproducer: `GET RUN TIME FIELD t0. WAIT UP TO 1 SECONDS. GET RUN TIME FIELD t1. WAIT UP TO 1 SECONDS. GET RUN TIME FIELD t2.` Derived from the source and the probe; this exact snippet has not been run on both systems yet.
+- Possible fix: keep a fixed `start`, set `(now - start) * 1000` (or `performance.now()` for sub-millisecond resolution), and scope the origin to the session.
+- Workaround: none; measure with `GET TIME STAMP FIELD` of type `timestampl` instead.
+- Regression: none yet.
+- Upstream: needs an issue in abaplint/transpiler (runtime), after our critic pass; no upstream filing requested.
+- Upstream version containing a fix: unknown.
