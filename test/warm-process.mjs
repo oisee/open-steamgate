@@ -8,6 +8,7 @@ import {ObjectStore} from "../tools/osd-store.mjs";
 import {WarmCompilerProcess} from "../tools/osd-warm-process.mjs";
 import {closeWarm, warmOperation} from "../tools/osd-store-warm.mjs";
 import {verifyNext} from "../tools/osd-store-verify.mjs";
+import {sendIPC} from "../tools/osd-ipc.mjs";
 
 const source = (name, n) => `CLASS ${name} DEFINITION PUBLIC CREATE PUBLIC.
  PUBLIC SECTION.
@@ -50,23 +51,24 @@ describe("warm compiler process: source isolation and bounded cold fallback", fu
     const worker = join(root, "worker.mjs");
     writeFileSync(worker, `import {main} from ${JSON.stringify(pathToFileURL(join(repo, "tools/osd-warm-worker.mjs")).href)};
 import {readFileSync} from "node:fs";
+import {sendIPC} from ${JSON.stringify(pathToFileURL(join(repo, "tools/osd-ipc.mjs")).href)};
 main({heapLimit: ${512 * 1048576}, beforeCompile: async ({method}) => {
- process.send({type: "environment", credentials: ["OSD_ADT_TOKEN", "OSD_BATCH_READ_TOKEN", "PGPASSWORD", "HANA_PASSWORD", "FIXTURE_SECRET"]
+ sendIPC(process, {type: "environment", credentials: ["OSD_ADT_TOKEN", "OSD_BATCH_READ_TOKEN", "PGPASSWORD", "HANA_PASSWORD", "FIXTURE_SECRET"]
   .filter(key => process.env[key] !== undefined), root: process.env.OSD_ROOT, path: process.env.PATH});
  const mode = readFileSync("control", "utf8");
- if (mode === "hang-" + method) { process.send({type: "paused"}); while (true) {} }
+ if (mode === "hang-" + method) { sendIPC(process, {type: "paused"}); while (true) {} }
  if (mode === "exit-" + method) process.exit(23);
  if (mode === "disconnect-" + method) {
   process.removeAllListeners("disconnect"); process.disconnect();
   await new Promise(() => setInterval(() => {}, 1000));
  }
  if (mode === "pause-" + method) {
-  process.send({type: "paused"});
+  sendIPC(process, {type: "paused"});
   await new Promise(resolve => process.once("message", resolve));
  }
 }, afterCompile: async ({method}) => {
  if (readFileSync("control", "utf8") === "pause-finished-" + method) {
-  process.send({type: "paused"});
+  sendIPC(process, {type: "paused"});
   await new Promise(resolve => process.once("message", resolve));
  }
 }});`);
@@ -181,7 +183,7 @@ main({heapLimit: ${512 * 1048576}, beforeCompile: async ({method}) => {
     // after a drop and must reject only that child's requests.
     retired.emit("disconnect");
     mode("normal");
-    replacement.send({resume: true});
+    sendIPC(replacement, {resume: true});
     expect(await priming, store.warmState.reason).to.not.equal(undefined);
     expect(compiler.primed).to.equal(true);
     expect(store.warmState.disabled).to.not.equal(true);
@@ -215,7 +217,7 @@ main({heapLimit: ${512 * 1048576}, beforeCompile: async ({method}) => {
     const saveMs = performance.now() - saveStarted;
     const beforeResume = store.read("CLAS", "ZCL_B").source;
     mode("normal");
-    child.send({method: "resume"});
+    sendIPC(child, {method: "resume"});
     const result = await publishing;
     await saving;
     expect(result).to.include({ok: true});
@@ -248,7 +250,7 @@ main({heapLimit: ${512 * 1048576}, beforeCompile: async ({method}) => {
     await Promise.race([saving, sleep(200).then(() => { throw new Error("save blocked by prime"); })]);
     expect(performance.now() - started).to.be.lessThan(200);
     expect(out("zcl_a")).to.include("IntegerFactory.get(1)");
-    mode("normal"); child.send({method: "resume"});
+    mode("normal"); sendIPC(child, {method: "resume"});
     expect(await priming).to.not.equal(undefined, store.warmState.reason);
     expect(compiler.primed).to.equal(true);
     const result = await activate();
@@ -266,7 +268,7 @@ main({heapLimit: ${512 * 1048576}, beforeCompile: async ({method}) => {
     await Promise.race([Promise.resolve(save("zcl_a", 8)), sleep(200).then(() => { throw new Error("save blocked by build"); })]);
     expect(performance.now() - started).to.be.lessThan(200);
     expect(out("zcl_a")).to.include("IntegerFactory.get(1)");
-    mode("normal"); child.send({method: "resume"});
+    mode("normal"); sendIPC(child, {method: "resume"});
     const result = await publishing;
     expect(result.ok, JSON.stringify(result)).to.equal(true);
     expect(result.transpile.superseded).to.equal(1);
@@ -309,7 +311,7 @@ main({heapLimit: ${512 * 1048576}, beforeCompile: async ({method}) => {
     const gate = new Promise(r => { release = r; });
     const retry = new Promise(r => { reached = r; });
     store.buildOptions.onStep = async () => { reached(); await gate; };
-    mode("normal"); child.send({method: "resume"});
+    mode("normal"); sendIPC(child, {method: "resume"});
     await retry;
     expect(out("zcl_a"), "the superseded warm generation was never made live").to.include("IntegerFactory.get(1)");
     expect(out("zcl_b")).to.include("IntegerFactory.get(1)");
@@ -329,7 +331,7 @@ main({heapLimit: ${512 * 1048576}, beforeCompile: async ({method}) => {
     const started = performance.now();
     await Promise.race([Promise.resolve(save("zcl_a", 11)), sleep(200).then(() => { throw new Error("save blocked by loaded prime"); })]);
     expect(performance.now() - started).to.be.lessThan(200);
-    mode("normal"); child.send({method: "resume"});
+    mode("normal"); sendIPC(child, {method: "resume"});
     expect(await priming).to.not.equal(undefined, store.warmState.reason);
     expect(compiler.primed).to.equal(true);
     const result = await activate();

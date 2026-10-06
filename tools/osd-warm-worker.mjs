@@ -4,7 +4,7 @@ import {checkView} from "./osd-store-compile-view.mjs";
 import {warmOverlay} from "./osd-warm-overlay.mjs";
 import {runsAs} from "./osd-main.mjs";
 import {join} from "node:path";
-import {sendIPC} from "./osd-ipc.mjs";
+import {sendIPC, onIPCFailure} from "./osd-ipc.mjs";
 
 export function main({beforeCompile = () => {}, afterCompile = () => {}, heapLimit = 512 * 1048576} = {}) {
   let inactive = [];
@@ -48,7 +48,7 @@ export function main({beforeCompile = () => {}, afterCompile = () => {}, heapLim
       }
     }).catch(() => process.exit(1));
   });
-  process.on("disconnect", () => { compiler.drop(); process.exit(0); });
+  onIPCFailure(process, () => { compiler.drop(); process.exit(0); });
 }
 
 if (runsAs("osd-warm-worker.mjs")) main();

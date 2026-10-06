@@ -4,6 +4,7 @@ import {WarmCompiler} from "./osd-warm.mjs";
 import {spawn} from "./osd-child-process.mjs";
 import {toolCommand} from "./osd-host.mjs";
 import {compilerEnv} from "./osd-warm-env.mjs";
+import {sendIPC, onIPCFailure} from "./osd-ipc.mjs";
 import {fileURLToPath} from "node:url";
 import {join} from "node:path";
 
@@ -68,8 +69,7 @@ export class WarmCompilerProcess extends WarmCompiler {
         this.#pending.delete(id);
       }
     };
-    child.on("error", fail);
-    child.on("disconnect", () => fail(new Error("warm compiler IPC disconnected")));
+    onIPCFailure(child, fail);
     this.#closed = new Promise(resolve => child.once("close", (code, signal) => {
       children.delete(child);
       fail(new Error(`warm compiler exited (${signal ?? code})`));
@@ -112,7 +112,7 @@ export class WarmCompilerProcess extends WarmCompiler {
     const folder = view?.folder ?? this.overlayOf(new Set())?.folder ?? join("build", "inactive", "active");
     return new Promise((resolve, reject) => {
       this.#pending.set(id, {resolve, reject, child});
-      child.send({id, method, activating: [...activating], inactive, folder, view, check}, error => {
+      sendIPC(child, {id, method, activating: [...activating], inactive, folder, view, check}, error => {
         if (error) { this.#pending.delete(id); reject(Object.assign(error, {code: "WARM_UNAVAILABLE"})); }
       });
     });
@@ -130,7 +130,6 @@ export class WarmCompilerProcess extends WarmCompiler {
     return result;
   }
   async build(activating = new Set(), snapshot = undefined) {
-    await this.loadStoreView();
     const result = await this.#call("build", activating, snapshot);
     if (this.recycleDue) await this.drop();
     return result;
