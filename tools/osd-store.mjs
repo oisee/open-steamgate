@@ -1184,29 +1184,52 @@ export class ObjectStore {
     const runtime = this.served;
     clearTimeout(w.timer);
     // the limits are reached by a swap, so the recycle is the swap's
-    // publish's to await (undefined when nothing is recycled)
-    if ((runtime?.swaps ?? 0) >= this.warmSwapLimit) {
-      return this.#catchUp(`${runtime.swaps} swaps`);
-    } else if (grown > WARM_HEAP_MB * 1024 * 1024) {
+    // publish's to await (undefined when nothing is recycled). The heap is
+    // the safety limit and always recycles; the swap count and a quiet
+    // minute are housekeeping and wait while a client holds an APC socket,
+    // which a recycle would cut (PIA, 2026-10-06: its terminal dropped
+    // while a turn waited on its model).
+    if (grown > WARM_HEAP_MB * 1024 * 1024) {
       return this.#catchUp(`a heap ${Math.round(grown / 1048576)} MB larger than at the first swap`);
+    } else if ((runtime?.swaps ?? 0) >= this.warmSwapLimit && !this.#channelsOpen(`${runtime.swaps} swaps`)) {
+      return this.#catchUp(`${runtime.swaps} swaps`);
     } else {
-      w.timer = setTimeout(() => {
-        // the live generation is compared once the saves have stopped, if
-        // the comparison of it was cut short by the next save
-        const live = this.served?.generation;
-        if (live !== undefined && w.compiler?.unverified.has(live)) {
-          w.next = live;
-          this.#verifyNext();
-        }
-        this.#catchUp("quiet");
-      }, WARM_QUIET_MS);
-      w.timer.unref?.();
+      this.#armQuiet();
     }
     return undefined;
   }
 
+  // a quiet minute after the last swap brings the catch-up recycle, unless
+  // an APC socket is open: then it is asked again a quiet period later
+  #armQuiet() {
+    const w = this.warm();
+    clearTimeout(w.timer);
+    w.timer = setTimeout(() => {
+      // the live generation is compared once the saves have stopped, if
+      // the comparison of it was cut short by the next save
+      const live = this.served?.generation;
+      if (live !== undefined && w.compiler?.unverified.has(live)) {
+        w.next = live;
+        this.#verifyNext();
+      }
+      if (this.#channelsOpen("quiet")) this.#armQuiet();
+      else this.#catchUp("quiet");
+    }, this.warmQuietMs);
+    w.timer.unref?.();
+  }
+
+  // the APC sockets the serving process holds (counted by upgradeProxy,
+  // tools/osd-proxy.mjs); says once per deferral why nothing is recycled
+  #channelsOpen(why) {
+    const open = this.served?.openChannels ?? 0;
+    if (open > 0) console.log(`warm: recycle after ${why} deferred: ${open} APC connection(s) open`);
+    return open > 0;
+  }
+
   // the swap count that brings a catch-up recycle (OSD_WARM_SWAPS); a test lowers it
   warmSwapLimit = WARM_SWAPS;
+  // the quiet period after a swap that brings one (OSD_WARM_QUIET_MS); likewise
+  warmQuietMs = WARM_QUIET_MS;
   // how long a publish waits for a runtime changing hands (OSD_TRANSITION_MS)
   transitionMs = TRANSITION_MS;
 

@@ -640,6 +640,67 @@ describe("tools/osd-warm: an activation answers once its source is live", () => 
     }
   });
 
+  it("an open APC socket defers the swap-count recycle until it closes", async () => {
+    const {store, src, events, done} = setup();
+    try {
+      store.warmSwapLimit = 1;
+      store.served.openChannels = 1;
+      src.text = "rv = 2.";
+      await activate(store);
+      expect(events.map((e) => e.what), "a recycle cut the open socket").to.deep.equal(["swap g1->g2"]);
+      store.served.openChannels = 0;
+      src.text = "rv = 3.";
+      await activate(store);
+      expect(events.map((e) => e.what)).to.deep.equal(["swap g1->g2", "swap g2->g3", "recycle"]);
+    } finally {
+      done();
+    }
+  });
+
+  it("an open APC socket defers the quiet recycle, which comes a quiet period after it closes", async () => {
+    const {store, src, events, done} = setup();
+    try {
+      store.warmQuietMs = 60;
+      store.served.openChannels = 1;
+      src.text = "rv = 2.";
+      await activate(store);
+      await sleep(250);
+      expect(events.map((e) => e.what), "a quiet recycle cut the open socket").to.deep.equal(["swap g1->g2"]);
+      store.served.openChannels = 0;
+      await sleep(200);
+      expect(events.map((e) => e.what)).to.deep.equal(["swap g1->g2", "recycle"]);
+    } finally {
+      done();
+    }
+  });
+
+  it("the APC upgrade proxy counts the sockets it holds open on the runtime", async () => {
+    const {createServer, connect} = await import("node:net");
+    const {upgradeProxy} = await import("../tools/osd-proxy.mjs");
+    const child = createServer((socket) => socket.on("data", () => {}));
+    await new Promise((ok) => child.listen(0, "127.0.0.1", ok));
+    const runtime = {url: `http://127.0.0.1:${child.address().port}`, async ensure() {}};
+    const http = (await import("node:http")).createServer();
+    http.on("upgrade", upgradeProxy(runtime, ["/sap/bc/apc/x"]));
+    await new Promise((ok) => http.listen(0, "127.0.0.1", ok));
+    let client;
+    try {
+      client = connect(http.address().port, "127.0.0.1");
+      await new Promise((ok) => client.once("connect", ok));
+      client.write("GET /sap/bc/apc/x HTTP/1.1\r\nHost: x\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n");
+      for (let i = 0; i < 50 && runtime.openChannels !== 1; i++) await sleep(10);
+      expect(runtime.openChannels).to.equal(1);
+      client.destroy();
+      for (let i = 0; i < 50 && runtime.openChannels !== 0; i++) await sleep(10);
+      expect(runtime.openChannels).to.equal(0);
+    } finally {
+      client?.destroy();
+      http.closeAllConnections?.();
+      await new Promise((ok) => http.close(ok));
+      await new Promise((ok) => child.close(ok));
+    }
+  });
+
   it("a build the serving process already runs loads nothing: no recycle of unchanged code", async () => {
     const {store, events, done} = setup();
     try {
