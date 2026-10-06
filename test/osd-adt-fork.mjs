@@ -72,8 +72,20 @@ describe("ADT carry IPC compatibility", function () {
       expect(said.some((line) => line.includes("no adt-state after 5 s"))).to.equal(carry === "1");
       // the carry contract, by time and by phase: opted-in waits its 5 s for
       // an answer that never comes; carry off never enters that wait
-      if (carry === "1") expect(readyElapsed, `opted-in carry reached ready before its 5 s wait (${detail()})`).to.be.at.least(5000);
-      else expect(phases, `carry off entered the adt-state wait (${detail()})`).to.not.include("waiting for ADT state");
+      // the carry contract, measured on the wait itself: the child reports
+      // each boot phase with its length ("boot: <phase> <n> ms")
+      const phaseMs = (name) => {
+        const line = said.find((l) => l.startsWith(`boot: ${name} `));
+        return line === undefined ? undefined : Number(/ (\d+) ms$/.exec(line)?.[1]);
+      };
+      if (carry === "1") {
+        const waited = phaseMs("waiting for ADT state");
+        expect(waited, `opted-in carry reported no adt-state wait (${detail()})`).to.be.a("number");
+        expect(waited, `opted-in carry did not wait its 5 s (${detail()})`).to.be.within(4500, 7000);
+      } else {
+        expect(phaseMs("waiting for ADT state"), `carry off entered the adt-state wait (${detail()})`).to.equal(undefined);
+        expect(phaseMs("ADT carry disabled"), `carry off spent time in its carry phase (${detail()})`).to.be.at.most(250);
+      }
     }, async () => {
       if (proc.exitCode === null && proc.signalCode === null) {
         // resolve on exit only: once(proc, "exit") also rejects on "error",
@@ -118,6 +130,16 @@ describe("IPC probe failure reporting", () => {
     expect(caught.message).to.equal("IPC child never became ready\nAdditionally, cleanup failed: IPC child did not quiesce within 2000 ms");
     expect(caught.cleanupError).to.equal(cleanup);
     expect(caught.stack).to.include(cleanup.stack);
+  });
+  it("keeps an undefined body failure as the one thrown", async () => {
+    let caught = "not thrown";
+    try { await withCleanup(() => {throw undefined;}, () => {throw new Error("cleanup");}); } catch (error) { caught = error; }
+    expect(caught).to.equal(undefined);
+  });
+  it("keeps a frozen body error even when the cleanup failure cannot be printed", async () => {
+    const body = Object.freeze(new Error("frozen readiness failure"));
+    const caught = await withCleanup(() => {throw body;}, () => {throw Symbol("cleanup");}).catch(error => error);
+    expect(caught).to.equal(body);
   });
   it("still reports a cleanup failure when the body passed", async () => {
     const cleanup = new Error("quiesce failed");
