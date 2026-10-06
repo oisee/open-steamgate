@@ -4,6 +4,10 @@ import {copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, rea
 import {dirname, join, relative, resolve} from "node:path";
 import {builtinModules} from "node:module";
 import {tmpdir} from "node:os";
+import {createServer} from "node:net";
+import {runtimeRootFixture} from "./helpers/runtime-root.mjs";
+
+const runtimeFixture = runtimeRootFixture();
 
 // The binary as a host of the same system (SP4, docs/bun-spike.md part
 // three). What bit once is measured here every time, so a quirk between
@@ -201,9 +205,14 @@ describe("the binary: the same system, one file", function () {
     if (!built) {
       this.skip();
     }
-    const port = 3090 + Math.floor(Math.random() * 100);
-    const database = join(root, ".local", "db", `binary-test-${process.pid}.sqlite`);
-    const child = spawn(binary, [...prefix, "up"], {cwd: root, env: {...process.env, STG_PORT: String(port), STG_DB_PATH: database, STG_ADT_SID: "OSX"}, stdio: ["ignore", "pipe", "pipe"]});
+    const port = await new Promise((resolve, reject) => {
+      const probe = createServer().listen(0, "127.0.0.1", () => {
+        const port = probe.address().port;
+        probe.close(() => resolve(port));
+      }).once("error", reject);
+    });
+    const database = join(runtimeFixture.root, "binary-test.sqlite");
+    const child = spawn(binary, [...prefix, "up"], {cwd: runtimeFixture.root, env: {...process.env, STG_PORT: String(port), STG_TLS: "0", STG_PROTOCOLS: "0", STG_DB: "sqlite", STG_DB_PATH: database, STG_ADT_SID: "OSX"}, stdio: ["ignore", "pipe", "pipe"]});
     let log = "";
     child.stdout.on("data", (d) => { log += d; });
     child.stderr.on("data", (d) => { log += d; });

@@ -20,7 +20,11 @@ import {ObjectStore} from "../tools/osd-store.mjs";
 import {build} from "../tools/osd-build.mjs";
 import {StoreDestination, withSystem} from "../tools/osd-store-destination.mjs";
 import {box, rows, answerOf} from "./helpers/destination.mjs";
+import {runtimeRootFixture} from "./helpers/runtime-root.mjs";
 import {activationJournal} from "../tools/osd-activation-journal.mjs";
+
+const runtimeFixture = runtimeRootFixture();
+const probePath = file => join(runtimeFixture.root, file);
 
 // Source fixtures borrow this checkout's registry, but own their journals.
 // A persistent owner.pid from a previous sandbox may identify an unrelated
@@ -29,7 +33,7 @@ let probeJournalRoot;
 before(() => {probeJournalRoot = mkdtempSync(join(tmpdir(), "store-probe-journal-"));});
 after(() => {if (probeJournalRoot) rmSync(probeJournalRoot, {recursive: true, force: true});});
 const probeJournal = () => activationJournal({root: probeJournalRoot});
-const probeStore = () => Object.assign(new ObjectStore({root: process.cwd()}), {activationJournal: probeJournal()});
+const probeStore = () => Object.assign(new ObjectStore({root: runtimeFixture.root}), {activationJournal: probeJournal()});
 
 // **In `src/`, not under `test/fixtures/`.** The probe has to be an object of
 // the system, and a fixture is not one: `/test/fixtures/` is excluded from
@@ -140,9 +144,9 @@ describe("the store, as the destination an editor screen calls", function () {
   let destination;
 
   before(() => {
-    mkdirSync(FOLDER, {recursive: true});
-    writeFileSync(FILE, CLEAN);
-    writeFileSync(XML, `<?xml version="1.0" encoding="utf-8"?>
+    mkdirSync(probePath(FOLDER), {recursive: true});
+    writeFileSync(probePath(FILE), CLEAN);
+    writeFileSync(probePath(XML), `<?xml version="1.0" encoding="utf-8"?>
 <abapGit version="v1.0.0" serializer="LCL_OBJECT_CLAS"><asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0"><asx:values><VSEOCLASS>
 <CLSNAME>${NAME}</CLSNAME><LANGU>E</LANGU><DESCRIPT>probe</DESCRIPT><STATE>1</STATE><CLSCCINCL>X</CLSCCINCL><FIXPT>X</FIXPT><UNICODE>X</UNICODE>
 </VSEOCLASS></asx:values></asx:abap></abapGit>
@@ -154,11 +158,11 @@ describe("the store, as the destination an editor screen calls", function () {
   // changed it: a test that fails before its own restore leaves a broken
   // class behind, and the next test reports the damage as its own finding
   afterEach(() => {
-    writeFileSync(FILE, CLEAN);
+    writeFileSync(probePath(FILE), CLEAN);
   });
 
   after(() => {
-    rmSync(FOLDER, {recursive: true, force: true});
+    rmSync(probePath(FOLDER), {recursive: true, force: true});
   });
 
   it("LIST names the object, its package, its file and whether it may be written", async () => {
@@ -220,12 +224,12 @@ describe("the store, as the destination an editor screen calls", function () {
     expect(written.EV_ERROR).to.equal("");
     expect(written.EV_FILE, "the same file, which is the whole point: one write path, not two")
       .to.equal(read.EV_FILE);
-    expect(readFileSync(FILE, "utf8"), "and the bytes on disk are the bytes sent").to.equal(edited);
+    expect(readFileSync(probePath(FILE), "utf8"), "and the bytes on disk are the bytes sent").to.equal(edited);
     expect(written.EV_VERSION, "written and not yet checked is a state a system has").to.equal("inactive");
   });
 
   it('WRITE returns the saved object revision in JSON and keeps scalar callers working', async () => {
-    const previous = readFileSync(FILE, 'utf8');
+    const previous = readFileSync(probePath(FILE), 'utf8');
     const edited = previous + '* saved revision\n';
     try {
       const written = await call(destination, {IV_COMMAND: 'WRITE', IV_TYPE: 'CLAS', IV_NAME: NAME, IV_SOURCE: edited});
@@ -241,10 +245,10 @@ describe("the store, as the destination an editor screen calls", function () {
   it("a WRITE without a source writes NOTHING rather than emptying the object", async () => {
     // a screen that posts a form with no text area in it would otherwise
     // silently empty what it was showing
-    const before = readFileSync(FILE, "utf8");
+    const before = readFileSync(probePath(FILE), "utf8");
     const answer = await call(destination, {IV_COMMAND: "WRITE", IV_NAME: NAME, iv_type: "CLAS"});
     expect(answer.EV_ERROR).to.match(/without IV_SOURCE/);
-    expect(readFileSync(FILE, "utf8")).to.equal(before);
+    expect(readFileSync(probePath(FILE), "utf8")).to.equal(before);
   });
 
   it("CHECK reads the source it is GIVEN, so a screen can check before it saves", async () => {
@@ -256,7 +260,7 @@ describe("the store, as the destination an editor screen calls", function () {
     expect(answer.ET_ISSUE[0].MESSAGE).to.be.a("string").and.not.equal("");
     expect(answer.ET_ISSUE[0].OBJ_NAME, "an issue belongs to an object, which is not always the one asked about")
       .to.equal(NAME);
-    expect(readFileSync(FILE, "utf8"), "a check does not write").to.equal(CLEAN);
+    expect(readFileSync(probePath(FILE), "utf8"), "a check does not write").to.equal(CLEAN);
   });
 
   it("CHECK of what is on disk is clean, so the two directions are not one answer", async () => {
@@ -286,8 +290,8 @@ describe("the store, as the destination an editor screen calls", function () {
     // alone reports clean: the object stays self-consistent while the
     // system it lives in stops compiling. A screen that showed "active" here
     // would be the false green the store's own comment was written about.
-    const callerFile = join(FOLDER, "zcl_store_dest_caller.clas.abap");
-    writeFileSync(join(FOLDER, "zcl_store_dest_caller.clas.xml"), readFileSync(XML, "utf8")
+    const callerFile = probePath(join(FOLDER, "zcl_store_dest_caller.clas.abap"));
+    writeFileSync(probePath(join(FOLDER, "zcl_store_dest_caller.clas.xml")), readFileSync(probePath(XML), "utf8")
       .replace(NAME, "ZCL_STORE_DEST_CALLER"));
     writeFileSync(callerFile, `CLASS zcl_store_dest_caller DEFINITION PUBLIC CREATE PUBLIC.
   PUBLIC SECTION.
@@ -322,7 +326,7 @@ ENDCLASS.
     // test that looks like this one. The rename leaves the probe perfectly
     // self-consistent and breaks only its caller, which is the whole point
     // of checking the callers at all.
-    writeFileSync(FILE, CLEAN.replaceAll("answer", "answer2"));
+    writeFileSync(probePath(FILE), CLEAN.replaceAll("answer", "answer2"));
     const afterStore = probeStore();
     afterStore.publish = async () => { throw new Error("a refused activation must not build"); };
     const after = new StoreDestination({store: () => afterStore});
@@ -363,8 +367,8 @@ ENDCLASS.
     const store = probeStore();
     const written = join("gen", "cds", "zcl_stg_cds_probe_row.clas.abap");
     store.publish = async () => {
-      mkdirSync(join(process.cwd(), "gen", "cds"), {recursive: true});
-      writeFileSync(join(process.cwd(), written), "* written by a generator during publish\n");
+      mkdirSync(join(runtimeFixture.root, "gen", "cds"), {recursive: true});
+      writeFileSync(join(runtimeFixture.root, written), "* written by a generator during publish\n");
       return {ok: true, recycled: false, generation: "probe-generation"};
     };
     try {
@@ -376,7 +380,7 @@ ENDCLASS.
       expect(answer.ET_OBJECT.find((r) => r.FILE === written).VERSION).to.equal("generated");
       expect(answer.EV_NOTE, "and the note counts what the list holds").to.match(/generated object/);
     } finally {
-      rmSync(join(process.cwd(), written), {force: true});
+      rmSync(join(runtimeFixture.root, written), {force: true});
     }
   });
 
@@ -484,7 +488,7 @@ describe("request-bound STORE commands", () => {
       const calls = [];
       const entry = {type: "PROG", name, writable: true};
       const store = {
-        root: process.cwd(),
+        root: runtimeFixture.root,
         activationJournal: probeJournal(),
         write: (type, object, value) => { source = value; return entry; },
         check: () => { calls.push(["check", source]); return {issues: []}; },

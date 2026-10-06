@@ -36,7 +36,7 @@ Format adapted from `larshp/hithub` (MIT).
 - Reproducer: run a registry with `unknownTypes: runtimeError`, then a new registry with `unknownTypes: compileError` in the same process. `build/src/validation.js` leaves its exported `config.syntax.errorNamespace` at `VOID_EVERYTHING` instead of restoring `.`.
 - Expected: each build uses its requested unknown-type policy, independent of previous builds.
 - Actual: earlier DSL suites change later cold output for IF_ALV_MESSAGE and both SALV exception classes; a fresh warm compiler refuses the byte comparison.
-- Workaround: normalize the selected transpiler's validation namespace before every validation, including directly constructed instances and bundled hosts.
+- Workaround: when the selected transpiler exposes `build/src/validation.js`, normalize its validation namespace before every validation, including directly constructed instances and bundled hosts. Linked fixture transpilers without that module skip the normalization; errors loading an existing validator still propagate.
 - Regression: `test/warm.mjs`, runtimeError followed by compileError rejects an unresolved type.
 - Upstream: not filed; this task authorizes local CI repair only. No SAP calls were needed for this compiler-state defect.
 

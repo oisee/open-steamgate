@@ -17,6 +17,9 @@ import {ServingRuntime} from "../tools/osd-runtime.mjs";
 import {Data} from "../tools/osd-data.mjs";
 import {execFile} from "node:child_process";
 import {promisify} from "node:util";
+import {runtimeRootFixture} from "./helpers/runtime-root.mjs";
+
+const runtimeFixture = runtimeRootFixture();
 
 const BASE = "/sap/bc/adt/oo/classrun/";
 const str = (v) => new abap.types.String().set(v);
@@ -111,7 +114,7 @@ describe("ADT C5: classrun bytes and runtime guard", function () {
     source("zcl_osd_classrun_out", "CLASS zcl_osd_classrun_out DEFINITION.\n  InTeRfAcEs if_oo_adt_classrun.\nENDCLASS.");
     source("zcl_osd_c5_empty", "CLASS zcl_osd_c5_empty DEFINITION.\r\n\t InTeRfAcEs if_oo_adt_classrun.\r\nENDCLASS.");
     store = new ObjectStore({root, libs: []});
-    runtime = new ServingRuntime({root: process.cwd(), env: {
+    runtime = new ServingRuntime({root: runtimeFixture.root, env: {
       OSD_ADT_ONE_RUNTIME: "1", STG_DB: "sqlite", STG_DB_PATH: "", STG_TLS: "0",
       NODE_OPTIONS: [process.env.NODE_OPTIONS, `--import=${resolve("test/helpers/c5-child-dump.mjs")}`].filter(Boolean).join(" "),
     }});
@@ -285,7 +288,7 @@ describe("ADT C5 B: serving-child parity", function () {
     writeFileSync(join(root, "src", "zcl_osd_c5_plain.clas.abap"), "CLASS zcl_osd_c5_plain DEFINITION. ENDCLASS.");
     writeFileSync(join(root, "src", "zcl_osd_c5_unbuilt.clas.abap"), "CLASS zcl_osd_c5_unbuilt DEFINITION.\n INTERFACES if_oo_adt_classrun.\nENDCLASS.");
     store = new ObjectStore({root, libs: []});
-    runtime = new ServingRuntime({root: process.cwd(), env: {OSD_ADT_ONE_RUNTIME: "1", STG_DB: "sqlite", STG_DB_PATH: "", STG_TLS: "0"}});
+    runtime = new ServingRuntime({root: runtimeFixture.root, env: {OSD_ADT_ONE_RUNTIME: "1", STG_DB: "sqlite", STG_DB_PATH: "", STG_TLS: "0"}});
     runtime.storeDestination = new StoreDestination({store});
     await runtime.start();
     const data = new Data({runtime});

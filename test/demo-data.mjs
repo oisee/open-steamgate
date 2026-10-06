@@ -8,6 +8,9 @@ import {fork, spawn} from "node:child_process";
 import {mkdtempSync, rmSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
+import {runtimeRootFixture} from "./helpers/runtime-root.mjs";
+
+const runtimeFixture = runtimeRootFixture();
 
 // the class's answer for its default size and seed, measured on Node, OSGo
 // and A4H (docs/demo-data.md); a host makes it only when the knob asks
@@ -79,7 +82,7 @@ describe("demo data: ZCL_OSD_DEMO_DATA on every host", function () {
 
 /** tools/osd-serve.mjs on a port of its own: what it said, and the rows */
 async function serve(env) {
-  const proc = fork("tools/osd-serve.mjs", ["0"], {stdio: ["ignore", "ignore", "inherit", "ipc"], env: {...process.env, ...env}});
+  const proc = fork("tools/osd-serve.mjs", ["0"], {cwd: runtimeFixture.root, stdio: ["ignore", "ignore", "inherit", "ipc"], env: {...process.env, ...env}});
   const said = [];
   try {
     const port = await new Promise((resolve, reject) => {
@@ -109,6 +112,7 @@ async function serve(env) {
 function child(source, env = {}) {
   return new Promise((resolve, reject) => {
     const proc = spawn(process.execPath, ["--input-type=module", "-e", `${source}\nprocess.exit(0);`], {
+      cwd: runtimeFixture.root,
       stdio: ["ignore", "ignore", "inherit", "ipc"],
       env: {...process.env, ...env},
     });

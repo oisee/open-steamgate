@@ -4,6 +4,9 @@ import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {ServingRuntime} from "../tools/osd-runtime.mjs";
 import {snapshot, childDatabaseFacts} from "../tools/osd-status.mjs";
+import {runtimeRootFixture} from "./helpers/runtime-root.mjs";
+
+const runtimeFixture = runtimeRootFixture();
 
 describe("connected database identity across the child boundary", function () {
   this.timeout(90000);
@@ -11,7 +14,7 @@ describe("connected database identity across the child boundary", function () {
     it(`${backend}: child facts override facade configuration`, async () => {
       const root = mkdtempSync(join(tmpdir(), "osd-db-host-"));
       const database = join(root, "isolated.db");
-      const runtime = new ServingRuntime({database, env: {STG_DB: backend, STG_TLS: "0"}});
+      const runtime = new ServingRuntime({root: runtimeFixture.root, database, env: {STG_DB: backend, STG_TLS: "0"}});
       try {
         expect(await childDatabaseFacts(runtime)).to.equal(undefined);
         await runtime.ensure();

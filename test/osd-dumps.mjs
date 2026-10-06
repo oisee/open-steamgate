@@ -7,6 +7,9 @@
 import {expect} from "chai";
 import {ServingRuntime, liveChildren} from "../tools/osd-runtime.mjs";
 import {objectOf, rowOf} from "../tools/osd-dumps.mjs";
+import {runtimeRootFixture} from "./helpers/runtime-root.mjs";
+
+const runtimeFixture = runtimeRootFixture();
 
 describe("tools/osd-dumps: ZOSD_DUMP, written after the rollback", function () {
   this.timeout(180000);
@@ -35,7 +38,7 @@ describe("tools/osd-dumps: ZOSD_DUMP, written after the rollback", function () {
   });
 
   it("a request that dumps writes one ZOSD_DUMP row with the right object and line, and the LUW's own rows are still rolled back", async () => {
-    const runtime = new ServingRuntime();
+    const runtime = new ServingRuntime({root: runtimeFixture.root});
     try {
       await runtime.start();
       const base = `${runtime.url}/sap/opu/odata/sap/ZSTG_DEMO_SRV`;
@@ -104,7 +107,7 @@ describe("tools/osd-dumps: ZOSD_DUMP, written after the rollback", function () {
   it("the table is capped: only the last OSD_DUMP_CAP rows are kept", async () => {
     // A small cap, its own process (env var read once at module load): fast
     // to prove without waiting on a thousand real dumps.
-    const runtime = new ServingRuntime({env: {OSD_DUMP_CAP: "3"}});
+    const runtime = new ServingRuntime({root: runtimeFixture.root, env: {OSD_DUMP_CAP: "3"}});
     try {
       await runtime.start();
       const headers = {"content-type": "application/json", "x-csrf-token": "open-steamgate"};

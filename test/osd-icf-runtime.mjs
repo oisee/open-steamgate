@@ -3,6 +3,9 @@ import {spawn, execFileSync} from "node:child_process";
 import {mkdtempSync, rmSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
+import {runtimeRootFixture} from "./helpers/runtime-root.mjs";
+
+const runtimeFixture = runtimeRootFixture();
 
 // Exercise both real hosts against a private database. No source object
 // declares these nodes, so falling back to files cannot pass this test.
@@ -42,14 +45,14 @@ describe("ICF database routing in both Node hosts", function () {
           for (const [name] of fixtures) await markEdited(db, name, 'AUDIT');
           await db.commit();
           await db.disconnect();
-        `], {env, stdio: "pipe", timeout: 30000});
+        `], {cwd: runtimeFixture.root, env, stdio: "pipe", timeout: 30000});
         const args = mode === "child" ? ["tools/osd-serve.mjs", "0"]
           : ["--input-type=module", "-e", `
             const {startServer} = await import('./test/start.mjs');
             const server = startServer(true);
             server.on('listening', () => process.send({type: 'ready', port: server.address().port}));
           `];
-        child = spawn(process.execPath, args, {env, stdio: ["ignore", "pipe", "pipe", "ipc"]});
+        child = spawn(process.execPath, args, {cwd: runtimeFixture.root, env, stdio: ["ignore", "pipe", "pipe", "ipc"]});
         let log = "";
         child.stdout.on("data", (d) => { log += d; });
         child.stderr.on("data", (d) => { log += d; });

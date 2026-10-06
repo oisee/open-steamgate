@@ -2,6 +2,9 @@ import {expect} from "chai";
 import {fork} from "node:child_process";
 import {ServingRuntime} from "../tools/osd-runtime.mjs";
 import {once} from "node:events";
+import {runtimeRootFixture} from "./helpers/runtime-root.mjs";
+
+const runtimeFixture = runtimeRootFixture();
 
 describe("ADT carry IPC compatibility", function () {
   this.timeout(20000);
@@ -9,6 +12,7 @@ describe("ADT carry IPC compatibility", function () {
     ? "an opted-in IPC child times out its unanswered carry and reaches ready"
     : "a demo-data style IPC parent reaches ready without answering adt-state", async () => {
     const proc = fork("tools/osd-serve.mjs", ["0"], {
+      cwd: runtimeFixture.root,
       stdio: ["ignore", "ignore", "inherit", "ipc"],
       env: {...process.env, STG_DB: "sqlite", STG_DB_PATH: "", OSD_DEMO_ROWS: "0", OSD_ADT_CARRY: carry},
     });
@@ -29,7 +33,7 @@ describe("ADT carry IPC compatibility", function () {
   it("the supervisor defaults carry OFF and does not call the snapshot provider", async () => {
     let snapshots = 0;
     const runtime = new ServingRuntime({
-      env: {OSD_ADT_ONE_RUNTIME: "", OSD_ADT_CARRY: "1", STG_DB: "sqlite", STG_DB_PATH: "", OSD_DEMO_ROWS: "0"},
+      root: runtimeFixture.root, env: {OSD_ADT_ONE_RUNTIME: "", OSD_ADT_CARRY: "1", STG_DB: "sqlite", STG_DB_PATH: "", OSD_DEMO_ROWS: "0"},
       adtSnapshot: () => {snapshots++; throw new Error("disabled snapshot was called");},
     });
     try {

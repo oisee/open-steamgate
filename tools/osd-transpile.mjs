@@ -53,7 +53,8 @@ export function modulesOf(root) {
   const identity = buildIdentity(root);
   const fromTranspiler = createRequire(join(where, "package.json"));
   const {Transpiler, Chunk} = fromTranspiler(where);
-  const {config: validationConfig} = fromTranspiler(join(where, "build/src/validation.js"));
+  const validationFile = join(where, "build/src/validation.js");
+  const validationConfig = existsSync(validationFile) ? fromTranspiler(validationFile).config : undefined;
   if (!LOADED_IDENTITIES.has(Transpiler)) LOADED_IDENTITIES.set(Transpiler, identity);
   const core = fromTranspiler("@abaplint/core");
   const {CallFunctionTranspiler} = fromTranspiler(join(where, 'build/src/statements/call_function.js'));

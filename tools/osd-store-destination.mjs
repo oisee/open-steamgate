@@ -1,4 +1,3 @@
-import {prepareActivation, publishActivation} from "./osd-publish-activation.mjs";
 // The object store, as a destination an ABAP screen can call (backlog G.8).
 //
 // **Why a destination and not a new door.** The editor screen is ABAP, and
@@ -501,6 +500,7 @@ export class StoreDestination {
   }
 
   async #activate(type, name, started, store) {
+    const {prepareActivation, publishActivation} = await import("./osd-publish-activation.mjs");
     const {activationJournal, recordBaselineGeneration} = await import("./osd-activation-journal.mjs");
     const journal = activationJournal(store);
     const {liveHash} = await import("./osd-build.mjs");

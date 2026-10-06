@@ -1,3 +1,4 @@
+import {runtimeRootFixture} from "./helpers/runtime-root.mjs";
 import {expect} from "chai";
 import {mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {spawn} from "node:child_process";
@@ -10,7 +11,7 @@ import {hashOf} from "../tools/osd-build.mjs";
 import {modulesOf, transpile} from "../tools/osd-transpile.mjs";
 import {createRequire} from "node:module";
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const runtimeFixture = runtimeRootFixture();
 const {pickInspectorPort, packNameOf} = createRequire(import.meta.url)("../editors/vscode/launcher.js");
 const {Launcher} = createRequire(import.meta.url)("../editors/vscode/launcher.js");
 const {debuggerConfiguration, runningAbapSources, breakpointWarning, Osd} = createRequire(import.meta.url)("../editors/vscode/lib.js");
@@ -122,7 +123,7 @@ async function inspectorTarget(port) {
 }
 
 function breakpointFor(sourcePath, sourceLine, sourceColumn) {
-  const output = join(ROOT, "output");
+  const output = join(runtimeFixture.root, "output");
   for (const name of readdirSync(output).filter((entry) => entry.endsWith(".mjs.map"))) {
     const mapFile = realpathSync(join(output, name));
     const data = JSON.parse(readFileSync(mapFile, "utf8"));
@@ -175,7 +176,7 @@ ENDCLASS.`;
       const config = {input_folder: relative(home, packSource),
         output_folder: relative(home, generation), input_filter: [".*\\.abap$"], exclude_filter: [],
         libs: [], options: {}, write_source_map: true, write_unit_tests: false};
-      await transpile({root: home, config, modules: modulesOf(ROOT)});
+      await transpile({root: home, config, modules: modulesOf(runtimeFixture.root)});
       const map = JSON.parse(readFileSync(join(generation, "zcl_ship_dpc_ext.clas.mjs.map"), "utf8"));
       const mapped = map.sources.find((entry) => entry.endsWith("zcl_ship_dpc_ext.clas.abap"));
       expect(mapped).to.equal(`${relative(generation, packSource).replaceAll("\\", "/")}/zcl_ship_dpc_ext.clas.abap`);
@@ -202,16 +203,16 @@ ENDCLASS.`;
       let before;
       let after;
       try {
-        before = hashOf(ROOT);
+        before = hashOf(runtimeFixture.root);
         rmSync(packSource);
         symlinkSync(otherWorkspace, packSource, "dir");
-        after = hashOf(ROOT);
+        after = hashOf(runtimeFixture.root);
       } finally {
         if (previousPacks === undefined) delete process.env.OSD_PACKS;
         else process.env.OSD_PACKS = previousPacks;
       }
       expect(after).to.equal(before);
-      await transpile({root: home, config, modules: modulesOf(ROOT)});
+      await transpile({root: home, config, modules: modulesOf(runtimeFixture.root)});
       const retargeted = JSON.parse(readFileSync(join(generation, "zcl_ship_dpc_ext.clas.mjs.map"), "utf8"));
       expect(retargeted).to.deep.equal(map);
     } finally {
@@ -256,7 +257,7 @@ const extraCases = [object, wrappedObject, new t.ABAPObject(), sorted, hashed, s
 debugger;
 `);
       const port = await pickInspectorPort();
-      const config = debuggerConfiguration(port, {root: ROOT});
+      const config = debuggerConfiguration(port, {root: runtimeFixture.root});
       child = spawn(process.execPath, [`--inspect-brk=127.0.0.1:${port}`, runner], {cwd: dir, stdio: "ignore"});
       exited = new Promise((resolve, reject) => {
         child.once("error", reject);
@@ -383,7 +384,7 @@ ENDCLASS.`;
       const config = {input_folder: relative(home, packSource), output_folder: "build/by-input/generation/output",
         input_filter: [".*\\.abap$"], exclude_filter: [], libs: [], options: {},
         write_source_map: true, write_unit_tests: false};
-      await transpile({root: home, config, modules: modulesOf(ROOT)});
+      await transpile({root: home, config, modules: modulesOf(runtimeFixture.root)});
       const module = join(home, config.output_folder, "zcl_probe.clas.testclasses.mjs");
       const map = JSON.parse(readFileSync(module + ".map", "utf8"));
       expect(realpathSync(resolve(dirname(module), map.sources[0]))).to.equal(testFile);
@@ -439,13 +440,13 @@ ENDCLASS.`;
   });
 
   it("attaches over CDP and stops on an ABAP line in a test method", async () => {
-    const sourcePath = join(ROOT, "src/webgui/zcl_osd_abap_tokens.clas.testclasses.abap");
+    const sourcePath = join(runtimeFixture.root, "src/webgui/zcl_osd_abap_tokens.clas.testclasses.abap");
     const sourceLines = readFileSync(sourcePath, "utf8").split(/\r?\n/);
     const sourceLine = sourceLines.findIndex((line) => line.includes("lt_token = zcl_osd_abap_tokens=>scan")) + 1;
     expect(sourceLine).to.be.greaterThan(0);
     const breakpoint = breakpointFor(sourcePath, sourceLine, sourceLines[sourceLine - 1].search(/\S/));
     const inspectPort = await pickInspectorPort();
-    const runner = new UnitRun(new ObjectStore({root: ROOT}));
+    const runner = new UnitRun(new ObjectStore({root: runtimeFixture.root}));
     const resultPromise = runner.runDetached("CLAS", "ZCL_OSD_ABAP_TOKENS", {
       testClass: "LTCL_SCAN",
       method: "KEYWORDS_AND_NAMES",
@@ -499,7 +500,7 @@ ENDCLASS.`;
   it("terminates a child paused at startup when the debug request is aborted", async () => {
     const inspectPort = await pickInspectorPort();
     const cancellation = new AbortController();
-    const runner = new UnitRun(new ObjectStore({root: ROOT}));
+    const runner = new UnitRun(new ObjectStore({root: runtimeFixture.root}));
     const resultPromise = runner.runDetached("CLAS", "ZCL_OSD_ABAP_TOKENS", {
       testClass: "LTCL_SCAN", method: "KEYWORDS_AND_NAMES", inspectPort,
       waitForDebugger: true, signal: cancellation.signal,
@@ -617,20 +618,20 @@ describe("VS Code debugger transport: a generation goes live ahead of the servin
   // source maps from the live generation only. Read the real script URLs off
   // the running process's inspector and check them against the configuration
   // the extension builds at that moment.
-  // The system serves from this checkout as it is; nothing here moves its
+  // The system serves from its private source root; nothing here moves its
   // build/live. The "other generation goes live" is staged in a temp home
-  // whose build/ reuses this checkout's generation store read-only (a link
+  // whose build/ reuses the private root's generation store read-only (a link
   // to build/by-input) and whose own build/live names a different, empty
   // generation, so the configuration is built exactly as for a home where
   // live has moved on while the serving process kept the one it booted.
   it("keeps the classrun class and the DPC the process loaded inside resolveSourceMapLocations", async () => {
     const storageDir = mkdtempSync(join(tmpdir(), "osd-debug-ahead-"));
     const dir = mkdtempSync(join(tmpdir(), "osd-debug-ahead-home-"));
-    const launcher = new Launcher({osdHome: ROOT, storageDir, workspaceFolders: [], warm: "off"});
+    const launcher = new Launcher({osdHome: runtimeFixture.root, storageDir, workspaceFolders: [], warm: "off"});
     let client;
     try {
       const {port} = await launcher.start();
-      const rootLive = readlinkSync(join(ROOT, "build", "live"));
+      const rootLive = readlinkSync(join(runtimeFixture.root, "build", "live"));
       const osdClient = new Osd(`http://127.0.0.1:${port}`);
       // The class run and the OData call load both modules before any debugger.
       expect((await osdClient.classrun("ZCL_OSD_CLASSRUN_DEMO")).text).to.be.a("string");
@@ -652,18 +653,18 @@ describe("VS Code debugger transport: a generation goes live ahead of the servin
       const home = join(dir, "home");
       const other = join(home, "build", "other", "output");
       mkdirSync(other, {recursive: true});
-      symlinkSync(join(ROOT, "build", "by-input"), join(home, "build", "by-input"), "dir");
+      symlinkSync(join(runtimeFixture.root, "build", "by-input"), join(home, "build", "by-input"), "dir");
       symlinkSync(dirname(other), join(home, "build", "live"), "dir");
       const config = debuggerConfiguration(inspectPort, {root: home, storageDir, layers: launcher.layers});
       expect(config.outFiles[0]).to.equal(`${realpathSync(other)}/**/*.mjs`);
       for (const script of scripts) {
         const moduleFile = fileURLToPath(script.url);
-        expect(moduleFile.startsWith(realpathSync(join(ROOT, "build", "by-input")))).to.equal(true);
+        expect(moduleFile.startsWith(realpathSync(join(runtimeFixture.root, "build", "by-input")))).to.equal(true);
         const mapFile = script.sourceMapURL.startsWith("file:")
           ? fileURLToPath(script.sourceMapURL) : resolve(dirname(moduleFile), script.sourceMapURL);
         expect(sourceMapAllowed(config, mapFile), `${mapFile} against ${config.resolveSourceMapLocations}`).to.equal(true);
       }
-      expect(readlinkSync(join(ROOT, "build", "live")), "this checkout's live link is untouched").to.equal(rootLive);
+      expect(readlinkSync(join(runtimeFixture.root, "build", "live")), "the source root's live link is untouched").to.equal(rootLive);
     } finally {
       client?.socket.close();
       await launcher.stop();
@@ -678,8 +679,8 @@ describe("VS Code debugger transport: serving DPC after earlier activity", funct
 
   it("pauses on a DPC line after a plain call, a detached session, and Stop/Start", async () => {
     const storageDir = mkdtempSync(join(tmpdir(), "osd-dpc-debug-"));
-    const launcher = new Launcher({osdHome: ROOT, storageDir, workspaceFolders: [], warm: "off"});
-    const sourcePath = join(ROOT, "src/demo/zcl_zstg_demo_dpc_ext.clas.abap");
+    const launcher = new Launcher({osdHome: runtimeFixture.root, storageDir, workspaceFolders: [], warm: "off"});
+    const sourcePath = join(runtimeFixture.root, "src/demo/zcl_zstg_demo_dpc_ext.clas.abap");
     const lines = readFileSync(sourcePath, "utf8").split(/\r?\n/);
     const sourceLine = lines.findIndex((line) => line.includes("lt_status = ranges_for(")) + 1;
     expect(sourceLine).to.be.greaterThan(0);

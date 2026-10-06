@@ -1,5 +1,7 @@
 import {expect} from "chai";
 import {configuredFor, previewClosure, uncovered, ENTRY} from "../tools/osd-preview-closure.mjs";
+import {readFileSync} from "node:fs";
+import {resolve} from "node:path";
 
 // **`await import()` does not keep a module out of a webpack bundle.**
 //
@@ -31,6 +33,19 @@ describe("what the preview bundle can reach", () => {
     expect(modules.some((m) => m.endsWith("duckdb-client.mjs"))).to.equal(false);
     for (const name of ["osd-publish-activation", "osd-activation-journal", "osd-store-tests", "osd-store-crud", "osd-build"]) {
       expect(modules.some(m => m.endsWith(`${name}.mjs`)), `${name} requires a source host`).to.equal(false);
+    }
+  });
+
+  it("loads STORE without statically importing ignored source activation modules", () => {
+    const {ignored} = configuredFor();
+    for (const file of previewClosure().modules) {
+      const source = readFileSync(file, "utf8");
+      for (const edge of source.matchAll(/(?:import\s+[^;]*?\s+from|export\s+[^;]*?\s+from|import)\s*["'](\.[^"']+)["']/g)) {
+        const target = resolve(file, "..", edge[1]);
+        if (/osd-(publish-activation|activation-journal|store-tests|store-crud|build)\.mjs$/.test(target)) {
+          expect(ignored.some(pattern => pattern.test(target)), `${file} statically imports ignored ${edge[1]}`).to.equal(false);
+        }
+      }
     }
   });
 

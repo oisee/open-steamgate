@@ -11,6 +11,9 @@ import {StoreDestination} from "../tools/osd-store-destination.mjs";
 import {dialogStep} from "../tools/osd-dialog-step.mjs";
 import {adtRouter} from "../tools/adt-facade.mjs";
 import {exceptionDocument} from "../tools/adt-documents.mjs";
+import {runtimeRootFixture} from "./helpers/runtime-root.mjs";
+
+const runtimeFixture = runtimeRootFixture();
 
 const path="/sap/bc/adt/core/http/segw/entitysets";
 async function wire(server,url=path+"?class=ZCL_FAIL",method="GET") {
@@ -132,14 +135,14 @@ describe("A10 serving-child registration facts",function () {
   let runtime;
   const servers=[],served=[];
   before(async () => {
-    const store=new ObjectStore({root:process.cwd()});
-    runtime=new ServingRuntime({root:process.cwd(),env:{OSD_ADT_ONE_RUNTIME:"1",STG_DB:"sqlite",STG_DB_PATH:join(tmpdir(),"a10-child.sqlite")}});
+    const store=new ObjectStore({root:runtimeFixture.root});
+    runtime=new ServingRuntime({root:runtimeFixture.root,env:{OSD_ADT_ONE_RUNTIME:"1",STG_DB:"sqlite",STG_DB_PATH:join(runtimeFixture.root,"a10-child.sqlite")}});
     runtime.storeDestination=new StoreDestination({store});
     await runtime.start();
   });
   after(async () => {for(const server of servers) await new Promise((r) => server.close(r));await runtime?.stop();});
   it("parent registration walk and READ reach the serving ABAP route over IPC",async () => {
-    const store=new ObjectStore({root:process.cwd()});
+    const store=new ObjectStore({root:runtimeFixture.root});
     async function mount(isAbap) {
       const app=express();app.set("etag",false);
       app.use(adtRouter({store,data:{},watch:false,logMisses:false,...(isAbap ? {

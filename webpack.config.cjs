@@ -135,7 +135,9 @@ module.exports = {
     // STORE activation/completion and test execution require a source host.
     // Keep these entry modules out just like the store itself: dynamic
     // imports are still traversed by webpack. Built preview hosts refuse
-    // source commands before reaching any of these modules.
+    // source commands before reaching any of these modules. Their imports
+    // must be dynamic behind that refusal: ignoring a static import leaves
+    // a webpackMissingModule call that throws during worker initialization.
     new webpack.IgnorePlugin({resourceRegExp: /osd-(publish-activation|activation-journal|store-tests|store-crud|build)\.mjs$/}),
     new webpack.ProvidePlugin({
       Buffer: ["buffer", "Buffer"],
