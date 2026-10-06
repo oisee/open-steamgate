@@ -7,7 +7,7 @@
 // with nothing of the ABAP around them: the host's rule, alone.
 import {expect} from "chai";
 import {DuckDBDatabaseClient} from "../tools/duckdb-client.mjs";
-import {dialogStep, exclusive, workProcess} from "../tools/osd-dialog-step.mjs";
+import {dialogStep, exclusive, workProcess, currentStepToken, onAfterStep} from "../tools/osd-dialog-step.mjs";
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -39,6 +39,56 @@ describe("a dialog step has the work process to itself", function () {
   });
   const insert = (id) => client.write({sql: `INSERT INTO "R" VALUES (${id})`});
   const ids = async () => (await client.native({sql: 'SELECT "ID" FROM "R" ORDER BY "ID"', expect: "rows"})).rows.map((r) => Number(r.ID));
+
+  it("awaits after-step work after committing and releasing the work process", async () => {
+    const order = [];
+    await dialogStep(async () => {
+      await insert(7);
+      onAfterStep(async ({dumped}) => {
+        expect(dumped).to.equal(false);
+        expect(currentStepToken()).to.equal(undefined);
+        expect(workProcess().held).to.equal(false);
+        // A warm publication must be able to acquire this same lock.
+        await exclusive(async () => {
+          expect(await ids()).to.deep.equal([7]);
+          await sleep(5);
+          order.push("publication");
+        });
+      });
+      order.push("event");
+    });
+    order.push("mailbox continues");
+    expect(order).to.deep.equal(["event", "publication", "mailbox continues"]);
+  });
+
+  it("rolls back before failing after-step work and preserves the original dump", async () => {
+    let cleaned = false;
+    const dump = new Error("event dumped");
+    const result = await dialogStep(async () => {
+      await insert(8);
+      onAfterStep(async ({dumped}) => {
+        expect(dumped).to.equal(true);
+        expect(await exclusive(ids)).to.deep.equal([]);
+        cleaned = true;
+      });
+      throw dump;
+    }).catch(error => error);
+    expect(result).to.equal(dump);
+    expect(cleaned).to.equal(true);
+  });
+
+  it("ends every after-step callback when one fails without rolling back committed work", async () => {
+    const failure = new Error("publication transport failed");
+    let cleaned = false;
+    const result = await dialogStep(async () => {
+      await insert(9);
+      onAfterStep(() => { throw failure; });
+      onAfterStep(() => { cleaned = true; });
+    }).catch(error => error);
+    expect(result).to.equal(failure);
+    expect(cleaned).to.equal(true);
+    expect(await ids()).to.deep.equal([9]);
+  });
 
   it("a step that dumps does not roll back the half-written rows of the step beside it", async () => {
     const order = [];

@@ -1,5 +1,6 @@
 {
   "files": [
+    "test/apc-store-step.mjs",
     "test/apc-timers.mjs",
     "test/amc.mjs",
     "test/dialog-step.mjs",
