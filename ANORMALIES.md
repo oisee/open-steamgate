@@ -3734,3 +3734,31 @@ SNAPSHOT_MISMATCH and the doctor retry.
 - Regression: none yet.
 - Upstream: needs an issue in abaplint/transpiler (runtime), after our critic pass; no upstream filing requested.
 - Upstream version containing a fix: unknown.
+
+### ANOMALY-2026-10-06-uccpi-high-byte - cl_abap_conv_out_ce=>uccpi multiplies the high byte by 255
+
+- Status: `open`
+- Discovery: PIA's first deployment to A4H 7.58 (zcl_pia_00_json_util, 29 tests, 29/29 on both systems after fixes), reported by the PIA session on 2026-10-06. dell confirmed the source.
+- Affected path: open-abap-core `src/conv/cl_abap_conv_out_ce.clas.abap`, method `uccpi`. It converts to encoding 4103 (UTF-16LE, low byte first), then computes `ret = lv_hex(1)` followed by `ret = ret + lv_hex+1(1) * 255`. The factor must be 256.
+- Reproducer: `cl_abap_conv_out_ce=>uccpi( 'Ж' )` and `cl_abap_conv_out_ce=>uccpi( '€' )`.
+- Expected SAP behaviour: 1046 (U+0416) and 8364 (U+20AC).
+- Actual local behaviour: 1042 and 8332, wrong by the high byte for every character above U+00FF. ASCII and Latin-1 are unaffected, because their high byte is 0.
+- Workaround: none in the tree; PIA does not use `uccpi`. ANOMALY-2026-10-04-sxml-supplementary-ref already avoids sXML numeric references, which convert through `cl_abap_conv_in_ce=>uccpi`.
+- Regression: none yet.
+- Upstream: needs an issue in open-abap-core, a one-character fix, after our critic pass; no upstream filing requested.
+- Upstream version containing a fix: unknown.
+
+### ANOMALY-2026-10-06-data-value-variable - DATA ... VALUE accepts a variable
+
+- Status: `open`
+- Discovery: PIA's first A4H deployment. Code that compiled in OSG was refused on SAP.
+- Affected path: the syntax check that the transpiler runs (abaplint).
+- Reproducer: `DATA lv_start TYPE i.` followed by `DATA lv_pos TYPE i VALUE lv_start.`
+- Expected SAP behaviour: a syntax error, "LV_START" is not a constant. VALUE takes only a literal, a constant or IS INITIAL.
+- Actual local behaviour: it compiles and runs. Code built in OSG then fails to transport to SAP.
+- Workaround: none; authors must use a constant or a literal.
+- Regression: none yet.
+- Upstream: needs an issue in abaplint/abaplint (syntax check), after our critic pass; no upstream filing requested.
+- Upstream version containing a fix: unknown.
+
+Not an anomaly, recorded for porting: on 7.58, `FIND ... REGEX` (POSIX) raises a deprecation that vsp deploy treats as an error. PIA moved to PCRE, which OSG supports.
