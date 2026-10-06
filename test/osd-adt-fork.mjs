@@ -36,13 +36,14 @@ describe("ADT carry IPC compatibility", function () {
       cwd: root,
       stdio: ["ignore", "ignore", "inherit", "ipc"],
       // Probe the prepared artifact directly; no source build or test/start.mjs.
-      env: {...process.env, OSD_OUTPUT: join(root, "output"), STG_DB: "sqlite", STG_DB_PATH: "", OSD_DEMO_ROWS: "0", OSD_ADT_CARRY: carry},
+      env: {...process.env, OSD_ROOT: root, OSD_OUTPUT: join(root, "output"), STG_DB: "sqlite", STG_DB_PATH: "", OSD_DEMO_ROWS: "0", OSD_ADT_CARRY: carry},
     });
     const said = [];
     let phase = "starting the child", requests = 0, readyElapsed;
+    const phases = [];
     proc.on("message", (m) => {
       if (m?.type === "say") said.push(m.line);
-      if (m?.type === "booting") phase = m.phase;
+      if (m?.type === "booting") {phase = m.phase; phases.push(m.phase);}
       if (m?.type === "adt-state-request") requests++;
     });
     const detail = () => `carry=${carry || "off"}, last phase: ${phase}; ${said.join("; ")}`;
@@ -69,9 +70,16 @@ describe("ADT carry IPC compatibility", function () {
       expect(ready.port).to.be.greaterThan(0);
       expect(requests, "only opted-in carry requests adt-state").to.equal(carry === "1" ? 1 : 0);
       expect(said.some((line) => line.includes("no adt-state after 5 s"))).to.equal(carry === "1");
+      // the carry contract, by time and by phase: opted-in waits its 5 s for
+      // an answer that never comes; carry off never enters that wait
+      if (carry === "1") expect(readyElapsed, `opted-in carry reached ready before its 5 s wait (${detail()})`).to.be.at.least(5000);
+      else expect(phases, `carry off entered the adt-state wait (${detail()})`).to.not.include("waiting for ADT state");
     }, async () => {
       if (proc.exitCode === null && proc.signalCode === null) {
-        const gone = once(proc, "exit");
+        // resolve on exit only: once(proc, "exit") also rejects on "error",
+        // which would clear the SIGKILL fallback with the child still alive
+        const gone = new Promise((resolve) => proc.once("exit", (code, signal) => resolve([code, signal])));
+        proc.once("error", (error) => console.error(`IPC child error during cleanup: ${error.message}`));
         const quiesceAt = performance.now();
         // Use IPC even on failed boot; boot-time signal listeners may consume TERM.
         let forced = false;

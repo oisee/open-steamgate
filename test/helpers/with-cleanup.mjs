@@ -11,9 +11,16 @@ export async function withCleanup(body, cleanup) {
       await cleanup();
     } catch (error) {
       if (primary === undefined) throw error;
-      primary.cleanupError = error;
-      primary.message += `\nAdditionally, cleanup failed: ${error.message}`;
-      primary.stack += `\nCleanup failure: ${error.stack}`;
+      // The body's failure stays the one thrown. Annotating it is best effort:
+      // a primitive or a frozen error cannot carry the note, and an attempt
+      // that throws must not replace it.
+      try {
+        primary.cleanupError = error;
+        primary.message += `\nAdditionally, cleanup failed: ${error?.message ?? error}`;
+        primary.stack += `\nCleanup failure: ${error?.stack ?? error}`;
+      } catch {
+        console.error(`cleanup failed after an earlier failure: ${error?.stack ?? error}`);
+      }
     }
   }
 }
