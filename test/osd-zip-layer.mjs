@@ -1,7 +1,9 @@
+import {execFileSync} from 'node:child_process';
 import {expect} from 'chai';
 import {mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, symlinkSync, existsSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
+import {orphanedOverlays, reportOrphanedOverlays} from '../tools/osd-orphan-overlays.mjs';
 import {archiveFiles} from '../tools/osd-source-zip.mjs';
 import {userLayersOf} from '../tools/osd-source-layers.mjs';
 import {ObjectStore} from '../tools/osd-store.mjs';
@@ -91,6 +93,26 @@ describe('immutable abapGit ZIP source layers', function () {
     const implicit=store.write('CLAS','ZCL_ZIP_IMPLICIT',source('new').replaceAll('zcl_zip_demo','zcl_zip_implicit'));
     expect(implicit.root).to.equal(layers[1].path); expect(implicit.package).to.equal('$ZDEMO');
   });
+  it('warns once for edited old revisions by root package, lists them for doctor and never carries edits', () => {
+    const first = zip(), store = new ObjectStore({root, libs: []});
+    store.write('CLAS', 'ZCL_ZIP_DEMO', source('old edit'));
+    // Legacy overlays did not have revision metadata.
+    rmSync(join(root,'local/overlays',first[0].archiveId+'.meta.txt'));
+    write('src/zcl_zip_demo.clas.abap', source('new base'));
+    archive = join(scratch, 'fixture-v2.zip'); const second = zip();
+    const said = []; reportOrphanedOverlays(root, line => said.push(line));
+    expect(said).to.have.length(1);
+    expect(said[0]).to.include(first[0].archiveId).and.include(first[1].path).and.include('1 changed objects').and.include('manually diffing/reapplying');
+    expect(orphanedOverlays(root)).to.have.length(1);
+    const doctor = execFileSync(process.execPath, ['bin/osd.mjs', 'doctor'], {env: {...process.env, OSD_ROOT: root}, encoding: 'utf8'});
+    expect(doctor).to.include('orphaned overlay').and.include(first[0].archiveId).and.include(first[1].path);
+    expect(orphanedOverlays(root)[0]).to.include({count: 1, sameLayer: true, key: '$ZDEMO'});
+    expect(new ObjectStore({root,libs:[]}).read('CLAS','ZCL_ZIP_DEMO').source).to.equal(source('new base'));
+    expect(existsSync(join(root, second[1].path, 'zcl_zip_demo.clas.abap'))).to.equal(false);
+    process.env.OSD_LAYERS = join(scratch, 'fixture.zip'); userLayersOf(root);
+    expect(orphanedOverlays(root)).to.deep.equal([]);
+  });
+
   it('reuses identical bytes and changes identity for different ZIP bytes, even just a comment', () => {
     const first=zip(), hash=hashOf(root,inputsOf(root));
     expect(userLayersOf(root)).to.deep.equal(first); expect(hashOf(root,inputsOf(root))).to.equal(hash);

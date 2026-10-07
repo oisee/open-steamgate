@@ -118,6 +118,10 @@ const GENERATORS = {
 
 switch (mode) {
   case "up": {
+    const {userLayersOf} = await import('../tools/osd-source-layers.mjs');
+    const {reportOrphanedOverlays} = await import('../tools/osd-orphan-overlays.mjs');
+    const layerRoot = process.env.OSD_ROOT ?? process.cwd();
+    userLayersOf(layerRoot); reportOrphanedOverlays(layerRoot);
     process.argv = [process.argv[0], "osd-host", ...rest];
     const {main} = await import("../tools/osd-build.mjs");
     const status = await main([]);
@@ -190,6 +194,11 @@ switch (mode) {
     break;
   }
   case "doctor": {
+    const {orphanedOverlays, overlayWarning} = await import('../tools/osd-orphan-overlays.mjs');
+    const orphanHomes = [process.env.OSD_ROOT ?? process.cwd(), ...homesIn(dataDirOf())];
+    for (const home of [...new Set(orphanHomes)]) {
+      for (const overlay of orphanedOverlays(home)) console.log(`orphaned overlay (${home}): ${overlayWarning(overlay)}`);
+    }
     console.log(`binary mode: ${embeddedSeed ? "seeded (embedded system seed)" : "checkout (no embedded system seed)"}`);
     // where a seeded binary keeps the system it works on, and whether one
     // has been materialized there yet (the first `osd up` does it)
