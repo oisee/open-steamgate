@@ -57,22 +57,50 @@ increase in warm swap count are required. An unexpected cold publication
 fails even when its timing happens to be fast. REPORT and DDLS presently
 remain cold; their repeat timings are measured and compared too.
 
-CI uses the most recent compatible successful `main` artifact from the last
-20 successful push runs. Recipe, SDK, VSP, runtime/library pins, Node major,
-OS and architecture must match. Timing exceeds the limit only when the
-median is above both 150% of the baseline and baseline +1000 ms. This
-allows small network/runner variation while catching sustained slowdowns.
-The report identifies the operation, measured median, baseline and limit.
-A missing compatible baseline is explicitly marked comparison pending;
-functional and warm-path requirements remain enforced. After the first
-successful main run the artifact supplies a baseline automatically.
-Unreadable available evidence or an invalid compatible baseline fails.
+CI timing is advisory; only functional operations, active readback, cleanup,
+MISSING allowances and warm-path correctness determine the required job and
+PR row. Every sampled operation median is divided by a same-run reference:
+the median of four cheap untouched controls, ABAP-FS CLAS/INTF `edit` and
+`readback-active` medians. The fixed class/interface pair excludes larger
+program/include/CDS reads and compilation work. All four controls must have
+positive finite medians; otherwise comparison is pending.
 
-`test/adt-lifecycle-report.mjs` injects sustained slowdowns, single outliers,
-missing cleanup, failed validation/readback and incompatible toolchains.
-It proves that sustained regression turns the comparator red and an isolated
-outlier does not. The registered suite also verifies that MISSING allowances
-cannot hide other failed operations.
+The workflow collects up to five compatible green `main` push runs, newest
+first, looking through the latest 30 successful runs of `tests.yml`. Collection
+stops after five usable runs or 170 seconds (including requests and unzip),
+with a three-minute step timeout and `continue-on-error`. Recipe,
+SDK, VSP, runtime/library pins, Node major, OS and architecture must match.
+Each main run is normalized by its own reference; the median of those
+normalized values is the operation's baseline. One artifact per run is used,
+trying the newest `adt-lifecycle-attempt-N` first. Missing, expired, unreadable,
+invalid or incompatible artifacts are skipped. Fewer than five usable runs
+are accepted, with their count, commit identities and reference medians in
+the summary; no usable history is explicitly comparison pending. API failures
+leave fewer baselines or comparison pending with an explanation, preserving
+functional gates. The required functional report runs immediately after the
+measurement step with `if: always()`, before history collection, and saves its
+PASS/FAIL and summary. The optional combined report runs after collection even
+if collection fails or times out; unreadable history leaves timing pending.
+Only the first report step can fail the gate, and its fallback summary remains
+available if the optional report fails.
+
+A warning fires when at least **two operations are strictly above 1.3x** their
+normalized historical median, or **any one reaches 2.0x**. A single operation
+between 1.3x and 2.0x is shown above margin but stays quiet. Triggered warnings
+produce a GitHub annotation and a summary section with raw medians, normalized
+medians, ratios and baseline counts; they never change the report's functional
+PASS/FAIL or CI exit code. Raw main milliseconds are shown for context only.
+A uniform runner slowdown cancels out; a regression in the reference controls
+can mask slowdowns, so retain raw measurements for investigation.
+
+`test/adt-lifecycle-report.mjs` transcribes the real #635/#633/#636 tables as
+JSON fixtures (all QUIET), injects one 2x operation slowdown (WARN), uniform
+1.6x runner slowdown (QUIET), isolated sample outliers, and five-run history
+with differing runner speeds. It also checks CLI annotations and exit codes,
+artifact fallback, collection timeouts, malformed baseline warnings for passing
+and failing current runs, missing cleanup, failed validation/readback and MISSING
+allowances. `test/osd-suites.mjs` checks that a warning retains the green
+functional PR row and a functional failure keeps that row and `test` red.
 
 ## Initial local observation, 2026-10-05
 
@@ -102,6 +130,6 @@ The full local run took approximately 15 minutes, including compiler
 preparation and cold builds; GitHub runner duration remains unmeasured.
 All 87 focused comparator/suite-reporter tests passed, actionlint and
 suite registration passed. A sustained 15 s class-activation injection into
-the real report exited 1 and named the operation; unchanged evidence compared
+the real report exited 1 under the original blocking rule and named the operation; unchanged evidence compared
 to itself passed. A clean VSP checkout build passed exact-commit metadata
 validation and a real SyntaxCheck with the diagnostics parser.
