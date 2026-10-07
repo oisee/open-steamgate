@@ -25,9 +25,10 @@
 # killed it.) A leftover server still holds its ports, and the port probe skips that
 # instance; stop your servers all the same.
 #
-# OSD_HEAVY_TIMEOUT (default 3h, `0` = none, any `timeout` duration) bounds the
-# command: TERM when it runs out, KILL a minute later, exit status 124 or 137 and a
-# line saying so. It signals the command itself, not its children.
+# OSD_HEAVY_TIMEOUT (default 3h, `0` = none; a whole number with an optional unit
+# s, m, h or d) bounds the command: TERM when it runs out, KILL a minute later, and
+# then the status is timeout(1)'s, 124 (or 137 after the KILL) whatever the command
+# did with the TERM. It signals the command itself, not its children.
 #
 # Each run gets its own TMPDIR, removed after the command has exited. Stop a run by
 # signalling its process group (kill -- -PGID); Ctrl-C does that already.
@@ -35,8 +36,8 @@ set -euo pipefail
 range=${OSD_HEAVY_RANGE:-40-49}
 slots=${OSD_HEAVY_SLOTS:-2}
 limit=${OSD_HEAVY_TIMEOUT:-3h}
-if ! [[ "$limit" =~ ^[0-9]+(\.[0-9]+)?[smhd]?$ ]]; then
-  echo "osd-heavy: OSD_HEAVY_TIMEOUT must be a timeout(1) duration such as 90m, or 0 for none, not '$limit'" >&2
+if ! [[ "$limit" =~ ^[0-9]+[smhd]?$ ]]; then
+  echo "osd-heavy: OSD_HEAVY_TIMEOUT must be a whole number with an optional unit s, m, h or d, such as 90m, or 0 for none, not '$limit'" >&2
   exit 2
 fi
 if ! [[ "$range" =~ ^([1-9][0-9])-([1-9][0-9])$ ]] || [ "${BASH_REMATCH[1]}" -gt "${BASH_REMATCH[2]}" ]; then
@@ -48,22 +49,23 @@ if ! [[ "$slots" =~ ^[1-9][0-9]?$ ]] || [ "$slots" -gt $((hi - lo + 1)) ]; then
   echo "osd-heavy: OSD_HEAVY_SLOTS must be a whole number from 1 to the size of the range ($((hi - lo + 1))), not '$slots'" >&2
   exit 2
 fi
-[[ "$limit" =~ ^0+(\.0*)?[smhd]?$ ]] && limit=0
+[[ "$limit" =~ ^0+[smhd]?$ ]] && limit=0
 [ $# -gt 0 ] || { echo "usage: OSD_HEAVY_RANGE=40-49 tools/osd-heavy.sh <command...>" >&2; exit 2; }
 here=$(cd "$(dirname "$0")" && pwd)
-# a timeout(1) duration in whole seconds, rounded down
+# OSD_HEAVY_TIMEOUT in seconds (read as decimal even with a leading 0)
 seconds() {
-  local n=${1%[smhd]} u=${1##*[0-9.]}
-  n=${n%%.*}
+  local n=$((10#${1%[smhd]})) u=${1##*[0-9]}
   case "$u" in m) echo $((n * 60)) ;; h) echo $((n * 3600)) ;; d) echo $((n * 86400)) ;; *) echo "$n" ;; esac
 }
-# the probe's path and the instance go in as arguments, never spliced into the JavaScript
+# the instance and the probe's path go in as arguments, never spliced into the
+# JavaScript, and the instance first: free-instance.mjs runs as a command when
+# argv[1] ends with its name, and then printed an instance of its own on stdout
 ports_free() {
   node --input-type=module -e '
     import {pathToFileURL} from "node:url";
-    const [probe, n] = process.argv.slice(1);
+    const [n, probe] = process.argv.slice(1);
     const {instancePorts, available} = await import(pathToFileURL(probe).href);
-    process.exit(await available(instancePorts(n)) ? 0 : 1);' "$here/../docker/image/free-instance.mjs" "$1"
+    process.exit(await available(instancePorts(n)) ? 0 : 1);' "$1" "$here/../docker/image/free-instance.mjs"
 }
 t0=$(date +%s)
 got=""
@@ -96,7 +98,7 @@ echo "osd-heavy: range $range, slot $got/$slots, INSTANCE=$INSTANCE, STG_PORT=$S
 # and the TMPDIR is removed after the command, by the EXIT trap. (Untrapped, a TERM
 # kills the wrapper at once and removes the TMPDIR under a running command:
 # measured.) To stop a run, signal its process group. The exit status is the
-# command's own.
+# command's own, except when OSD_HEAVY_TIMEOUT stops it (see above).
 trap ':' TERM INT HUP
 trap 'rm -rf "$TMPDIR"' EXIT
 set +e
@@ -111,8 +113,10 @@ else
 fi
 rc=$?
 # 124 and 137 are also what a command says by itself (an inner `timeout`, an OOM
-# kill), so the line is written only when the time has really run out.
+# kill). timeout(1) does not say which it was, so the line is written only when the
+# limit has passed as well; a command that itself exits 124 or 137 just as its limit
+# runs out is the one case this names wrongly.
 if [ "$limit" != 0 ] && { [ "$rc" = 124 ] || [ "$rc" = 137 ]; } && [ $(( $(date +%s) - t1 )) -ge "$(seconds "$limit")" ]; then
-  echo "osd-heavy: the command overran OSD_HEAVY_TIMEOUT=$limit and was stopped (exit $rc); slot $got and INSTANCE=$inst are free again: $*" >&2
+  echo "osd-heavy: the command ran past OSD_HEAVY_TIMEOUT=$limit and exited $rc, which is what a stop by the timeout returns; slot $got and INSTANCE=$inst are free again: $*" >&2
 fi
 exit "$rc"
