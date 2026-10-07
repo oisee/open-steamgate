@@ -1,7 +1,10 @@
 import {expect} from 'chai';
 import {connect} from 'node:net';
 import {once} from 'node:events';
-import {writeFileSync} from 'node:fs';
+import {zipInProcess} from '../tools/osd-abapgit-zip.mjs';
+import {userLayersOf} from '../tools/osd-source-layers.mjs';
+import {withSystem} from '../tools/osd-store-destination.mjs';
+import {mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {randomBytes} from 'node:crypto';
 import {runtimeRootFixture} from './helpers/runtime-root.mjs';
@@ -52,18 +55,57 @@ async function channel(runtime) {
 describe('APC publication in a real ServingRuntime', function () {
   this.timeout(180000);
   const fixture = runtimeRootFixture();
-  let store, runtime, client, release;
+  let store, runtime, client, release, priorLayers;
   const source = value => `CLASS zcl_apc_store_target DEFINITION PUBLIC CREATE PUBLIC.
 PUBLIC SECTION. CLASS-METHODS answer RETURNING VALUE(rv) TYPE i. ENDCLASS.
 CLASS zcl_apc_store_target IMPLEMENTATION. METHOD answer. rv = ${value}. ENDMETHOD. ENDCLASS.\n`;
   before(async () => {
     const root = fixture.root;
-    writeFileSync(join(root, 'src/zcl_apc_store_target.clas.abap'), source(1));
+    priorLayers = process.env.OSD_LAYERS;
+    const repository = join(root, 'zip-fixture'); mkdirSync(join(repository, 'src'), {recursive: true});
+    writeFileSync(join(repository, '.abapgit.xml'), '<STARTING_FOLDER>/src/</STARTING_FOLDER><FOLDER_LOGIC>FULL</FOLDER_LOGIC>');
+    writeFileSync(join(repository, 'src/package.devc.xml'), '<DEVC><DEVCLASS>$ZAPCTEST</DEVCLASS><CTEXT>APC fixture</CTEXT></DEVC>');
+    writeFileSync(join(repository, 'src/zcl_apc_store_target.clas.abap'), source(1));
+    const archive = join(root, 'fixture.zip'); writeFileSync(archive, zipInProcess(repository));
+    process.env.OSD_LAYERS = archive;
     writeFileSync(join(root, 'src/zstore_step.sapc.xml'), '<SAPC><APPLICATION_ID>ZSTORE_STEP</APPLICATION_ID><PATH>/store-step</PATH><CLASS_NAME>ZCL_OSD_APC_STORE_PROBE</CLASS_NAME><STATEFUL>X</STATEFUL></SAPC>');
     store = new ObjectStore({root});
     store.activationJournal = new ActivationJournal(root, {host: 'serving-apc-probe'});
     store.warmState = {on: false};
     expect((await store.publish()).ok).to.equal(true);
+  });
+  after(() => {
+    if (priorLayers === undefined) delete process.env.OSD_LAYERS; else process.env.OSD_LAYERS = priorLayers;
+  });
+  it('first ZIP STORE WRITE + ACTIVATE stays warm and an open APC session survives', async () => {
+    const root = fixture.root, layers = userLayersOf(root);
+    runtime = new ServingRuntime({root, env: {STG_DB: 'sqlite', STG_DB_PATH: '', OSD_ADT_ONE_RUNTIME: '1', OSD_WARM: '0'}});
+    const destination = runtime.storeDestination = new StoreDestination({store});
+    await runtime.start(); store.served = runtime;
+    store.warmState = {on: true, compiler: new WarmCompilerProcess({root,
+      overlay: set => store.overlay(set), keyOf: file => store.objectKeyOf(file), inactiveSources: set => store.inactiveSources(set)})};
+    expect(await store.warmUp(), store.warmState.reason).not.to.equal(undefined);
+    const epoch = runtime.epoch;
+    client = await channel(runtime);
+    const execute = command => withSystem(() => {}, () => destination.execute({IV_COMMAND: command,
+      IV_TYPE: 'CLAS', IV_NAME: 'ZCL_APC_STORE_TARGET', IV_SOURCE: source(7)}), {store});
+    expect((await execute('WRITE')).EV_ERROR ?? '').to.equal('');
+    const publication = store.publish.bind(store); let result;
+    store.publish = async options => {result = await publication(options); return result;};
+    try {
+      const operation = JSON.parse((await execute('ACTIVATE')).EV_JSON);
+      expect(operation).to.include({state: 'published', active: true, live: true});
+      expect(result).to.include({ok: true, hot: true, recycled: false});
+      expect(result.transpile.warm).to.equal(true);
+      await store.warmState.verifying;
+      expect(store.activationJournal.lookup(operation.op_id).verified).to.equal(true);
+      expect(runtime.epoch).to.equal(epoch); expect(client.socket.destroyed).to.equal(false);
+      client.send('lookup:' + operation.op_id);
+      await until(() => client.messages.length === 2);
+      expect(JSON.parse(client.messages[1])).to.include({op_id: operation.op_id, state: 'published'});
+      expect(readFileSync(join(root, layers[0].path, 'zcl_apc_store_target.clas.abap'), 'utf8')).to.equal(source(1));
+      expect(store.read('CLAS', 'ZCL_APC_STORE_TARGET', 'main', 'active').source).to.equal(source(7));
+    } finally {store.publish = publication;}
   });
   afterEach(async () => {
     release?.(); release = undefined;

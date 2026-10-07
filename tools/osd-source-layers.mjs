@@ -1,7 +1,7 @@
 // Explicit user layers: folders retain their write policy; ZIPs are immutable
 // content-named sources with a persistent writable overlay immediately above.
 import {createHash} from 'node:crypto';
-import {chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync} from 'node:fs';
+import {chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync} from 'node:fs';
 import {basename, delimiter, dirname, join, relative, resolve} from 'node:path';
 import {repositoryConfig, sourceFolder} from './osd-abapgit-config.mjs';
 import {archiveFiles} from './osd-source-zip.mjs';
@@ -85,6 +85,24 @@ export function userLayersOf(root, env = process.env) {
     // reuses edits; replacing the base starts clean, preserving the old revision.
     const overlay = join('local', 'overlays', id);
     mkdirSync(join(root, overlay), {recursive: true});
+    // Establish package inputs before the first generation is hashed/primed.
+    // Copying these on first save otherwise introduces a new DEVC input and
+    // forces a cold publication, disconnecting existing APC sessions.
+    const headers = folder => {
+      for (const entry of readdirSync(folder, {withFileTypes: true})) {
+        const from = join(folder, entry.name);
+        if (entry.isDirectory()) headers(from);
+        else if (entry.name.endsWith('.devc.xml')) {
+          const to = join(root, overlay, relative(source, from));
+          if (!existsSync(to)) {
+            mkdirSync(dirname(to), {recursive: true});
+            copyFileSync(from, to);
+            chmodSync(to, 0o644);
+          }
+        }
+      }
+    };
+    headers(source);
     layers.push({path, writable: false, library: false, ...meta, archiveId: id, overlay});
     layers.push({path: overlay, writable: true, library: false, ...meta, overlayOf: path});
   }
