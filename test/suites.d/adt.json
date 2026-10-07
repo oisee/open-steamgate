@@ -36,6 +36,7 @@
     "test/adt-activation.mjs",
     "test/adt-activation-wire.mjs",
     "test/adt-devloop.mjs",
+    "test/adt-include-objectpost-parity.mjs",
     "test/adt-editor.mjs",
     "test/adt-facade.mjs",
     "test/adt-host-seam.mjs",

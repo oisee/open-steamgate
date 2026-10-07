@@ -439,24 +439,20 @@ export class StoreVersions {
     return target;
   }
 
-  #activeSource(file, entry) {
-    const active = this.#activeFile(file, entry);
-    if (!active || !existsSync(active)) {
-      const error = new NotFound(entry.type, `${entry.name} active version (${entry.include ?? "main"})`);
-      if (entry.type === "CLAS" && entry.include === "testclasses") {
-        const pool = entry.name.toUpperCase().padEnd(30, "=") + "CCAU";
-        error.message = pool + " does not have any inactive version";
-        error.properties = [["T100KEY-ID", "ED"], ["T100KEY-NO", "170"], ["T100KEY-V1", pool]];
-      }
-      throw error;
-    }
-    return readFileSync(active, "utf8");
-  }
-
   sourceVersion(part, version) {
     const active = version === "active";
-    const source = active ? this.#activeSource(part.file, part) : part.source;
-    return {...part, ...(active ? {empty: false} : {}), source, etag: entityTag(active ? "active\0" + source : source)};
+    const activeFile = active ? this.#activeFile(part.file, part) : undefined;
+    const classInclude = part.type === "CLAS" && part.include !== "main";
+    // Class includes use READ's per-version absence flag. The ADT routes
+    // turn it into measured missing-test errors or standard templates.
+    // A main source without active proof has no readable representation.
+    if (active && activeFile === undefined && !classInclude) {
+      throw new NotFound(part.type, `${part.name} active version (${part.include ?? "main"})`);
+    }
+    const source = active ? (activeFile === undefined ? "" : readFileSync(activeFile, "utf8")) : part.source;
+    // Retained active bytes, including zero bytes, survive working-file removal.
+    const presence = active ? {empty: activeFile === undefined} : {};
+    return {...part, ...presence, source, etag: entityTag(active ? "active\0" + source : source)};
   }
 
 }

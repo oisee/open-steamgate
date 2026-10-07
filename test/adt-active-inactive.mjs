@@ -13,6 +13,7 @@ import {HotLoader} from "../tools/osd-hot.mjs";
 import {WarmCompiler} from "../tools/osd-warm.mjs";
 import {adtRouter} from "../tools/adt-facade.mjs";
 import {adtAbap} from "./helpers/adt-abap.mjs";
+import {classIncludeTemplates} from "../tools/adt-documents.mjs";
 
 const REPO = resolve(".");
 const main = `CLASS zcl_t05 DEFINITION PUBLIC. PUBLIC SECTION.
@@ -99,10 +100,14 @@ CLASS zcl_empty_live IMPLEMENTATION. METHOD run. rv = lcl_value=>get( ). ENDMETH
         for (const [include, source] of Object.entries(expected)) {
           const path = object.path + (include === "main" ? "" : `/includes/${include}`) + "/source/main";
           const active = await fetch(base + path + "?version=active");
-          expect(active.status).to.equal(scenario === "built tree" ? 200 : 404);
+          // Unknown main source is a 404; absent standard includes generate
+          // their measured template from READ's per-version absence flag.
+          const template = object.type === "CLAS" && scenario !== "built tree" ? classIncludeTemplates[include] : undefined;
+          expect(active.status).to.equal(scenario === "built tree" || template !== undefined ? 200 : 404);
           const body = await active.text();
-          if (scenario === "built tree") expect(body).to.equal(source);
+          if (scenario === "built tree" || template !== undefined) expect(body).to.equal(template ?? source);
           else expect(body).to.include("ExceptionResourceNotFound");
+          if (template !== undefined) expect(reader.read(object.type, object.name, include, "active").empty).to.equal(true);
           expect(reader.read(object.type, object.name, include).source).to.equal(scenario === "built tree" ? source : "");
         }
         const doc = await fetch(base + object.path);

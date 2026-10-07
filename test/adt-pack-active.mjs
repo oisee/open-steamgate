@@ -151,7 +151,11 @@ for (const location of ["in-root pack", "external pack", "workspace layer"]) for
       rmSync(join(root, "build"), {recursive: true, force: true});
       expect(await active("main", 404)).to.include(`${name} active version (main) does not exist`);
       expect(store.read("CLAS", name).source).to.equal(source(name, "P2"));
-      const body = await active("testclasses", 404);
+      expect(store.read("CLAS", name, "testclasses", "active").empty).to.equal(true);
+      expect(await active("testclasses", 404)).to.equal("No suitable resource found");
+      const missingInclude = await fetch(`${url}/sap/bc/adt/oo/classes/${object.base}/includes/testclasses?version=active`);
+      expect(missingInclude.status).to.equal(404);
+      const body = await missingInclude.text();
       expect(body).to.include("ExceptionResourceNotFound");
       expect(body).to.include("ED").and.to.include("170");
       const history = await fetch(`${url}/sap/bc/adt/oo/classes/${object.base}/source/main/versions`);

@@ -35,7 +35,7 @@ const envelopes = [
   ["oo/interfaces", `<intf:abapInterface xmlns:intf="http://www.sap.com/adt/oo/interfaces" xmlns:adtcore="${core}" adtcore:name="ZIF_XML"/>`, 409],
   ["programs/includes", `<include:abapInclude xmlns:include="http://www.sap.com/adt/programs/includes" xmlns:adtcore="${core}" adtcore:name="ZINCL_XML"/>`, 409],
   ["ddic/ddl/sources", `<ddl:ddlSource xmlns:ddl="http://www.sap.com/adt/ddic/ddlsources" xmlns:adtcore="${core}" adtcore:name="ZDDL_XML"/>`, 409],
-  ["ddic/srvd/sources", `<srvd:serviceDefinition xmlns:srvd="http://www.sap.com/adt/ddic/srvd" xmlns:adtcore="${core}" adtcore:name="ZSRV_XML"/>`, 501],
+  ["ddic/srvd/sources", `<srvd:srvdSource xmlns:srvd="http://www.sap.com/adt/ddic/srvdsources" xmlns:adtcore="${core}" adtcore:name="ZSRV_XML"/>`, 501],
   ["programs/programs/zxml?_action=LOCK", refs, 400],
   ["programs/programs/zxml?_action=UNLOCK", refs, 200],
   ["packages", `<pack:package xmlns:pack="http://www.sap.com/adt/packages" xmlns:adtcore="${core}" adtcore:name="$TMP"><pack:superPackage adtcore:name="$TMP"/></pack:package>`, 409],
@@ -74,7 +74,7 @@ const variants = {
 const wireAnswers = new Map();
 for (const front of ["node", "abap"]) describe(`T12/T13 XML requests ${front} mode=${process.env.OSD_ADT_ONE_RUNTIME ?? "0"}`, function () {
   this.timeout(180000);
-  let root, store, server, origin, auth, facade, runtime;
+  let root, store, server, origin, auth, facade, runtime, lockAuth;
   const workCalls = [];
   before(async () => {
     root = mkdtempSync(join(tmpdir(), "adt-xml-")); mkdirSync(join(root, "src"));
@@ -113,13 +113,26 @@ for (const front of ["node", "abap"]) describe(`T12/T13 XML requests ${front} mo
     const hello = await fetch(origin+base+"core/discovery",{method:"HEAD",headers:{"x-csrf-token":"fetch"}});
     auth = {"content-type":"application/xml",cookie:hello.headers.getSetCookie().map(c => c.split(";")[0]).join("; "),"x-csrf-token":hello.headers.get("x-csrf-token")};
     const locked = await fetch(origin+base+"core/discovery",{method:"HEAD",headers:{"x-csrf-token":"fetch","x-sap-adt-sessiontype":"stateful"}});
-    const lockAuth = {cookie:locked.headers.getSetCookie().map(c => c.split(";")[0]).join("; "),"x-csrf-token":locked.headers.get("x-csrf-token"),"x-sap-adt-sessiontype":"stateful"};
+    lockAuth = {cookie:locked.headers.getSetCookie().map(c => c.split(";")[0]).join("; "),"x-csrf-token":locked.headers.get("x-csrf-token"),"x-sap-adt-sessiontype":"stateful"};
     const lock = await fetch(origin+base+"oo/interfaces/zif_xml?_action=LOCK",{method:"POST",headers:lockAuth});
     expect(lock.status,await lock.text()).to.equal(200);
     // An inactive save preserves an active copy: rejection must keep both.
     store.write("PROG","ZXML","REPORT zxml.\nWRITE 'saved'.\n");
   });
-  after(async () => {if(server) await new Promise(r => server.close(r)); if(runtime) await runtime.stop(); if(root) rmSync(root,{recursive:true,force:true});});
+  after(async () => {
+    // Closing a listener does not end a stateful ADT session or its enqueue.
+    // Release the XML probes' holder before the next suite shares this runtime.
+    if (server) {
+      if (lockAuth) {
+        const response = await fetch(origin + "/sap/public/bc/icf/logoff", {headers: lockAuth});
+        await response.arrayBuffer();
+        expect(response.status).to.equal(200);
+      }
+      await new Promise(r => server.close(r));
+    }
+    if(runtime) await runtime.stop();
+    if(root) rmSync(root,{recursive:true,force:true});
+  });
   const post = async (path,body) => {
     const r = await fetch(origin+base+path,{method:"POST",headers:auth,body});
     return {status:r.status,type:r.headers.get("content-type"),location:r.headers.get("location"),body:await r.text()};
