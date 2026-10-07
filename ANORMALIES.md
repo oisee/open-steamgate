@@ -3819,7 +3819,7 @@ SNAPSHOT_MISMATCH and the doctor retry.
 - Actual local behaviour: it compiles and runs. Code built in OSG then fails to transport to SAP.
 - Workaround: none; authors must use a constant or a literal.
 - Regression: none yet.
-- Upstream: needs an issue in abaplint/abaplint (syntax check), after our critic pass; no upstream filing requested.
+- Upstream: filed as https://github.com/abaplint/abaplint/issues/4392 after the critic pass (2026-10-07). Measured with @abaplint/cli 2.120.70: the VALUE operand is not resolved at all; an undeclared name there also gives 0 issues.
 - Upstream version containing a fix: unknown.
 
 Not an anomaly, recorded for porting: on 7.58, `FIND ... REGEX` (POSIX) raises a deprecation that vsp deploy treats as an error. PIA moved to PCRE, which OSG supports.
