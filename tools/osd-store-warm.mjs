@@ -24,6 +24,9 @@ export function warmUp(store) {
         try {
           const r = await warmOperation(store, () => w.compiler.prime(view));
           await acceptView(store, view, new Set(), undefined, true);
+          // The synchronous activation validator keeps its own publication
+          // registry in the source host. Prime it before admitting hot edits.
+          store.registry();
           w.reason = undefined;
           return r;
         } catch (error) {

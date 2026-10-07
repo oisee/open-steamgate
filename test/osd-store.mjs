@@ -414,20 +414,23 @@ ENDCLASS.
     expect(broken.issues[0].line).to.be.greaterThan(1);
   });
 
-  it("a write drops the parse, because an update does not reach the callers", () => {
-    // the fast path was built, measured and taken out again: telling
-    // abaplint what changed is twenty milliseconds against four seconds,
-    // and the object that changed then checks correctly while its callers
-    // do not. A rename that breaks a caller came back clean, which is the
-    // exact case activation exists to catch.
+  it("a write updates the kept parse and invalidates cached callers", () => {
     store.write("CLAS", "ZCL_OSD_PROBE", CLASS);
-    store.registry();
-    expect(store.parsed).to.not.equal(undefined);
-
-    store.write("CLAS", "ZCL_OSD_PROBE", CLASS.replace("'hello'", "'goodbye'"));
-    expect(store.parsed, "a write buys a reparse rather than an update").to.equal(undefined);
-    expect(store.check("CLAS", "ZCL_OSD_PROBE").issues).to.deep.equal([]);
-    expect(store.read("CLAS", "ZCL_OSD_PROBE").source).to.contain("'goodbye'");
+    store.write("CLAS", "ZCL_OSD_PROBE_CALLER", `CLASS zcl_osd_probe_caller DEFINITION PUBLIC.
+PUBLIC SECTION. CLASS-METHODS run. ENDCLASS.
+CLASS zcl_osd_probe_caller IMPLEMENTATION.
+METHOD run. DATA probe TYPE REF TO zcl_osd_probe. CREATE OBJECT probe. probe->run( ). ENDMETHOD. ENDCLASS.`);
+    const registry = store.registry();
+    expect(store.check("CLAS", "ZCL_OSD_PROBE_CALLER").issues).to.deep.equal([]);
+    store.write("CLAS", "ZCL_OSD_PROBE", CLASS.replaceAll("run", "renamed"));
+    const refused = store.activate("CLAS", "ZCL_OSD_PROBE");
+    expect(store.registry(), "the hot path keeps the registry").to.equal(registry);
+    expect(refused.active).to.equal(false);
+    expect(refused.dependents.map(d => d.name)).to.include("ZCL_OSD_PROBE_CALLER");
+    store.write("CLAS", "ZCL_OSD_PROBE", CLASS);
+    expect(store.activate("CLAS", "ZCL_OSD_PROBE").active).to.equal(true);
+    expect(store.check("CLAS", "ZCL_OSD_PROBE_CALLER").issues).to.deep.equal([]);
+    store.delete("CLAS", "ZCL_OSD_PROBE_CALLER");
   });
 
   it("rebuilding the index drops the parse, because files changed under it", () => {

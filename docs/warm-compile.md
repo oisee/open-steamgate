@@ -427,9 +427,13 @@ Doctor keeps this informational (exit 0): cold compilation remains available.
   digest are the follow-up.
 - **The dev loop's cold path** still reparses the tree three times (the
   parent's check, the build, the child's cross-reference seed; foreman-dell's
-  measurement) and runs every generator on every save. The warm path skips
-  the parent check and generators and derives selected xref rows from the
-  compiler registry; the cold path is unchanged.
+  measurement) and runs every generator on every save. The warm path checks
+  synchronously using the source host's kept registry: only changed source files
+  are updated, and affected objects and transitive readers are dirtied before
+  reparsing. It retains the publication validator's identifier rules, including
+  the 30-character method-name limit, and checks new class includes before
+  scheduling publication. The warm path skips generators and derives selected
+  xref rows from the compiler registry; the cold build path is unchanged.
 - **Priming after a cold build** still costs a full transpile in the compiler
   process. Saves during it can require another prime to catch up; requests
   continue to answer and saves no longer wait for that work.

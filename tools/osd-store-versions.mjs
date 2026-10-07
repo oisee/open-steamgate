@@ -1,9 +1,9 @@
+import {updateRegistryFiles} from "./osd-store-registry.mjs";
 import {warmOverlay} from "./osd-warm-overlay.mjs";
 // Active/inactive versions, source snapshots and activation provenance.
 import {existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync} from "node:fs";
 import {createHash} from "node:crypto";
 import {dirname, join, relative, resolve} from "node:path";
-import * as abaplint from "@abaplint/core";
 import {hashOf, inputsOf, liveHash, normalPath} from "./osd-build.mjs";
 import {entityTag} from "./adt-entity.mjs";
 import {NotFound} from "./osd-store.mjs";
@@ -294,7 +294,7 @@ export class StoreVersions {
   // (#withSource's borrowing, for several files).
   withOverlay(activating, fn) {
     const registry = this.#store.registry();
-    const swapped = [];
+    const replacements = [], restore = [];
     for (const key of this.#store.inactive) {
       if (activating.has(key)) continue;
       const [type, ...rest] = key.split(" ");
@@ -303,30 +303,20 @@ export class StoreVersions {
       for (const file of this.#filesOfEntry(entry)) {
         if (!/\.(abap|xml|asddls)$/.test(file)) continue;
         const name = "/" + file;
-        const before = registry.getFileByName(name);
+        const before = registry.getFileByName(name)?.getRaw();
         const copy = join(this.#store.root, this.#snapshotOf(file));
-        if (existsSync(copy)) {
-          const replacement = new abaplint.MemoryFile(name, readFileSync(copy, "utf8"));
-          if (before === undefined) registry.addFile(replacement);
-          else registry.updateFile(replacement);
-          swapped.push({name, before, replacement});
-        } else if (before !== undefined) {
-          registry.removeFile(before);
-          swapped.push({name, before, replacement: undefined});
-        }
+        const source = existsSync(copy) ? readFileSync(copy, "utf8") : undefined;
+        if (before === source) continue;
+        replacements.push([name, source]);
+        restore.push([name, before]);
       }
     }
-    if (swapped.length === 0) return fn(registry);
+    if (replacements.length === 0) return fn(registry);
     try {
-      registry.parse();
+      updateRegistryFiles(registry, replacements);
       return fn(registry);
     } finally {
-      for (const {before, replacement} of swapped.reverse()) {
-        if (before === undefined) registry.removeFile(replacement);
-        else if (replacement === undefined) registry.addFile(before);
-        else registry.updateFile(before);
-      }
-      registry.parse();
+      updateRegistryFiles(registry, restore);
     }
   }
 

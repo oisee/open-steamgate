@@ -14,6 +14,7 @@
 // are — reload the browser), or data/ (a reseed replaces rows you may have
 // made by hand; that is an explicit command). The store watches src/, local/
 // and test/, and that is the whole list.
+import {forgetRegistry} from "./osd-store-registry.mjs";
 import {basename} from "node:path";
 import {objectOf} from "./osd-inputs.mjs";
 
@@ -43,6 +44,8 @@ export function devLoop(options = {}) {
       log(`${changed.length} file${changed.length === 1 ? "" : "s"} saved and not activated; left to its activation`);
       return {ok: true, stage: "inactive"};
     }
+    if (store.index === undefined) store.incrementalIndex = store.parsed !== undefined;
+    forgetRegistry(store, store.index === undefined && !store.incrementalIndex ? undefined : files);
     const objects = new Map();
     for (const file of files) {
       const key = objectOf(basename(file));
@@ -58,7 +61,7 @@ export function devLoop(options = {}) {
 
     // check first, the object and whoever depends on it; the registry sees
     // the system whole, so three changed files that broke against an
-    // unchanged fourth are caught here, in seconds, before a build
+    // unchanged fourth are caught here before a build, using the kept parse
     const started = Date.now();
     const broken = [];
     const checked = [];

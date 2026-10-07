@@ -116,9 +116,12 @@ process.send({ready: true});`);
   afterEach(async () => {await closeWarm(store); await store.warmState?.verifying; await stop(); if (root) rmSync(root, {recursive: true, force: true});});
 
   it("publishes an existing edit with warm swap, new serving code, and one status/test generation", async () => {
+    const registry = store.registry();
     await edit(2);
+    expect(store.registry(), "WRITE must reuse the kept registry").to.equal(registry);
     // Synchronous validation does not prevent publication from swapping warm.
     const operation = await activate();
+    expect(store.registry(), "ACTIVATE must not rebuild the registry").to.equal(registry);
     expect(operation).to.include({state: "published", active: true, live: true, verified: false});
     expect(operation.op_id).to.be.a("string").and.not.equal("");
     expect(publications[0]).to.include({ok: true, hot: true, recycled: false});
