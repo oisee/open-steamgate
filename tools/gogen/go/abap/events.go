@@ -91,7 +91,8 @@ type EventSender interface {
 var (
 	eventMu sync.Mutex
 	// FOR ALL INSTANCES, per instance event; the registrations of static
-	// events. Process-wide, as the class data of the generated program is.
+	// events. These runtime stores remain process-wide; generated class
+	// attributes and constructor flags belong to each Session.
 	allHandlers    = map[string]*handlerTable{}
 	staticHandlers = map[string]*handlerTable{}
 )

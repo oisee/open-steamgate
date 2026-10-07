@@ -31,8 +31,11 @@ type Sy struct {
 
 // Session is what a dialog step runs in. A goroutine picks one up, runs, and
 // puts it down: nothing ties a Session to the goroutine that ran it last.
+// Only one goroutine may use a Session at a time. Its zero value is ready to use.
 type Session struct {
-	Sy Sy
+	// statics: lazily allocated class attributes and constructor flags.
+	statics []any
+	Sy      Sy
 	// Handlers: the CATCH clauses of the TRYs active in this session,
 	// outermost first, each asking whether it takes a recovered value. A
 	// CLEANUP runs only when one of them does (see Handled).

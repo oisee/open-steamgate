@@ -1,4 +1,4 @@
-// Package session resets process-wide ABAP state at an internal-session boundary.
+// Package session resets remaining process-wide runtime stores between test classes.
 // The unit runner calls Reset between test classes. Database state is outside
 // this reset; database copies belong to a separate unit-runner change.
 package session
@@ -9,13 +9,13 @@ var resetters []func()
 var classMu sync.Mutex
 var classRunning bool
 
-// Register adds one reset function for a generated class or runtime store.
+// Register adds a reset function for a process-wide runtime store.
+// Class statics and constructor flags belong to abap.Session and need no callback.
 // Registration happens during package initialization, before unit execution.
 func Register(reset func()) { resetters = append(resetters, reset) }
 
-// Reset starts a fresh internal session. It assumes test classes run one at a
-// time: generated class statics and constructor flags are process globals.
-// BeginTestClass holds this invariant through the entire test class.
+// Reset clears registered runtime stores between test classes.
+// BeginTestClass reserves those stores through the entire test class.
 func Reset() {
 	classMu.Lock()
 	defer classMu.Unlock()
@@ -32,7 +32,8 @@ func reset() {
 }
 
 // BeginTestClass resets process state and reserves it until EndTestClass.
-// Parallel test classes require class statics to move into Session first.
+// Class statics are isolated by each fresh abap.Session; remaining registered
+// runtime stores still require test classes to run one at a time.
 func BeginTestClass() {
 	classMu.Lock()
 	defer classMu.Unlock()
