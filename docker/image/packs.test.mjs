@@ -34,3 +34,26 @@ test("core/showcase pack validation does not load the optional ABAP compiler", (
     assert.equal(child.status, 0, child.stdout + child.stderr);
   } finally {rmSync(scratch, {recursive: true, force: true});}
 });
+
+test("inactive source bookkeeping imports without the optional compiler", () => {
+  const scratch = mkdtempSync(join(tmpdir(), "osd-versions-loader-"));
+  try {
+    const loader = join(scratch, "no-core.mjs");
+    writeFileSync(loader, `export function resolve(specifier, context, next) {
+      if (specifier === '@abaplint/core') throw new Error('core image has no compiler');
+      return next(specifier, context);
+    }
+    export function load(url, context, next) {
+      // Isolate versions' compiler dependency from the store's separate parser.
+      if (url.endsWith('/tools/osd-store.mjs')) return {format:'module',shortCircuit:true,
+        source:'export class NotFound extends Error {}'};
+      if (url.endsWith('/tools/osd-build.mjs')) return {format:'module',shortCircuit:true,
+        source:'export const hashOf=()=>{}, inputsOf=()=>{}, liveHash=()=>{}, normalPath=p=>p;'};
+      return next(url, context);
+    }`);
+    const child = spawnSync(process.execPath, ['--loader', loader, '--input-type=module', '-e',
+      `const {StoreVersions} = await import(${JSON.stringify(new URL('../../tools/osd-store-versions.mjs', import.meta.url).href)});
+       new StoreVersions({root:${JSON.stringify(scratch)},inactiveDir:'inactive',inactive:new Set()},()=>new Map()).loadInactive();`], {encoding:'utf8'});
+    assert.equal(child.status, 0, child.stdout + child.stderr);
+  } finally {rmSync(scratch, {recursive:true,force:true});}
+});
