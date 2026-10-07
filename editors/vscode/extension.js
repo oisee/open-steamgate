@@ -3553,7 +3553,10 @@ async function classrunObject(name, classrunOutput, withDebugger = false, file,
         const object = adtObjectOf(file);
         const source = await client().activeSource(object);
         const normalize = text => text.replace(/\r\n/g, "\n").replace(/\n+$/, "");
-        changed = normalize(source) !== normalize(document.getText());
+        // An empty active source means "unknown", not "different": pack and
+        // workspace-layer objects outside the system root come back as 0 bytes
+        // (osg-demo, 0.7.1688), and every reader would see a false warning.
+        if (String(source ?? "").trim() !== "") changed = normalize(source) !== normalize(document.getText());
       } catch { /* An unavailable active source leaves the dirty-only hint. */ }
     }
     if (changed) classrunOutput.appendLine("osd: running the active version; your editor changes are not activated yet (Ctrl+F3)");
