@@ -438,15 +438,15 @@ export class StoreVersions {
     return target;
   }
 
-  #activeSource(file, entry) {
-    const active = this.#activeFile(file, entry);
-    return active && existsSync(active) ? readFileSync(active, "utf8") : "";
-  }
-
   sourceVersion(part, version) {
     const active = version === "active";
-    const source = active ? this.#activeSource(part.file, part) : part.source;
-    return {...part, source, etag: entityTag(active ? "active\0" + source : source)};
+    const activeFile = active ? this.#activeFile(part.file, part) : undefined;
+    const source = active ? (activeFile === undefined ? "" : readFileSync(activeFile, "utf8")) : part.source;
+    // Include absence belongs to the requested version. A deleted working
+    // file cannot hide retained active bytes, including a zero-byte include.
+    const presence = active && part.type === "CLAS" && part.include !== "main"
+      ? {empty: activeFile === undefined} : {};
+    return {...part, ...presence, source, etag: entityTag(active ? "active\0" + source : source)};
   }
 
 }

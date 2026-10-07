@@ -860,3 +860,72 @@ remain in the href fragment `#start=<line>,<col>`, including class include sourc
 The serializer's ADT type table uses the observed words Program and Class.
 For INTF, DDLS and the remaining unmeasured type words, it retains the facade's
 previous name-only description rather than inventing SAP wording.
+
+### Class includes and object XML POST (2026-10-06)
+
+The Node facade and ABAP source route distinguish a missing `testclasses`
+include from an empty file. Name-only GET returns 404 / `ExceptionResourceNotFound`;
+PUT under the class lock returns 500 / `ExceptionResourceSaveFailure` and writes
+nothing. Both carry ED/170 with V1 equal to the uppercase class name padded with
+`=` to 30 characters, followed by `CCAU`, and the message
+`<CCAU> does not have any inactive version`. Our routed `/source/main` alias
+returns 404 text/plain `No suitable resource found` while the test include is
+absent; after creation it continues to serve source for existing client links.
+
+Create it with `POST <class>/includes?lockHandle=...` and a
+`class:abapClassInclude` with `class:includeType="testclasses"`. The existing
+201 response has no Content-Type, an empty body, and a lowercase relative
+Location. Then PUT returns 200 without a representation and GET returns the
+saved text. Definitions, macros and implementations always have a source:
+when no file exists, ADT returns their generated template comments, including
+the CRLF line endings (165/106/143 bytes). The
+conditional save compares against the template's ETag. This is an ADT policy;
+the PIA-facing dev API's `STORE WRITE` deliberately keeps implicit creation of
+a testclasses file. The store's `empty` flag describes absence in the requested
+version: inactive/default uses the working file; active uses proven generation
+snapshots or retained pre-save copies. Removing a working include therefore
+does not hide its surviving active source or replace it with a template. A
+proven zero-byte active include is present too. This preserves VS Code's active
+source comparison through `/includes/{include}/source/main?version=active`.
+
+An object POST with no `_action` validates object XML rather than taking a
+lock. Empty bodies and `<x/>` return `ExceptionInvalidData`, the expected
+expanded root name, XML_PATH/XML_OFFSET, and T100 00/001 with the message split
+at 48 characters. The probes send the measured Accept
+`application/vnd.sap.as+xml;charset=UTF-8;dataname=com.sap.adt.lock.result`.
+The expanded roots below are audited against vsp's
+[`pkg/adt/crud.go`](https://github.com/oisee/vibing-steampunk/blob/main/pkg/adt/crud.go)
+object type map and its SDK's `src/api/objectcreator.ts` creation type table
+(local `abap-adt-api` and `abap-adt-api-lib` copies). Both client tables agree:
+
+| Type | Expanded root | Evidence for object POST diagnostics |
+| --- | --- | --- |
+| CLAS | `{http://www.sap.com/adt/oo/classes}abapClass` | Measured on SAP, 2026-10-06; both clients agree |
+| INTF | `{http://www.sap.com/adt/oo/interfaces}abapInterface` | Both clients' collection-create bodies; query-less object POST unmeasured |
+| PROG | `{http://www.sap.com/adt/programs/programs}abapProgram` | Both clients' collection-create bodies; query-less object POST unmeasured |
+| INCL | `{http://www.sap.com/adt/programs/includes}abapInclude` | Both clients' collection-create bodies; query-less object POST unmeasured |
+| DDLS | `{http://www.sap.com/adt/ddic/ddlsources}ddlSource` | Both clients' collection-create bodies; query-less object POST unmeasured |
+| SRVD | `{http://www.sap.com/adt/ddic/srvdsources}srvdSource` | Both clients' collection-create bodies; query-less object POST unmeasured |
+
+SRVD uses `srvdsources`, not the collection URI's `srvd/sources` spelling. Both
+XML namespace policies now admit `srvdSource` for collection XML; SRVD collection
+creation remains unsupported. No element name in this six-type rule lacks
+client evidence; element names outside these audited types remain unmeasured.
+Client creation bodies establish the root names, not SAP's diagnostic behavior
+for other object types. Packages
+and non-source collections retain their existing action dispatch. Valid object
+XML updates remain unsupported (501); this change implements the measured
+invalid-body cases and never enqueues for an object XML POST.
+
+Consumer audit: desktop VS Code reads active includes through our retained
+`/source/main` alias and saves files locally; ABAP-FS conformance reads existing test files; vsp uses name-only
+include URLs. vsp's workflow in `pkg/adt/workflows.go` tries `UpdateClassInclude`
+first and recovers through `CreateTestInclude`; the SDK's `createTestInclude`
+sends the same include XML.
+The lifecycle tool writes main source only. Their transports require no change. The read-diff tests now
+expect generated comments, and the parity suite exercises Node, ABAP and the
+serving process with the one-runtime switch, plus a real `ZOSD_STORE` WRITE.
+The ABAP group rejects `OSD_ADT=js` and asserts `X-OSD-Served-By: ABAP` on
+include GETs and object POSTs. Eclipse recovery is conditional on GET 404:
+POST `/includes`, PUT 200, then GET the saved source. Include creation and PUT
+remain HOST orchestration under one-runtime.

@@ -1,6 +1,7 @@
 import {expect} from "chai";
 import express from "express";
 import {cpSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync} from "node:fs";
+import {rm} from "node:fs/promises";
 import {tmpdir} from "node:os";
 import {join, resolve} from "node:path";
 import {EventEmitter, once} from "node:events";
@@ -20,7 +21,10 @@ const BASE = "/sap/bc/adt";
 // Runtime start/recycle prepares the active source view. Even a read-only
 // door test can switch build/live, so every real runtime owns its build root.
 let runtimeRoot;
-before(() => {
+before(function () {
+  // copying the tree takes seconds on a loaded runner; a root-level hook
+  // gets mocha's 2 s default, not a suite's 60 s
+  this.timeout(60000);
   runtimeRoot = mkdtempSync(join(tmpdir(), "osd-one-runtime-host-"));
   for (const dir of ["src", "gen", "packs", "data", "webapp", "test"]) cpSync(resolve(dir), join(runtimeRoot, dir), {recursive: true});
   for (const file of ["package.json", "abap_transpile.json", "abaplint.jsonc", "libs.lock.json"]) cpSync(resolve(file), join(runtimeRoot, file));
@@ -28,7 +32,13 @@ before(() => {
   mkdirSync(join(runtimeRoot, ".local"));
   symlinkSync(resolve(".local/lars"), join(runtimeRoot, ".local/lars"));
 });
-after(() => { if (runtimeRoot) rmSync(runtimeRoot, {recursive: true, force: true}); });
+// A copy of src, gen, packs, data, webapp and test: removing it can take
+// seconds on a loaded runner, past mocha's 2 s default for a root-level hook
+// (hooks inside the suites inherit their 60 s, this one does not).
+after(async function () {
+  this.timeout(60000);
+  if (runtimeRoot) await rm(runtimeRoot, {recursive: true, force: true});
+});
 const listen = (app) => new Promise(resolve => { const s = app.listen(0, "127.0.0.1", () => resolve(s)); });
 const until = async (work) => {
   for (let i = 0; i < 200; i++) { if (await work()) return; await new Promise(r => setTimeout(r, 10)); }
@@ -814,7 +824,10 @@ function storeRoot() {
   storeRoots.push(dir);
   return dir;
 }
-after(() => { for (const dir of storeRoots.splice(0)) rmSync(dir, {recursive: true, force: true}); });
+after(async function () {
+  this.timeout(60000);
+  for (const dir of storeRoots.splice(0)) await rm(dir, {recursive: true, force: true});
+});
 
 describe("remote activation publication", () => {
   for (const entry of ["ANSWER", "RESUME"]) for (const failure of ["publish", "promotion"]) {

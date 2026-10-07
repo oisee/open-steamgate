@@ -2,10 +2,12 @@
 import {expect} from "chai";
 import express from "express";
 import {request} from "node:http";
+import {createHash} from "node:crypto";
 import {mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import "./start.mjs";
+import {classIncludeTemplates} from "../tools/adt-documents.mjs";
 import {adtRouter} from "../tools/adt-facade.mjs";
 import {abapRunner} from "../tools/adt-abap-front.mjs";
 import {dialogStep} from "../tools/osd-dialog-step.mjs";
@@ -181,12 +183,12 @@ describe("ADT B2a source reads and bare documents: live Node byte diff", functio
   });
   for(const include of ["macros","Definitions","constructor"]) for(const suffix of ["","/source/main"]) it(`class include ${include}${suffix}`,async () => {
     const r=await diff(base+collections[0]+"/"+names[0]+"/includes/"+include+suffix); expect(r.status).to.equal(include === "macros" ? 200 : 404);
-    if(include === "macros") {expect(r.body.length).to.equal(0); expect(r.headers.etag).to.equal("e3b0c44298fc1c149afbf4c8996fb924");}
+    if(include === "macros") {expect(r.body.toString()).to.equal(classIncludeTemplates.macros); expect(r.headers.etag).to.equal(createHash("sha256").update(classIncludeTemplates.macros).digest("hex").slice(0, 32));}
   });
-  it("empty includes GET/HEAD keep Content-Length and wildcard freshness",async () => {
+  it("generated and empty includes GET/HEAD keep Content-Length and wildcard freshness",async () => {
     for(const include of ["macros","testclasses"]) for(const method of ["GET","HEAD"]) {
       const path=base+collections[0]+"/"+names[0]+"/includes/"+include;
-      const first=await diff(path,method); expect(first.headers["content-length"]).to.equal("0");
+      const first=await diff(path,method); expect(first.headers["content-length"]).to.equal(String(include === "macros" ? Buffer.byteLength(classIncludeTemplates.macros) : 0));
       for(const tag of [first.headers.etag,"*"]) {
         const conditional=await diff(path,method,{"if-none-match":tag}); expect(conditional.status).to.equal(304);
         expect(conditional.headers["content-type"]).to.equal(tag === "*" ? null : "text/plain; charset=utf-8");
@@ -199,7 +201,7 @@ describe("ADT B2a source reads and bare documents: live Node byte diff", functio
   for(const accept of [undefined,"*/*",xmlAccept,xmlAccept.toUpperCase()]) it(`namespaced include Accept ${accept}`,async () => {
     const path=base+collections[0]+"/%2Fdemo%2Fzread/includes/macros";
     const r=await diff(path,"GET",accept === undefined ? {} : {accept}); expect(r.status).to.equal(200);
-    if(accept === xmlAccept) expect(r.body.toString()).to.include('/%2Fdemo%2Fzread/includes/macros/source/main'); else expect(r.body.length).to.equal(0);
+    if(accept === xmlAccept) expect(r.body.toString()).to.include('/%2Fdemo%2Fzread/includes/macros/source/main'); else expect(r.body.toString()).to.equal(classIncludeTemplates.macros);
   });
   for(const suffix of ["","/source/main"]) for(const method of ["GET","HEAD"]) it(`namespaced class ${suffix} ${method}`,async () => {
     expect((await diff(base+collections[0]+"/%2Fdemo%2Fzread"+suffix,method)).status).to.equal(200);

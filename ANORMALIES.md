@@ -2053,6 +2053,18 @@ for `zosd_status_app`, which has been deployed for a day.
 - Regression-test location: `test/amc.mjs` (program mapping and refused send), `test/unit/zcl_osd_amc_test.clas.testclasses.abap` (authorised and unauthorised sends).
 - Upstream version containing a fix: none.
 
+### ANOMALY-2026-10-06-amc-one-process — an AMC message sent from a background job never reaches the server's APC subscribers
+
+- Status: `open` (by design so far: the supervisor broker is step 6 of `docs/abap-daemons.md` and is not built)
+- Discovery date: `2026-10-06` (reported by PIA)
+- Affected versions: the one-process AMC host in `tools/osd-amc.mjs`, with every background job running in its own `tools/osd-batch-runs.mjs worker` process
+- Affected runtime API: `cl_amc_channel_manager=>create_message_producer( )->send( )` in a job step, received by an APC WebSocket bound with `bind_amc_message_consumer` in the serving process
+- Expected SAP behaviour: AMC is not tied to a work process. A job (or a daemon) that sends on a channel reaches an APC client bound to it in a dialog work process. PIA's job mode on A4H relies on this. It is reported by PIA and has not been probed by OSG yet.
+- Actual open-abap behaviour: each process has its own `AmcBroker`. The worker's `SEND` is delivered to subscribers in the worker only, and the APC client in the server receives nothing. Measured by PIA: the job completed in 34 s and its terminal got no message.
+- Impact on open-steamgate: any "job reports progress over AMC" pattern is silent. A sender inside the serving process (an HTTP step, an APC handler, a daemon in the same process) is not affected.
+- Smallest safe workaround: send from the serving process. PIA 0.1.1 runs the work inline in the APC handler instead of as a job.
+- Regression-test location: none yet; it belongs with the supervisor broker (`docs/backlog/jobs.md`).
+
 ### ANOMALY-2026-09-29-amc-scope-assumption — AMC cross-identity delivery has no A4H measurement
 
 - Status: `open` (local policy implemented, system semantics unmeasured)

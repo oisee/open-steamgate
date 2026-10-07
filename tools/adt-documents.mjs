@@ -1214,6 +1214,19 @@ export function lockResultDocument(handle, options = {}) {
 //
 // options.properties: [key, value] pairs for <properties>, the way a system
 // carries a message's T100 key and long text.
+// Generated class include source when no repository file has been written.
+export const classIncludeTemplates = {
+  definitions: '*"* use this source file for any type of declarations (class\r\n*"* definitions, interfaces or type declarations) you need for\r\n*"* components in the private section\r\n',
+  macros: '*"* use this source file for any macro definitions you need\r\n*"* in the implementation part of the class\r\n',
+  implementations: '*"* use this source file for the definition and implementation of\r\n*"* local helper classes, interface definitions and type\r\n*"* declarations\r\n',
+};
+export function missingTestInclude(name) {
+  const pool = String(name).toUpperCase().padEnd(30, "=") + "CCAU";
+  return {message: pool + " does not have any inactive version", properties: [
+    ["T100KEY-ID", "ED"], ["T100KEY-NO", "170"], ["T100KEY-V1", pool],
+  ]};
+}
+
 export function exceptionDocument(type, message, options = {}) {
   const properties = options.properties ?? [];
   const props = properties.length === 0 ? "  <properties/>" : "  <properties>\n" +
