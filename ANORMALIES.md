@@ -3534,7 +3534,7 @@ point approximation and is format-checked before masking in wire tests.
 
 ### ANOMALY-2026-10-02-get-run-time-units — GET RUN TIME FIELD returns milliseconds since the previous call, not microseconds since the first
 
-- Status: `open` (osgo measures in monotonic microseconds since #473; the JS runtime does not)
+- Status: `fixed upstream: abaplint/transpiler#1956 (merged 2026-10-03), pinned 2026-10-07` (`libs.lock.json` transpiler oisee/transpiler `local/osd-build-2026-10-07` 2ff0e801 = the previous pin plus a cherry-pick of #1956; microseconds since the first call, monotonic, per ABAP instance; a host resets the origin with `context.runTime = undefined`)
 - Discovery date: `2026-10-02`
 - Affected versions: OSD `vscode-v0.6.1511` (JS runtime)
 - Affected ABAP statement, runtime API or adapter: `GET RUN TIME FIELD lv_t0. … GET RUN TIME FIELD lv_t1. lv_d = lv_t1 - lv_t0.`
@@ -3770,7 +3770,7 @@ SNAPSHOT_MISMATCH and the doctor retry.
 
 ### ANOMALY-2026-10-06-http-client-send-synchronous - cl_http_client send( ) blocks, receive( ) does nothing
 
-- Status: `open`
+- Status: `fixed in the pin, upstream PR pending` (oisee/open-abap-core `fix/http-client-async-send-upstream` on upstream main; the byte-identical patch is in the `osd-build-2026-10-07` pin b1f43c31 since 2026-10-07, on top of cherry-picks of upstream #1253, #1271, #1268, #1270, #1269 and #1289; `send( )` starts the request, `receive( )` awaits it, construction errors fail in send, request errors and timeouts in receive)
 - Discovery: PIA's fan-out probe (ZCL_PIA_PROBE_FAN), measured on A4H (SAP 7.58, background job) and on an OSG instance. It was reported by the PIA session on 2026-10-06; dell confirmed the source.
 - Affected path: open-abap-core `src/http/cl_http_client.clas.abap` (pin 8b397be). `if_http_client~send` awaits the whole request (`await postData(...)`, around line 195) and fills the response there. `if_http_client~receive` is empty ("handled in send()").
 - Reproducer: create three clients for `http://httpbin.org/delay/2`. Call `send( )` on each, then `receive( )` on each.
@@ -3784,7 +3784,7 @@ SNAPSHOT_MISMATCH and the doctor retry.
 
 ### ANOMALY-2026-10-06-get-run-time-delta - GET RUN TIME returns ms since the previous call
 
-- Status: `open`
+- Status: `duplicate` of ANOMALY-2026-10-02-get-run-time-units: fixed upstream in abaplint/transpiler#1956, pinned 2026-10-07 (2ff0e801)
 - Discovery: the same probe printed "A sequential: 6525 ms" on A4H and "7 ms" on OSG, while the OSG wall clock was 13.6 s for six 2-second requests. dell confirmed the source.
 - Affected path: `@abaplint/runtime` `build/src/statements/get_run_time.js`. It keeps a module-level `prev`. The first call sets 0; every later call sets `Date.now() - prev` and moves `prev`.
 - Expected SAP behaviour: the first `GET RUN TIME FIELD` returns 0 and fixes the origin. Every later call returns the microseconds elapsed since that origin, so the value only grows. After `WAIT UP TO 1 SECONDS` twice, the three calls give 0, about 1000000 and about 2000000.
@@ -3798,7 +3798,7 @@ SNAPSHOT_MISMATCH and the doctor retry.
 
 ### ANOMALY-2026-10-06-uccpi-high-byte - cl_abap_conv_out_ce=>uccpi multiplies the high byte by 255
 
-- Status: `open`
+- Status: `duplicate` of ANOMALY-2026-09-24-uccpi-255. The defect was already fixed upstream in open-abap-core#1263 (merged 2026-09-25), but our pin 8b397be predates the fix. Remedy: cherry-pick or move the pin; no new upstream filing. Recorded here by dell without checking the older entry (2026-10-07 correction).
 - Discovery: PIA's first deployment to A4H 7.58 (zcl_pia_00_json_util, 29 tests, 29/29 on both systems after fixes), reported by the PIA session on 2026-10-06. dell confirmed the source.
 - Affected path: open-abap-core `src/conv/cl_abap_conv_out_ce.clas.abap`, method `uccpi`. It converts to encoding 4103 (UTF-16LE, low byte first), then computes `ret = lv_hex(1)` followed by `ret = ret + lv_hex+1(1) * 255`. The factor must be 256.
 - Reproducer: `cl_abap_conv_out_ce=>uccpi( 'Ж' )` and `cl_abap_conv_out_ce=>uccpi( '€' )`.
@@ -3806,7 +3806,7 @@ SNAPSHOT_MISMATCH and the doctor retry.
 - Actual local behaviour: 1042 and 8332, wrong by the high byte for every character above U+00FF. ASCII and Latin-1 are unaffected, because their high byte is 0.
 - Workaround: none in the tree; PIA does not use `uccpi`. ANOMALY-2026-10-04-sxml-supplementary-ref already avoids sXML numeric references, which convert through `cl_abap_conv_in_ce=>uccpi`.
 - Regression: none yet.
-- Upstream: needs an issue in open-abap-core, a one-character fix, after our critic pass; no upstream filing requested.
+- Upstream: already fixed in open-abap-core#1263; stoker brings it into our pin branch (osd-build-2026-10-07).
 - Upstream version containing a fix: unknown.
 
 ### ANOMALY-2026-10-06-data-value-variable - DATA ... VALUE accepts a variable
@@ -3819,14 +3819,14 @@ SNAPSHOT_MISMATCH and the doctor retry.
 - Actual local behaviour: it compiles and runs. Code built in OSG then fails to transport to SAP.
 - Workaround: none; authors must use a constant or a literal.
 - Regression: none yet.
-- Upstream: needs an issue in abaplint/abaplint (syntax check), after our critic pass; no upstream filing requested.
+- Upstream: filed as https://github.com/abaplint/abaplint/issues/4392 after the critic pass (2026-10-07). Measured with @abaplint/cli 2.120.70: the VALUE operand is not resolved at all; an undeclared name there also gives 0 issues.
 - Upstream version containing a fix: unknown.
 
 Not an anomaly, recorded for porting: on 7.58, `FIND ... REGEX` (POSIX) raises a deprecation that vsp deploy treats as an error. PIA moved to PCRE, which OSG supports.
 
 ### ANOMALY-2026-10-06-uccp-lone-surrogate - uccp drops a surrogate code unit
 
-- Status: `open`
+- Status: `fixed in the pin, upstream PR pending` (oisee/open-abap-core `fix/uccp-lone-surrogate`, carried by the `osd-build-2026-10-07` pin b1f43c31 since 2026-10-07; `uccp` builds the UTF-16 code unit directly, so a lone surrogate survives and the pair concatenates to U+1F60A)
 - Discovery: PIA's test escape_emoji_pair passes 30/30 on A4H 7.58 and fails only in OSG. It was triggered by an emoji in a model answer and reported by the PIA session on 2026-10-06. dell confirmed the path in source.
 - Affected path: open-abap-core `src/conv/cl_abap_conv_in_ce.clas.abap`. `uccp` turns the hex into an integer and calls `uccpi`, which decodes the two bytes through a UTF-16LE (4103) converter. A lone surrogate does not survive that decode, and `uccp` swallows `cx_sy_conversion_codepage` (`* todo, hmm`), which leaves the result empty.
 - Reproducer: `cl_abap_conv_in_ce=>uccp( 'D83D' ) && cl_abap_conv_in_ce=>uccp( 'DE0A' )`.

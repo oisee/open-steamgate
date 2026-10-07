@@ -1,5 +1,7 @@
 import {warnWarmPin} from "./osd-warm-capabilities.mjs";
 import {acceptView, captureView} from "./osd-store-compile-view.mjs";
+import {waitVerifier} from "./osd-warm-verification.mjs";
+import {verifyNext} from "./osd-store-verify.mjs";
 // Background priming belongs to the compiler process, never the HTTP front.
 export function warmUp(store) {
   const w = store.warm();
@@ -18,7 +20,12 @@ export function warmUp(store) {
     // primed on the build view: inactive objects as their active copies
     w.compiler ??= new WarmCompilerProcess({root: store.root, log: (m) => console.log(m), overlay: (activating) => store.overlay(activating),
       keyOf: (file) => store.objectKeyOf(file), inactiveSources: (activating) => store.inactiveSources(activating)});
+    w.compiler.verifyDeadlineMs = store.warmVerifyLifetimeMs ?? Number(process.env.OSD_WARM_VERIFY_LIFETIME_MS ?? 180000);
     try {
+      // Let an already running frozen comparison finish before the bounded
+      // full prime. New comparisons wait below; saves still take their turns.
+      const verifier = w.compiler.verifying;
+      await waitVerifier(verifier, store.warmVerifyDeadlineMs ?? store.warmVerifyWaitMs ?? Number(process.env.OSD_WARM_VERIFY_WAIT_MS ?? 30000));
       for (;;) {
         const view = await captureView(store);
         try {
@@ -50,6 +57,7 @@ export function warmUp(store) {
       return undefined;
     } finally {
       w.priming = undefined;
+      verifyNext(store);
     }
   })();
   return w.priming;
@@ -61,6 +69,7 @@ export async function closeWarm(store) {
   w.closed = true;
   clearTimeout(w.reprime);
   clearTimeout(w.timer);
+  w.quietArmed = false;
   await w.compiler?.shutdown?.();
   await w.priming;
 }

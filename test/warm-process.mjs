@@ -6,7 +6,10 @@ import {join, resolve} from "node:path";
 import {pathToFileURL} from "node:url";
 import {ObjectStore} from "../tools/osd-store.mjs";
 import {WarmCompilerProcess} from "../tools/osd-warm-process.mjs";
-import {closeWarm} from "../tools/osd-store-warm.mjs";
+import {closeWarm, warmOperation} from "../tools/osd-store-warm.mjs";
+import {verifyNext} from "../tools/osd-store-verify.mjs";
+import {sendIPC} from "../tools/osd-ipc.mjs";
+import {EventEmitter} from "node:events";
 
 const source = (name, n) => `CLASS ${name} DEFINITION PUBLIC CREATE PUBLIC.
  PUBLIC SECTION.
@@ -37,7 +40,8 @@ describe("warm compiler process: source isolation and bounded cold fallback", fu
   beforeEach(async () => {
     root = mkdtempSync(join(tmpdir(), "osd-warm-ipc-"));
     writeFileSync(join(root, "abaplint.jsonc"), JSON.stringify({syntax: {version: "OpenABAP"}}));
-    mkdirSync(join(root, "src"));
+    mkdirSync(join(root, "src", "demo"), {recursive: true});
+    writeFileSync(join(root, "src", "demo", "package.devc.xml"), "<abapGit><asx:abap><asx:values><DEVC><CTEXT>demo</CTEXT></DEVC></asx:values></asx:abap></abapGit>");
     for (const name of ["zcl_a", "zcl_b"]) writeFileSync(join(root, "src", `${name}.clas.abap`), source(name, 1));
     writeFileSync(join(root, "abap_transpile.json"), JSON.stringify({
       input_folder: "src", input_filter: [], output_folder: "output", libs: [], write_unit_tests: true, write_source_map: true,
@@ -49,23 +53,24 @@ describe("warm compiler process: source isolation and bounded cold fallback", fu
     const worker = join(root, "worker.mjs");
     writeFileSync(worker, `import {main} from ${JSON.stringify(pathToFileURL(join(repo, "tools/osd-warm-worker.mjs")).href)};
 import {readFileSync} from "node:fs";
+import {sendIPC} from ${JSON.stringify(pathToFileURL(join(repo, "tools/osd-ipc.mjs")).href)};
 main({heapLimit: ${512 * 1048576}, beforeCompile: async ({method}) => {
- process.send({type: "environment", credentials: ["OSD_ADT_TOKEN", "OSD_BATCH_READ_TOKEN", "PGPASSWORD", "HANA_PASSWORD", "FIXTURE_SECRET"]
+ sendIPC(process, {type: "environment", credentials: ["OSD_ADT_TOKEN", "OSD_BATCH_READ_TOKEN", "PGPASSWORD", "HANA_PASSWORD", "FIXTURE_SECRET"]
   .filter(key => process.env[key] !== undefined), root: process.env.OSD_ROOT, path: process.env.PATH});
  const mode = readFileSync("control", "utf8");
- if (mode === "hang-" + method) { process.send({type: "paused"}); while (true) {} }
+ if (mode === "hang-" + method) { sendIPC(process, {type: "paused"}); while (true) {} }
  if (mode === "exit-" + method) process.exit(23);
  if (mode === "disconnect-" + method) {
   process.removeAllListeners("disconnect"); process.disconnect();
   await new Promise(() => setInterval(() => {}, 1000));
  }
  if (mode === "pause-" + method) {
-  process.send({type: "paused"});
+  sendIPC(process, {type: "paused"});
   await new Promise(resolve => process.once("message", resolve));
  }
 }, afterCompile: async ({method}) => {
  if (readFileSync("control", "utf8") === "pause-finished-" + method) {
-  process.send({type: "paused"});
+  sendIPC(process, {type: "paused"});
   await new Promise(resolve => process.once("message", resolve));
  }
 }});`);
@@ -97,6 +102,138 @@ main({heapLimit: ${512 * 1048576}, beforeCompile: async ({method}) => {
     }
   });
 
+  it("keeps one prime through create, cold publication, and edits of new and existing classes", async () => {
+    const logs = [];
+    compiler.log = text => logs.push(text);
+    const coldStart = performance.now();
+    await store.create("CLAS", "ZCL_NEW", {package: "$STG_DEMO", source: source("zcl_new", 1)});
+    const created = store.warmActivation("CLAS", "ZCL_NEW");
+    const cold = await store.publish({activate: [{type: "CLAS", name: "ZCL_NEW"}]});
+    expect(store.completeActivation(created, cold.transpile.built)).to.equal(true);
+    expect(cold.ok, JSON.stringify(cold)).to.equal(true);
+    expect(cold.transpile.warm).to.not.equal(true);
+    expect(compiler.primed).to.equal(true);
+    expect(store.warmState.primeDue).to.equal(false);
+    expect(logs.some(line => line.includes("warm: updated")), logs.join("\n")).to.equal(true);
+    for (const name of ["zcl_new", "zcl_a"]) {
+      await save(name, 4);
+      const checked = store.warmActivation("CLAS", name.toUpperCase());
+      const next = await store.publish({activate: [{type: "CLAS", name: name.toUpperCase()}]});
+      expect(store.completeActivation(checked, next.transpile.built)).to.equal(true);
+      expect(next.ok, JSON.stringify(next)).to.equal(true);
+      expect(next.transpile.warm).to.equal(true);
+      expect(next.transpile.superseded).to.equal(0);
+      expect(out(name)).to.include("IntegerFactory.get(4)");
+      expect((await compiler.verify(next.transpile.hash)).verdict).to.equal("same");
+      console.log(`create/edit loop: ${name} warm ${next.transpile.ms} ms`);
+    }
+    expect(logs.filter(line => line.includes("warm: primed") || line.includes("warm: re-prime"))).to.deep.equal([]);
+    console.log(`create/edit loop including cold and two verifications: ${(performance.now() - coldStart).toFixed(0)} ms`);
+  });
+
+  it("logs a re-prime for a config/layer change and warms the next edit", async () => {
+    const logs = [];
+    compiler.log = text => logs.push(text);
+    mkdirSync(join(root, "layer"));
+    writeFileSync(join(root, "layer", "zcl_layer.clas.abap"), source("zcl_layer", 1));
+    const path = join(root, "abap_transpile.json");
+    const config = JSON.parse(readFileSync(path, "utf8"));
+    config.input_folder = ["src", "layer"];
+    writeFileSync(path, JSON.stringify(config));
+    const cold = await store.publish();
+    expect(cold.ok, JSON.stringify(cold)).to.equal(true);
+    expect(logs.join("\n")).to.include("warm: re-prime: the config changed");
+    expect(compiler.primed).to.equal(false);
+    expect(store.warmState.primeDue).to.equal(true);
+    await save("zcl_a", 5);
+    const next = await activate();
+    expect(next.ok).to.equal(true);
+    expect(next.transpile.warm).to.equal(true);
+    expect(logs.filter(line => line.includes("warm: primed"))).to.have.length(1);
+  });
+
+  it("finishes mismatch recovery with a ready compiler and warms the next activation", async () => {
+    await save("zcl_a", 2);
+    const activation = store.warmActivation("CLAS", "ZCL_A");
+    const warm = await activate();
+    expect(store.completeActivation(activation, warm.transpile.built)).to.equal(true);
+    const hash = warm.transpile.hash;
+    writeFileSync(join(root, "build", "by-input", hash, "output", "zcl_a.clas.mjs"), "// deliberate mismatch\n");
+    store.warmState.next = new Set([hash]);
+    verifyNext(store);
+    await store.warmState.verifying;
+    expect(store.warmState.last.verdict).to.equal("differs");
+    expect(out("zcl_a")).to.include("IntegerFactory.get(2)");
+    expect(compiler.primed, "recovery includes priming, without another activation or a timer").to.equal(true);
+    await save("zcl_a", 3);
+    const next = await activate();
+    expect(next.ok, JSON.stringify(next)).to.equal(true);
+    expect(next.transpile.warm).to.equal(true);
+    expect((await compiler.verify(next.transpile.hash)).verdict).to.equal("same");
+  });
+
+  it("finishes a frozen comparison before bounded priming and resumes queued verification afterwards", async () => {
+    await compiler.drop();
+    const verifier = Object.assign(new EventEmitter(), {exitCode: null});
+    compiler.verifying = verifier;
+    let compares = 0;
+    compiler.verify = async () => { compares++; return {verdict: "same", files: 0, ms: 0}; };
+    const priming = store.warmUp();
+    const hash = store.served?.generation ?? compiler.hash;
+    store.warmState.next = new Set([hash]);
+    verifyNext(store);
+    await sleep(20);
+    expect(compiler.primed).to.equal(false);
+    expect(compares).to.equal(0);
+    expect(store.warmState.next.has(hash)).to.equal(true);
+    // A save can finish while the background work yields; prime then sees
+    // the active copy rather than certifying the newly saved draft.
+    await save("zcl_a", 12);
+    compiler.verifying = undefined;
+    verifier.exitCode = 0;
+    verifier.emit("exit", 0);
+    expect(await priming, store.warmState.reason).to.not.equal(undefined);
+    await store.warmState.verifying;
+    expect(compiler.primed).to.equal(true);
+    expect(compares).to.equal(1);
+    expect(store.warmState.last).to.include({hash, verdict: "same"});
+    expect((await activate()).transpile.warm).to.equal(true);
+    expect(out("zcl_a")).to.include("IntegerFactory.get(12)");
+  });
+
+  it("ignores a retired child's late IPC failure while its replacement is priming", async () => {
+    const retired = child;
+    await compiler.drop();
+    paused = false;
+    mode("pause-finished-prime");
+    const priming = store.warmUp();
+    await waitPaused();
+    const replacement = child;
+    expect(replacement).to.not.equal(retired);
+    // Close and disconnect are separate events; either can be delivered
+    // after a drop and must reject only that child's requests.
+    retired.emit("disconnect");
+    mode("normal");
+    sendIPC(replacement, {resume: true});
+    expect(await priming, store.warmState.reason).to.not.equal(undefined);
+    expect(compiler.primed).to.equal(true);
+    expect(store.warmState.disabled).to.not.equal(true);
+  });
+
+  it("discarding a busy baseline requests cold fallback without disabling its replacement", async () => {
+    mode("pause-build");
+    const building = warmOperation(store, () => compiler.build()).catch(error => error);
+    await waitPaused();
+    await compiler.drop();
+    expect((await building).code).to.equal("NOT_WARM");
+    expect(store.warmState.disabled).to.not.equal(true);
+    mode("normal");
+    expect(await store.warmUp(), store.warmState.reason).to.not.equal(undefined);
+    expect(compiler.primed).to.equal(true);
+    await save("zcl_a", 2);
+    expect((await activate()).transpile.warm).to.equal(true);
+  });
+
   it("saves an unrelated object within 200 ms after dispatch, before hashing; B stays inactive", async () => {
     await save("zcl_a", 2);
     const checked = store.warmActivation("CLAS", "ZCL_A");
@@ -111,7 +248,7 @@ main({heapLimit: ${512 * 1048576}, beforeCompile: async ({method}) => {
     const saveMs = performance.now() - saveStarted;
     const beforeResume = store.read("CLAS", "ZCL_B").source;
     mode("normal");
-    child.send({method: "resume"});
+    sendIPC(child, {method: "resume"});
     const result = await publishing;
     await saving;
     expect(result).to.include({ok: true});
@@ -144,7 +281,7 @@ main({heapLimit: ${512 * 1048576}, beforeCompile: async ({method}) => {
     await Promise.race([saving, sleep(200).then(() => { throw new Error("save blocked by prime"); })]);
     expect(performance.now() - started).to.be.lessThan(200);
     expect(out("zcl_a")).to.include("IntegerFactory.get(1)");
-    mode("normal"); child.send({method: "resume"});
+    mode("normal"); sendIPC(child, {method: "resume"});
     expect(await priming).to.not.equal(undefined, store.warmState.reason);
     expect(compiler.primed).to.equal(true);
     const result = await activate();
@@ -162,7 +299,7 @@ main({heapLimit: ${512 * 1048576}, beforeCompile: async ({method}) => {
     await Promise.race([Promise.resolve(save("zcl_a", 8)), sleep(200).then(() => { throw new Error("save blocked by build"); })]);
     expect(performance.now() - started).to.be.lessThan(200);
     expect(out("zcl_a")).to.include("IntegerFactory.get(1)");
-    mode("normal"); child.send({method: "resume"});
+    mode("normal"); sendIPC(child, {method: "resume"});
     const result = await publishing;
     expect(result.ok, JSON.stringify(result)).to.equal(true);
     expect(result.transpile.superseded).to.equal(1);
@@ -205,7 +342,7 @@ main({heapLimit: ${512 * 1048576}, beforeCompile: async ({method}) => {
     const gate = new Promise(r => { release = r; });
     const retry = new Promise(r => { reached = r; });
     store.buildOptions.onStep = async () => { reached(); await gate; };
-    mode("normal"); child.send({method: "resume"});
+    mode("normal"); sendIPC(child, {method: "resume"});
     await retry;
     expect(out("zcl_a"), "the superseded warm generation was never made live").to.include("IntegerFactory.get(1)");
     expect(out("zcl_b")).to.include("IntegerFactory.get(1)");
@@ -225,7 +362,7 @@ main({heapLimit: ${512 * 1048576}, beforeCompile: async ({method}) => {
     const started = performance.now();
     await Promise.race([Promise.resolve(save("zcl_a", 11)), sleep(200).then(() => { throw new Error("save blocked by loaded prime"); })]);
     expect(performance.now() - started).to.be.lessThan(200);
-    mode("normal"); child.send({method: "resume"});
+    mode("normal"); sendIPC(child, {method: "resume"});
     expect(await priming).to.not.equal(undefined, store.warmState.reason);
     expect(compiler.primed).to.equal(true);
     const result = await activate();
@@ -261,11 +398,24 @@ main({heapLimit: ${512 * 1048576}, beforeCompile: async ({method}) => {
     const worker = join(root, "worker.mjs");
     writeFileSync(worker, readFileSync(worker, "utf8").replace("heapLimit: 536870912", "heapLimit: -1e12"));
     await store.warmUp();
+    let swapVerified, scheduled;
+    store.served = {running: true, generation: compiler.hash, swaps: 0, async hot(options) {
+      swapVerified = options.verified;
+      this.generation = options.generation;
+      return {hot: true, generation: options.generation, ms: 1, heaps: [1]};
+    }};
+    const verify = compiler.verify.bind(compiler);
+    compiler.verify = hash => { scheduled = hash; return verify(hash); };
     await save("zcl_a", 6);
     const checked = store.warmActivation("CLAS", "ZCL_A");
     const result = await activate();
     expect(result.ok).to.equal(true);
     expect(result.transpile.warm).to.equal(true);
+    expect(result.transpile.unverified).to.equal(true);
+    expect(swapVerified, "runtime must be told this generation is unchecked").to.equal(false);
+    expect(scheduled, "comparison must be scheduled after compiler recycling").to.equal(result.transpile.hash);
+    await store.warmState.verifying;
+    expect(store.warmState.last.verdict).to.equal("same");
     expect(compiler.recycleDue).to.equal(true);
     expect(compiler.primed).to.equal(false);
     expect(compiler.memory.rss).to.be.greaterThan(0);

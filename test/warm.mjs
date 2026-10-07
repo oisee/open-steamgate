@@ -676,6 +676,34 @@ describe("tools/osd-warm: an activation answers once its source is live", () => 
     }
   });
 
+  it("a save restarts the quiet period, and a quiet recycle waits for an activation in flight", async () => {
+    const {store, src, compiler, events, done} = setup();
+    try {
+      store.warmQuietMs = 100;
+      src.text = "rv = 2.";
+      await activate(store);
+      // a save re-arms the pending quiet timer rather than leaving it to fire
+      const armed = store.warmState.timer;
+      store.write("CLAS", "ZCL_A", "CLASS zcl_a DEFINITION PUBLIC. ENDCLASS.\nCLASS zcl_a IMPLEMENTATION. ENDCLASS.\n* saved\n");
+      expect(store.warmState.timer, "a save left the quiet timer as it was").to.not.equal(armed);
+      // an activation whose build outlasts the quiet period: the timer fires
+      // while it is in flight and must not recycle under it
+      let release;
+      const gate = new Promise((ok) => { release = ok; });
+      const build = compiler.build;
+      compiler.build = async function () { await gate; return build.call(this); };
+      src.text = "rv = 3.";
+      const second = activate(store);
+      await sleep(400);
+      expect(events.map((e) => e.what), "a quiet recycle under an activation in flight").to.deep.equal(["swap g1->g2"]);
+      release();
+      await second;
+      expect(events.map((e) => e.what), "the activation is a warm swap").to.deep.equal(["swap g1->g2", "swap g2->g3"]);
+    } finally {
+      done();
+    }
+  });
+
   it("a pool's swap reports the heap of every work process", async () => {
     const pool = new RuntimePool({size: 2});
     pool.runtimes[0].hot = async () => ({ms: 1, swaps: 1, heap: 100});
@@ -1050,20 +1078,15 @@ describe("tools/osd-warm: an activation answers once its source is live", () => 
   });
 });
 
-describe("tools/osd-warm: a comparison the tree has left", () => {
-  // vsp's pattern: a warm edit starts a comparison (a cold transpile in a
-  // child), and the next create is a cold build beside it; the comparison
-  // can only end inconclusive, and the activation waiting on the build paid
-  // for both transpiles
-  it("is stopped by a cold build, and one of the tree as it is is kept", () => {
+describe("tools/osd-warm: frozen comparisons survive cold publications", () => {
+  it("is kept across cold builds and stopped explicitly on shutdown", () => {
     const kills = [];
-    const child = (hash) => ({osdHash: hash, exitCode: null, kill: (s) => kills.push(`${hash} ${s}`)});
-    const compiler = {verifying: child("g2")};
-    expect(WarmCompiler.prototype.cancelVerify.call(compiler, "g2"), "the tree is still g2").to.equal(false);
-    expect(WarmCompiler.prototype.cancelVerify.call(compiler, "g3")).to.equal(true);
-    expect(kills).to.deep.equal(["g2 SIGTERM"]);
-    expect(compiler.verifying.osdCancelled).to.match(/a cold build replaced the tree/);
-    expect(WarmCompiler.prototype.cancelVerify.call({verifying: undefined}, "g3")).to.equal(false);
+    const compiler = {verifying: {osdHash: "g2", exitCode: null, kill: signal => kills.push(signal)}};
+    expect(WarmCompiler.prototype.cancelVerify.call(compiler, "g3")).to.equal(false);
+    expect(WarmCompiler.prototype.cancelVerify.call(compiler, undefined, "the front is closing")).to.equal(true);
+    expect(kills).to.deep.equal(["SIGTERM"]);
+    expect(compiler.verifying.osdCancelled).to.equal("the front is closing");
+    expect(WarmCompiler.prototype.cancelVerify.call({verifying: undefined}, undefined, "closing")).to.equal(false);
   });
 });
 
@@ -1108,7 +1131,7 @@ describe("tools/osd-warm: the build view, with other objects inactive", function
   let store;
   const A = "ZCL_WV_A";
   const B = "ZCL_WV_B";
-  const src = (name, v) => `CLASS ${name.toLowerCase()} DEFINITION PUBLIC CREATE PUBLIC.\n  PUBLIC SECTION.\n    CLASS-METHODS v RETURNING VALUE(rv) TYPE i.\nENDCLASS.\nCLASS ${name.toLowerCase()} IMPLEMENTATION.\n  METHOD v.\n    rv = ${v}.\n  ENDMETHOD.\nENDCLASS.\n`;
+  const src = (name, v) => `CLASS ${name.toLowerCase()} DEFINITION PUBLIC CREATE PUBLIC.\n  PUBLIC SECTION.\n    CLASS-METHODS class_constructor.\n    CLASS-METHODS v RETURNING VALUE(rv) TYPE i.\nENDCLASS.\nCLASS ${name.toLowerCase()} IMPLEMENTATION.\n  METHOD class_constructor.\n  ENDMETHOD.\n  METHOD v.\n    rv = ${v}.\n  ENDMETHOD.\nENDCLASS.\n`;
   const out = (name) => readFileSync(join(root, "output", `${name.toLowerCase()}.clas.mjs`), "utf8");
   const activate = async (name) => {
     const checked = store.warmActivation("CLAS", name);
@@ -1189,7 +1212,7 @@ describe("tools/osd-warm: the build view, with other objects inactive", function
   // an ADT client creates, saves and activates (cold: the object is new),
   // then saves and activates again at once -- before the reprime five
   // seconds later, so that one went cold as well (the stand-in, round 2)
-  it("the activation right after a cold one primes on demand and is warm", async () => {
+  it("the activation right after a cold create uses the updated registry and is warm", async () => {
     writeFileSync(join(root, "src", "zcl_wv_c.clas.abap"), src("ZCL_WV_C", 1));
     store.index = undefined;
     const made = await activate("ZCL_WV_C");
@@ -1227,6 +1250,30 @@ describe("tools/osd-warm: the build view, with other objects inactive", function
     expect((await prime).code).to.equal("CLOSED");
     expect(compiler.primed).to.equal(false);
   });
+
+  it("activating B while A stays on its active copy matches real cold script ordering", async () => {
+    const activeA = out(A);
+    store.write("CLAS", A, src(A, 40));
+    store.write("CLAS", B, src(B, 21));
+    const r = await activate(B);
+    expect(r.ok, JSON.stringify(r.transpile)).to.equal(true);
+    expect(r.transpile.warm, store.warmState.reason).to.equal(true);
+    expect((await store.warmState.compiler.verify(r.transpile.hash)).verdict).to.equal("same");
+    const scripts = ["init.mjs", "_init.mjs"];
+    const warmScripts = scripts.map(file => readFileSync(join(root, "output", file), "utf8"));
+    const frozen = JSON.parse(readFileSync(join(root, "build", "by-input", r.transpile.hash, "compile-inputs.json"), "utf8"));
+    // An independent cold build uses the store's actual view, not the
+    // verifier's potentially incorrect recorded order.
+    const cold = await build({root, generators: false, force: true, replace: true, overlay: store.overlay()});
+    expect(cold.hash).to.equal(r.transpile.hash);
+    for (const [i, file] of scripts.entries()) expect(warmScripts[i], file).to.equal(readFileSync(join(root, "output", file), "utf8"));
+    const sources = frozen.files.map(f => f.source);
+    expect(sources.indexOf("src/zcl_wv_b.clas.abap")).to.be.lessThan(sources.indexOf("src/zcl_wv_a.clas.abap"));
+    expect(out(A)).to.equal(activeA);
+    expect(out(B)).to.include("IntegerFactory.get(21)");
+    expect((await store.warmState.compiler.verify(r.transpile.hash)).verdict).to.equal("same");
+  });
+
 
 });
 
