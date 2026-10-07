@@ -81,6 +81,35 @@ describe("tools/adt-facade: a failed activation stays inactive", function () {
   };
   const inactive = async () => (await (await fetch(`${base}/activation/inactiveobjects`)).text());
 
+  it("keeps a newer ADT If-Match refusal when an older pending STORE attempt publishes", async () => {
+    const {StoreDestination, withSystem} = await import('../tools/osd-store-destination.mjs');
+    const {activationJournal} = await import('../tools/osd-activation-journal.mjs');
+    store.write('CLAS', 'ZCL_OSD_ACT', CLASS("'hello'"));
+    expect(ok(await activate('CLAS', 'ZCL_OSD_ACT'))).to.equal(true);
+    store.write('CLAS', 'ZCL_OSD_ACT', CLASS("'pending'"));
+    let complete;
+    const destination = new StoreDestination({store});
+    const a = JSON.parse((await withSystem(() => {}, () => destination.execute({
+      IV_COMMAND: 'ACTIVATE', IV_TYPE: 'CLAS', IV_NAME: 'ZCL_OSD_ACT'}),
+      {store, deferActivate: work => {complete = work;}})).EV_JSON);
+    expect(a.state).to.equal('pending');
+    const response = await fetch(`${base}/activation?method=activate`, {
+      method: 'POST', headers: {'content-type': 'application/xml', 'x-csrf-token': token,
+        cookie, 'if-match': '"outdated-check"'},
+      body: '<adtcore:objectReferences xmlns:adtcore="http://www.sap.com/adt/core"><adtcore:objectReference adtcore:uri="/sap/bc/adt/oo/classes/zcl_osd_act" adtcore:name="ZCL_OSD_ACT"/></adtcore:objectReferences>',
+    });
+    expect(response.status).to.equal(412);
+    await response.text();
+    const journal = activationJournal(store);
+    const b = journal.lastOutcome('CLAS', 'ZCL_OSD_ACT');
+    expect(b).to.include({outcome: 'failed'});
+    expect(b.attempt_seq).to.be.greaterThan(a.attempt_seq);
+    await complete();
+    expect(journal.lookup(a.op_id).state).to.equal('published');
+    expect(journal.lastOutcome('CLAS', 'ZCL_OSD_ACT')).to.deep.equal(b);
+    expect(store.read('CLAS', 'ZCL_OSD_ACT', 'main', 'active').source).to.equal(CLASS("'pending'"));
+  });
+
   it("forced activation builds pending source without the separate pre-check", async () => {
     store.write("CLAS", "ZCL_OSD_ACT", CLASS("'hello'"));
     expect(ok(await activate("CLAS", "ZCL_OSD_ACT"))).to.equal(true);

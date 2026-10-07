@@ -41,18 +41,33 @@ export class ActivationJournal {
     this.directory = join(root, ".local", "activation", host);
     this.file = join(this.directory, "operations.json");
     this.outcomeFile = join(this.directory, "last-outcomes.json");
+    this.attemptFile = join(this.directory, "attempt-sequences.json");
     this.generationFile = join(this.directory, "published-generation.json");
     try { this.entries = JSON.parse(readFileSync(this.file, "utf8")); }
     catch (e) { if (e.code !== "ENOENT") throw e; this.entries = {}; }
     let migrate = false;
     try { this.outcomes = JSON.parse(readFileSync(this.outcomeFile, "utf8")); }
     catch (e) { if (e.code !== "ENOENT") throw e; this.outcomes = {}; migrate = true; }
-    const latest = new Map(Object.values(this.entries).map(entry => [`${entry.type} ${entry.name}`, entry]));
+    try { this.attempts = JSON.parse(readFileSync(this.attemptFile, "utf8")); }
+    catch (e) { if (e.code !== "ENOENT") throw e; this.attempts = {}; }
+    // Legacy tickets are in start order. Keep counters beyond ticket expiry.
+    for (const entry of Object.values(this.entries)) {
+      const key = `${entry.type} ${entry.name}`;
+      const counter = this.attempts[key] ??= {sequence: 0};
+      entry.attempt_seq ??= counter.sequence + 1;
+      counter.sequence = Math.max(counter.sequence, entry.attempt_seq);
+    }
+    for (const [key, outcome] of Object.entries(this.outcomes)) {
+      outcome.attempt_seq ??= this.entries[outcome.op_id]?.attempt_seq ?? 0;
+      const counter = this.attempts[key] ??= {sequence: 0};
+      counter.sequence = Math.max(counter.sequence, outcome.attempt_seq);
+    }
+    this.saveAttempts();
     for (const entry of Object.values(this.entries)) {
       if (!["published", "failed"].includes(entry.state)) {
         Object.assign(entry, {state: "failed", active: false, live: false, failure_stage: "recovery",
           note: "source host restarted before completion", updated_at: this.time(), completed_at: this.time()});
-        if (latest.get(`${entry.type} ${entry.name}`) === entry) this.rememberOutcome(entry);
+        this.rememberOutcome(entry);
       } else if (migrate) this.rememberOutcome(entry);
     }
     // Migrate before pruning expired history, including a failed old ticket.
@@ -79,11 +94,19 @@ export class ActivationJournal {
     } catch (error) { checkpointFailure(this, error); }
   }
   rememberOutcome(entry) {
-    this.outcomes[`${entry.type} ${entry.name}`] = {
-      op_id: entry.op_id, outcome: entry.state, generation: entry.generation_id,
+    const key = `${entry.type} ${entry.name}`;
+    if ((this.outcomes[key]?.attempt_seq ?? -1) > entry.attempt_seq) return;
+    this.outcomes[key] = {
+      op_id: entry.op_id, attempt_seq: entry.attempt_seq, outcome: entry.state, generation: entry.generation_id,
       diagnostics: {failure_stage: entry.failure_stage, note: entry.note, issues: entry.issues,
         ...(entry.error ? {error: entry.error} : {})},
     };
+  }
+  saveAttempts() {
+    mkdirDurable(this.directory);
+    const temporary = `${this.attemptFile}.${process.pid}.tmp`;
+    writeDurable(temporary, JSON.stringify(this.attempts));
+    renameDurable(temporary, this.attemptFile);
   }
   saveOutcomes() {
     mkdirDurable(this.directory);
@@ -107,7 +130,11 @@ export class ActivationJournal {
     renameSync(temporary, this.file);
   }
   create(type, name) {
-    const entry = {state: "checked", op_id: randomUUID(), generation_id: "", type, name,
+    name = String(name).toUpperCase();
+    const counter = this.attempts[`${type} ${name}`] ??= {sequence: 0};
+    const attempt_seq = ++counter.sequence;
+    this.saveAttempts();
+    const entry = {state: "checked", op_id: randomUUID(), attempt_seq, generation_id: "", type, name,
       created_at: this.time(), updated_at: this.time(), completed_at: "", failure_stage: "",
       active: false, live: false, note: "", issues: []};
     this.entries[entry.op_id] = entry;

@@ -755,6 +755,32 @@ describe('STORE activation operation tracking', function () {
     expect(failed.state).to.equal('failed');
     expect(failed.failure_stage).to.equal('step');
   });
+  it('orders outcomes by attempt start across completion, restart and ticket expiry', async () => {
+    const {ActivationJournal} = await import('../tools/osd-activation-journal.mjs');
+    let time = Date.now();
+    const journal = new ActivationJournal(root, {now: () => time});
+    const a = journal.create('CLAS', 'ZOP');
+    journal.update(a.op_id, {state: 'pending'});
+    const b = journal.create('CLAS', 'ZOP');
+    journal.update(b.op_id, {state: 'failed', failure_stage: 'validation'});
+    journal.update(a.op_id, {state: 'published', generation_id: 'older-publication'});
+    expect(journal.lastOutcome('CLAS', 'ZOP')).to.include({op_id: b.op_id, outcome: 'failed', attempt_seq: b.attempt_seq});
+    expect(journal.lookup(a.op_id).state).to.equal('published');
+    time += 25 * 60 * 60 * 1000;
+    journal.save();
+    const restarted = new ActivationJournal(root, {now: () => time});
+    expect(restarted.lastOutcome('CLAS', 'ZOP').op_id).to.equal(b.op_id);
+    const c = restarted.create('CLAS', 'ZOP');
+    expect(c.attempt_seq).to.be.greaterThan(b.attempt_seq);
+    restarted.update(c.op_id, {state: 'published', generation_id: 'recovery'});
+    expect(restarted.lastOutcome('CLAS', 'ZOP')).to.include({op_id: c.op_id, outcome: 'published'});
+    const d = restarted.create('CLAS', 'ZOP');
+    const e = restarted.create('CLAS', 'ZOP');
+    restarted.update(e.op_id, {state: 'failed', failure_stage: 'validation'});
+    const recovered = new ActivationJournal(root, {now: () => time});
+    expect(recovered.lookup(d.op_id).failure_stage).to.equal('recovery');
+    expect(recovered.lastOutcome('CLAS', 'ZOP').op_id).to.equal(e.op_id);
+  });
   it('recovers unfinished operations conservatively and expires terminal entries after 24h', async () => {
     const {ActivationJournal} = await import('../tools/osd-activation-journal.mjs');
     let time = Date.now();
