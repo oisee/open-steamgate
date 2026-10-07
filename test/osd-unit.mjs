@@ -149,6 +149,44 @@ ENDCLASS.
     }
   });
 
+  it("a test method or class written in mixed case is looked up the way the transpiler keys it", () => {
+    // ABAP names are case-insensitive: `METHODS First_Test FOR TESTING` runs
+    // on SAP. The transpiler keys FRIENDS_ACCESS_INSTANCE and the module's
+    // exports in lower case, while the parse keeps the case as written, so
+    // the plan has to carry the lower-case key or the method is "not a
+    // function" (found by PIA's agent on OSG, 2026-10-07).
+    const name = "ZCL_OSD_MIXED_CASE_PROBE";
+    const file = join("src", "zcl_osd_mixed_case_probe.clas.abap");
+    const tests = join("src", "zcl_osd_mixed_case_probe.clas.testclasses.abap");
+    writeFileSync(file, `CLASS zcl_osd_mixed_case_probe DEFINITION PUBLIC CREATE PUBLIC.
+ENDCLASS.
+
+CLASS zcl_osd_mixed_case_probe IMPLEMENTATION.
+ENDCLASS.
+`);
+    writeFileSync(tests, `CLASS LTCL_Probe DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
+  PRIVATE SECTION.
+    METHODS First_Test FOR TESTING RAISING cx_static_check.
+    METHODS SECOND_TEST FOR TESTING RAISING cx_static_check.
+ENDCLASS.
+
+CLASS LTCL_Probe IMPLEMENTATION.
+  METHOD first_test.
+  ENDMETHOD.
+  METHOD second_test.
+  ENDMETHOD.
+ENDCLASS.
+`);
+    try {
+      const {classes} = new UnitRun(new ObjectStore()).classes("CLAS", name);
+      expect(classes.map((c) => [c.name, c.localClass])).to.deep.equal([["LTCL_PROBE", "ltcl_probe"]]);
+      expect(classes[0].testMethods.map((m) => [m.name, m.method])).to.deep.equal([
+        ["FIRST_TEST", "first_test"], ["SECOND_TEST", "second_test"]]);
+    } finally {
+      for (const f of [file, tests]) rmSync(f, {force: true});
+    }
+  });
+
   it("a method that throws is one failed method, and the rest still run", async () => {
     // a method the module does not have: the runtime throws, and what
     // matters is that the throw is reported rather than ending the run
