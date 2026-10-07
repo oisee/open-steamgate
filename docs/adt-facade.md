@@ -239,6 +239,20 @@ and the body carries the verdict. `transpileOnActivate: false` is a test seam
 for suites that want the verdict without the build; it is not what a running
 instance does.
 
+**Active source proof.** `version=active` and history content `00000` require
+retained live-generation bytes or backfill verified against that generation's
+input digests. Unknown active source returns ADT 404 `ExceptionResourceNotFound`;
+a missing active test include carries ED/170, consistent with the include
+existence contract. Proven empty includes remain present, and removing a
+working include does not hide its retained active source. History listings and
+older git revisions do not require active-source proof.
+
+External pack and workspace-layer inputs retain their original root-relative
+provenance keys. Snapshot paths and pre-save copies encode parent segments
+beneath `build/`, beside ordinary generation sources. Only build source inputs
+are retained; unrelated foreign files are not copied. Cold builds, cache repair
+and warm promotions use the same reversible path mapping.
+
 **Inactive versions** (vsp-i7's abapGit spike, 2026-10-02). A write lands
 in the file, which stays the working area every editor shares, and marks the
 object inactive. Before the first save after an activation the active

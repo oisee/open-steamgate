@@ -24,13 +24,36 @@ CLASS zcl_osd_adt_source IMPLEMENTATION.
   ENDMETHOD.
   METHOD read.
     DATA lx_error TYPE REF TO zcx_osd_adt.
+    DATA lt_properties TYPE tihttpnvp.
+    DATA ls_property TYPE ihttpnvp.
+    DATA lv_pool TYPE string.
 *   B2a needs the extended READ/OBJECT contract. Go lacks OBJECT today.
     zcl_osd_adt_host=>require( `OBJECT` ).
     TRY.
         rs_read = zcl_osd_adt_host=>read( iv_type = iv_type iv_name = iv_name iv_include = iv_include iv_version = iv_version ).
       CATCH zcx_osd_adt INTO lx_error.
         IF lx_error->status = 404.
-          IF lx_error->message_text CS ` include `.
+          IF lx_error->message_text CS ` does not have any inactive version` AND iv_include = `testclasses`.
+            lv_pool = to_upper( iv_name ).
+            WHILE strlen( lv_pool ) < 30.
+              lv_pool = lv_pool && `=`.
+            ENDWHILE.
+            lv_pool = lv_pool && `CCAU`.
+            ls_property-name = `T100KEY-ID`.
+            ls_property-value = `ED`.
+            APPEND ls_property TO lt_properties.
+            ls_property-name = `T100KEY-NO`.
+            ls_property-value = `170`.
+            APPEND ls_property TO lt_properties.
+            ls_property-name = `T100KEY-V1`.
+            ls_property-value = lv_pool.
+            APPEND ls_property TO lt_properties.
+            CREATE OBJECT lx_error EXPORTING iv_status = 404 iv_type = `ExceptionResourceNotFound`
+              iv_message = lv_pool && ` does not have any inactive version` it_properties = lt_properties
+              iv_miss = zcx_osd_adt=>c_miss_object.
+          ELSEIF lx_error->message_text CS ` active version (`.
+            lx_error = zcx_osd_adt=>not_found( iv_message = lx_error->message_text iv_miss = zcx_osd_adt=>c_miss_object ).
+          ELSEIF lx_error->message_text CS ` include `.
             lx_error = zcx_osd_adt=>not_found( iv_message = |{ iv_type } { iv_name } include { iv_include } does not exist| iv_miss = zcx_osd_adt=>c_miss_object ).
           ELSE.
             lx_error = zcx_osd_adt=>not_found( iv_message = |{ iv_type } { iv_name } does not exist| iv_miss = zcx_osd_adt=>c_miss_object ).

@@ -824,7 +824,8 @@ describe("tools/adt-facade: the development loop", () => {
       // this scratch class into the live generation or promote its source.
       expect(await again.text()).to.contain('adtcore:version="inactive"');
       const active = await call(`/oo/classes/${SCRATCH}/source/main?version=active`);
-      expect(await active.text()).to.equal("");
+      expect(active.status).to.equal(404);
+      expect(await active.text()).to.include("ExceptionResourceNotFound");
     });
 
     it("source that holds activates, and says so with its properties", async function () {

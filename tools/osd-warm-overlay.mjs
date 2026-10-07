@@ -1,5 +1,6 @@
 // One build view for the store and the compiler process. A promoted object's
 // sources replace its copies; all other inactive sources keep their copies.
+import {sourceSnapshotPath} from "./osd-source-snapshot.mjs";
 import {existsSync, readdirSync} from "node:fs";
 import {join, resolve} from "node:path";
 
@@ -11,7 +12,7 @@ export function warmOverlay(root, folder, entries, activating = new Set()) {
   for (const {key, files} of entries) {
     const mine = activating.has(key);
     for (const file of files) {
-      const copy = join(folder, file);
+      const copy = join(folder, sourceSnapshotPath(file));
       const hasCopy = existsSync(join(root, copy));
       if (mine) {
         if (hasCopy) unused.push(resolve(root, copy));

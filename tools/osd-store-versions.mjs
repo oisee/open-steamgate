@@ -6,7 +6,8 @@ import {dirname, join, relative, resolve} from "node:path";
 import * as abaplint from "@abaplint/core";
 import {hashOf, inputsOf, liveHash, normalPath} from "./osd-build.mjs";
 import {entityTag} from "./adt-entity.mjs";
-import {writeSourceSnapshot} from "./osd-source-snapshot.mjs";
+import {NotFound} from "./osd-store.mjs";
+import {writeSourceSnapshot, sourceSnapshotPath, sourceOriginalPath} from "./osd-source-snapshot.mjs";
 import {copyDurable, mkdirDurable, removeDurable, renameDurable, writeDurable} from "./osd-durable.mjs";
 import {TYPES, INCLUDES} from "./osd-store-types.mjs";
 
@@ -89,7 +90,7 @@ export class StoreVersions {
   #recoverFromCopies() {
     const folder = join(this.#store.root, this.#store.inactiveDir, "active");
     if (!existsSync(folder)) return;
-    const copies = new Set(walkFiles(folder).map((f) => relative(folder, f).split("\\").join("/")));
+    const copies = new Set(walkFiles(folder).map((f) => sourceOriginalPath(relative(folder, f))));
     if (copies.size === 0) return;
     this.#keepOrphans = true;
     for (const entry of this.#entries().values()) {
@@ -215,7 +216,7 @@ export class StoreVersions {
   }
 
   #snapshotOf(file) {
-    return join(this.#store.inactiveDir, "active", file);
+    return join(this.#store.inactiveDir, "active", sourceSnapshotPath(file));
   }
 
   #hasCopy(entry) {
@@ -394,7 +395,7 @@ export class StoreVersions {
     const hash = (this.#store.served?.running === true ? this.#store.served.generation : undefined) ?? liveHash(this.#store.root);
     const generation = hash && join(this.#store.root, "build", "by-input", hash);
     const complete = generation && existsSync(join(generation, "source", ".complete"));
-    const snapshot = generation && join(generation, "source", file);
+    const snapshot = generation && join(generation, "source", sourceSnapshotPath(file));
     if (complete && existsSync(snapshot)) return snapshot;
     // Pre-save copies retain proven active input, including genuinely empty
     // bytes. keepActive leaves unavailable input absent, never a placeholder.
@@ -427,7 +428,7 @@ export class StoreVersions {
     if (typeof digest !== "string" || !/^[a-f0-9]{64}$/.test(digest)) return undefined;
     const shared = join(this.#store.root, "build", "source-by-digest", digest);
     if (existsSync(join(generation, "source-shared")) && existsSync(shared)) return shared;
-    const target = join(generation, "source", file);
+    const target = join(generation, "source", sourceSnapshotPath(file));
     if (existsSync(target) && createHash("sha256").update(readFileSync(target)).digest("hex") === digest) return target;
     const working = join(this.#store.root, file);
     if (!existsSync(working)) return undefined;
@@ -440,13 +441,22 @@ export class StoreVersions {
 
   #activeSource(file, entry) {
     const active = this.#activeFile(file, entry);
-    return active && existsSync(active) ? readFileSync(active, "utf8") : "";
+    if (!active || !existsSync(active)) {
+      const error = new NotFound(entry.type, `${entry.name} active version (${entry.include ?? "main"})`);
+      if (entry.type === "CLAS" && entry.include === "testclasses") {
+        const pool = entry.name.toUpperCase().padEnd(30, "=") + "CCAU";
+        error.message = pool + " does not have any inactive version";
+        error.properties = [["T100KEY-ID", "ED"], ["T100KEY-NO", "170"], ["T100KEY-V1", pool]];
+      }
+      throw error;
+    }
+    return readFileSync(active, "utf8");
   }
 
   sourceVersion(part, version) {
     const active = version === "active";
     const source = active ? this.#activeSource(part.file, part) : part.source;
-    return {...part, source, etag: entityTag(active ? "active\0" + source : source)};
+    return {...part, ...(active ? {empty: false} : {}), source, etag: entityTag(active ? "active\0" + source : source)};
   }
 
 }

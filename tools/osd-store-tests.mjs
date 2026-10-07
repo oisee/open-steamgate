@@ -7,6 +7,7 @@ import {createHash} from "node:crypto";
 import * as abaplint from "@abaplint/core";
 import {liveHash, linkRoots, loadConfig} from "./osd-build.mjs";
 import {activationJournal} from "./osd-activation-journal.mjs";
+import {sourceSnapshotPath} from "./osd-source-snapshot.mjs";
 import {withSourceLock} from "./osd-store-source-lock.mjs";
 import {nameProblem} from "./osd-object-name.mjs";
 import {objectOf} from "./osd-inputs.mjs";
@@ -30,7 +31,7 @@ function plansOf(root, generation, targets) {
   const sources = new Map(targets.map(t => [`${t.type} ${t.name}`, []]));
   for (const [file, digest] of Object.entries(inputs)) {
     if (!wanted.has(objectOf(basename(file)))) continue;
-    const source = join(generation, "source", file);
+    const source = join(generation, "source", sourceSnapshotPath(file));
     const bytes = readFileSync(existsSync(source) ? source : join(root, "build/source-by-digest", digest));
     if (createHash("sha256").update(bytes).digest("hex") !== digest) {
       throw refusal("GENERATION_UNAVAILABLE", "published source snapshot does not match its recorded digest");

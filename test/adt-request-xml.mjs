@@ -3,7 +3,7 @@ import {expect} from "chai";
 import express from "express";
 import {createServer} from "node:net";
 import {createHash} from "node:crypto";
-import {mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, readdirSync} from "node:fs";
+import {mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, readdirSync, readlinkSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import "./start.mjs";
@@ -19,6 +19,8 @@ import {dialogStep} from "../tools/osd-dialog-step.mjs";
 import {runtimeRootFixture} from "./helpers/runtime-root.mjs";
 
 const runtimeFixture = runtimeRootFixture();
+
+import {activeFixture} from "./helpers/source-snapshot.mjs";
 
 const base = "/sap/bc/adt/";
 const core = "http://www.sap.com/adt/core";
@@ -82,12 +84,14 @@ for (const front of ["node", "abap"]) describe(`T12/T13 XML requests ${front} mo
     writeFileSync(join(root, "src/zxml.prog.abap"), "REPORT zxml.\nWRITE 'active'.\n");
     writeFileSync(join(root, "src/zcl_xml.clas.abap"), "CLASS zcl_xml DEFINITION PUBLIC. ENDCLASS. CLASS zcl_xml IMPLEMENTATION. ENDCLASS.");
     writeFileSync(join(root, "src/zcl_xml.clas.testclasses.abap"), "CLASS ltcl_xml DEFINITION FOR TESTING. PRIVATE SECTION. METHODS test FOR TESTING. ENDCLASS. CLASS ltcl_xml IMPLEMENTATION. METHOD test. ENDMETHOD. ENDCLASS.");
+    activeFixture(root);
     store = new ObjectStore({root,libs:[],roots:[{path:"src",package:"$TMP",writable:true}]});
     writeFileSync(join(root,"src/zif_xml.intf.abap"),"INTERFACE zif_xml PUBLIC. ENDINTERFACE.");
     writeFileSync(join(root,"src/zincl_xml.prog.abap"),"FORM demo. ENDFORM.");
     writeFileSync(join(root,"src/zincl_xml.prog.xml"),"<abapGit><PROGDIR><SUBC>I</SUBC></PROGDIR></abapGit>");
     writeFileSync(join(root,"src/zddl_xml.ddls.asddls"),"define view entity ZDDL_XML as select from ztable { key id }");
     writeFileSync(join(root,"src/zsrv_xml.srvd.srvdsrv"),"define service ZSRV_XML { expose ZDDL_XML; }");
+    activeFixture(root);
     store = new ObjectStore({root,libs:[],roots:[{path:"src",package:"$TMP",writable:true}]});
     for(const method of ["activate","check","publish","create","write","read","unit","find"]) {
       const original = store[method];
@@ -137,7 +141,7 @@ for (const front of ["node", "abap"]) describe(`T12/T13 XML requests ${front} mo
   const digest = async () => {
     const files = [];
     const walk = dir => {for(const entry of readdirSync(dir,{withFileTypes:true}).sort((a,b) => a.name.localeCompare(b.name))) {
-      const path = join(dir,entry.name); if(entry.isDirectory()) walk(path); else files.push([path.slice(root.length),readFileSync(path).toString("hex")]);
+      const path = join(dir,entry.name); if(entry.isDirectory()) walk(path); else files.push([path.slice(root.length),entry.isSymbolicLink() ? {link:readlinkSync(path)} : readFileSync(path).toString("hex")]);
     }};
     walk(root);
     const holders = [];

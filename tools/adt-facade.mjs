@@ -1712,7 +1712,7 @@ export function adtRouter(options = {}) {
     // <include>/versions, and so does an interface's main include, which is
     // where vsp asks (resolveRevisionURL); everything else at .../source/main.
     const versionsOf = (req, res, include) => answer(res, () => {
-      const part = store.read(type, req.params.name, include, "active");
+      const part = store.read(type, req.params.name, include);
       const base = `${BASE}/${adt}/${encodeURIComponent(String(req.params.name).toLowerCase())}` +
         (include === undefined ? "/source/main/versions" : `/includes/${include}/versions`);
       const feed = objectVersions(store.root, part.empty ? undefined : part.file, identity.userName);
@@ -1722,7 +1722,7 @@ export function adtRouter(options = {}) {
       sendEntity(req, res, Buffer.from(versionsFeedDocument(part.name, type, base, feed)));
     });
     const versionContent = (req, res, include) => answer(res, () => {
-      const part = store.read(type, req.params.name, include, "active");
+      const part = store.read(type, req.params.name, include, req.params.version === "00000" ? "active" : "inactive");
       let source;
       try {
         source = versionSource(store.root, part.empty ? undefined : part.file, req.params.version, part.source);
