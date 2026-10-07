@@ -6473,6 +6473,15 @@ function compare(node, ctx) {
   const not = kids.length > 0 && isTok(kids[0], "NOT");
   const sources = node.findDirectExpressions(Expressions.Source);
   const text = upper(node.concatTokens());
+  const instanceClass = node.findDirectExpression(Expressions.ClassName);
+  if (/\bIS\s+(NOT\s+)?INSTANCE\s+OF\b/.test(text) && sources.length === 1 && instanceClass !== undefined) {
+    const value = source(sources[0], ctx);
+    if (value.type.k !== "ref") throw new Unsupported(`IS INSTANCE OF a ${value.type.k}`);
+    const target = namedType(instanceClass, ctx);
+    if (target.intf) ctx.program.interfaces.add(target.name);
+    const result = {c: "instance_of", x: value, type: target};
+    return /\bIS\s+NOT\s+INSTANCE\s+OF\b/.test(text) !== not ? {c: "not", x: result} : result;
+  }
   if (/\bIS\s+(NOT\s+)?SUPPLIED\b/.test(text)) {
     const nm = upper(/^(?:NOT\s+)?(\S+)\s+IS\b/.exec(text)?.[1] ?? "");
     if (!ctx.sig.params.some((p) => p.suppliedOf === nm)) throw new Unsupported(`${nm} IS SUPPLIED: not a parameter this method's declaration tracks`);

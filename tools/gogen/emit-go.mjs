@@ -2238,6 +2238,14 @@ function cond(c, ctx) {
       // a structure holding such a field: component by component
       if (c.x.type.k === "struct" && typedZeroInside(c.x.type)) return `abap.IsInitialOf(${expr(c.x, ctx)}, ${desc(c.x.type)})`;
       return `(${expr(c.x, ctx)} == ${zero(c.x.type)})`;
+    // IS INSTANCE OF uses the same fit as ?= / CAST, but reports false
+    // instead of raising CX_SY_MOVE_CAST_ERROR.
+    case "instance_of": {
+      const value = expr(c.x, ctx);
+      const target = goType(c.type);
+      if (c.type.name === "OBJECT" && c.type.intf) return `(${value} != nil)`;
+      return `func() bool { value := ${value}; if value == nil { return false }; _, ok := any(value).(${target}); return ok }()`;
+    }
     // ultra/events: line_exists( ) (frontend lineExists)
     case "line_exists": {
       const n = ctx.loop++;

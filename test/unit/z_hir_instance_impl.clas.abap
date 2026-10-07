@@ -1,0 +1,6 @@
+CLASS z_hir_instance_impl DEFINITION PUBLIC CREATE PUBLIC.
+  PUBLIC SECTION.
+    INTERFACES zcl_hir_instance_intf.
+ENDCLASS.
+CLASS z_hir_instance_impl IMPLEMENTATION.
+ENDCLASS.
