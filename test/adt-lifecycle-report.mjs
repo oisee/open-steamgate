@@ -145,11 +145,11 @@ describe("ADT lifecycle evidence and timing advisory",()=>{
   const base=fixture(); base.identity.vsp="other";
   const mismatch=checkReport(fixture(),base);
   expect(mismatch.errors).to.deep.equal([]);
-  expect(mismatch.timing.notes).to.include("Incompatible baseline identity: vsp");
+  expect(mismatch.timing.notes.join("\n")).to.contain("Incompatible baseline identity: vsp");
   base.complete=false;
   const partial=checkReport(fixture(),[base,fixture()]);
   expect(partial.errors).to.deep.equal([]);
-  expect(partial.timing.notes).to.include("Baseline lifecycle evidence is invalid");
+  expect(partial.timing.notes.join("\n")).to.contain("Baseline lifecycle evidence is invalid");
   expect(partial.timing.baselines).to.have.length(1);
  });
  it("still exits nonzero for a failed active readback with advisory timing",()=>{
@@ -172,6 +172,44 @@ describe("ADT lifecycle evidence and timing advisory",()=>{
    expect(verdict.timing.notes).to.have.length.greaterThan(0);
   }
  });
+ for (const failing of [false,true]) {
+  it(`skips malformed report-shaped baselines with warnings for a ${failing ? "failing" : "passing"} current run in checkReport and CLI`,()=>{
+   const current=fixture();
+   if(failing) current.results.find(row=>row.operation==="readback-active").status="FAIL";
+   const invalid=change=>{const report=fixture();change(report);return report;};
+   const malformed=[
+    invalid(report=>report.results=[null]),
+    invalid(report=>report.results.push(false,123,[])),
+    invalid(report=>report.results.push({})),
+    invalid(report=>delete report.results[0].client),
+    invalid(report=>report.results[0].operation=123),
+    invalid(report=>report.results[0].status="UNKNOWN"),
+    invalid(report=>report.results[0].ms="2000"),
+    invalid(report=>delete report.results[0].ms),
+    invalid(report=>report.results[0].sample="0"),
+    invalid(report=>delete report.results.find(row=>row.sample===0).sample),
+    invalid(report=>report.results[0].note={}),
+    invalid(report=>delete report.repeats),
+    invalid(report=>report.complete="true"),
+    invalid(report=>report.fatal={toString:null}),
+    invalid(report=>report.identity.commit={toString:null}),
+   ];
+   for (const reports of [malformed,[...malformed,fixture()]]) {
+    const history={reports}, verdict=checkReport(current,history);
+    expect(verdict.errors).to.deep.equal(checkReport(current).errors);
+    expect(verdict.timing.baselines).to.have.length(reports.length===malformed.length?0:1);
+    expect(verdict.timing.status).to.equal(reports.length===malformed.length?"PENDING":"QUIET");
+    expect(verdict.timing.notes).to.have.length(malformed.length);
+    expect(verdict.timing.notes.every(note=>note==="Warning: skipping timing baseline: Baseline lifecycle evidence is invalid")).to.equal(true);
+    const run=cli(current,history);
+    expect(run.status).to.equal(failing?1:0);
+    expect(run.stderr).to.equal("");
+    expect(run.summary).to.contain(`### ADT lifecycle: ${failing?"FAIL":"PASS"}`).and.contain("Warning: skipping timing baseline");
+    expect(run.stdout).to.contain("::warning title=ADT lifecycle timing history::");
+    if(failing) expect(run.summary).to.contain("readback-active");
+   }
+  });
+ }
  it("requires distinct repeated samples",()=>{
   const r=fixture(); r.results.find(x=>x.sample===1).sample=0;
   expect(checkReport(r).errors.length).to.be.greaterThan(0);
@@ -186,22 +224,33 @@ describe("ADT lifecycle evidence and timing advisory",()=>{
 describe("CI lifecycle timing history collection",()=>{
  const require=createRequire(import.meta.url);
  const workflow=require("js-yaml").load(readFileSync(".github/workflows/tests.yml","utf8"));
- const script=workflow.jobs["adt-lifecycle"].steps.find(step=>step.name==="Collect up to five compatible green main timing runs").with.script;
- const execute=async (apiFailure=false,artifactFailure)=>{
-  const {current}=realFixture(635), writes=new Map(), calls=[];
+ const steps=workflow.jobs["adt-lifecycle"].steps;
+ const collection=steps.find(step=>step.name==="Collect up to five compatible green main timing runs");
+ const script=collection.with.script;
+ const execute=async (apiFailure=false,artifactFailure,timeoutAt,scanCap=false)=>{
+  const {current}=realFixture(635), writes=new Map(), calls=[], downloads=[];
+  let elapsed=0;
   const fs={readFileSync:()=>JSON.stringify(current),writeFileSync:(file,data)=>writes.set(file,data)};
-  const cp={spawnSync:(_command,args)=>{
+  const cp={spawnSync:(_command,args,options)=>{
+   expect(options.timeout).to.be.within(1,170000);
    const data=writes.get(args[1]).toString();
    return {status:data==="unreadable zip"?1:0,stdout:data};
   }};
   const actions={
    listWorkflowRuns:async args=>{
-    expect(args).to.include({branch:"main",event:"push",status:"success",per_page:100});
+    expect(args).to.include({branch:"main",event:"push",status:"success",per_page:30});
+    expect(args.request.timeout).to.be.within(1,170000);
+    expect(args.request.signal).to.be.instanceOf(AbortSignal);
+    if(timeoutAt==="runs") { elapsed=170000; throw Error("request timed out"); }
     if(apiFailure) throw Error("history API unavailable");
+    if(scanCap) return {data:{workflow_runs:Array.from({length:100},(_,id)=>({id:id+100,head_sha:`commit-${id}`}))}};
     return {data:{workflow_runs:[90,10,9,8,7,6,5,4,3,2,1].map(id=>({id,head_sha:`commit-${id}`}))}};
    },
    listWorkflowRunArtifacts(){},
-   downloadArtifact:async ({artifact_id:id})=>{
+   downloadArtifact:async ({artifact_id:id,request})=>{
+    downloads.push(id);
+    expect(request.timeout).to.be.within(1,170000);
+    if(timeoutAt===id) { elapsed=170000; throw Error("request timed out"); }
     if(id===82) {
      if(artifactFailure) return {data:Buffer.from(artifactFailure)};
      throw Error("artifact expired during download");
@@ -213,19 +262,54 @@ describe("CI lifecycle timing history collection",()=>{
     return {data:Buffer.from(JSON.stringify(report))};
    },
   };
-  const github={rest:{actions},paginate:async (_method,{run_id:id})=>{
+  const github={rest:{actions},paginate:async (_method,{run_id:id,request})=>{
    calls.push(id);
+   expect(request.timeout).to.be.within(1,170000);
+   if(scanCap) return [];
+   if(timeoutAt==="artifacts") { elapsed=170000; throw Error("request timed out"); }
    if(id===10) return [];
    if(id===9) return [{id:91,name:"adt-lifecycle-attempt-1",expired:true}];
    const artifact=attempt=>({id:id*10+attempt,name:`adt-lifecycle-attempt-${attempt}`,expired:false});
    return [artifact(1),artifact(2)];
   }};
-  await new (Object.getPrototypeOf(async function(){}).constructor)("require","github","context","core","process",script)(
+  await new (Object.getPrototypeOf(async function(){}).constructor)("require","github","context","core","process","performance",script)(
    name=>name==="node:fs"?fs:name==="node:child_process"?cp:require(name),github,
    {repo:{owner:"fixture",repo:"fixture"},runId:90},{info(){}},
-   {cwd:()=>process.cwd(),env:{RUNNER_TEMP:"/tmp"}});
-  return {history:JSON.parse(writes.get(".local/adt-lifecycle/baselines.json")),calls};
+   {cwd:()=>process.cwd(),env:{RUNNER_TEMP:"/tmp"}},{now:()=>elapsed});
+  return {history:JSON.parse(writes.get(".local/adt-lifecycle/baselines.json")),calls,downloads};
  };
+ it("scans no more than 30 runs even if the API returns extra runs",async()=>{
+  const {history,calls}=await execute(false,undefined,undefined,true);
+  expect(calls).to.have.length(30);
+  expect(calls.at(-1)).to.equal(129);
+  expect(history.reports).to.deep.equal([]);
+ });
+ it("computes the required verdict before bounded optional history and renders after collection failure or timeout",()=>{
+  const functional=steps.find(step=>step.id==="functional_report");
+  const advisory=steps.find(step=>step.name==="Report normalized timing advisory and functional result");
+  expect(steps.indexOf(functional)).to.be.lessThan(steps.indexOf(collection));
+  expect(steps.indexOf(collection)).to.be.lessThan(steps.indexOf(advisory));
+  expect(functional.if).to.equal("always()");
+  expect(functional.run).to.contain("report.json ''").and.contain("report/summary.md");
+  expect(functional["continue-on-error"]).not.to.equal(true);
+  expect(collection).to.include({"timeout-minutes":3,"continue-on-error":true});
+  expect(advisory.if).to.equal("${{ !cancelled() && steps.functional_report.outcome == 'success' }}");
+  expect(advisory).to.include({"timeout-minutes":1,"continue-on-error":true});
+  expect(advisory.run).to.contain("report/advisory-summary.md\nmv");
+ });
+ for (const timeoutAt of ["runs","artifacts",52]) {
+  it(`stops on the elapsed budget during ${timeoutAt}, retaining partial history and the functional verdict`,async()=>{
+   const {history,calls,downloads}=await execute(false,undefined,timeoutAt);
+   expect(history.reports).to.have.length(timeoutAt===52?1:0);
+   expect(history.notes.join("\n")).to.contain("request timed out");
+   if(timeoutAt!=="runs") expect(history.notes.join("\n")).to.contain("170-second budget");
+   expect(calls).not.to.include(4);
+   if(timeoutAt===52) expect(downloads).not.to.include(51);
+   expect(checkReport(fixture(),history).errors).to.deep.equal([]);
+   const failed=fixture();failed.results.find(row=>row.operation==="readback-active").status="FAIL";
+   expect(checkReport(failed,history).errors).to.deep.equal(checkReport(failed).errors);
+  });
+ }
  it("collects five distinct usable runs despite unavailable artifacts and invalid history",async()=>{
   const {history,calls}=await execute();
   expect(history.reports.map(report=>report.identity.commit)).to.deep.equal(["artifact-81","artifact-52","artifact-42","artifact-32","artifact-22"]);

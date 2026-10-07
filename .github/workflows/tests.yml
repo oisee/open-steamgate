@@ -645,8 +645,16 @@ jobs:
         run: |
           mkdir -p .local/adt-lifecycle/report
           OSD_HEAVY_RANGE=90-99 OSD_HEAVY_SLOTS=4 tools/osd-heavy.sh node tools/adt-lifecycle.mjs --start 2>&1 | tee .local/adt-lifecycle/report/server.log
+      # Save the required verdict before any optional network work. A failed
+      # measurement still gets its functional report; timing cannot hide it.
+      - name: Compute required functional result
+        id: functional_report
+        if: always()
+        run: node tools/adt-lifecycle-report.mjs .local/adt-lifecycle/report/report.json '' .local/adt-lifecycle/report/summary.md
       - name: Collect up to five compatible green main timing runs
         if: success()
+        timeout-minutes: 3
+        continue-on-error: true
         uses: actions/github-script@v7
         with:
           script: |
@@ -658,22 +666,36 @@ jobs:
             const {owner, repo} = context.repo;
             const history = {reports: [], notes: []};
             const skipped = message => { history.notes.push(message); core.info(message); };
+            // Leave ten seconds for writing partial history before the step's
+            // hard three-minute limit. Each request and unzip shares this budget.
+            const started = performance.now();
+            const remaining = () => {
+              const ms = Math.floor(170000 - (performance.now() - started));
+              if (ms <= 0) throw Error('Timing history collection reached its 170-second budget');
+              return ms;
+            };
+            const request = () => {
+              const ms = remaining();
+              return {timeout:ms, signal:AbortSignal.timeout(ms)};
+            };
             try {
-              // Bound API work to the latest 100 green main push runs; expired
+              // Bound API work to the latest 30 green main push runs; expired
               // or unavailable artifacts do not consume the five usable slots.
-              const runs = await github.rest.actions.listWorkflowRuns({owner, repo, workflow_id:'tests.yml', event:'push', branch:'main', status:'success', per_page:100});
-              for (const run of runs.data.workflow_runs) {
+              const runs = await github.rest.actions.listWorkflowRuns({owner, repo, workflow_id:'tests.yml', event:'push', branch:'main', status:'success', per_page:30, request:request()});
+              for (const run of runs.data.workflow_runs.slice(0, 30)) {
+                remaining();
                 if (run.id === context.runId) continue;
                 try {
-                  const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {owner, repo, run_id:run.id});
+                  const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {owner, repo, run_id:run.id, request:request()});
                   const candidates = artifacts.filter(a => /^adt-lifecycle-attempt-\d+$/.test(a.name) && !a.expired)
                     .sort((a,b) => Number(b.name.split('-').at(-1)) - Number(a.name.split('-').at(-1)));
                   for (const artifact of candidates) {
+                    remaining();
                     try {
-                      const zip = await github.rest.actions.downloadArtifact({owner, repo, artifact_id:artifact.id, archive_format:'zip'});
+                      const zip = await github.rest.actions.downloadArtifact({owner, repo, artifact_id:artifact.id, archive_format:'zip', request:request()});
                       const archive = process.env.RUNNER_TEMP + '/lifecycle-baseline.zip';
                       fs.writeFileSync(archive, Buffer.from(zip.data));
-                      const unpack = cp.spawnSync('unzip', ['-p', archive, 'report.json'], {encoding:'utf8'});
+                      const unpack = cp.spawnSync('unzip', ['-p', archive, 'report.json'], {encoding:'utf8', timeout:remaining()});
                       if (unpack.status !== 0) throw Error('Unreadable main lifecycle artifact');
                       const base = JSON.parse(unpack.stdout);
                       const issue = baselineIssue(current, base);
@@ -692,9 +714,14 @@ jobs:
             fs.writeFileSync('.local/adt-lifecycle/baselines.json', JSON.stringify(history));
             core.info(`Timing history: ${history.reports.length}/${TIMING_RULE.baselines} compatible green main runs`);
       - name: Report normalized timing advisory and functional result
-        if: success()
+        # A collector failure/timeout is advisory. The required verdict and
+        # fallback summary already exist; retain them if rendering also fails.
+        if: ${{ !cancelled() && steps.functional_report.outcome == 'success' }}
+        timeout-minutes: 1
+        continue-on-error: true
         run: |
-          node tools/adt-lifecycle-report.mjs .local/adt-lifecycle/report/report.json .local/adt-lifecycle/baselines.json .local/adt-lifecycle/report/summary.md
+          node tools/adt-lifecycle-report.mjs .local/adt-lifecycle/report/report.json .local/adt-lifecycle/baselines.json .local/adt-lifecycle/report/advisory-summary.md
+          mv .local/adt-lifecycle/report/advisory-summary.md .local/adt-lifecycle/report/summary.md
       - name: Publish measurements even on failure
         if: always()
         run: |

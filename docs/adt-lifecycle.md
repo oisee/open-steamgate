@@ -66,7 +66,9 @@ program/include/CDS reads and compilation work. All four controls must have
 positive finite medians; otherwise comparison is pending.
 
 The workflow collects up to five compatible green `main` push runs, newest
-first, looking through the latest 100 successful runs of `tests.yml`. Recipe,
+first, looking through the latest 30 successful runs of `tests.yml`. Collection
+stops after five usable runs or 170 seconds (including requests and unzip),
+with a three-minute step timeout and `continue-on-error`. Recipe,
 SDK, VSP, runtime/library pins, Node major, OS and architecture must match.
 Each main run is normalized by its own reference; the median of those
 normalized values is the operation's baseline. One artifact per run is used,
@@ -75,7 +77,12 @@ invalid or incompatible artifacts are skipped. Fewer than five usable runs
 are accepted, with their count, commit identities and reference medians in
 the summary; no usable history is explicitly comparison pending. API failures
 leave fewer baselines or comparison pending with an explanation, preserving
-functional gates.
+functional gates. The required functional report runs immediately after the
+measurement step with `if: always()`, before history collection, and saves its
+PASS/FAIL and summary. The optional combined report runs after collection even
+if collection fails or times out; unreadable history leaves timing pending.
+Only the first report step can fail the gate, and its fallback summary remains
+available if the optional report fails.
 
 A warning fires when at least **two operations are strictly above 1.3x** their
 normalized historical median, or **any one reaches 2.0x**. A single operation
@@ -90,7 +97,8 @@ can mask slowdowns, so retain raw measurements for investigation.
 JSON fixtures (all QUIET), injects one 2x operation slowdown (WARN), uniform
 1.6x runner slowdown (QUIET), isolated sample outliers, and five-run history
 with differing runner speeds. It also checks CLI annotations and exit codes,
-artifact fallback, missing cleanup, failed validation/readback and MISSING
+artifact fallback, collection timeouts, malformed baseline warnings for passing
+and failing current runs, missing cleanup, failed validation/readback and MISSING
 allowances. `test/osd-suites.mjs` checks that a warning retains the green
 functional PR row and a functional failure keeps that row and `test` red.
 

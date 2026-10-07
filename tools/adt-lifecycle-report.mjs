@@ -63,7 +63,21 @@ export function timingReference(report) {
   return values.every(value => Number.isFinite(value) && value > 0) ? median(values) : undefined;
 }
 export function baselineIssue(report, baseline) {
-  if (!baseline || !Array.isArray(baseline.results) || functionalErrors(baseline).length) return "Baseline lifecycle evidence is invalid";
+  // History is optional, untrusted JSON. Reject malformed rows before either
+  // the functional validator or metric aggregation can dereference them.
+  if (!baseline || baseline.schema !== 1 || baseline.complete !== true ||
+    !Number.isInteger(baseline.repeats) || baseline.repeats < 3 ||
+    (baseline.fatal !== undefined && typeof baseline.fatal !== "string") ||
+    (baseline.identity?.commit !== undefined && typeof baseline.identity.commit !== "string") ||
+    !Array.isArray(baseline.results) || baseline.results.some(row =>
+    !row || typeof row !== "object" || Array.isArray(row) ||
+    !["client", "type", "operation"].every(key => typeof row[key] === "string" && row[key].length > 0) ||
+    !["PASS", "FAIL", "MISSING", "N/A"].includes(row.status) ||
+    (row.ms !== undefined && (!Number.isFinite(row.ms) || row.ms < 0)) ||
+    (row.status === "PASS" && row.type !== "DEVC" &&
+      ["edit", "check", "activate-edit", "readback-active", "edit+check+activate"].includes(row.operation) && row.sample === undefined) ||
+    (row.sample !== undefined && (!Number.isInteger(row.sample) || row.sample < 0 || row.sample >= baseline.repeats)) ||
+    (row.note !== undefined && typeof row.note !== "string")) || functionalErrors(baseline).length) return "Baseline lifecycle evidence is invalid";
   for (const key of ["recipe", "sdk", "vsp", "runtime", "node", "platform", "arch"]) {
     if (!report.identity?.[key] || report.identity[key] !== baseline.identity?.[key]) return `Incompatible baseline identity: ${key}`;
   }
@@ -79,7 +93,7 @@ export function checkReport(report, history) {
   const baselines = [];
   for (const baseline of candidates) {
     const issue = baselineIssue(report, baseline);
-    if (issue) { notes.push(issue); continue; }
+    if (issue) { notes.push(`Warning: skipping timing baseline: ${issue}`); continue; }
     baselines.push({report: baseline, reference: timingReference(baseline), metrics: metrics(baseline)});
     if (baselines.length === TIMING_RULE.baselines) break;
   }
@@ -150,6 +164,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   if (process.argv[4]) writeFileSync(process.argv[4], text);
   console.log(text);
   const verdict = checkReport(report, history);
+  for (const note of verdict.timing.notes.filter(note => typeof note === "string" && note.startsWith("Warning: skipping timing baseline:"))) {
+    const escaped = note.replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A");
+    console.log(`::warning title=ADT lifecycle timing history::${escaped}`);
+  }
   for (const warning of verdict.warnings) {
     const escaped = warning.replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A");
     console.log(`::warning title=ADT lifecycle timing::${escaped}`);

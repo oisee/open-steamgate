@@ -537,9 +537,12 @@ correctness remain required by `test` and determine the PR report row. Timing is
 advisory: divide every sampled operation median by the same-run median of four untouched
 ABAP-FS CLAS/INTF `edit` and `readback-active` medians, then compare with the median of
 normalized values from up to five compatible green main push runs (newest first,
-scanning the latest 100 successful `tests.yml` runs; fewer when artifacts are missing,
+scanning the latest 30 successful `tests.yml` runs with a 170-second elapsed budget
+and a three-minute step timeout; fewer when artifacts are missing,
 expired, unreadable, invalid or incompatible). Warn with a GitHub annotation and summary
 numbers when at least two operations are strictly above 1.3x or one reaches 2.0x;
 warnings never fail the job or PR row. No usable history or a zero/unavailable reference
-leaves timing explicitly pending. See [ADT lifecycle](adt-lifecycle.md) for the exact
+leaves timing explicitly pending. The required functional report saves the verdict
+before optional collection; collector and optional report failures cannot fail the
+job or suppress that report. See [ADT lifecycle](adt-lifecycle.md) for the exact
 controls, identity pins, evidence fixtures and local execution.
