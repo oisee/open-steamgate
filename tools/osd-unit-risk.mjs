@@ -2,6 +2,7 @@
 // dependencies. See docs/unit-risk.md for dispatch and unknown-target policy.
 import {BuiltIn, Expressions, SyntaxLogic, BasicTypes} from "@abaplint/core";
 import {statementKindOf} from "./osd-unit-risk-statements.mjs";
+import {registryRevision} from "./osd-store-registry.mjs";
 
 const WRITES = {
   InsertDatabase: "INSERT",
@@ -84,7 +85,8 @@ export class UnitRisk {
 
   #graph() {
     const registry = this.store.registry();
-    if (this.graph?.registry === registry) return this.graph;
+    const revision = registryRevision(registry);
+    if (this.graph?.registry === registry && this.graph.revision === revision) return this.graph;
     const classes = new Map(), nodes = new Map(), functions = new Map();
     const classKey = (object, name) => `${object}:${name}`;
     for (const object of registry.getObjects()) {
@@ -147,7 +149,7 @@ export class UnitRisk {
     }
     const globals = new Map([...classes.values()].filter((c) => c.object === c.name).map((c) => [c.name, c]));
     const lookup = (owner, name) => classes.get(classKey(owner.object, name)) ?? globals.get(name);
-    this.graph = {registry, classes, nodes, functions, lookup};
+    this.graph = {registry, revision, classes, nodes, functions, lookup};
     return this.graph;
   }
 

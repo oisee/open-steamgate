@@ -630,3 +630,52 @@ describe('ObjectStore numeric include invalidation', function () {
     expect(store.activate('INCL', '123').active).to.equal(true);
   });
 });
+
+describe('ObjectStore transitive activation checks', function () {
+  let root, store;
+  const base = 'CLASS zcl_base DEFINITION PUBLIC. PUBLIC SECTION. METHODS run IMPORTING iv_old TYPE i. ENDCLASS.\nCLASS zcl_base IMPLEMENTATION. METHOD run. ENDMETHOD. ENDCLASS.\n';
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'transitive-activation-'));
+    mkdirSync(join(root, 'src'));
+    writeFileSync(join(root, 'abap_transpile.json'), JSON.stringify({input_folder: 'src', libs: []}));
+    writeFileSync(join(root, 'abaplint.jsonc'), JSON.stringify({syntax: {version: 'v702'}}));
+    writeFileSync(join(root, 'src/zcl_base.clas.abap'), base);
+    writeFileSync(join(root, 'src/zcl_sub.clas.abap'), 'CLASS zcl_sub DEFINITION PUBLIC INHERITING FROM zcl_base. ENDCLASS.\nCLASS zcl_sub IMPLEMENTATION. ENDCLASS.\n');
+    writeFileSync(join(root, 'src/zcl_caller.clas.abap'), 'CLASS zcl_caller DEFINITION PUBLIC. PUBLIC SECTION. CLASS-METHODS call. ENDCLASS.\nCLASS zcl_caller IMPLEMENTATION. METHOD call. DATA sub TYPE REF TO zcl_sub. CREATE OBJECT sub. sub->run( iv_old = 1 ). ENDMETHOD. ENDCLASS.\n');
+    activeFixture(root);
+    store = new ObjectStore({root, libs: []});
+  });
+  afterEach(() => rmSync(root, {recursive: true, force: true}));
+  it('checks an inherited parameter through a subclass and recovers with the kept registry', () => {
+    expect(store.check('CLAS', 'ZCL_CALLER').issues).to.deep.equal([]);
+    const registry = store.registry();
+    store.write('CLAS', 'ZCL_BASE', base.replace('iv_old', 'iv_new'));
+    const result = store.activate('CLAS', 'ZCL_BASE');
+    expect(result.issues).to.deep.equal([]);
+    expect(result.active).to.equal(false);
+    expect(result.dependents.map(d => d.name)).to.include('ZCL_CALLER');
+    expect(result.dependents.flatMap(d => d.issues).some(i => /iv_old/i.test(i.message))).to.equal(true);
+    expect(store.registry()).to.equal(registry);
+    store.write('CLAS', 'ZCL_BASE', base);
+    expect(store.activate('CLAS', 'ZCL_BASE').active).to.equal(true);
+  });
+  it('accepts APC metadata reached through its handler while retaining source checks', () => {
+    writeFileSync(join(root, 'src/zchannel.sapc.xml'), '<SAPC><APPLICATION_ID>ZCHANNEL</APPLICATION_ID><PATH>/channel</PATH><CLASS_NAME>ZCL_CALLER</CLASS_NAME><STATEFUL>X</STATEFUL></SAPC>');
+    store.build();
+    expect(store.activate('CLAS', 'ZCL_BASE').active).to.equal(true);
+    store.write('CLAS', 'ZCL_BASE', base.replace('iv_old', 'iv_new'));
+    expect(store.activate('CLAS', 'ZCL_BASE').dependents.map(d => d.name)).to.include('ZCL_CALLER');
+  });
+  it('logs and checks the full registry above the dirty closure limit', () => {
+    for (let i = 0; i < 257; i++) writeFileSync(join(root, `src/zreader${i}.prog.abap`), `REPORT zreader${i}.\n* zcl_base\n`);
+    writeFileSync(join(root, 'src/zbad.prog.abap'), 'REPORT zbad.\nmissing_variable = 1.\n');
+    store.build();
+    const messages = [], warn = console.warn;
+    console.warn = message => messages.push(message);
+    let result;
+    try {result = store.activate('CLAS', 'ZCL_BASE');} finally {console.warn = warn;}
+    expect(messages.some(m => m.includes('exceeds 256') && m.includes('full registry check'))).to.equal(true);
+    expect(result.active).to.equal(false);
+    expect(result.dependents.map(d => d.name)).to.include('ZBAD');
+  });
+});

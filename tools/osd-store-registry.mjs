@@ -12,6 +12,8 @@ import {OBJECT_NAME_PATTERN} from "./osd-object-name.mjs";
 const PARSED = new Map();
 const PENDING = new Map();
 const REFERENCES = new WeakMap();
+const REVISIONS = new WeakMap();
+export const registryRevision = registry => REVISIONS.get(registry) ?? 0;
 
 export function forgetRegistry(store, files) {
   if (files !== undefined && PARSED.has(store.root)) {
@@ -50,6 +52,23 @@ function referenceIndex(registry) {
   }
   return index;
 }
+// One closure for cache invalidation and activation checking. Stop collecting
+// candidates at the check limit; its caller then checks the full registry.
+function readerClosure(index, names, limit = Infinity) {
+  const reached = new Set(names);
+  const queue = [...reached];
+  const affected = new Set();
+  for (const name of queue) {
+    for (const reader of index.readers.get(name) ?? []) {
+      if (affected.has(reader)) continue;
+      affected.add(reader);
+      if (affected.size > limit) return undefined;
+      const key = reader.getName().toUpperCase();
+      if (!reached.has(key)) {reached.add(key); queue.push(key);}
+    }
+  }
+  return affected;
+}
 
 // Update/add/remove only the changed object's files and dirty its transitive
 // readers before parsing. Both sides of temporary overlays use this too, so
@@ -73,16 +92,8 @@ export function updateRegistryFiles(registry, replacements) {
     }
     if (object) indexObject(index, object);
   }
-  const affected = new Set();
-  const queue = [...changed];
-  for (const name of queue) {
-    for (const reader of index.readers.get(name) ?? []) {
-      if (affected.has(reader)) continue;
-      affected.add(reader);
-      const key = reader.getName().toUpperCase();
-      if (!changed.has(key)) {changed.add(key); queue.push(key);}
-    }
-  }
+  const affected = readerClosure(index, changed);
+  if (changed.size) REVISIONS.set(registry, registryRevision(registry) + 1);
   for (const object of affected) object.setDirty();
   registry.parse();
 }
@@ -145,7 +156,7 @@ export function buildRegistry(store, configPath = "abaplint.jsonc") {
     // DDLS/SRVD are generator inputs excluded from the transpiler; their
     // dedicated checks below remain authoritative for those source types.
     rules: {...validation.rules, allowed_object_types: {...validation.rules.allowed_object_types,
-      allowed: [...validation.rules.allowed_object_types.allowed, "DDLS", "SRVD"]}},
+      allowed: [...validation.rules.allowed_object_types.allowed, "DDLS", "SRVD", "SAPC", "SAMC"]}},
   })));
   // everything, not only what the index calls an object: a class needs its
   // local includes, and a type pool is not an ADT object but the check
@@ -168,7 +179,10 @@ export function buildRegistry(store, configPath = "abaplint.jsonc") {
 export function registryDependents(registry, type, name) {
   const index = referenceIndex(registry);
   const self = registry.getObject(TYPES[type]?.sameFileAs ?? type, name);
-  return [...(index.readers.get(String(name).toUpperCase()) ?? [])]
+  const limit = 256;
+  const closure = readerClosure(index, [String(name).toUpperCase()], limit);
+  if (!closure) console.warn(`activation ${type} ${name}: dirty reader closure exceeds ${limit} objects; falling back to a full registry check`);
+  return [...(closure ?? registry.getObjects())]
     .filter(object => object !== self)
     .map(object => ({type: object.getType(), name: object.getName()}));
 }
