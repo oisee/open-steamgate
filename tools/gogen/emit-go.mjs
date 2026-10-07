@@ -1269,8 +1269,9 @@ function stmtLines(st, ctx, d) {
       const run = c.receiving ? `${place(c.receiving, ctx)} = ${expr(c, ctx)}` : expr(c, ctx);
       const quit = c.owner === "CL_ABAP_UNIT_ASSERT" ? c.args.find((a) => a.name === "QUIT" && a.supplied) : null;
       const marked = quit ? `abap.WithAssertQuit(${expr(quit.value, ctx)}, func() { ${run} })` : run;
-      // ultra/events: a c field passed to a generic TYPE c keeps its length
-      const fits = c.args.filter((a) => a.fitc).map((a) => `${t}${place(a.place, ctx)} = abap.CFit(${place(a.place, ctx)}, ${a.fitc})`);
+      // a fixed c or x field passed as a generic keeps its length
+      const fits = c.args.filter((a) => a.fitc).map((a) => `${t}${place(a.place, ctx)} = abap.CFit(${place(a.place, ctx)}, ${a.fitc})`)
+        .concat(c.args.filter((a) => a.fitx).map((a) => `${t}${place(a.place, ctx)} = abap.XFit(${place(a.place, ctx)}, ${a.fitx})`));
       if (fits.length) {
         if (!c.exceptions) return [`${t}${marked}`, ...fits];
         const m = Object.entries(c.exceptions.map).map(([k, v]) => `${JSON.stringify(k)}: ${v}`).join(", ");

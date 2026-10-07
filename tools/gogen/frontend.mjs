@@ -6077,7 +6077,9 @@ function call(chain, ctx, statement, hint) {
     // caller's c of any length: the callee writes the caller's field, which
     // keeps its own length (the value is fitted to it after the call)
     if (statement && p.type.k === "c" && p.type.len === 262143 && t.type.k === "c" && p.dir !== "importing") return {dir: p.dir, byValue: p.byValue, place: t, type: p.type, fitc: t.type.len};
-    if (p.dir !== "importing" && p.type.k === "xstring" && t.type.k === "x") return {dir: p.dir, byValue: p.byValue, place: t, type: p.type};
+    if (p.dir !== "importing" && p.type.k === "xstring" && t.type.k === "x") {
+      return {dir: p.dir, byValue: p.byValue, place: t, type: p.type, fitx: t.type.len};
+    }
     if (!sameType(t.type, p.type)) throw new Unsupported(`${name}: IMPORTING ${p.name} into a ${t.type.k}, the parameter is ${p.type.k}`);
     return {dir: p.dir, byValue: p.byValue, place: t, type: p.type};
   });

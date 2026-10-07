@@ -1,0 +1,13 @@
+CLASS zcl_osgt_xseq_fit DEFINITION PUBLIC FINAL CREATE PUBLIC.
+PUBLIC SECTION.
+CLASS-METHODS fill EXPORTING buffer TYPE xsequence.
+CLASS-METHODS fill_short EXPORTING buffer TYPE xsequence.
+ENDCLASS.
+CLASS zcl_osgt_xseq_fit IMPLEMENTATION.
+METHOD fill.
+buffer = 'AABB'.
+ENDMETHOD.
+METHOD fill_short.
+buffer = 'AA'.
+ENDMETHOD.
+ENDCLASS.
