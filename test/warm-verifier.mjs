@@ -108,8 +108,34 @@ describe("warm verifier settlement, lifetime and retained history (#625 round 7)
     for (const literal of ["'escaped '' period. INTERFACES zif_fake.'", "`escaped `` period. INTERFACES zif_fake.`", "|period. INTERFACES zif_fake.| "]) {
       const before = source(1).replace("PUBLIC SECTION.", `PUBLIC SECTION. CONSTANTS c TYPE string VALUE ${literal}.\n" leading comment.\n INTERFACES zif_one.`);
       expect(warmRule({path: input(), before, after: before.replace("zif_one", "zif_two")})).to.match(/INTERFACES/);
-      expect(warmRule({path: input(), before, after: before.replace("zif_fake", "zif_changed")})).to.equal(undefined);
+      // the cold generator matches raw text, literals included: conservative
+      expect(warmRule({path: input(), before, after: before.replace("zif_fake", "zif_changed")})).to.match(/INTERFACES/);
     }
+  });
+
+  it("guards INTERFACES past a pragma holding a quote, and literal text the generator reads raw", () => {
+    writeFileSync(join(root, "src", "zguard.tran.xml"), `<abapGit><TSTC><TCODE>ZGUARD</TCODE></TSTC><TSTCP><PARAM>\\CLASS=ZCL_GUARD\\METHOD=GET</PARAM></TSTCP></abapGit>`);
+    const cases = [
+      // a backtick inside pragma brackets opens no literal
+      source(1).replace("PUBLIC SECTION.", "PUBLIC SECTION. CONSTANTS c TYPE i VALUE 1 ##NEEDED[`]. INTERFACES zif_one."),
+      // the generator reads a literal's raw text
+      source(1).replace("PUBLIC SECTION.", "PUBLIC SECTION. CONSTANTS c TYPE string VALUE `period. INTERFACES zif_one.`.\n INTERFACES: zif_marker."),
+    ];
+    for (const before of cases) {
+      const after = before.replace("zif_one", "zif_osd_transaction");
+      writeFileSync(input(), before); const first = registryClass(transactions([join(root, "src")]));
+      writeFileSync(input(), after); const second = registryClass(transactions([join(root, "src")]));
+      expect(second, before).to.not.equal(first);
+      expect(warmRule({path: input(), before, after}), before).to.match(/INTERFACES/);
+    }
+    // a chained statement continued past the pragma's line changes the
+    // interface list: refused (the generator does not read this form, the
+    // compiled class does)
+    const chained = source(1).replace("PUBLIC SECTION.", "PUBLIC SECTION. CONSTANTS c TYPE i VALUE 1 ##NEEDED[`]. INTERFACES: zif_marker,\n zif_one.");
+    expect(warmRule({path: input(), before: chained, after: chained.replace("zif_one", "zif_two")})).to.match(/INTERFACES/);
+    // a method-body edit that touches no INTERFACES text stays warm
+    const plain = source(1).replace("PUBLIC SECTION.", "PUBLIC SECTION. CONSTANTS c TYPE i VALUE 1 ##NEEDED[`].\n INTERFACES zif_one.");
+    expect(warmRule({path: input(), before: plain, after: plain.replace("VALUE 1", "VALUE 2")})).to.equal(undefined);
   });
 
   it("retains a known mismatch past the settlement lock deadline and recovers cold", async () => {
