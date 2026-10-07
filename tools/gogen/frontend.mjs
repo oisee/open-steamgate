@@ -2240,25 +2240,34 @@ function statement(node, ctx) {
   // SEPARATED BY, RESPECTING BLANKS, LINES OF and a target of fixed length
   // stay refused in byte mode; character mode is ultra/events' CONCATENATE
   // further down.
-  if (isStmt(node, Statements.Concatenate) && /\bIN\s+BYTE\s+MODE\b/i.test(text)) {
-    if (!/\bIN\s+BYTE\s+MODE\s*\.?$/i.test(text) || /\b(SEPARATED|RESPECTING)\b/i.test(text)) throw new Unsupported(`CONCATENATE form: ${text}`);
-    const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
-    // CONCATENATE LINES OF itab INTO xstr IN BYTE MODE: the rows joined once,
-    // the way a reader gathers its pieces without copying the whole each time
-    if (/^CONCATENATE\s+LINES\s+OF\b/i.test(text)) {
-      const table = source(node.findDirectExpressions(Expressions.SimpleSource3)[0] ?? node.findDirectExpression(Expressions.Source), ctx);
-      if (target.type.k !== "xstring" || table?.type.k !== "table" || table.type.row.k !== "xstring") throw new Unsupported(`CONCATENATE form: ${text}`);
-      return {s: "concat_bytes", target, table, row: {e: "temp", name: "ConcatRow", type: table.type.row}};
+  if (isStmt(node, Statements.Concatenate)) {
+    const keywords = node.getChildren().filter((k) => k instanceof Nodes.TokenNode).map((k) => upper(tokenStr(k)));
+    const hasKeywords = (...words) => keywords.some((_, i) => words.every((word, j) => keywords[i + j] === word));
+    const endsWithKeywords = (...words) => {
+      const end = keywords.at(-1) === "." ? keywords.length - 1 : keywords.length;
+      const start = end - words.length;
+      return start >= 0 && words.every((word, i) => keywords[start + i] === word);
+    };
+    if (hasKeywords("IN", "BYTE", "MODE")) {
+      if (!endsWithKeywords("IN", "BYTE", "MODE") || hasKeywords("SEPARATED") || hasKeywords("RESPECTING")) throw new Unsupported(`CONCATENATE form: ${text}`);
+      const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+      // CONCATENATE LINES OF itab INTO xstr IN BYTE MODE: the rows joined once,
+      // the way a reader gathers its pieces without copying the whole each time
+      if (hasKeywords("LINES", "OF") && keywords[1] === "LINES" && keywords[2] === "OF") {
+        const table = source(node.findDirectExpressions(Expressions.SimpleSource3)[0] ?? node.findDirectExpression(Expressions.Source), ctx);
+        if (target.type.k !== "xstring" || table?.type.k !== "table" || table.type.row.k !== "xstring") throw new Unsupported(`CONCATENATE form: ${text}`);
+        return {s: "concat_bytes", target, table, row: {e: "temp", name: "ConcatRow", type: table.type.row}};
+      }
+      // parity-wave2: into an x of fixed length (A4H 2026-09-24,
+      // ZCL_GOGEN_T_BYTECATX): padded with 00 on the right and sy-subrc 0,
+      // cut to the length and sy-subrc 4 when longer; the operands, the target
+      // among them, are read first
+      if (target.type.k !== "xstring" && target.type.k !== "x") throw new Unsupported(`CONCATENATE IN BYTE MODE into a ${target.type.k}`);
+      const parts = node.findDirectExpressions(Expressions.SimpleSource3).map((n) => source(n, ctx));
+      if (parts.length < 2) throw new Unsupported(`CONCATENATE form: ${text}`);
+      for (const p of parts) if (p.type.k !== "x" && p.type.k !== "xstring") throw new Unsupported(`CONCATENATE IN BYTE MODE of a ${p.type.k}`);
+      return {s: "concat_bytes", target, parts: parts.map((p) => convert(p, XS)), fixed: target.type.k === "x" ? target.type.len : undefined};
     }
-    // parity-wave2: into an x of fixed length (A4H 2026-09-24,
-    // ZCL_GOGEN_T_BYTECATX): padded with 00 on the right and sy-subrc 0,
-    // cut to the length and sy-subrc 4 when longer; the operands, the target
-    // among them, are read first
-    if (target.type.k !== "xstring" && target.type.k !== "x") throw new Unsupported(`CONCATENATE IN BYTE MODE into a ${target.type.k}`);
-    const parts = node.findDirectExpressions(Expressions.SimpleSource3).map((n) => source(n, ctx));
-    if (parts.length < 2) throw new Unsupported(`CONCATENATE form: ${text}`);
-    for (const p of parts) if (p.type.k !== "x" && p.type.k !== "xstring") throw new Unsupported(`CONCATENATE IN BYTE MODE of a ${p.type.k}`);
-    return {s: "concat_bytes", target, parts: parts.map((p) => convert(p, XS)), fixed: target.type.k === "x" ? target.type.len : undefined};
   }
   if (isStmt(node, Statements.Condense)) {
     const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);

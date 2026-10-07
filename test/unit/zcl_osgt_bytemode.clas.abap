@@ -1,0 +1,20 @@
+CLASS zcl_osgt_bytemode DEFINITION PUBLIC FINAL CREATE PUBLIC.
+PUBLIC SECTION.
+CLASS-METHODS:
+  byte_in_literal RETURNING VALUE(rv) TYPE string,
+  char_in_literal RETURNING VALUE(rv) TYPE string,
+  real_byte RETURNING VALUE(rv) TYPE xstring.
+ENDCLASS.
+CLASS zcl_osgt_bytemode IMPLEMENTATION.
+METHOD byte_in_literal.
+CONCATENATE `a IN BYTE MODE b` `!` INTO rv.
+ENDMETHOD.
+METHOD char_in_literal.
+CONCATENATE `a IN CHARACTER MODE b` `!` INTO rv.
+ENDMETHOD.
+METHOD real_byte.
+DATA hex_a TYPE x LENGTH 1 VALUE 'AB'.
+DATA hex_b TYPE x LENGTH 1 VALUE '21'.
+CONCATENATE hex_a hex_b INTO rv IN BYTE MODE.
+ENDMETHOD.
+ENDCLASS.
