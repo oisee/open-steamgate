@@ -20,6 +20,12 @@ CLASS zcl_osd_apc_store_probe IMPLEMENTATION.
     DATA lv_generation TYPE string.
     DATA lv_tests TYPE string.
     lv_command = i_message->get_text( ).
+    IF strlen( lv_command ) > 7.
+      IF lv_command(7) = 'lookup:'.
+        mv_operation = lv_command+7.
+        lv_command = 'status'.
+      ENDIF.
+    ENDIF.
     CASE lv_command.
       WHEN 'activate' OR 'dump'.
         ls_answer = zcl_osd_adt_host=>store( iv_command = 'ACTIVATE'

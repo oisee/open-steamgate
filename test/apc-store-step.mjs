@@ -48,7 +48,7 @@ class Socket extends EventEmitter {
 
 describe('APC STORE activation ends at the message step boundary', function () {
   this.timeout(120000);
-  let Host, root, store, ipc, parent, peer, socket, saved, hot, publishes, dump, failBuild;
+  let Host, root, store, ipc, parent, peer, socket, saved, hot, publishes, dump, failBuild, publicationGate, handled;
   before(async () => {
     await import('./start.mjs');
     Host = (await import('../output/zcl_apc_host.clas.mjs')).zcl_apc_host;
@@ -94,10 +94,11 @@ cl_abap_unit_assert=>assert_equals( act = zcl_apc_store_target=>answer( ) exp = 
       overlay: set => store.overlay(set), keyOf: file => store.objectKeyOf(file), inactiveSources: set => store.inactiveSources(set)})};
     expect(await store.warmUp(), store.warmState.reason).not.to.equal(undefined);
     await store.write('CLAS', target, source(2));
-    publishes = 0; failBuild = false; dump = [];
+    publishes = 0; failBuild = false; dump = []; publicationGate = undefined; handled = [];
     const publish = store.publish.bind(store);
     store.publish = async options => {
       publishes++;
+      if (publicationGate) { publicationGate.enter(); await publicationGate.wait; }
       // Deterministically let message #2 overtake the old fire-and-forget
       // notification. Publication must run outside the work-process lock.
       await sleep(50);
@@ -112,14 +113,18 @@ cl_abap_unit_assert=>assert_equals( act = zcl_apc_store_target=>answer( ) exp = 
     ipc = new StoreIPCClient(peer);
     abap.context.RFCDestinations.STORE = ipc;
     socket = new Socket();
+    class TrackedHost extends Host {
+      async message(input) { handled.push(input.iv_text.get()); return super.message(input); }
+    }
     await serveChannel({req: {headers: {'sec-websocket-key': 'dGhlIHNhbXBsZSBub25jZQ=='}, url: '/store'},
-      socket, head: Buffer.alloc(0), host: Host,
+      socket, head: Buffer.alloc(0), host: TrackedHost,
       channel: {path: '/store', name: 'STORE', handler: 'ZCL_OSD_APC_STORE_PROBE', stateful: true},
       log: text => dump.push(text)});
     expect(socket.writes[0]).to.include('101 Switching Protocols');
     expect(socket.messages()).to.deep.equal(['ready']);
   });
   afterEach(async () => {
+    publicationGate?.release();
     // Wait for both the mailbox and any old asynchronous publication, even
     // on the failing-first run, before removing the private source tree.
     const deadline = Date.now() + 30000;
@@ -140,6 +145,58 @@ cl_abap_unit_assert=>assert_equals( act = zcl_apc_store_target=>answer( ) exp = 
     }
     if (root) rmSync(root, {recursive: true, force: true});
     expect(workProcess()).to.include({held: false, waiting: 0});
+  });
+  function gatePublication() {
+    let enter, release;
+    const entered = new Promise(resolve => { enter = resolve; });
+    const wait = new Promise(resolve => { release = resolve; });
+    publicationGate = {enter, release, wait};
+    return {entered, release};
+  }
+  it('startup activation publishes before its immediately due timer queries status', async () => {
+    // A warm swap intentionally cancels old-generation timers. Publish cold
+    // with no serving child so this test measures the startup mailbox itself.
+    await closeWarm(store); store.warmState.on = false; store.served = undefined;
+    socket.end(); socket = new Socket();
+    const gate = gatePublication();
+    const opening = serveChannel({req: {headers: {'sec-websocket-key': 'dGhlIHNhbXBsZSBub25jZQ=='}, url: '/store'},
+      socket, head: Buffer.alloc(0), host: Host,
+      channel: {path: '/store', name: 'STORE', handler: 'ZCL_OSD_APC_START_PROBE', stateful: true},
+      log: text => dump.push(text)});
+    try {
+      await gate.entered;
+      await sleep(30); // the zero-delay timer has expired while publication waits
+      expect(socket.writes).to.have.length(0);
+      expect(Object.values(store.activationJournal.entries)[0].state).to.equal('pending');
+    } finally { gate.release(); }
+    await opening;
+    const [pending, status] = (await socket.until(2)).map(JSON.parse);
+    expect(socket.writes[0]).to.include('101 Switching Protocols');
+    expect(status).to.include({state: 'published', op_id: pending.op_id});
+    expect(store.activationJournal.lookup(pending.op_id)).to.deep.equal(status);
+    expect(publishes).to.equal(1); expect(dump).to.deep.equal([]);
+  });
+  it('drops queued messages on transport close but completes committed publication', async () => {
+    const gate = gatePublication();
+    socket.send('activate'); socket.send('tests');
+    try {
+      await gate.entered;
+      expect(handled).to.deep.equal(['activate']);
+      const pending = JSON.parse((await socket.until(2))[1]);
+      const writes = socket.writes.length;
+      socket.end();
+      gate.release();
+      const deadline = Date.now() + 20000;
+      while (store.activationJournal.lookup(pending.op_id).state === 'pending' && Date.now() < deadline) await sleep(5);
+      // An independent FIFO step can proceed during publication and is a
+      // deterministic checkpoint after the gated event gives up its lock.
+      await exclusive(async () => {});
+      await sleep(30);
+      expect(store.activationJournal.lookup(pending.op_id)).to.include({state: 'published', active: true});
+      expect(handled).to.deep.equal(['activate']);
+      expect(socket.writes).to.have.length(writes + 1); // transport close frame only
+      expect(publishes).to.equal(1); expect(dump).to.deep.equal([]);
+    } finally { gate.release(); }
   });
   it('publishes before the next on_message on the same socket and runs tests on that generation', async () => {
     socket.send('activate'); socket.send('tests');
@@ -177,13 +234,15 @@ cl_abap_unit_assert=>assert_equals( act = zcl_apc_store_target=>answer( ) exp = 
     await db.commit();
     const sql = 'SELECT "run_id" FROM "zosd_job_seen" WHERE "run_id" = \'APC_STEP_PROBE\'';
     const before = (await db.select({select: sql})).rows;
-    socket.send('dump');
+    socket.send('dump'); socket.send('activate');
     const deadline = Date.now() + 20000;
     while (!dump.length && Date.now() < deadline) await sleep(5);
     expect(dump).to.have.length(1);
     const [operation] = Object.values(store.activationJournal.entries);
     expect(operation).to.include({state: 'failed', failure_stage: 'step', active: false});
     expect(publishes).to.equal(0);
+    await sleep(30);
+    expect(handled).to.deep.equal(['dump']);
     expect((await db.select({select: sql})).rows).to.deep.equal(before);
     await db.execute('DELETE FROM "zosd_job_seen" WHERE "run_id" = \'APC_STEP_PROBE\'');
     await db.commit();
