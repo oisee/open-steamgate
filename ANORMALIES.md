@@ -3770,7 +3770,7 @@ SNAPSHOT_MISMATCH and the doctor retry.
 
 ### ANOMALY-2026-10-06-http-client-send-synchronous - cl_http_client send( ) blocks, receive( ) does nothing
 
-- Status: `fixed in the pin, upstream PR pending` (oisee/open-abap-core `fix/http-client-async-send-upstream` on upstream main; the byte-identical patch is in the `osd-build-2026-10-07` pin b1f43c31 since 2026-10-07, on top of cherry-picks of upstream #1253, #1271, #1268, #1270, #1269 and #1289; `send( )` starts the request, `receive( )` awaits it, construction errors fail in send, request errors and timeouts in receive)
+- Status: `fixed in the pin, upstream PR pending` (oisee/open-abap-core `fix/http-client-async-send-upstream` on upstream main; the byte-identical patch (round 6 of review) is in the `osd-build-2026-10-07b` pin 22d31a35, on top of cherry-picks of upstream #1253, #1271, #1268, #1270, #1269 and #1289; `send( )` starts the request, `receive( )` awaits it, construction errors fail in send, request errors and timeouts in receive)
 - Discovery: PIA's fan-out probe (ZCL_PIA_PROBE_FAN), measured on A4H (SAP 7.58, background job) and on an OSG instance. It was reported by the PIA session on 2026-10-06; dell confirmed the source.
 - Affected path: open-abap-core `src/http/cl_http_client.clas.abap` (pin 8b397be). `if_http_client~send` awaits the whole request (`await postData(...)`, around line 195) and fills the response there. `if_http_client~receive` is empty ("handled in send()").
 - Reproducer: create three clients for `http://httpbin.org/delay/2`. Call `send( )` on each, then `receive( )` on each.
@@ -3779,7 +3779,7 @@ SNAPSHOT_MISMATCH and the doctor retry.
 - Possible fix: `send` keeps the pending promise without awaiting it; `receive` awaits it and fills the response. `http_communication_failure` then moves from `send` to `receive`, as on SAP. The per-client agent uses `maxSockets: 1`, which is fine per client.
 - Workaround: none in the tree. PIA runs its turn in a background unit and makes one LLM call per step. Whether two background units run concurrently in OSG has not been measured.
 - Regression: none yet.
-- Upstream: needs an issue in open-abap-core, after our critic pass; no upstream filing requested.
+- Upstream: [open-abap/open-abap-core#1299](https://github.com/open-abap/open-abap-core/pull/1299) (sent 2026-10-07 after three critic rounds; branch oisee:fix/http-client-async-send-upstream at 6c6dc15e).
 - Upstream version containing a fix: unknown.
 
 ### ANOMALY-2026-10-06-get-run-time-delta - GET RUN TIME returns ms since the previous call
@@ -3826,7 +3826,7 @@ Not an anomaly, recorded for porting: on 7.58, `FIND ... REGEX` (POSIX) raises a
 
 ### ANOMALY-2026-10-06-uccp-lone-surrogate - uccp drops a surrogate code unit
 
-- Status: `fixed in the pin, upstream PR pending` (oisee/open-abap-core `fix/uccp-lone-surrogate`, carried by the `osd-build-2026-10-07` pin b1f43c31 since 2026-10-07; `uccp` builds the UTF-16 code unit directly, so a lone surrogate survives and the pair concatenates to U+1F60A)
+- Status: `fixed in the pin, upstream PR pending` (oisee/open-abap-core `fix/uccp-lone-surrogate`, carried by the pin since 2026-10-07, now `osd-build-2026-10-07b` 22d31a35; `uccp` builds the UTF-16 code unit directly, so a lone surrogate survives and the pair concatenates to U+1F60A)
 - Discovery: PIA's test escape_emoji_pair passes 30/30 on A4H 7.58 and fails only in OSG. It was triggered by an emoji in a model answer and reported by the PIA session on 2026-10-06. dell confirmed the path in source.
 - Affected path: open-abap-core `src/conv/cl_abap_conv_in_ce.clas.abap`. `uccp` turns the hex into an integer and calls `uccpi`, which decodes the two bytes through a UTF-16LE (4103) converter. A lone surrogate does not survive that decode, and `uccp` swallows `cx_sy_conversion_codepage` (`* todo, hmm`), which leaves the result empty.
 - Reproducer: `cl_abap_conv_in_ce=>uccp( 'D83D' ) && cl_abap_conv_in_ce=>uccp( 'DE0A' )`.
@@ -3835,7 +3835,7 @@ Not an anomaly, recorded for porting: on 7.58, `FIND ... REGEX` (POSIX) raises a
 - Related, milder: on SAP, `cl_abap_conv_codepage=>create_out( )->convert( )` of a lone surrogate raises `CX_SY_CONVERSION_CODEPAGE`, while OSG appears to produce `EF BF BD` silently. This is not measured in OSG yet.
 - Workaround: none in the tree. The same family as ANOMALY-2026-10-04-sxml-supplementary-ref and ANOMALY-2026-10-06-uccpi-high-byte.
 - Regression: none yet.
-- Upstream: needs an issue in open-abap-core (code-unit level `uccp`, without a decode round trip), after our critic pass; no upstream filing requested.
+- Upstream: [open-abap/open-abap-core#1298](https://github.com/open-abap/open-abap-core/pull/1298) (sent 2026-10-07 after our critic; branch oisee:fix/uccp-lone-surrogate-upstream).
 - Upstream version containing a fix: unknown.
 
 ### ANOMALY-2026-10-07-daemon-api-types -- PIA measured typed START and INFO order
