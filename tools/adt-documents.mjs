@@ -39,6 +39,9 @@ export const ADT_TYPE = {
   SRVD: "SRVD/SRV",
   SHLP: "SHLP/DH",
   MSAG: "MSAG/N",
+  SICF: "SICF",
+  SAPC: "SAPC",
+  SAMC: "SAMC",
   DEVC: "DEVC/K",
 };
 

@@ -71,7 +71,7 @@ export function layerList(args, env = process.env, cwd = process.cwd()) {
   const rest = [];
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--layer") {
-      if (!args[i + 1] || args[i + 1].startsWith("--")) throw new Error("--layer needs a directory");
+      if (!args[i + 1] || args[i + 1].startsWith("--")) throw new Error("--layer needs a folder or ZIP");
       cli.push(args[++i]);
     } else {
       rest.push(args[i]);
@@ -80,7 +80,7 @@ export function layerList(args, env = process.env, cwd = process.cwd()) {
   const folders = [...(env.OSD_LAYERS || "").split(delimiter).filter(Boolean), ...cli]
     .map((folder) => isAbsolute(folder) ? resolve(folder) : resolve(cwd, folder));
   for (const folder of folders) {
-    if (!existsSync(folder) || !statSync(folder).isDirectory()) throw new Error(`layer is not a directory: ${folder}`);
+    if (!existsSync(folder) || !(statSync(folder).isDirectory() || statSync(folder).isFile() && /\.zip$/i.test(folder))) throw new Error(`layer is not a folder or ZIP: ${folder}`);
   }
   return {folders, rest};
 }

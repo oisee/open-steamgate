@@ -981,7 +981,7 @@ ENDCLASS.
 `;
 }
 
-function main() {
+export function main() {
   const reg = new abaplint.Registry(new abaplint.Config(JSON.stringify({
     global: {files: "/**/*.*"}, syntax: {version: "open-abap", errorNamespace: "."}, rules: {},
   })));

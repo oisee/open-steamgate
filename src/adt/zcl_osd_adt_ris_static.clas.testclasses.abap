@@ -52,6 +52,9 @@ CLASS ltcl_static IMPLEMENTATION.
     ls_response = answer( `repository/informationsystem/objecttypes` ).
     FIND ALL OCCURRENCES OF `<nameditem:namedItem>` IN ls_response-body MATCH COUNT lv_count.
     cl_abap_unit_assert=>assert_equals( act = lv_count exp = 15 ).
+    cl_abap_unit_assert=>assert_false( act = xsdbool( ls_response-body CS `<nameditem:name>SICF</nameditem:name>` ) ).
+    cl_abap_unit_assert=>assert_false( act = xsdbool( ls_response-body CS `<nameditem:name>SAPC</nameditem:name>` ) ).
+    cl_abap_unit_assert=>assert_false( act = xsdbool( ls_response-body CS `<nameditem:name>SAMC</nameditem:name>` ) ).
     cl_abap_unit_assert=>assert_char_cp( act = ls_response-body
       exp = `*<nameditem:name>CLAS</nameditem:name>*type:CLAS/OC;usedBy:quick_search,virtual_folders*` ).
     cl_abap_unit_assert=>assert_char_cp( act = ls_response-body

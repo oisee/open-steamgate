@@ -71,7 +71,7 @@ describe("ADT B8a: typestructure and parser/info Node diff", function () {
       expect(await wire(ported, TYPES, ask(ported))).to.deep.equal(expected);
       expect(expected.status).to.equal(200);
       expect(served).to.deep.equal([`ABAP POST ${TYPES}`]);
-      expect(expected.body.toString().match(/<SEU_ADT_OBJECT_TYPE_DESCRIPTOR>/g)).to.have.length(15);
+      expect(expected.body.toString().match(/<SEU_ADT_OBJECT_TYPE_DESCRIPTOR>/g)).to.have.length(18);
     });
   }
   it("typestructure case/trailing slash and CSRF refusal match Node", async () => {

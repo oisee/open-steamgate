@@ -1,3 +1,5 @@
+import {repositoryConfig} from "./osd-abapgit-config.mjs";
+import {userLayersOf, declaredPackage, rootPackage} from "./osd-source-layers.mjs";
 import {packageChildName} from "./osd-object-name.mjs";
 import {transpileStore} from "./osd-store-build.mjs";
 import {deferSourceMutation} from "./osd-store-source-lock.mjs";
@@ -18,7 +20,7 @@ import {recordBaselineGeneration, recordStoreGeneration} from "./osd-activation-
 // registry, because a class that compiles alone can still break the system
 // it is part of. The check returns the same shape for a write and for an
 // activation, since the façade reports both the same way.
-import {existsSync, mkdirSync, readFileSync, rmSync, statSync, unlinkSync, watch, writeFileSync} from "node:fs";
+import {chmodSync, copyFileSync, readdirSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, unlinkSync, watch, writeFileSync} from "node:fs";
 import {createHash} from "node:crypto";
 import {CREATABLE} from "./osd-store-create.mjs";
 import {StoreVersions} from "./osd-store-versions.mjs";
@@ -153,10 +155,14 @@ export function exclusionsOf(root) {
 
 export function rootsOf(root, env = process.env) {
   const config = loadConfig(root);
-  const packs = new Map(packRootsOf(root, env).map((pack) => [pack.path, pack]));
+  const packs = new Map([...packRootsOf(root, env), ...userLayersOf(root, env)].map((pack) => [pack.path, pack]));
   return inputFoldersOf(root, config, env).map((path) => packs.get(path) ?? (path === TMP_FOLDER ? tmpRoot() : {
     path, writable: path !== "gen", library: false,
     ...(path === "local" || path.startsWith("local/") ? {imported: true} : {}),
+    ...(existsSync(join(root, path, ".abapgit.xml")) ? {
+      abapgit: repositoryConfig(join(root, path)),
+      package: rootPackage(join(root, path), "$OSD_" + packageWord(basename(path))),
+    } : {}),
   }));
 }
 
@@ -243,6 +249,17 @@ export class ObjectStore {
   // link joined up, so a name that happens to hold an underscore does not
   // invent a parent that is not there.
   #packagesOf(file, root) {
+    if (root.abapgit) {
+      const folders = relative(root.path, dirname(file)).split(/[\\/]/).filter(p => p && p !== ".");
+      const chain = [root.package];
+      let at = root.path;
+      for (const folder of folders) {
+        at = join(at, folder);
+        chain.push(declaredPackage(join(this.root, at)) ?? (root.abapgit.folderLogic === "FULL"
+          ? folder.toUpperCase() : `${chain[chain.length - 1]}_${folder.toUpperCase()}`));
+      }
+      return chain;
+    }
     const own = Object.keys(FOLDER_PACKAGES).find((folder) => file.startsWith(folder + "/"));
     const bases = own !== undefined ? [FOLDER_PACKAGES[own]]
       // a pack says which package it is (tools/osd-packs.mjs)
@@ -294,7 +311,7 @@ export class ObjectStore {
               : own && this.superPackage ? [this.superPackage]
               : chain;
             index.set(key, {type, name: objectName, file, root: root.path, writable: root.writable, library: root.library,
-                            imported: root.imported === true, package: home[home.length - 1], packages: home});
+                            imported: root.imported === true, overlay: root.overlay, package: home[home.length - 1], packages: home});
           }
           break;
         }
@@ -439,6 +456,47 @@ export class ObjectStore {
     return this.#versions.sourceVersion({...entry, include, source: readFileSync(join(this.root, entry.file), "utf8")}, version);
   }
 
+  // Copy the complete winning object, including XML and all class includes,
+  // before the active-source machinery takes its snapshot of the overlay.
+  #copyToOverlay(entry) {
+    const root = this.roots.find(r => r.path === entry.overlay && r.writable);
+    if (!root) throw new ReadOnly(entry.type, entry.name);
+    const sourceDir = dirname(entry.file);
+    const targetDir = join(root.path, relative(entry.root, sourceDir));
+    const safe = writeCheck(this.root, {...root, tmp: true}, `${entry.type} ${entry.name}`);
+    for (const name of readdirSync(join(this.root, sourceDir))) {
+      if (name.startsWith(basename(entry.file).slice(0, -TYPES[entry.type].ext.length) + "." + entry.type.toLowerCase() + ".")) safe(join(targetDir, name));
+    }
+    mkdirSync(join(this.root, targetDir), {recursive: true});
+    const stem = basename(entry.file).slice(0, -TYPES[entry.type].ext.length);
+    for (const name of readdirSync(join(this.root, sourceDir))) {
+      if (name.startsWith(stem + "." + entry.type.toLowerCase() + ".")) {
+        copyFileSync(join(this.root, sourceDir, name), join(this.root, targetDir, name));
+        chmodSync(join(this.root, targetDir, name), 0o644);
+      }
+    }
+    // Preserve package descriptions/identity at every level above the copy.
+    let from = sourceDir;
+    for (;;) {
+      const header = join(this.root, from, "package.devc.xml");
+      const to = join(this.root, root.path, relative(entry.root, from), "package.devc.xml");
+      if (existsSync(header) && !existsSync(to)) {
+        mkdirSync(dirname(to), {recursive: true});
+        safe(relative(this.root, to));
+        copyFileSync(header, to);
+        chmodSync(to, 0o644);
+      }
+      if (from === entry.root) break;
+      from = dirname(from);
+    }
+    const copied = {...entry, file: join(targetDir, basename(entry.file)), root: root.path,
+      writable: true, overlay: undefined};
+    this.#versions.relocateActive(entry, copied);
+    this.#entries().set(`${entry.type} ${entry.name}`, copied);
+    this.#forget();
+    return copied;
+  }
+
   // a write lands a file; a new object goes to the first writable root unless
   // a caller with a specific layer (the notebook scratch pack) names one
   write(type, name, source, include = "main", options = {}) {
@@ -456,7 +514,8 @@ export class ObjectStore {
     }
     let entry = this.find(type, name);
     if (entry !== undefined && entry.writable === false) {
-      throw new ReadOnly(type, name);
+      if (entry.overlay) entry = this.#copyToOverlay(entry);
+      else throw new ReadOnly(type, name);
     }
     if (entry !== undefined && requestedRoot !== undefined &&
         resolve(this.root, entry.root) !== resolve(this.root, requestedRoot.path)) {
@@ -464,8 +523,9 @@ export class ObjectStore {
     }
     if (entry === undefined) {
       checkName(type, name, CREATABLE[type] !== undefined); // a W3MI id, an IWSV keep their own
-      const root = requestedRoot ?? this.roots.find((r) => r.writable);
-      const file = join(root.path, "osd", fileOf(name) + meta.ext);
+      const root = requestedRoot ?? [...this.roots].reverse().find(r => r.overlayOf && r.writable)
+        ?? this.roots.find((r) => r.writable);
+      const file = join(root.path, ...(root.overlayOf ? [] : ["osd"]), fileOf(name) + meta.ext);
       const packages = this.#packagesOf(file, root);
       entry = {type, name: String(name).toUpperCase(), file, root: root.path, writable: true, library: false,
                imported: root.imported === true, package: packages[packages.length - 1], packages};
@@ -479,6 +539,9 @@ export class ObjectStore {
       }
       file = entry.file.replace(/\.clas\.abap$/, suffix);
     }
+    const writeRoot = this.roots.find(r => r.path === entry.root);
+    const safe = writeCheck(this.root, {...writeRoot, tmp: writeRoot?.overlayOf ? true : writeRoot?.tmp}, `${type} ${entry.name}`);
+    safe(file);
     mkdirSync(join(this.root, dirname(file)), {recursive: true});
     // One line ending, the repository's. An editor on Windows sends CRLF,
     // and a save that wrote it as it came turned a one-line comment into a
@@ -490,7 +553,7 @@ export class ObjectStore {
     this.#versions.crash("write:before-intent");
     this.#versions.markInactive(entry, new Map([[file, Buffer.from(text, "utf8")]]));
     this.#versions.crash("write:before-source");
-    writeFileSync(join(this.root, file), text);
+    writeChecked(this.root, file, text, safe, this.hooks);
     this.#forget();
     return {...entry, ...this.stateOf(entry), include, file, bytes: Buffer.byteLength(source, "utf8"),
       revision: this.#versions.sourceRevision(type, entry.name)};
@@ -522,12 +585,13 @@ export class ObjectStore {
       throw new Conflict(type, upper);
     }
     const parent = String(options.package ?? "").toUpperCase();
-    const home = this.find("DEVC", parent);
+    let home = this.find("DEVC", parent);
     if (parent === "" || home === undefined) {
       throw new NotFound("DEVC", parent === "" ? "(no package named)" : parent);
     }
     if (home.writable === false) {
-      throw new ReadOnly("DEVC", parent);
+      if (home.overlay) home = this.#copyToOverlay(home);
+      else throw new ReadOnly("DEVC", parent);
     }
     const folder = dirname(home.file);
     const root = this.roots.find((r) => folder === r.path || folder.startsWith(r.path + "/"));
@@ -541,7 +605,7 @@ export class ObjectStore {
     } else if (file === undefined) {
       file = join(folder, fileOf(upper) + meta.ext);
     }
-    const safe = writeCheck(this.root, root, `${type} ${upper}`); // inside its root, no link
+    const safe = writeCheck(this.root, root?.overlayOf ? {...root, tmp: true} : root, `${type} ${upper}`); // inside its root, no link
     safe(file);
     if (existsSync(join(this.root, file))) {
       throw new Conflict(type, upper);

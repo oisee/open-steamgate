@@ -3837,3 +3837,21 @@ Not an anomaly, recorded for porting: on 7.58, `FIND ... REGEX` (POSIX) raises a
 - Regression: none yet.
 - Upstream: needs an issue in open-abap-core (code-unit level `uccp`, without a decode round trip), after our critic pass; no upstream filing requested.
 - Upstream version containing a fix: unknown.
+
+### ANOMALY-2026-10-07-daemon-api-types -- PIA measured typed START and INFO order
+
+- Status: fixed locally (round 1 of ZIP parity).
+- Measurement: PIA DD04L/DD03L on A4H 7.58, 2026-10-07.
+- Expected contract: IF_ABAP_DAEMON_TYPES instance ID uses ABAP_DAEMON_INSTANCE_ID
+  (SSTRING 255), name uses ABAP_DAEMON_NAME (CHAR60), priority uses
+  ABAP_DAEMON_PRIORITY (INT4). START priority is VALUE with normal default.
+- ABAP_DAEMON_INFO field order: NAME, INSTANCE_ID, CREATOR_CLIENT (CLNT3),
+  CREATOR_USER (CHAR12), USED_DEST (ABAP_DAEMON_DESTINATION, CHAR40),
+  CREATION_TIME (TIMESTAMP, DEC15), APPLICATION_SERVER (MSNAME2, CHAR40).
+  PIA did not name data elements for CREATOR_CLIENT/CREATOR_USER; those remain
+  direct types. No additional daemon API signatures were inferred.
+- Previously: generic START name/priority and INFO destination after creation
+  time, with missing element identities. The merged main had already corrected
+  the instance ID's builtin type to SSTRING; it still lacked the measured element.
+- Regression: test/daemon-api.mjs, measured DDIC/order/START parameter check;
+  test/unit/zcl_osd_daemon_api.clas.abap compiles calls using the interface types.
