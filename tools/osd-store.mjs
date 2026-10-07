@@ -1190,6 +1190,7 @@ export class ObjectStore {
     }
     const runtime = this.served;
     clearTimeout(w.timer);
+    w.quietArmed = false;
     // the limits are reached by a swap, so the recycle is the swap's
     // publish's to await (undefined when nothing is recycled). The heap is
     // the safety limit and always recycles; the swap count and a quiet
@@ -1229,7 +1230,7 @@ export class ObjectStore {
   // period again, so it never lands on the activation it would have to wait
   // for and turn that warm swap into a cold load (adt-lifecycle, 2026-10-07)
   #stillActive() {
-    if (this.warmState?.quietArmed === true) this.#armQuiet();
+    if (this.warmState?.quietArmed === true && this.warmState.closed !== true) this.#armQuiet();
   }
 
   // the APC sockets the serving process holds (counted by upgradeProxy,

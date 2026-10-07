@@ -66,6 +66,7 @@ export async function closeWarm(store) {
   w.closed = true;
   clearTimeout(w.reprime);
   clearTimeout(w.timer);
+  w.quietArmed = false;
   await w.compiler?.shutdown?.();
   await w.priming;
 }
