@@ -3798,7 +3798,7 @@ SNAPSHOT_MISMATCH and the doctor retry.
 
 ### ANOMALY-2026-10-06-uccpi-high-byte - cl_abap_conv_out_ce=>uccpi multiplies the high byte by 255
 
-- Status: `open`
+- Status: `duplicate` of ANOMALY-2026-09-24-uccpi-255. The defect was already fixed upstream in open-abap-core#1263 (merged 2026-09-25), but our pin 8b397be predates the fix. Remedy: cherry-pick or move the pin; no new upstream filing. Recorded here by dell without checking the older entry (2026-10-07 correction).
 - Discovery: PIA's first deployment to A4H 7.58 (zcl_pia_00_json_util, 29 tests, 29/29 on both systems after fixes), reported by the PIA session on 2026-10-06. dell confirmed the source.
 - Affected path: open-abap-core `src/conv/cl_abap_conv_out_ce.clas.abap`, method `uccpi`. It converts to encoding 4103 (UTF-16LE, low byte first), then computes `ret = lv_hex(1)` followed by `ret = ret + lv_hex+1(1) * 255`. The factor must be 256.
 - Reproducer: `cl_abap_conv_out_ce=>uccpi( 'Ж' )` and `cl_abap_conv_out_ce=>uccpi( '€' )`.
@@ -3806,7 +3806,7 @@ SNAPSHOT_MISMATCH and the doctor retry.
 - Actual local behaviour: 1042 and 8332, wrong by the high byte for every character above U+00FF. ASCII and Latin-1 are unaffected, because their high byte is 0.
 - Workaround: none in the tree; PIA does not use `uccpi`. ANOMALY-2026-10-04-sxml-supplementary-ref already avoids sXML numeric references, which convert through `cl_abap_conv_in_ce=>uccpi`.
 - Regression: none yet.
-- Upstream: needs an issue in open-abap-core, a one-character fix, after our critic pass; no upstream filing requested.
+- Upstream: already fixed in open-abap-core#1263; stoker brings it into our pin branch (osd-build-2026-10-07).
 - Upstream version containing a fix: unknown.
 
 ### ANOMALY-2026-10-06-data-value-variable - DATA ... VALUE accepts a variable
