@@ -320,12 +320,12 @@ describe("editors/vscode: the extension's logic", function () {
   it("compares saved source with the active ADT include before F9, falling back when unavailable", async () => {
     const api = vscodeStub();
     const file = "/project/zcl_a.clas.abap", lines = [], requests = [];
-    let active = "old", unavailable = false;
+    let active = "old", unavailable = false, status = 200;
     api.window.activeTextEditor = {document: {fileName: file, isDirty: false, getText: () => "new\r\n"}};
     const client = new Osd("http://local", async (url, options) => {
       requests.push([url, options]);
       if (unavailable) throw Error("timeout");
-      return {ok: true, text: async () => active};
+      return {ok: status === 200, status, statusText: "Not Found", text: async () => active};
     });
     client.classrun = async () => ({text: "ok", ms: 1});
     const run = () => loadExtension(api).classrunObject("ZCL_A", {show() {}, appendLine: line => lines.push(line)},
@@ -340,9 +340,11 @@ describe("editors/vscode: the extension's logic", function () {
     unavailable = true; lines.length = 0;
     await run();
     expect(lines[0]).to.equal("--- classrun ZCL_A ---");
-    // A pack object outside the system root answers an empty active source:
-    // unknown, so no warning (osg-demo report on 0.7.1688).
+    // A successful empty read is proven active source and must be compared.
     unavailable = false; active = ""; lines.length = 0;
+    await run();
+    expect(lines[0]).to.include("editor changes are not activated");
+    status = 404; lines.length = 0;
     await run();
     expect(lines[0]).to.equal("--- classrun ZCL_A ---");
   });
@@ -353,7 +355,7 @@ describe("editors/vscode: the extension's logic", function () {
     for (const [suffix, include] of [["abap", "main"], ["locals_imp.abap", "implementations"]]) {
       const file = `/project/zcl_a.clas.${suffix}`;
       for (const [active, saved] of [["same", "same\r\n"], ["same\r\n\r\n", "same"],
-        ["one\r\ntwo\r\n", "one\ntwo\n\n"], ["same", "changed\n"]]) {
+        ["one\r\ntwo\r\n", "one\ntwo\n\n"], ["same", "changed\n"], ["", "changed\n"], ["", ""], [" \n", "changed\n"]]) {
         const lines = [], requests = [];
         api.window.activeTextEditor = {document: {fileName: file, isDirty: false, getText: () => saved}};
         const client = new Osd("http://local", async url => {

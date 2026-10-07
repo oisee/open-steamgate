@@ -64,21 +64,15 @@ const inputSnapshot = async (inputs) => {
 };
 // The persisted active view uses the same copy layout as ObjectStore.overlay.
 // Read it without constructing a store (its recovery can write to disk).
-const inactiveViewSnapshot = () => {
+const inactiveViewSnapshot = async () => {
+  const {warmOverlay} = await moduleOf('osd-warm-overlay.mjs');
   const root = process.cwd();
   const folder = join(root, 'build/inactive/active');
   const metadata = join(root, 'build/inactive/inactive.json');
   const text = existsSync(metadata) ? readFileSync(metadata, 'utf8') : '';
   const entries = text ? Object.values(JSON.parse(text).inactive ?? {}) : [];
-  const kept = new Set();
-  const owned = new Set();
   for (const entry of entries) {
     if (!Array.isArray(entry.files)) throw new Error('Invalid inactive generation view');
-    for (const file of entry.files) {
-      if (existsSync(join(root, file))) kept.add(resolve(root, file));
-      const copy = join(folder, file);
-      if (existsSync(copy)) owned.add(resolve(copy));
-    }
   }
   const copies = [];
   const walk = (dir) => {
@@ -92,8 +86,7 @@ const inactiveViewSnapshot = () => {
   copies.sort();
   const digest = createHash('sha256').update(text);
   for (const path of copies) digest.update(relative(folder, path)).update('\0').update(readFileSync(path)).update('\0');
-  const exclude = [...kept, ...copies.filter((path) => !owned.has(resolve(path)))];
-  const overlay = owned.size ? {exclude, folder: 'build/inactive/active'} : kept.size ? {exclude: [...kept]} : undefined;
+  const overlay = warmOverlay(root, 'build/inactive/active', entries);
   return {signature: digest.digest('hex'), overlay};
 };
 const changedInputs = (before, after) => [...new Set([...before.keys(), ...after.keys()])].filter((path) => before.get(path) !== after.get(path));
@@ -135,7 +128,7 @@ exports.observeGenerationDrift = async ({pack} = {}) => {
       const restored = text.replace(new RegExp(drift.restoreContent.pattern), drift.restoreContent.replacement);
       return restored !== text && createHash('sha256').update(restored).digest('hex') === generationBaseline.digests.get(path);
     });
-    const inactive = inactiveViewSnapshot();
+    const inactive = await inactiveViewSnapshot();
     const sameInactive = inactive.signature === generationBaseline.inactive.signature;
     const liveMatches = state.live === snapshot.tree || (sameInactive && inactive.overlay && hashOf(process.cwd(), inputs, {overlay: inactive.overlay}) === state.live);
     if (!matches || !contentMatches || !sameInactive || restoredTree !== generationBaseline.tree || !liveMatches) throw new Error(`test-isolation: ${current}: unrecognized originating generation drift: ${JSON.stringify({identity: matches, content: contentMatches, restoredTree, baselineTree: generationBaseline.tree, sameInactive, live: state.live, tree: snapshot.tree, changed: changed.map((path) => relative(process.cwd(), path).replaceAll('\\', '/'))})}`);
@@ -266,7 +259,7 @@ Mocha.Suite.prototype.emit = function (event, ...args) {
     generationBaseline = allowances[file]?.generation && before.generation.live !== null ? await inputSnapshot() : undefined;
     if (generationBaseline) generationBaseline.beforeTree = before.generation.tree;
     if (allowances[file]?.generation?.drift.kind === 'restored-inputs' || lastGeneration?.inactive !== undefined) {
-      const inactive = inactiveViewSnapshot();
+      const inactive = await inactiveViewSnapshot();
       before.generation.inactive = inactive.signature;
       if (generationBaseline) generationBaseline.inactive = inactive;
     }
@@ -303,7 +296,7 @@ Mocha.Suite.prototype.emit = function (event, ...args) {
     let generation;
     try {
       generation = generationStateSnapshot();
-      if (allowances[file]?.generation?.drift.kind === 'restored-inputs' || lastGeneration?.inactive !== undefined) generation.inactive = inactiveViewSnapshot().signature;
+      if (allowances[file]?.generation?.drift.kind === 'restored-inputs' || lastGeneration?.inactive !== undefined) generation.inactive = (await inactiveViewSnapshot()).signature;
     }
     catch (error) { generation = {root: process.cwd(), error: error.message}; }
     const after = {dialog: dialogStateSnapshot(), generation,
