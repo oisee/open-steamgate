@@ -6,7 +6,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"unicode/utf16"
 )
 
 // A dynamic Open SQL condition (SELECT ... WHERE (lv_where)) as an IR
@@ -402,8 +401,8 @@ func valueFor(tok osqlToken, c *OsqlColumn) *IR {
 			n, ct = 8, TChar(8)
 		}
 		v := raw
-		if u := utf16.Encode([]rune(v)); n > 0 && len(u) > n {
-			v = string(utf16.Decode(u[:n]))
+		if n > 0 && int(Strlen(v)) > n {
+			v = SubS(v, 0, int32(n))
 		}
 		return Lit(strings.TrimRight(v, " "), ct)
 	}

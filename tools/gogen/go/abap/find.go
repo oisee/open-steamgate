@@ -31,11 +31,11 @@ func FindStmt(s, p string, regex, icase bool, n int) (bool, int32, int32, []stri
 		if icase {
 			hay, needle = strings.ToUpper(s), strings.ToUpper(p)
 		}
-		i := strings.Index(hay, needle)
+		i := index16(hay, needle)
 		if i < 0 {
 			return false, 0, 0, subs
 		}
-		return true, int32(utf8.RuneCountInString(s[:i])), int32(utf8.RuneCountInString(p)), subs
+		return true, int32(i), Strlen(p), subs
 	}
 	re := compileABAP(p, icase)
 	checkLines(p, s, "FIND REGEX")
@@ -48,7 +48,7 @@ func FindStmt(s, p string, regex, icase bool, n int) (bool, int32, int32, []stri
 			subs[i] = s[m[2*(i+1)]:m[2*(i+1)+1]]
 		}
 	}
-	return true, int32(utf8.RuneCountInString(s[:m[0]])), int32(utf8.RuneCountInString(s[m[0]:m[1]])), subs
+	return true, Strlen(s[:m[0]]), Strlen(s[m[0]:m[1]]), subs
 }
 
 func compileABAP(p string, icase bool) *regexp.Regexp {
@@ -145,61 +145,14 @@ func ReplaceBytes(s, with string, off, n int32, xLen int) (string, int32) {
 // empty section, where only an empty pattern is found (at the offset,
 // length 0). A match must lie inside the section.
 func FindSection(s, p string, icase bool, off, n int32, nsub int) (bool, int32, int32, []string) {
-	// the section by byte index, walked to once: no []rune of the whole
-	// text per call (a loop of FIND ... SECTION OFFSET over a long text was
-	// quadratic in allocations, 45 s of an ImportSet in ZCL_STG_SADL_DEF)
 	if off < 0 || n < -1 {
 		rangeError()
 	}
-	var from, to int
-	if isASCII(s) {
-		if int(off) > len(s) || (n >= 0 && int(off+n) > len(s)) {
-			rangeError()
-		}
-		from, to = int(off), len(s)
-		if n >= 0 {
-			to = int(off + n)
-		}
-	} else if m := memoOf(s); m != nil {
-		if int(off) > m.runes || (n >= 0 && int(off+n) > m.runes) {
-			rangeError()
-		}
-		from, to = m.byteAt(s, int(off)), len(s)
-		if n >= 0 {
-			to = m.byteAt(s, int(off+n))
-		}
-	} else {
-		var ok bool
-		if from, ok = charsToByte(s, 0, int(off)); !ok {
-			rangeError()
-		}
-		to = len(s)
-		if n >= 0 {
-			if to, ok = charsToByte(s, from, int(n)); !ok {
-				rangeError()
-			}
-		}
-	}
-	found, o, l, subs := FindStmt(s[from:to], p, false, icase, nsub)
+	found, o, l, subs := FindStmt(SubS(s, off, n), p, false, icase, nsub)
 	if !found {
 		return false, 0, 0, subs
 	}
 	return true, off + o, l, subs
-}
-
-// charsToByte is the byte index k characters after byte index from in s;
-// false when s ends before that.
-func charsToByte(s string, from, k int) (int, bool) {
-	i := from
-	for ; k > 0 && i < len(s); k-- {
-		if s[i] < utf8.RuneSelf {
-			i++
-			continue
-		}
-		_, w := utf8.DecodeRuneInString(s[i:])
-		i += w
-	}
-	return i, k == 0
 }
 
 // FindTable is FIND [REGEX] p IN TABLE itab (rows of strings), measured on
@@ -251,7 +204,7 @@ func FindResults(s, p string, kind byte, icase, all bool) [][]int32 {
 		panic(NotCompiled("FIND ... RESULTS", "a search kind "+string(kind)))
 	}
 	var out [][]int32
-	chars := func(b int) int32 { return int32(utf8.RuneCountInString(s[:b])) }
+	chars := func(b int) int32 { return Strlen(s[:b]) }
 	for pos := 0; pos <= len(s); {
 		var m []int
 		if pos == 0 {
@@ -302,18 +255,19 @@ func FindResults(s, p string, kind byte, icase, all bool) [][]int32 {
 
 func plainResults(s, p string, all bool) [][]int32 {
 	var out [][]int32
-	n := int32(utf8.RuneCountInString(p))
-	for pos := 0; pos <= len(s); {
-		i := strings.Index(s[pos:], p)
+	n := Strlen(p)
+	for pos := int32(0); pos <= Strlen(s); {
+		i := Find(s, p, pos)
 		if i < 0 {
 			break
 		}
-		out = append(out, []int32{int32(utf8.RuneCountInString(s[:pos+i])), n})
+		out = append(out, []int32{i, n})
 		if !all {
 			break
 		}
-		pos += i + len(p)
+		pos = i + n
 	}
+
 	return out
 }
 

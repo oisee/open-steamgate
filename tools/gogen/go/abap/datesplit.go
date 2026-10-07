@@ -2,7 +2,6 @@ package abap
 
 import (
 	"strings"
-	"unicode/utf8"
 )
 
 // DToI is a d moved into an i, or a d as an operand of arithmetic, measured
@@ -71,7 +70,7 @@ func SplitN(v, sep string, n int) []string {
 // SplitFit moves a piece into a c field of n characters: cut to fit, and a
 // piece that did not fit sets sy-subrc 4 (measured on A4H).
 func SplitFit(s *Session, piece string, n int) string {
-	if utf8.RuneCountInString(strings.TrimRight(piece, " ")) > n {
+	if int(Strlen(strings.TrimRight(piece, " "))) > n {
 		s.Sy.Subrc = 4
 	}
 	return CFit(piece, n)

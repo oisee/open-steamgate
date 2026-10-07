@@ -2220,6 +2220,13 @@ function statement(node, ctx) {
   // mask go and as many blanks come in on the left, so the length stays; a
   // blank not in the mask stops it. Every other SHIFT form is refused.
   if (isStmt(node, Statements.Shift)) {
+    if (/^SHIFT\s+\S+(?:\s+BY\s+\S+(?:\s+PLACES)?)?(?:\s+(?:LEFT|RIGHT))?(?:\s+CIRCULAR)?\s*\.?$/i.test(text)) {
+      const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+      if (!["string", "c"].includes(target.type.k)) throw new Unsupported(`character SHIFT of a ${target.type.k}`);
+      const amount = node.findDirectExpression(Expressions.Source);
+      return {s: "shift_places", target, amount: amount ? convert(source(amount, ctx), I) : {e: "int", value: 1, type: I}, left: !/\sRIGHT\b/i.test(text), circular: /\sCIRCULAR\b/i.test(text)};
+    }
+
     // parity-wave2: SHIFT x LEFT CIRCULAR IN BYTE MODE, one byte (CL_ABAP_ZIP's
     // little-endian int2; A4H 2026-09-24, ZCL_GOGEN_T_ZIP: AABB is BBAA,
     // 01020304 is 02030401)
@@ -3346,8 +3353,8 @@ function lvalue(target, ctx) {
       const off = isExpr(kids[i], Expressions.FieldOffset) ? offsetValue(kids[i], ctx) : null;
       if (off !== null) i += 1;
       const len = isExpr(kids[i], Expressions.FieldLength) ? offsetValue(kids[i], ctx) : null;
-      if (i < kids.length - 1 || !len || place.type.k !== "x") throw new Unsupported(`write target ${target.concatTokens()}`);
-      return {e: "substr_target", base: place, off, len, type: X(len.e === "int" ? len.value : place.type.len)};
+      if (i < kids.length - 1 || !["x", "c"].includes(place.type.k) || (place.type.k === "x" && !len)) throw new Unsupported(`write target ${target.concatTokens()}`);
+      return {e: "substr_target", base: place, off, len, type: place.type.k === "x" ? X(len.e === "int" ? len.value : place.type.len) : S};
     } else {
       throw new Unsupported(`target ${target.concatTokens()}`);
     }
@@ -5938,13 +5945,13 @@ function call(chain, ctx, statement, hint) {
     const argNode = direct ?? named?.findDirectExpressions(Expressions.ParameterS).find((p) => upper(p.findDirectExpression(Expressions.ParameterName).concatTokens()) === "VAL")?.findDirectExpression(Expressions.Source);
     return {e: "case_fn", upper: name === "TO_UPPER", x: convert(source(argNode, ctx), S), type: S};
   }
-  if (receiver === null && name === "STRLEN" && !ctx.signatures.has(name)) {
+  if (receiver === null && ["STRLEN", "NUMOFCHAR"].includes(name) && !ctx.signatures.has(name)) {
     // parity-wave1: of a value the backends hold as text only (a generic
     // operand reached it through a function module's untyped parameter and
     // the Go build failed on it)
     const x = source(direct, ctx);
     if (["data", "i", "int8", "f", "struct", "table", "ref", "dref", "exc"].includes(x.type.k)) throw new Unsupported(`strlen( ) of a ${x.type.k}`);
-    return {e: "strlen", x, type: I};
+    return name === "NUMOFCHAR" ? {e: "str_fn", fn: "Numofchar", args: [convert(x, S)], type: I} : {e: "strlen", x, type: I};
   }
   if (receiver === null && owner === null && name === "REVERSE" && !ctx.signatures.has(name)) {
     const x = source(direct, ctx);

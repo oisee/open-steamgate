@@ -15,7 +15,6 @@ import (
 	"sync/atomic"
 	"unicode"
 	"unicode/utf8"
-	"unsafe"
 )
 
 // Character-like values are Go strings. A c field is stored without its
@@ -25,9 +24,8 @@ import (
 // CFit moves a character value into a c field of length n: cut at n
 // characters, trailing blanks dropped.
 func CFit(v string, n int) string {
-	if utf8.RuneCountInString(v) > n {
-		r := []rune(v)
-		v = string(r[:n])
+	if int(Strlen(v)) > n {
+		v = SubS(v, 0, int32(n))
 	}
 	return strings.TrimRight(v, " ")
 }
@@ -46,11 +44,8 @@ func S2T(v string) string {
 	if v == "" {
 		return "000000"
 	}
-	r := []rune(v)
-	if len(r) > 6 {
-		r = r[:6]
-	}
-	return string(r) + strings.Repeat("0", 6-len(r))
+	n := min(6, int(Strlen(v)))
+	return SubS(v, 0, int32(n)) + strings.Repeat("0", 6-n)
 }
 
 // FmtI formats an i the way a string template does: a leading minus, no
@@ -294,7 +289,15 @@ func MinF(vs ...float64) float64 {
 
 func ToUpper(v string) string { return strings.ToUpper(v) }
 func ToLower(v string) string { return strings.ToLower(v) }
-func Strlen(v string) int32   { return int32(utf8.RuneCountInString(v)) }
+func Strlen(v string) int32 {
+	if m := memoOf(v); m != nil {
+		return int32(m.units)
+	}
+	return int32(count16(v))
+}
+
+// Numofchar excludes trailing blanks, then counts UTF-16 units.
+func Numofchar(v string) int32 { return Strlen(strings.TrimRight(v, " ")) }
 
 // FmtF formats an f the way a string template does, as measured on A4H
 // 2026-09-23: seventeen significant digits, always positional (1E20 is
@@ -377,7 +380,7 @@ func PowF(a, b float64) float64 {
 // Pad is WIDTH / ALIGN / PAD of a template, as measured on A4H: the text
 // already formatted is padded, never cut (-5 in WIDTH 3 PAD '0' is 0-5).
 func Pad(v string, width int, align, pad string) string {
-	n := utf8.RuneCountInString(v)
+	n := int(Strlen(v))
 	if n >= width {
 		return v
 	}
@@ -478,171 +481,44 @@ func BitXS(op, a, b string) string {
 // 0100000002 2, empty 0; a move the same, ZCL_GOGEN_T_XMOVI).
 func XToI(v string) int32 { return int32(intbytes.FromX(v, 4)) }
 
-// A character offset into a string is a byte offset only when every
-// character is one byte. For a long string asked about again (a parser
-// calling find( off = ... ) and substring( ) on one document over and over)
-// the answer is kept: whether it is ASCII, and else its length in
-// characters and the byte offset of every 64th character, so that an offset
-// costs at most 63 steps. The memo keeps the pointer it was given, so the
-// memory it names cannot be reused for another string meanwhile. Without it
-// each call converted the whole string to runes, and a 750 KB import took
-// minutes instead of milliseconds (parity-wave1, ZCL_STG_JSON=>READ_STRING
-// and ZCL_STG_SEGW_IMPORT=>PARSE).
-type strMemo struct {
-	p     *byte
-	n     int
-	ascii bool
-	runes int
-	idx   []int
-	// the last character asked for and its byte offset (k<<32 | b): a parser
-	// walks its document a character at a time, and from there the next one
-	// is a step or two away rather than up to 63 from a checkpoint
-	cursor atomic.Uint64
-}
-
-// A few strings are kept, not one: a parser takes substrings of its
-// document and of the long values in it by turns, and with one slot each
-// value evicted the document, which was then scanned whole again (a third of the
-// time of a 3.7 MB XML conversion went here)
-var strMemos [4]atomic.Pointer[strMemo]
-
-func memoOf(v string) *strMemo {
-	if len(v) < 256 {
-		return nil
-	}
-	p := unsafe.StringData(v)
-	for i := range strMemos {
-		if m := strMemos[i].Load(); m != nil && m.p == p && m.n == len(v) {
-			return m
-		}
-	}
-	m := &strMemo{p: p, n: len(v), ascii: true}
-	for i := 0; i < len(v); i++ {
-		if v[i] >= 0x80 {
-			m.ascii = false
-			break
-		}
-	}
-	if !m.ascii {
-		k := 0
-		for i := range v {
-			if k%64 == 0 {
-				m.idx = append(m.idx, i)
-			}
-			k++
-		}
-		m.runes = k
-	}
-	// the shortest gives its place up: a string costs its length to scan
-	// again, and a document must not be pushed out by the values in it
-	slot := 0
-	for i := range strMemos {
-		o := strMemos[i].Load()
-		if o == nil {
-			slot = i
-			break
-		}
-		if o.n < strMemos[slot].Load().n {
-			slot = i
-		}
-	}
-	strMemos[slot].Store(m)
-	return m
-}
-
-func isASCII(v string) bool {
-	if m := memoOf(v); m != nil {
-		return m.ascii
-	}
-	for i := 0; i < len(v); i++ {
-		if v[i] >= 0x80 {
-			return false
-		}
-	}
-	return true
-}
-
-// byteAt is the byte offset of character k of a non-ASCII memoised string
-// (k up to its length)
-func (m *strMemo) byteAt(v string, k int) int {
-	if k >= m.runes {
-		return len(v)
-	}
-	b, from := m.idx[k/64], k/64*64
-	if uint64(len(v)) < 1<<32 {
-		c := m.cursor.Load()
-		if ck, cb := int(c>>32), int(c&0xffffffff); ck <= k && ck > from {
-			b, from = cb, ck
-		}
-	}
-	for j := k - from; j > 0; j-- {
-		_, w := utf8.DecodeRuneInString(v[b:])
-		b += w
-	}
-	if uint64(len(v)) < 1<<32 {
-		m.cursor.Store(uint64(k)<<32 | uint64(b))
-	}
-	return b
-}
-
 func rangeError() { panic(ArithmeticError{Class: "CX_SY_RANGE_OUT_OF_BOUNDS", Op: "offset/length"}) }
 
 // SubS is v+off(len) of a string, counted in characters; len -1 is the
 // rest. Out of range raises, as ABAP does.
 func SubS(v string, off, length int32) string {
-	if isASCII(v) {
-		n := int32(len(v))
-		if off < 0 || off > n {
-			rangeError()
-		}
-		if length < 0 {
-			return v[off:]
-		}
-		if off+length > n {
-			rangeError()
-		}
-		return v[off : off+length]
+	m := memoOf(v)
+	ascii := m != nil && m.ascii
+	if m == nil {
+		ascii = isASCII(v)
 	}
-	if m := memoOf(v); m != nil {
-		if off < 0 || int(off) > m.runes {
-			rangeError()
+	n := len(v)
+	if !ascii {
+		if m != nil {
+			n = m.units
+		} else {
+			n = count16(v)
 		}
-		b := m.byteAt(v, int(off))
-		if length < 0 {
-			return v[b:]
-		}
-		if int(off+length) > m.runes {
-			rangeError()
-		}
-		e := b
-		for j := int32(0); j < length; j++ {
-			_, w := utf8.DecodeRuneInString(v[e:])
-			e += w
-		}
-		return v[b:e]
 	}
-	r := []rune(v)
-	n := int32(len(r))
-	if off < 0 || off > n {
+	if off < 0 || int(off) > n {
 		rangeError()
 	}
-	if length < 0 {
-		return string(r[off:])
+	end := n
+	if length >= 0 {
+		if int64(off)+int64(length) > int64(n) {
+			rangeError()
+		}
+		end = int(off) + int(length)
 	}
-	if off+length > n {
-		rangeError()
+	if ascii {
+		return v[int(off):end]
 	}
-	return string(r[off : off+length])
+	return slice16Memo(v, int(off), end, m)
 }
 
-// SubC is v+off(len) of a c field of length n: read with its trailing
-// blanks, stored trimmed again.
+// SubC reads a fixed field with its implicit trailing blanks.
 func SubC(v string, n, off, length int32) string {
-	r := []rune(v)
-	for int32(len(r)) < n {
-		r = append(r, ' ')
-	}
-	return strings.TrimRight(SubS(string(r[:n]), off, length), " ")
+	v = PadC(CFit(v, int(n)), int(n))
+	return strings.TrimRight(SubS(v, off, length), " ")
 }
 
 // SubX is v+off(len) of an x or xstring, counted in bytes.
@@ -708,7 +584,7 @@ func Find(v, sub string, off int32) int32 {
 		panic(ArithmeticError{Class: "CX_SY_STRG_PAR_VAL", Op: "find"})
 	}
 	if isASCII(v) {
-		if off < 0 || off > int32(len(v)) {
+		if off < 0 || int(off) > len(v) {
 			rangeError()
 		}
 		i := strings.Index(v[off:], sub)
@@ -717,26 +593,12 @@ func Find(v, sub string, off int32) int32 {
 		}
 		return off + int32(i)
 	}
-	if m := memoOf(v); m != nil {
-		if off < 0 || int(off) > m.runes {
-			rangeError()
-		}
-		b := m.byteAt(v, int(off))
-		i := strings.Index(v[b:], sub)
-		if i < 0 {
-			return -1
-		}
-		return off + int32(utf8.RuneCountInString(v[b:b+i]))
-	}
-	r := []rune(v)
-	if off < 0 || off > int32(len(r)) {
-		rangeError()
-	}
-	i := strings.Index(string(r[off:]), sub)
+	sec := SubS(v, off, -1)
+	i := index16(sec, sub)
 	if i < 0 {
 		return -1
 	}
-	return off + int32(utf8.RuneCountInString(string(r[off:])[:i]))
+	return off + int32(i)
 }
 
 // CO: every character of a is one of b; true for an empty a.

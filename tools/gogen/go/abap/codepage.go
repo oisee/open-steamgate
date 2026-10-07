@@ -1,9 +1,9 @@
 package abap
 
 import (
+	"strings"
 	"unicode/utf16"
 	"unicode/utf8"
-	"strings"
 )
 
 // EncodeText is cl_abap_conv_out_ce->convert: the characters of a string as
@@ -15,7 +15,7 @@ func EncodeText(encoding, text string) string {
 	case "utf8":
 		return text
 	case "utf16le", "utf-16le":
-		u := utf16.Encode([]rune(text))
+		u := UTF16Units(text)
 		b := make([]byte, 0, 2*len(u))
 		for _, c := range u {
 			b = append(b, byte(c), byte(c>>8))

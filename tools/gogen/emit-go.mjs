@@ -1222,6 +1222,11 @@ function stmtLines(st, ctx, d) {
     case "assign":
       if (st.target.e === "substr_target") {
         HELPER_IMPORTS.add("subwrite");
+        if (st.target.base.type.k !== "x") {
+          const limit = st.target.base.type.k === "c" ? st.target.base.type.len : -1;
+          return [`${t}${place(st.target.base, ctx)} = hSubwrite.Char(${expr(st.target.base, ctx)}, ${st.target.off ? expr(st.target.off, ctx) : "0"}, ${st.target.len ? expr(st.target.len, ctx) : "-1"}, ${expr(st.value, ctx)}, ${limit})`];
+        }
+
         return [`${t}${place(st.target.base, ctx)} = hSubwrite.X(${expr(st.target.base, ctx)}, ${st.target.off ? expr(st.target.off, ctx) : "0"}, ${expr(st.target.len, ctx)}, ${expr(st.value, ctx)})`];
       }
       if (ctx.builders?.has(st.target.name) && isAppend(st, st.target.name)) {
@@ -1661,6 +1666,11 @@ ${t}	}`));
       return [`${t}${place(st.target, ctx)} = string(${expr(st.x, ctx)}.T.Kind)`];
     case "move_corr_data":
       return [`${t}abap.MoveCorrespondingData(${expr(st.to, ctx)}, ${expr(st.from, ctx)})`];
+    case "shift_places": {
+      const p = place(st.target, ctx);
+      const limit = st.target.type.k === "c" ? st.target.type.len : -1;
+      return [`${t}${p} = abap.ShiftPlaces(${p}, ${st.left}, ${st.circular}, ${expr(st.amount, ctx)}, ${limit})`];
+    }
     case "shift_right_trailing": {
       const p = place(st.target, ctx);
       const mask = st.maskLen !== undefined ? `abap.PadC(${expr(st.mask, ctx)}, ${st.maskLen})` : expr(st.mask, ctx);

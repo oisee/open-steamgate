@@ -1,0 +1,57 @@
+CLASS ltcl_test DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS.
+PRIVATE SECTION.
+METHODS len FOR TESTING.
+METHODS section FOR TESTING.
+METHODS write_section FOR TESTING.
+METHODS shift_places FOR TESTING.
+METHODS find_offset FOR TESTING.
+METHODS half_roundtrip FOR TESTING.
+METHODS numofchar_units FOR TESTING.
+ENDCLASS.
+CLASS ltcl_test IMPLEMENTATION.
+METHOD len.
+DATA(s) = zcl_osgt_strlen16=>emoji( ).
+cl_abap_unit_assert=>assert_equals( act = strlen( s ) exp = 3 msg = `strlen of U+1F600 followed by A` ).
+ENDMETHOD.
+METHOD section.
+DATA(s) = zcl_osgt_strlen16=>emoji( ).
+DATA(last) = s+2(1).
+cl_abap_unit_assert=>assert_equals( act = last exp = `A` msg = `offset 2 is the A after the surrogate pair` ).
+ENDMETHOD.
+METHOD write_section.
+DATA(s) = zcl_osgt_strlen16=>emoji( ).
+DATA c TYPE c LENGTH 3.
+c = s.
+c+2(1) = `B`.
+cl_abap_unit_assert=>assert_equals( act = c+2(1) exp = `B` ).
+cl_abap_unit_assert=>assert_equals( act = strlen( c ) exp = 3 ).
+ENDMETHOD.
+METHOD shift_places.
+DATA(s) = zcl_osgt_strlen16=>emoji( ).
+SHIFT s BY 2 PLACES LEFT.
+cl_abap_unit_assert=>assert_equals( act = s exp = `A` ).
+ENDMETHOD.
+METHOD find_offset.
+DATA(s) = zcl_osgt_strlen16=>emoji( ).
+DATA off TYPE i.
+DATA len TYPE i.
+FIND `A` IN s MATCH OFFSET off MATCH LENGTH len.
+cl_abap_unit_assert=>assert_equals( act = off exp = 2 ).
+cl_abap_unit_assert=>assert_equals( act = len exp = 1 ).
+cl_abap_unit_assert=>assert_equals( act = find( val = s sub = `A` off = 1 ) exp = 2 ).
+ENDMETHOD.
+METHOD half_roundtrip.
+DATA(s) = zcl_osgt_strlen16=>emoji( ).
+DATA(hi) = s+0(1).
+cl_abap_unit_assert=>assert_equals( act = strlen( hi ) exp = 1 ).
+DATA c TYPE c LENGTH 3.
+c = s.
+c+0(1) = hi.
+s = c.
+cl_abap_unit_assert=>assert_equals( act = s exp = zcl_osgt_strlen16=>emoji( ) ).
+ENDMETHOD.
+METHOD numofchar_units.
+DATA(s) = zcl_osgt_strlen16=>emoji( ) && `  `.
+cl_abap_unit_assert=>assert_equals( act = numofchar( s ) exp = 3 ).
+ENDMETHOD.
+ENDCLASS.

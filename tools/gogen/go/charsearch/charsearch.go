@@ -2,7 +2,6 @@ package charsearch
 
 import (
 	"strings"
-	"unicode/utf16"
 
 	"osg/gogen/abap"
 )
@@ -17,15 +16,15 @@ func FindOcc(v, sub string, occ int32) int32 {
 		panic(abap.NotCompiled("find( )", "OCC = 0 was not measured"))
 	}
 	positions := []int32{}
-	for at := 0; at <= len(v); {
-		i := strings.Index(v[at:], sub)
-		if i < 0 {
+	for at := int32(0); at <= abap.Strlen(v); {
+		pos := abap.Find(v, sub, at)
+		if pos < 0 {
 			break
 		}
-		at += i
-		positions = append(positions, int32(len([]rune(v[:at]))))
-		at += len(sub)
+		positions = append(positions, pos)
+		at = pos + abap.Strlen(sub)
 	}
+
 	index := int(occ) - 1
 	if occ < 0 {
 		index = len(positions) + int(occ)
@@ -37,11 +36,11 @@ func FindOcc(v, sub string, occ int32) int32 {
 }
 
 func Reverse(v string) string {
-	r := []rune(v)
+	r := abap.UTF16Units(v)
 	for i, j := 0, len(r)-1; i < j; i, j = i+1, j-1 {
 		r[i], r[j] = r[j], r[i]
 	}
-	return string(r)
+	return abap.UTF16String(r)
 }
 
 // WithPos records the uppercased UTF-16 position, including a miss.
@@ -50,9 +49,9 @@ func WithPos(s *abap.Session, a, b string) bool {
 	left, right := upper(a), upper(b)
 	pos := strings.Index(left, right)
 	if pos < 0 {
-		s.Sy.Fdpos = int32(len(utf16.Encode([]rune(left))))
+		s.Sy.Fdpos = abap.Strlen(left)
 		return false
 	}
-	s.Sy.Fdpos = int32(len(utf16.Encode([]rune(left[:pos]))))
+	s.Sy.Fdpos = abap.Strlen(left[:pos])
 	return true
 }
