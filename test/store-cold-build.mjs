@@ -81,6 +81,10 @@ describe("STORE cold builds after a source-host restart", function () {
     const published = JSON.parse((await execute("ACTIVATE")).EV_JSON);
     expect(published).to.include({state: "published", active: true, live: true});
     expect(run()).to.equal(42);
+    const generation = join(root, "build", "by-input", published.generation_id);
+    const frozen = JSON.parse(readFileSync(join(generation, "source-inputs.json"), "utf8"));
+    expect(readFileSync(join(generation, "source/local/tmp/tadir.json"), "utf8"))
+      .to.equal(readFileSync(join(root, "build/source-by-digest", frozen["local/tmp/tadir.json"]), "utf8"));
     expect(restartBuild().ok).to.equal(true);
     expect(run()).to.equal(42);
   });

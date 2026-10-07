@@ -16,6 +16,7 @@
 // transpiler and the registry it is handed must come from ONE copy of
 // @abaplint/core, because the transpiler checks its input with instanceof.
 // So core is resolved from where the transpiler package is, not from here.
+import {createHash} from "node:crypto";
 import {buildIdentity, assertToolchain} from "./osd-transpiler.mjs";
 import {phase} from "./osgjs-trace.mjs";
 import {execFileSync} from "node:child_process";
@@ -28,6 +29,7 @@ import {mapStatementStarts} from "./osd-source-map-starts.mjs";
 import {lowerNarrowSubmit} from "./osd-narrow-submit.mjs";
 import {installRfcMessage} from "./osd-rfc-message.mjs";
 import {libraryPath} from "./osd-lib-path.mjs";
+import {orderRegistry} from "./osd-warm-order.mjs";
 
 // the transpiler package in use by this tree, and the core it was built
 // against. A tree with the library installed resolves it directly; a tree
@@ -149,13 +151,16 @@ function matching(dir, patterns) {
 
 const regexps = (list) => (list ?? []).map((p) => new RegExp(p, "i"));
 
-export async function readAll(files, relativeTo, transform = (source) => source, onRead = undefined) {
+export async function readAll(files, relativeTo, transform = (source) => source, onRead = undefined, retainBytes = false) {
   return files.map((filename) => {
     // read as bytes once: what a caller is told was read is what was used
     const bytes = readFileSync(filename);
     onRead?.(filename, bytes);
     return {
       filename: basename(filename),
+      path: filename,
+      sourceDigest: createHash("sha256").update(bytes).digest("hex"),
+      ...(retainBytes ? {sourceBytes: bytes} : {}),
       relative: relative(relativeTo, dirname(filename)),
       contents: transform(bytes.toString(isBinaryFilename(filename) ? "latin1" : "utf8"), basename(filename)),
     };
@@ -222,7 +227,7 @@ export async function loadLibs(root, config, log = () => {}, onRead = undefined)
     const found = matching(dir, patterns)
       .filter((f) => f.endsWith(".clas.testclasses.abap") === false)
       .filter((f) => exclude.length === 0 || exclude.some((r) => r.test(f)) === false);
-    files.push(...await readAll(found, root, undefined, onRead));
+    files.push(...await readAll(found, root, undefined, onRead, cleanup));
     log(`\t${found.length} files added from lib`);
     if (cleanup) {
       rmSync(dir, {recursive: true, force: true});
@@ -286,6 +291,7 @@ export async function transpile(options = {}) {
   const {files, skipped} = await loadFiles(root, config, core, options.onRead);
   log(`${files.length} files added from source, ${skipped} skipped`);
   const libs = await loadLibs(root, config, log, options.onRead);
+  options.onInputs?.(files, libs);
   const settings = {...config.options};
   if (config.write_source_map !== true) {
     settings.ignoreSourceMap = true;
@@ -298,6 +304,7 @@ export async function transpile(options = {}) {
   for (const l of libs) {
     reg.addDependency(new core.MemoryFile(l.filename, l.contents));
   }
+  orderRegistry(reg, core, files, libs);
   const output = await phase("transpile", () => t.run(reg, options.progress ?? QUIET));
   const outputFolder = resolve(root, config.output_folder);
   mkdirSync(outputFolder, {recursive: true});
