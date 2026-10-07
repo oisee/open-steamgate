@@ -337,6 +337,7 @@ export function emitGo(program, pkg = "main", layers = null, unitBuild = false) 
   for (const [name, sigs] of program.interfaceMethods ?? []) {
     if (layers?.interfaces && !layers.interfaces.has(name)) continue;
     out.push(`type ${typeName(name)} interface {`);
+    out.push(`\t${interfaceMarker(name)}()`);
     for (const m of sigs) if (definable(program, m)) out.push(`\t${signature({name}, m, true)}`);
     out.push(...intfAccessors(program, name));
     out.push("}", "");
@@ -370,6 +371,7 @@ export function emitGo(program, pkg = "main", layers = null, unitBuild = false) 
     if (out.at(-1) === `type ${typeName(cls.name)} struct {`) out.push("\t_ byte");
     out.push("}", "");
     if (cls.name === "KERNEL_CX_ASSERT") out.push(`func (me *KERNEL_CX_ASSERT) AssertionMessage() string { return me.${ident("MSG")} }`, "");
+    for (const intf of implementedInterfaces(program, cls)) out.push(`func (me *${typeName(cls.name)}) ${interfaceMarker(intf)}() {}`, "");
     if (POLY.has(cls.name)) out.push(...classInterface(program, cls));
     out.push(...attrAccessors(cls, inst));
     for (const a of statics) {
@@ -798,6 +800,27 @@ function classInterface(program, cls) {
  * it. A read is *p, a write *p = v; both reach the object.
  */
 const accessorName = (attr) => `Ptr_${typeName(attr)}`;
+
+const interfaceMarker = (intf) => `implements_${typeName(intf)}`;
+
+function implementedInterfaces(program, cls) {
+  const out = new Set();
+  for (const c of [cls, ...ancestorsOf(cls)]) {
+    for (const intf of c.interfaces ?? []) {
+      out.add(intf);
+      for (const included of componentInterfaces(program.reg, intf)) out.add(included);
+    }
+  }
+  return out;
+}
+
+function componentInterfaces(reg, intf, seen = new Set()) {
+  for (const c of reg?.getObject("INTF", intf)?.getDefinition()?.getImplementing?.() ?? []) {
+    const name = upper(c.name);
+    if (!seen.has(name)) { seen.add(name); componentInterfaces(reg, name, seen); }
+  }
+  return [...seen];
+}
 
 function intfAccessors(program, intf) {
   return (program.interfaceAttrs?.get(intf) ?? []).filter((a) => !a.static && !a.unsupported && definable(program, {params: [{type: a.type}]}))
