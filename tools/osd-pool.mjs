@@ -146,13 +146,15 @@ export class RuntimePool {
   }
 
   // every work process takes the same swap; one that cannot fails the lot,
-  // and the caller recycles them all
+  // and the caller recycles them all. Each one's heap goes back, in order:
+  // the store's safety limit measures every work process's growth, not
+  // only the first one's
   async hot(swap) {
     const done = [];
     for (const runtime of this.runtimes) {
       done.push(await runtime.hot(swap));
     }
-    return done[0];
+    return {...done[0], heaps: done.map((d) => d?.heap)};
   }
 
   verified(generation) {

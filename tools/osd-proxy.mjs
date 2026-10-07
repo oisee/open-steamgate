@@ -221,6 +221,21 @@ export function upgradeProxy(runtime, paths, log = () => {}) {
       }
       socket.pipe(upstream);
       upstream.pipe(socket);
+      // counted on the runtime the store serves, so a catch-up recycle can
+      // wait for the socket rather than cut it (tools/osd-store.mjs)
+      runtime.openChannels = (runtime.openChannels ?? 0) + 1;
+      let counted = true;
+      const release = () => {
+        if (!counted) return;
+        counted = false;
+        runtime.openChannels--;
+      };
+      socket.once("close", release);
+      upstream.once("close", release);
+      // a client gone without a close frame may only half-close: its FIN
+      // ends the session, whether or not the child ever closes its side
+      socket.once("end", release);
+      upstream.once("end", release);
     });
     upstream.on("error", (e) => {
       log(`APC ${path}: upstream ${e?.message ?? e}`);

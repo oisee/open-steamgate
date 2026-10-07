@@ -640,6 +640,125 @@ describe("tools/osd-warm: an activation answers once its source is live", () => 
     }
   });
 
+  it("an open APC socket defers the swap-count recycle until it closes", async () => {
+    const {store, src, events, done} = setup();
+    try {
+      store.warmSwapLimit = 1;
+      store.served.openChannels = 1;
+      src.text = "rv = 2.";
+      await activate(store);
+      expect(events.map((e) => e.what), "a recycle cut the open socket").to.deep.equal(["swap g1->g2"]);
+      store.served.openChannels = 0;
+      src.text = "rv = 3.";
+      await activate(store);
+      expect(events.map((e) => e.what)).to.deep.equal(["swap g1->g2", "swap g2->g3", "recycle"]);
+    } finally {
+      done();
+    }
+  });
+
+  it("an open APC socket defers the quiet recycle, which comes a quiet period after it closes", async () => {
+    const {store, src, events, done} = setup();
+    try {
+      store.warmQuietMs = 60;
+      store.served.openChannels = 1;
+      src.text = "rv = 2.";
+      await activate(store);
+      await sleep(250);
+      expect(events.map((e) => e.what), "a quiet recycle cut the open socket").to.deep.equal(["swap g1->g2"]);
+      store.served.openChannels = 0;
+      await sleep(200);
+      expect(events.map((e) => e.what)).to.deep.equal(["swap g1->g2", "recycle"]);
+    } finally {
+      done();
+    }
+  });
+
+  it("a pool's swap reports the heap of every work process", async () => {
+    const pool = new RuntimePool({size: 2});
+    pool.runtimes[0].hot = async () => ({ms: 1, swaps: 1, heap: 100});
+    pool.runtimes[1].hot = async () => ({ms: 1, swaps: 1, heap: 800});
+    expect(await pool.hot({})).to.deep.include({swaps: 1, heaps: [100, 800]});
+  });
+
+  it("the heap limit sees any work process grow, past an open APC socket", async () => {
+    const MB = 1024 * 1024;
+    for (const [first, later] of [[[100, 1000], [800, 1000]], [[100, 100], [100, 700]]]) {
+      const {store, src, events, done} = setup();
+      try {
+        store.served.openChannels = 1;
+        let heaps = first;
+        const hot = store.served.hot;
+        store.served.hot = async function (swap) { return {...await hot.call(this, swap), heaps: heaps.map((h) => h * MB)}; };
+        src.text = "rv = 2.";
+        await activate(store);
+        heaps = later;
+        src.text = "rv = 3.";
+        await activate(store);
+        expect(events.map((e) => e.what), `${first} -> ${later}`).to.deep.equal(["swap g1->g2", "swap g2->g3", "recycle"]);
+      } finally {
+        done();
+      }
+    }
+  });
+
+  it("the APC upgrade proxy releases a socket whose client only half-closes", async () => {
+    const {createServer, connect} = await import("node:net");
+    const {upgradeProxy} = await import("../tools/osd-proxy.mjs");
+    // like the real HTTP child: an upgraded socket may stay half-open
+    const held = new Set();
+    const child = createServer({allowHalfOpen: true}, (socket) => { held.add(socket); socket.on("data", () => {}); });
+    await new Promise((ok) => child.listen(0, "127.0.0.1", ok));
+    const runtime = {url: `http://127.0.0.1:${child.address().port}`, async ensure() {}};
+    const http = (await import("node:http")).createServer();
+    http.on("upgrade", upgradeProxy(runtime, ["/sap/bc/apc/x"]));
+    await new Promise((ok) => http.listen(0, "127.0.0.1", ok));
+    let client;
+    try {
+      client = connect({port: http.address().port, host: "127.0.0.1", allowHalfOpen: true});
+      await new Promise((ok) => client.once("connect", ok));
+      client.write("GET /sap/bc/apc/x HTTP/1.1\r\nHost: x\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n");
+      for (let i = 0; i < 50 && runtime.openChannels !== 1; i++) await sleep(10);
+      expect(runtime.openChannels).to.equal(1);
+      client.end();
+      for (let i = 0; i < 50 && runtime.openChannels !== 0; i++) await sleep(10);
+      expect(runtime.openChannels, "a half-closed socket still counted").to.equal(0);
+    } finally {
+      client?.destroy();
+      for (const socket of held) socket.destroy();
+      http.closeAllConnections?.();
+      await new Promise((ok) => http.close(ok));
+      await new Promise((ok) => child.close(ok));
+    }
+  });
+
+  it("the APC upgrade proxy counts the sockets it holds open on the runtime", async () => {
+    const {createServer, connect} = await import("node:net");
+    const {upgradeProxy} = await import("../tools/osd-proxy.mjs");
+    const child = createServer((socket) => socket.on("data", () => {}));
+    await new Promise((ok) => child.listen(0, "127.0.0.1", ok));
+    const runtime = {url: `http://127.0.0.1:${child.address().port}`, async ensure() {}};
+    const http = (await import("node:http")).createServer();
+    http.on("upgrade", upgradeProxy(runtime, ["/sap/bc/apc/x"]));
+    await new Promise((ok) => http.listen(0, "127.0.0.1", ok));
+    let client;
+    try {
+      client = connect(http.address().port, "127.0.0.1");
+      await new Promise((ok) => client.once("connect", ok));
+      client.write("GET /sap/bc/apc/x HTTP/1.1\r\nHost: x\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n");
+      for (let i = 0; i < 50 && runtime.openChannels !== 1; i++) await sleep(10);
+      expect(runtime.openChannels).to.equal(1);
+      client.destroy();
+      for (let i = 0; i < 50 && runtime.openChannels !== 0; i++) await sleep(10);
+      expect(runtime.openChannels).to.equal(0);
+    } finally {
+      client?.destroy();
+      http.closeAllConnections?.();
+      await new Promise((ok) => http.close(ok));
+      await new Promise((ok) => child.close(ok));
+    }
+  });
+
   it("a build the serving process already runs loads nothing: no recycle of unchanged code", async () => {
     const {store, events, done} = setup();
     try {
