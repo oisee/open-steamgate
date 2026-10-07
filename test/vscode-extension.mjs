@@ -340,6 +340,11 @@ describe("editors/vscode: the extension's logic", function () {
     unavailable = true; lines.length = 0;
     await run();
     expect(lines[0]).to.equal("--- classrun ZCL_A ---");
+    // A pack object outside the system root answers an empty active source:
+    // unknown, so no warning (osg-demo report on 0.7.1688).
+    unavailable = false; active = ""; lines.length = 0;
+    await run();
+    expect(lines[0]).to.equal("--- classrun ZCL_A ---");
   });
 
   it("normalizes active-source CRLF and terminal newlines for main source and includes", async () => {
