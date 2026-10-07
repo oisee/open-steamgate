@@ -118,8 +118,8 @@ CLASS zcl_osd_adt_lock IMPLEMENTATION.
           lv_uri = `http://www.sap.com/adt/ddic/ddlsources`.
           lv_element = `ddlSource`.
         WHEN `SRVD`.
-          lv_uri = `http://www.sap.com/adt/ddic/srvd`.
-          lv_element = `serviceDefinition`.
+          lv_uri = `http://www.sap.com/adt/ddic/srvdsources`.
+          lv_element = `srvdSource`.
       ENDCASE.
       IF lv_element IS NOT INITIAL.
         READ TABLE is_request-xml INDEX 1 INTO ls_root.

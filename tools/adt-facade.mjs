@@ -1683,11 +1683,12 @@ export function adtRouter(options = {}) {
           throw new NotFound(type, `${name} include ${include}`);
         }
         const part = store.read(type, name, include, req.query.version);
-        if (part.empty && include === "testclasses") {
+        // READ's empty flag describes the requested version, including active snapshots.
+        if (part.empty === true && include === "testclasses") {
           const missing = missingTestInclude(part.name);
           return void refuse(res, 404, "ExceptionResourceNotFound", missing.message, missing);
         }
-        if (part.empty && classIncludeTemplates[include]) { part.source = classIncludeTemplates[include]; part.etag = entityTag(part.source); }
+        if (part.empty === true && classIncludeTemplates[include]) { part.source = classIncludeTemplates[include]; part.etag = entityTag(part.source); }
         // VSP and the source links in class properties use this URL directly
         // with */*. Only an explicit include-property request wants XML.
         if (!String(req.headers.accept ?? "").includes("application/vnd.sap.adt.oo.classes.includes.")) {
@@ -1707,10 +1708,10 @@ export function adtRouter(options = {}) {
           throw new NotFound(type, `${req.params.name} include ${req.params.include}`);
         }
         const part = store.read(type, req.params.name, req.params.include, req.query.version);
-        if (part.empty && req.params.include === "testclasses") {
+        if (part.empty === true && req.params.include === "testclasses") {
           return void res.status(404).type("text/plain; charset=utf-8").send("No suitable resource found");
         }
-        if (part.empty && classIncludeTemplates[req.params.include]) { part.source = classIncludeTemplates[req.params.include]; part.etag = entityTag(part.source); }
+        if (part.empty === true && classIncludeTemplates[req.params.include]) { part.source = classIncludeTemplates[req.params.include]; part.etag = entityTag(part.source); }
         const source = part.source;
         res.type("text/plain; charset=utf-8");
         sendEntity(req, res, source, part.etag);
@@ -1721,7 +1722,9 @@ export function adtRouter(options = {}) {
     // <include>/versions, and so does an interface's main include, which is
     // where vsp asks (resolveRevisionURL); everything else at .../source/main.
     const versionsOf = (req, res, include) => answer(res, () => {
-      const part = store.read(type, req.params.name, include, "active");
+      // Git history is keyed by the working file, independently of whether
+      // there is an active snapshot (the HISTORY host command does the same).
+      const part = store.read(type, req.params.name, include);
       const base = `${BASE}/${adt}/${encodeURIComponent(String(req.params.name).toLowerCase())}` +
         (include === undefined ? "/source/main/versions" : `/includes/${include}/versions`);
       const feed = objectVersions(store.root, part.empty ? undefined : part.file, identity.userName);
@@ -1732,9 +1735,10 @@ export function adtRouter(options = {}) {
     });
     const versionContent = (req, res, include) => answer(res, () => {
       const part = store.read(type, req.params.name, include, "active");
+      const working = store.read(type, req.params.name, include);
       let source;
       try {
-        source = versionSource(store.root, part.empty ? undefined : part.file, req.params.version, part.source);
+        source = versionSource(store.root, working.empty ? undefined : working.file, req.params.version, part.source);
       } catch (error) {
         throw new NotFound(type, `${req.params.name} version ${req.params.version} (${error.message})`);
       }

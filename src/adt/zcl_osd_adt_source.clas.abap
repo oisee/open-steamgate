@@ -66,6 +66,8 @@ CLASS zcl_osd_adt_source IMPLEMENTATION.
     ENDIF.
     zcl_osd_adt_package=>query( EXPORTING is_request = is_request iv_name = `version` IMPORTING ev_value = lv_version ).
     ls_read = read( iv_type = lv_type iv_name = lv_name iv_include = lv_include iv_version = lv_version ).
+*   READ reports absence for lv_version, not just the working-tree file.
+*   A retained active include (even empty) must survive working-file removal.
     IF lv_type = `CLAS` AND ls_read-empty = abap_true.
       CASE lv_include.
         WHEN `testclasses`.
