@@ -4006,7 +4006,10 @@ function namedType(typeNode, ctx, inferred) {
     return inferred;
   }
   const t = upper(text);
-  const builtin = {I, F, STRING: S, XSTRING: XS, INT8, D: C(8), T: C(6)}[t];
+  const builtin = {
+    I, F, STRING: S, XSTRING: XS, INT8, D: C(8), T: C(6),
+    P: {k: "p", len: 8, dec: 0}, C: C(1), N: {k: "n", len: 1}, X: X(1), ABAP_BOOL: C(1),
+  }[t];
   if (builtin) return builtin;
   const pool = t.includes("_") ? ctx.reg.getObject("TYPE", t.split("_")[0]) : undefined;
   const poolType = pool ? new abaplint.SyntaxLogic(ctx.reg, pool).run().spaghetti.getFirstChild()?.getFirstChild()?.findType(t) : undefined;
@@ -5626,6 +5629,7 @@ function valueBody(body, to, ctx, text) {
     }
     return literal;
   }
+  if (body === null && to.k !== "struct") return {e: "zero", type: to};
   if (to.k !== "struct") throw new Unsupported(`VALUE for a ${to.k}: ${text}`);
   const fields = [];
   for (const c of body?.getChildren() ?? []) {
