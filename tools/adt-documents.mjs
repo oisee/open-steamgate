@@ -10,7 +10,6 @@ import {requestElements, elementsNamed, descendantsOf, attributeValue, namespace
 // the places where a guess is load-bearing are marked.
 import {frameUri} from "./adt-unit-result.mjs";
 export {frameUri, unitResultDocument} from "./adt-unit-result.mjs";
-import {Visibility} from "@abaplint/core";
 import {TYPES, NotFound} from "./osd-store.mjs";
 import {localView} from "./osd-tmp-view.mjs";
 
@@ -42,8 +41,9 @@ export const ADT_TYPE = {
   DEVC: "DEVC/K",
 };
 
-// a method of a class, an include of one, and an interface's methods
+// A global class method. Local and test methods use CLAS/OLD.
 const METHOD = "CLAS/OM";
+// Repository tree/include documents still use this type; objectstructure does not.
 const CLASS_INCLUDE = "CLAS/I";
 
 // where an object lives in the resource tree, which is what a client follows
@@ -55,133 +55,54 @@ export function uriOf(type, name) {
   return `/sap/bc/adt/${collection}/${encodeURIComponent(String(name).toLowerCase())}`;
 }
 
-// a range in the main source, the way ADT writes one
-const rangeUri = (at) => `source/main#start=${at.row},${at.col}` + (at.endRow === undefined ? "" : `;end=${at.endRow},${at.endCol}`);
+// ADT lines are 1-based, columns 0-based. Blocks end ON the period;
+// identifier ends are the boundary after the name token (A4H 7.58).
+const rangeUri = (at, source = "source/main") => `${source}#start=${at.row},${at.col}`
+  + (at.endRow === undefined ? "" : `;end=${at.endRow},${at.endCol}`);
+const span = (first, last, identifier = false) => ({
+  row: first.getStart().getRow(), col: first.getStart().getCol() - 1,
+  endRow: last.getEnd().getRow(), endCol: last.getEnd().getCol() - (identifier ? 1 : 2),
+});
+const sourceLink = (rel, first, last, source, type) => ({
+  rel, href: rangeUri(span(first, last, rel.endsWith("Identifier")), source),
+  ...(type === undefined ? {} : {type}),
+});
+const structureAttributes = (e) => [
+  `adtcore:name="${xmlEscape(e.name)}"`, `adtcore:type="${xmlEscape(e.type)}"`,
+  ...["visibility", "level", "clif_name", "testclass", "testmethod", "final"].flatMap((k) =>
+    e[k] === undefined ? [] : [`${k}="${xmlEscape(e[k])}"`]),
+  ...(e.uri === undefined ? [] : [`abapsource:sourceUri="${xmlEscape(e.uri)}"`]),
+  ...Object.entries(e.extra ?? {}).map(([k, v]) => `${k}="${xmlEscape(v)}"`),
+].join(" ");
+const structureLinks = (e, pad) => (e.links ?? []).map((l) =>
+  `${pad}<atom:link rel="http://www.sap.com/adt/relations/source/${xmlEscape(l.rel)}" href="${xmlEscape(l.href)}"${l.type === undefined ? "" : ` type="${xmlEscape(l.type)}"`}/>`);
 
-const VISIBILITY = {
-  [Visibility.Public]: "public",
-  [Visibility.Protected]: "protected",
-  [Visibility.Private]: "private",
-};
-
-// ------------------------------------------------- the object structure
-
-// What a client reads before it asks for one method rather than a whole
-// class: the elements of an object and, for each, the fragment of the source
-// URI that selects it. A plain full-source read never comes through here,
-// which is why wave 0 did without it.
-//
-// The source URI fragment is the load-bearing part. ADT writes the position
-// as `#start=row,col`, and a client that wants one method asks for
-// `source/main#start=…`. We answer the whole source and let the client cut,
-// which is what it does anyway: the fragment never reaches a server.
 export function objectStructureDocument(object, options = {}) {
   const element = (e, indent) => {
     const pad = " ".repeat(indent);
-    const attributes = [
-      `adtcore:name="${xmlEscape(e.name)}"`,
-      `adtcore:type="${xmlEscape(e.type)}"`,
-      e.visibility === undefined ? undefined : `abapsource:visibility="${e.visibility}"`,
-      e.modifiers === undefined ? undefined : `abapsource:modifiers="${e.modifiers}"`,
-      e.uri === undefined ? undefined : `abapsource:sourceUri="${xmlEscape(e.uri)}"`,
-      ...Object.entries(e.extra ?? {}).map(([k, v]) => `${k}="${xmlEscape(v)}"`),
-    ].filter((a) => a !== undefined).join(" ");
-    // The client looks a member up by its identifier links, not its block
-    // links (ObjectStructureContentHandler rewrites only definitionIdentifier
-    // and implementationIdentifier to the short names getLink searches for);
-    // both point at the same range here, so each block link has its twin.
-    const twin = (l) => l.rel.endsWith("Block") ? [l, {rel: l.rel.replace(/Block$/, "Identifier"), href: l.href}] : [l];
-    const links = (e.links ?? []).flatMap(twin).map((l) => `${pad}  <atom:link rel="http://www.sap.com/adt/relations/source/${xmlEscape(l.rel)}" href="${xmlEscape(l.href)}"/>`);
-    const inner = [...links, ...(e.children ?? []).map((c) => element(c, indent + 2))];
-    if (inner.length === 0) {
-      return `${pad}<abapsource:objectStructureElement ${attributes}/>`;
-    }
-    return `${pad}<abapsource:objectStructureElement ${attributes}>
-${inner.join("\n")}
-${pad}</abapsource:objectStructureElement>`;
+    const inner = [...structureLinks(e, pad + "  "), ...(e.children ?? []).map((c) => element(c, indent + 2))];
+    return inner.length === 0 ? `${pad}<abapsource:objectStructureElement ${structureAttributes(e)}/>`
+      : `${pad}<abapsource:objectStructureElement ${structureAttributes(e)}>\n${inner.join("\n")}\n${pad}</abapsource:objectStructureElement>`;
   };
-
+  const inner = [...structureLinks(object, "  "), ...(object.children ?? []).map((c) => element(c, 2))];
   return `<?xml version="1.0" encoding="utf-8"?>
 <abapsource:objectStructureElement xmlns:abapsource="http://www.sap.com/adt/abapsource"
                                    xmlns:adtcore="http://www.sap.com/adt/core"
                                    xmlns:atom="http://www.w3.org/2005/Atom"${options.base === undefined ? "" : `
                                    xml:base="${xmlEscape(options.base)}"`}
-                                   adtcore:name="${xmlEscape(object.name)}"
-                                   adtcore:type="${xmlEscape(object.type)}"
-${object.version === undefined ? "" : `                                   adtcore:version="${xmlEscape(object.version)}"\n`}                                   abapsource:sourceUri="source/main">
-${(object.children ?? []).map((c) => element(c, 2)).join("\n")}
+                                   ${structureAttributes(object)}${object.version === undefined ? "" : ` adtcore:version="${xmlEscape(object.version)}"`}>
+${inner.join("\n")}
 </abapsource:objectStructureElement>
 `;
 }
 
-// Where every method body begins and ends, from the parse. A client asks for
-// one method by a range and slices the main source between the two, so half
-// a range is no range: without the end it reads nothing at all.
-function implementationRows(object) {
-  const rows = new Map();
-  for (const file of object.getSequencedFiles?.() ?? []) {
-    const structure = file.getStructure?.();
-    if (structure === null || structure === undefined) {
-      continue;
-    }
-    for (const node of findMethods(structure)) {
-      // METHOD <name> ... ENDMETHOD: the name is the token after METHOD, and
-      // the last token of the node is the end of ENDMETHOD
-      const tokens = [node.getFirstToken?.(), node.getLastToken?.()];
-      const name = nameAfterMethod(node);
-      const start = tokens[0]?.getStart?.();
-      const end = tokens[1]?.getEnd?.() ?? tokens[1]?.getStart?.();
-      if (name === undefined || start === undefined || end === undefined) {
-        continue;
-      }
-      rows.set(String(name).toUpperCase(), {
-        row: start.getRow(),
-        col: start.getCol(),
-        endRow: end.getRow(),
-        endCol: end.getCol(),
-      });
-    }
-  }
-  return rows;
-}
-
-// Where each method is declared, as the whole statement rather than the name
-// alone: a client uses this range for a signature, and a declaration with
-// parameters runs over several lines.
-function declarationRows(object) {
-  const rows = new Map();
-  for (const file of object.getSequencedFiles?.() ?? []) {
-    for (const statement of file.getStatements?.() ?? []) {
-      if (statement.get?.()?.constructor?.name !== "MethodDef") {
-        continue;
-      }
-      const tokens = statement.getTokens?.() ?? [];
-      // CLASS-METHODS name ... or METHODS name ...: the name is the first
-      // token that is not part of the keyword
-      const name = tokens.find((t) => ["CLASS", "-", "METHODS"].includes(t.getStr().toUpperCase()) === false);
-      const start = tokens[0]?.getStart?.();
-      const end = tokens[tokens.length - 1]?.getEnd?.();
-      if (name === undefined || start === undefined || end === undefined) {
-        continue;
-      }
-      rows.set(name.getStr().toUpperCase(), {
-        row: start.getRow(),
-        col: start.getCol(),
-        endRow: end.getRow(),
-        endCol: end.getCol(),
-      });
-    }
-  }
-  return rows;
-}
-
 // Every node of the given structure or statement kinds, in source order.
 function findNodes(node, kinds, out = []) {
-  const kind = node.get?.()?.constructor?.name;
+  const kind = node?.get?.()?.constructor?.name;
   if (kinds.includes(kind)) {
     out.push(node);
   }
-  for (const child of node.getChildren?.() ?? []) {
+  for (const child of node?.getChildren?.() ?? []) {
     findNodes(child, kinds, out);
   }
   return out;
@@ -234,137 +155,116 @@ function programParts(object) {
   return parts;
 }
 
-function findMethods(node, out = []) {
-  if (node.get?.()?.constructor?.name === "Method") {
-    out.push(node);
+// Preserve the owning class and physical include before collecting members.
+// Method names alone are not keys: several local/test classes may use RUN.
+function classParts(object, globalName, type) {
+  const classes = new Map();
+  for (const file of object?.getSequencedFiles?.() ?? []) {
+    const filename = file.getFilename();
+    const include = /\.clas\.(locals_def|locals_imp|testclasses|macros)\.abap$/i.exec(filename)?.[1];
+    const source = include === undefined ? "./source/main" : `./includes/${{
+      locals_def: "definitions", locals_imp: "implementations", testclasses: "testclasses", macros: "macros",
+    }[include.toLowerCase()]}`;
+    for (const node of findNodes(file.getStructure?.(), ["ClassDefinition", "ClassImplementation", "Interface"])) {
+      if (node.getFirstStatement === undefined) continue;
+      const header = node.getFirstStatement();
+      const token = header.getTokens()[1];
+      const name = token.getStr().toUpperCase();
+      const owner = classes.get(name) ?? {name, declarations: [], bodies: new Map()};
+      classes.set(name, owner);
+      const part = {node, token, source};
+      if (node.get().constructor.name === "ClassImplementation") {
+        owner.implementation = part;
+        for (const method of findNodes(node, ["Method"])) {
+          const token = method.getFirstStatement().getTokens()[1];
+          owner.bodies.set(token.getStr().toUpperCase(), {node: method, token, source});
+        }
+      } else {
+        owner.definition = part;
+        let visibility = "public";
+        for (const statement of findNodes(node, ["Public", "Protected", "Private", "MethodDef", "InterfaceDef", "Aliases", "Data", "ClassData", "Constant"])) {
+          if (statement.constructor.name !== "StatementNode") continue;
+          const kind = statement.get().constructor.name;
+          if (["Public", "Protected", "Private"].includes(kind)) {visibility = kind.toLowerCase(); continue;}
+          owner.declarations.push({statement, kind, visibility, source});
+        }
+      }
+    }
   }
-  for (const child of node.getChildren?.() ?? []) {
-    findMethods(child, out);
-  }
-  return out;
+  const partLinks = (definition, implementation, methodType) => [
+    ...(definition === undefined ? [] : [sourceLink("definitionIdentifier", definition.token, definition.token, definition.source, methodType)]),
+    ...(implementation === undefined ? [] : [sourceLink("implementationIdentifier", implementation.token, implementation.token, implementation.source,
+      methodType === "CLAS/OLD" ? methodType : undefined)]),
+    ...(definition === undefined ? [] : [sourceLink("definitionBlock", definition.node.getFirstToken(), definition.node.getLastToken(), definition.source)]),
+    ...(implementation === undefined ? [] : [sourceLink("implementationBlock", implementation.node.getFirstToken(), implementation.node.getLastToken(), implementation.source)]),
+  ];
+  const build = (owner, local) => {
+    const methodType = local ? "CLAS/OLD" : METHOD;
+    const links = partLinks(owner.definition, owner.implementation);
+    const children = [], listed = new Set(), interfaces = new Map();
+    for (const {statement, kind, visibility, source} of owner.declarations) {
+      const tokens = statement.getTokens();
+      const keyword = kind === "MethodDef" ? "METHODS" : kind === "ClassData" ? "DATA" : undefined;
+      const token = keyword === undefined ? tokens[1] : tokens[tokens.findIndex((t) => t.getStr().toUpperCase() === keyword) + 1];
+      const name = token.getStr().toUpperCase();
+      const declared = {node: statement, token, source};
+      if (kind === "InterfaceDef") {
+        interfaces.set(name, declared);
+        const bodies = [...owner.bodies].filter(([n]) => n.startsWith(name + "~")).map(([, b]) => b);
+        children.push({name, type: "CLAS/OR", links: [
+          sourceLink("definitionIdentifier", token, token, source),
+          ...bodies.map((b) => sourceLink("implementationIdentifier", b.token, b.token, b.source, methodType)),
+          sourceLink("definitionBlock", statement.getFirstToken(), statement.getLastToken(), source),
+        ]});
+      } else if (kind === "MethodDef") {
+        listed.add(name);
+        children.push({name, type: methodType, visibility, level: tokens[0].getStr().toUpperCase() === "CLASS" ? "static" : "instance",
+          clif_name: owner.name,
+          ...(statement.concatTokens().toUpperCase().includes("FOR TESTING") ? {testmethod: "true"} : {}),
+          links: partLinks(declared, owner.bodies.get(name), methodType)});
+      } else {
+        const alias = kind === "Aliases";
+        children.push({name, type: alias ? "CLAS/OB" : "CLAS/OA", visibility,
+          ...(alias ? {} : {level: ["ClassData", "Constant"].includes(kind) ? "static" : "instance"}),
+          links: partLinks(declared)});
+      }
+    }
+    for (const [name, body] of owner.bodies) {
+      if (listed.has(name)) continue;
+      const intf = interfaces.get(name.split("~")[0]);
+      children.push({name, type: methodType, visibility: "public", level: "instance", clif_name: owner.name, links: [
+        ...(intf === undefined ? [] : [sourceLink("definitionIdentifier", intf.token, intf.token, intf.source, "CLAS/OR")]),
+        sourceLink("implementationIdentifier", body.token, body.token, body.source, methodType),
+        sourceLink("implementationBlock", body.node.getFirstToken(), body.node.getLastToken(), body.source),
+      ]});
+    }
+    const header = owner.definition?.node.getFirstStatement().concatTokens().toUpperCase() ?? "";
+    return {name: owner.name, type: local ? "CLAS/OCL" : ADT_TYPE[type],
+      ...(local ? {} : {visibility: "public"}),
+      ...(header.includes(" FINAL") ? {final: "true"} : {}),
+      ...(header.includes("FOR TESTING") ? {testclass: "true"} : {}), links, children};
+  };
+  const root = classes.get(globalName);
+  const result = root === undefined ? {name: globalName, type: ADT_TYPE[type], children: []} : build(root, false);
+  for (const owner of classes.values()) if (owner !== root) result.children.push(build(owner, true));
+  return result;
 }
 
-// the name of the method a node implements: the token after METHOD
-function nameAfterMethod(node) {
-  const statement = node.getFirstStatement?.();
-  const tokens = statement?.getTokens?.() ?? [];
-  return tokens.length > 1 ? tokens[1].getStr() : undefined;
-}
-
-// The elements of a class or an interface, out of the parsed system. The
-// parse is the same one the syntax check runs on, so what a client is told
-// exists is what would compile.
 export function structureOf(store, type, name) {
   const entry = store.find(type, name);
-  if (entry === undefined) {
-    return undefined;
-  }
+  if (entry === undefined) return undefined;
   const object = store.registry().getObject(type === "INCL" ? "PROG" : type, entry.name);
-  const children = [];
-
-  const definition = object?.getDefinition?.();
-  if (definition !== undefined) {
-    // where each method's body is, which is not where its declaration is. A
-    // client that wants one method slices the source at this position, so
-    // pointing at the declaration gives it the signature and no body. The
-    // declaration is the fallback for a method that has no implementation:
-    // abstract, or inherited and not redefined here.
-    const bodies = implementationRows(object);
-    const declarations = declarationRows(object);
-    for (const method of definition.getMethodDefinitions?.()?.getAll?.() ?? []) {
-      const name = method.getName().toUpperCase();
-      const declared = method.getStart?.();
-      const body = bodies.get(name);
-      const declaration = declarations.get(name) ?? (declared === undefined ? undefined : {
-        row: declared.getRow?.() ?? declared.row,
-        col: declared.getCol?.() ?? declared.col,
-        endRow: declared.getRow?.() ?? declared.row,
-        endCol: declared.getCol?.() ?? declared.col,
-      });
-      const at = body ?? declaration;
-      children.push({
-        name,
-        type: METHOD,
-        visibility: VISIBILITY[method.getVisibility?.()] ?? "public",
-        modifiers: method.isStatic?.() === true ? "static" : undefined,
-        uri: at === undefined ? "source/main" : rangeUri(at),
-        // the two links a client actually reads: where the method is declared
-        // and where its body is. The attribute above says the same thing and
-        // is kept because a real system carries both, but a client that wants
-        // one method reads these.
-        links: [
-          declaration === undefined ? undefined : {rel: "definitionBlock", href: rangeUri(declaration)},
-          body === undefined ? undefined : {rel: "implementationBlock", href: rangeUri(body)},
-        ].filter((l) => l !== undefined),
-      });
-    }
-  }
-
-  // A method the class implements without declaring: one it takes from an
-  // interface. abaplint lists a class's own METHODS and not those, so a
-  // class that is nothing but an interface implementation — an APC handler,
-  // a BAdI — had no children here at all. That is not a cosmetic gap: the
-  // client's class outline reads result[0] without checking the length
-  // (oo.ui!AbapClassOutlineExplorerTreeContentProvider#getChildren@14-16),
-  // so an empty structure is an exception rather than an empty tree.
-  //
-  // Read from the parsed file, not from the definition: a class whose
-  // superclass is not in this tree has no definition at all, and its
-  // bodies are still right there in the source.
-  if (object !== undefined) {
-    const listed = new Set(children.map((c) => c.name));
-    for (const [name, body] of implementationRows(object)) {
-      if (listed.has(name) === false) {
-        children.push({name, type: METHOD, visibility: "public", uri: rangeUri(body),
-          links: [{rel: "implementationBlock", href: rangeUri(body)}]});
-      }
-    }
-  }
-  if (definition !== undefined) {
-    // the attributes, which a real structure lists beside the methods
-    // (a4h-adt-2026-09-14T2205.jsonl:112 has seven CLAS/OA to five CLAS/OM)
-    for (const attribute of definition.getAttributes?.()?.getAll?.() ?? []) {
-      const at = attribute.getStart?.();
-      children.push({
-        name: attribute.getName().toUpperCase(),
-        type: "CLAS/OA",
-        visibility: VISIBILITY[attribute.getVisibility?.()] ?? "public",
-        uri: at === undefined ? "source/main" : rangeUri({row: at.getRow(), col: at.getCol(), endRow: at.getRow(), endCol: at.getCol()}),
-      });
-    }
-  }
-
-  // a class carries more than one file, and ADT calls them includes; a client
-  // reads one through the includes resource rather than through source/main
-  if (type === "CLAS") {
-    for (const include of ["definitions", "implementations", "macros", "testclasses"]) {
-      const part = store.read(type, entry.name, include);
-      if (part.empty === true || part.source === "") {
-        continue;
-      }
-      children.push({
-        name: include.toUpperCase(),
-        type: CLASS_INCLUDE,
-        uri: `includes/${include}/source/main`,
-      });
-    }
-  }
-
-  // The class itself, as one more child, which a real structure always
-  // carries (the same capture: one CLAS/OCX named after the class). It is
-  // also what keeps the structure of an empty class from being empty, and
-  // the outline provider above from throwing on it.
-  if (type === "CLAS") {
-    children.push({name: entry.name, type: "CLAS/OCX", uri: "source/main",
-      extra: {isExternalRef: "true", description: "Text Elements"}});
-  }
+  const result = ["CLAS", "INTF"].includes(type) ? classParts(object, entry.name, type)
+    : {name: entry.name, type: ADT_TYPE[type] ?? type, uri: "source/main", children: []};
+  if (type === "CLAS") result.children.push({name: entry.name, type: "CLAS/OCX",
+    extra: {isExternalRef: "true", description: "Text Elements"},
+    links: [{rel: "definitionIdentifier", href: `/sap/bc/adt/textelements/classes/${entry.name.toLowerCase()}`}],
+  });
   if (type === "PROG" || type === "INCL") {
-    children.push(...programParts(object));
-    children.push({name: entry.name, type: "PROG/PX", uri: "source/main"});
+    result.children.push(...programParts(object), {name: entry.name, type: "PROG/PX", uri: "source/main"});
   }
-
-  return {name: entry.name, type: ADT_TYPE[type] ?? type, children,
-    ...(["INCL", "SRVD"].includes(type) ? {version: store.stateOf(entry).version} : {})};
+  if (["INCL", "SRVD"].includes(type)) result.version = store.stateOf(entry).version;
+  return result;
 }
 
 // The base resource of a class include. A client resolves a method body by

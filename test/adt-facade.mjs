@@ -499,7 +499,7 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       const methods = [...xml.matchAll(/adtcore:type="CLAS\/OM"[^>]*/g)].map((m) => m[0]);
       expect(methods.length, "an APC handler has methods, all of them from its interface").to.be.greaterThan(0);
       expect(xml).to.contain('adtcore:name="IF_APC_WSP_EXTENSION~ON_START"');
-      expect(xml, "a method points into the source").to.match(/adtcore:type="CLAS\/OM"[^>]*abapsource:sourceUri="source\/main#start=\d+,\d+;end=\d+,\d+"/);
+      expect(xml, "a method points into the source").to.match(/adtcore:type="CLAS\/OM"[\s\S]*?implementationBlock" href="\.\/source\/main#start=\d+,\d+;end=\d+,\d+"/);
       expect(xml, "the class itself is a child, as it is in a real structure").to.contain('adtcore:type="CLAS/OCX"');
     });
 
@@ -727,13 +727,13 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       expect(xml).to.contain('adtcore:type="CLAS/OM"');
       // dispatch is public, origin is private: the difference is the reason a
       // client reads this document at all
-      expect(xml).to.match(/adtcore:name="DISPATCH"[^>]*abapsource:visibility="public"/);
-      expect(xml).to.match(/adtcore:name="ORIGIN"[^>]*abapsource:visibility="private"/);
+      expect(xml).to.match(/adtcore:name="DISPATCH"[^>]*visibility="public"/);
+      expect(xml).to.match(/adtcore:name="ORIGIN"[^>]*visibility="private"/);
     });
 
     it("a method carries the source position a client asks for it by", async () => {
       const xml = await (await call("/oo/classes/ZCL_STG_DISPATCHER/objectstructure")).text();
-      expect(xml).to.match(/abapsource:sourceUri="source\/main#start=\d+,\d+;end=\d+,\d+"/);
+      expect(xml).to.match(/implementationBlock" href="\.\/source\/main#start=\d+,\d+;end=\d+,\d+"/);
     });
 
     it("a method carries the whole range of its body, both ends", async () => {
@@ -741,7 +741,7 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       // ends of this range. Half a range is no range: without the end it
       // reads nothing, which is what "no implementation" meant.
       const xml = await (await call("/oo/classes/ZCL_STG_SEGW_REPO/objectstructure")).text();
-      const at = xml.match(/adtcore:name="FILES"[^>]*source\/main#start=(\d+),\d+;end=(\d+),\d+/);
+      const at = xml.match(/adtcore:name="FILES"[\s\S]*?implementationBlock" href="\.\/source\/main#start=(\d+),\d+;end=(\d+),\d+/);
       expect(at, "FILES carries a start and an end").to.not.equal(null);
       const source = (await (await call("/oo/classes/ZCL_STG_SEGW_REPO/source/main")).text()).split("\n");
       expect(source[Number(at[1]) - 1].toUpperCase()).to.contain("METHOD FILES");
@@ -751,7 +751,7 @@ describe("tools/adt-facade: OSD answers ADT", () => {
 
     it("every method of a class carries a range, not only the first", async () => {
       const xml = await (await call("/oo/classes/ZCL_STG_SEGW_REPO/objectstructure")).text();
-      const methods = [...xml.matchAll(/adtcore:type="CLAS\/OM"[^>]*sourceUri="([^"]+)"/g)].map((m) => m[1]);
+      const methods = [...xml.matchAll(/adtcore:type="CLAS\/OM"[\s\S]*?implementationBlock" href="([^"]+)"/g)].map((m) => m[1]);
       expect(methods.length).to.be.greaterThan(3);
       for (const uri of methods) {
         expect(uri, uri).to.match(/#start=\d+,\d+;end=\d+,\d+$/);
@@ -766,7 +766,7 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       expect(element, "FILES is an element with children").to.not.equal(null);
       expect(element[0]).to.contain('rel="http://www.sap.com/adt/relations/source/implementationBlock"');
       expect(element[0]).to.contain('rel="http://www.sap.com/adt/relations/source/definitionBlock"');
-      const body = element[0].match(/implementationBlock" href="source\/main#start=(\d+),\d+;end=(\d+),\d+"/);
+      const body = element[0].match(/implementationBlock" href="\.\/source\/main#start=(\d+),\d+;end=(\d+),\d+"/);
       expect(body, "the implementation link carries a range").to.not.equal(null);
       const source = (await (await call("/oo/classes/ZCL_STG_SEGW_REPO/source/main")).text()).split("\n");
       expect(source[Number(body[1]) - 1].toUpperCase()).to.contain("METHOD FILES");
@@ -776,7 +776,7 @@ describe("tools/adt-facade: OSD answers ADT", () => {
     it("the declaration link points at the whole signature, not the name alone", async () => {
       const xml = await (await call("/oo/classes/ZCL_STG_SEGW_REPO/objectstructure")).text();
       const element = xml.match(/<abapsource:objectStructureElement adtcore:name="FILES"[\s\S]*?<\/abapsource:objectStructureElement>/)[0];
-      const declaration = element.match(/definitionBlock" href="source\/main#start=(\d+),\d+;end=(\d+),\d+"/);
+      const declaration = element.match(/definitionBlock" href="\.\/source\/main#start=(\d+),\d+;end=(\d+),\d+"/);
       expect(declaration).to.not.equal(null);
       const source = (await (await call("/oo/classes/ZCL_STG_SEGW_REPO/source/main")).text()).split("\n");
       expect(source[Number(declaration[1]) - 1].toUpperCase()).to.contain("METHODS FILES");
@@ -784,10 +784,11 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       expect(Number(declaration[2])).to.be.greaterThan(Number(declaration[1]));
     });
 
-    it("a class's other includes are elements of the structure too", async () => {
+    it("test classes are nested local classes with links into their include", async () => {
       const xml = await (await call("/oo/classes/ZCL_STG_SEGW_TEST/objectstructure")).text();
-      expect(xml).to.contain('adtcore:name="TESTCLASSES"');
-      expect(xml).to.contain('abapsource:sourceUri="includes/testclasses/source/main"');
+      expect(xml).to.contain('adtcore:type="CLAS/OCL"');
+      expect(xml).to.contain('testclass="true"');
+      expect(xml).to.contain('href="./includes/testclasses#start=');
     });
 
     it("the object structure of an interface answers too", async () => {

@@ -40,6 +40,7 @@
     "test/adt-devloop.mjs",
     "test/adt-include-objectpost-parity.mjs",
     "test/adt-editor.mjs",
+    "test/adt-objectstructure-parity.mjs",
     "test/adt-facade.mjs",
     "test/adt-host-seam.mjs",
     "test/adt-handle-migration.mjs",

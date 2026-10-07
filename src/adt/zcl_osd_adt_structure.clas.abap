@@ -13,7 +13,7 @@ CLASS zcl_osd_adt_structure DEFINITION PUBLIC FINAL CREATE PUBLIC.
       RETURNING VALUE(rv_xml) TYPE string RAISING zcx_ajson_error.
     CLASS-METHODS links IMPORTING io_json TYPE REF TO zcl_ajson iv_path TYPE string iv_pad TYPE string
       RETURNING VALUE(rv_xml) TYPE string RAISING zcx_ajson_error.
-    CLASS-METHODS link IMPORTING iv_rel TYPE string iv_href TYPE string iv_pad TYPE string
+    CLASS-METHODS link IMPORTING iv_rel TYPE string iv_href TYPE string iv_pad TYPE string iv_type TYPE string
       RETURNING VALUE(rv_xml) TYPE string.
 ENDCLASS.
 CLASS zcl_osd_adt_structure IMPLEMENTATION.
@@ -26,6 +26,7 @@ CLASS zcl_osd_adt_structure IMPLEMENTATION.
     DATA ls_answer TYPE zcl_osd_adt_host=>ty_answer.
     DATA lx_error TYPE REF TO zcx_osd_adt.
     DATA lx_json TYPE REF TO zcx_ajson_error.
+    DATA lv_accept TYPE string.
     READ TABLE is_request-params WITH KEY name = `name` INTO ls_name.
     lt_types = zcl_osd_adt_types=>sources( ).
     LOOP AT lt_types INTO ls_type.
@@ -54,14 +55,20 @@ CLASS zcl_osd_adt_structure IMPLEMENTATION.
     ENDTRY.
     rs_response-status = 200.
     rs_response-content_type = `application/vnd.sap.adt.objectstructure.v2+xml; charset=utf-8`.
+    lv_accept = zcl_osd_adt_csrf=>header( it_headers = is_request-headers iv_name = `accept` ).
+    IF lv_accept NS `application/vnd.sap.adt.objectstructure.v2+xml`
+      AND ( lv_accept CS `application/vnd.sap.adt.objectstructure+xml` OR lv_accept CS `application/xml` ).
+      rs_response-content_type = `application/vnd.sap.adt.objectstructure+xml; charset=utf-8`.
+    ENDIF.
   ENDMETHOD.
   METHOD document.
     DATA lv_nl TYPE string.
     DATA lv_pad TYPE string.
     DATA lv_version TYPE string.
+    DATA lv_links TYPE string.
     lv_version = io_json->get_string( `/version` ).
     IF lv_version IS NOT INITIAL.
-      lv_version = `                                   adtcore:version="` && lv_version && `"` && cl_abap_char_utilities=>newline.
+      lv_version = ` adtcore:version="` && zcl_osd_adt_xml=>esc( lv_version ) && `"`.
     ENDIF.
     lv_nl = cl_abap_char_utilities=>newline.
     lv_pad = `                                   `.
@@ -70,11 +77,12 @@ CLASS zcl_osd_adt_structure IMPLEMENTATION.
       && lv_pad && `xmlns:adtcore="http://www.sap.com/adt/core"` && lv_nl
       && lv_pad && `xmlns:atom="http://www.w3.org/2005/Atom"` && lv_nl
       && lv_pad && `xml:base="` && zcl_osd_adt_xml=>esc( iv_base ) && `"` && lv_nl
-      && lv_pad && `adtcore:name="` && zcl_osd_adt_xml=>esc( io_json->get_string( `/name` ) ) && `"` && lv_nl
-      && lv_pad && `adtcore:type="` && zcl_osd_adt_xml=>esc( io_json->get_string( `/type` ) ) && `"` && lv_nl
-      && lv_version
-      && lv_pad && `abapsource:sourceUri="source/main">` && lv_nl
-      && children( io_json = io_json iv_path = `/children` iv_pad = `  ` ) && lv_nl
+      && lv_pad && attributes( io_json = io_json iv_path = `` ) && lv_version && `>` && lv_nl.
+    lv_links = links( io_json = io_json iv_path = `/links` iv_pad = `  ` ).
+    IF lv_links IS NOT INITIAL.
+      rv_xml = rv_xml && lv_links && lv_nl.
+    ENDIF.
+    rv_xml = rv_xml && children( io_json = io_json iv_path = `/children` iv_pad = `  ` ) && lv_nl
       && `</abapsource:objectStructureElement>` && lv_nl.
   ENDMETHOD.
   METHOD children.
@@ -96,7 +104,7 @@ CLASS zcl_osd_adt_structure IMPLEMENTATION.
     DATA lt_members TYPE string_table.
     DATA lv_member TYPE string.
     DATA lv_path TYPE string.
-    SPLIT `name,type,visibility,modifiers,uri` AT `,` INTO TABLE lt_keys.
+    SPLIT `name,type,visibility,level,clif_name,testclass,testmethod,final,uri` AT `,` INTO TABLE lt_keys.
     LOOP AT lt_keys INTO lv_key.
       lv_path = iv_path && `/` && lv_key.
       IF io_json->exists( lv_path ) = abap_false.
@@ -111,7 +119,8 @@ CLASS zcl_osd_adt_structure IMPLEMENTATION.
           lv_attr = `abapsource:sourceUri`.
           lv_value = zcl_osd_adt_xml=>esc( lv_value ).
         WHEN OTHERS.
-          lv_attr = `abapsource:` && lv_key.
+          lv_attr = lv_key.
+          lv_value = zcl_osd_adt_xml=>esc( lv_value ).
       ENDCASE.
       IF rv_xml IS NOT INITIAL.
         rv_xml = rv_xml && ` `.
@@ -127,7 +136,11 @@ CLASS zcl_osd_adt_structure IMPLEMENTATION.
   ENDMETHOD.
   METHOD link.
     rv_xml = iv_pad && `<atom:link rel="http://www.sap.com/adt/relations/source/`
-      && zcl_osd_adt_xml=>esc( iv_rel ) && `" href="` && zcl_osd_adt_xml=>esc( iv_href ) && `"/>`.
+      && zcl_osd_adt_xml=>esc( iv_rel ) && `" href="` && zcl_osd_adt_xml=>esc( iv_href ) && `"`.
+    IF iv_type IS NOT INITIAL.
+      rv_xml = rv_xml && ` type="` && zcl_osd_adt_xml=>esc( iv_type ) && `"`.
+    ENDIF.
+    rv_xml = rv_xml && `/>`.
   ENDMETHOD.
   METHOD links.
     DATA lt_members TYPE string_table.
@@ -135,7 +148,7 @@ CLASS zcl_osd_adt_structure IMPLEMENTATION.
     DATA lv_path TYPE string.
     DATA lv_rel TYPE string.
     DATA lv_href TYPE string.
-    DATA lv_offset TYPE i.
+    DATA lv_type TYPE string.
     lt_members = zcl_osd_adt_json=>ordered_members( io_json = io_json iv_path = iv_path ).
     LOOP AT lt_members INTO lv_member.
       lv_path = iv_path && `/` && lv_member.
@@ -144,13 +157,8 @@ CLASS zcl_osd_adt_structure IMPLEMENTATION.
       IF rv_xml IS NOT INITIAL.
         rv_xml = rv_xml && cl_abap_char_utilities=>newline.
       ENDIF.
-      rv_xml = rv_xml && link( iv_rel = lv_rel iv_href = lv_href iv_pad = iv_pad ).
-      lv_offset = strlen( lv_rel ) - 5.
-      IF lv_offset >= 0 AND lv_rel+lv_offset = `Block`.
-        lv_rel = lv_rel(lv_offset) && `Identifier`.
-        rv_xml = rv_xml && cl_abap_char_utilities=>newline
-          && link( iv_rel = lv_rel iv_href = lv_href iv_pad = iv_pad ).
-      ENDIF.
+      lv_type = io_json->get_string( lv_path && `/type` ).
+      rv_xml = rv_xml && link( iv_rel = lv_rel iv_href = lv_href iv_pad = iv_pad iv_type = lv_type ).
     ENDLOOP.
   ENDMETHOD.
   METHOD element.
