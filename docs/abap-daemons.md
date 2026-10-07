@@ -1155,3 +1155,21 @@ deployed to a system is decided by the deploy manifest, not by the name.
 | D7 | The preview | best effort as described: a daemon lives while a page keeps the worker alive, restarts from rows when the worker starts |
 | D8 | Probes on A4H | ask once for the whole set P0 to P11 in one `$ZOSG_TMP` package, rather than one at a time. **Run 2026-09-24; P8 run the same day after Alice allowed the abapGit route for the `SAMC`; the cross-client half of P6 and of P8 blocked (one logon)** |
 | D9 | Keep the daemon registry `ZOSD_DAEMON` (and `ZOSD_DAEMON_ACK`) as a table, although it is authoritative state and not an index derived from files | the table, because `GET_DAEMON_INFO` is ABAP and a system keeps this state authoritatively too (**P0: in a runtime table of its own**); the alternatives are supervisor memory only (lost on a crash and on every Go swap) or a host file under `.local/` |
+
+### OSG client-manager compatibility
+
+OSG exposes the P0 constants and START/GET_DAEMON_INFO call shapes above,
+including `IF_ABAP_DAEMON_TYPES` aliases for instance ID (the data element
+`ABAP_DAEMON_INSTANCE_ID`, SSTRING 255), name (`ABAP_DAEMON_NAME`, CHAR60)
+and priority (`ABAP_DAEMON_PRIORITY`, INT4). START priority is passed by VALUE.
+The measured INFO field order is NAME, INSTANCE_ID, CREATOR_CLIENT,
+CREATOR_USER, USED_DEST, CREATION_TIME, APPLICATION_SERVER. USED_DEST uses
+ABAP_DAEMON_DESTINATION (CHAR40), CREATION_TIME uses TIMESTAMP (DEC15), and
+APPLICATION_SERVER uses MSNAME2 (CHAR40). START records daemon ID,
+destination and priority; priorities 0/1/2 are accepted and recorded without
+scheduling effect. The local host reports `OSG` as its application server and
+runs locally; a destination does not select another server. GET_DAEMON_INFO
+filters by class and/or recorded daemon ID and raises when both are initial.
+START needs a known class: OSG has no daemon-ID-to-class registration service,
+so a daemon-ID-only start raises instead of guessing a class. No additional
+members are inferred from the measured A4H surface.

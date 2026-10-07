@@ -384,7 +384,7 @@ describe("deploy/manifest.json: only listed objects leave, never an SAP-owned na
 
   it("a node at a listed URL with an SAP ICF_NAME is refused", () => {
     writeFileSync(join(dir, "zosd_thing.sicf.xml"), node("/sap/bc/osd/thing/", "SAPNODE"));
-    expect(() => layout(dir, out, "p", undefined, probe("SICF /sap/bc/osd/thing"))).to.throw(/SICF \/sap\/bc\/osd\/thing[\s\S]*sap-name/);
+    expect(() => layout(dir, out, "p", undefined, probe("SICF /sap/bc/osd/thing"))).to.throw(/SICF ZOSD_THING[\s\S]*sap-name/);
   });
 
   it("a name that only starts like a listed one is not it; {nnn} is three digits", () => {
@@ -489,6 +489,6 @@ describe("deploy/manifest.json: only listed objects leave, never an SAP-owned na
       const o = objectOf(f, () => readFileSync(join("packs/lsd/src", f), "utf8"));
       return o.key;
     }));
-    expect(() => layout("packs/lsd/src", out, "lsd", undefined, everything)).to.throw(/SICF \/sap\/bc\/lsd[\s\S]*sap-name/);
+    expect(() => layout("packs/lsd/src", out, "lsd", undefined, everything)).to.throw(/SICF ZLSD +[A-F0-9]{25}[\s\S]*sap-name/);
   });
 });

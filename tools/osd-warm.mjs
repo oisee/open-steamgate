@@ -628,6 +628,37 @@ export class WarmCompiler {
     const hash = hashOf(root, inputsOf(root, config), {digests: raw, folders: this.folders, transpiler, overlay});
     const view = this.#view(overlay, raw, config, stack);
     const digests = view.digests;
+    // First save into a ZIP overlay relocates an existing complete object.
+    // Retain its registry file and old digest while rebuilding source maps
+    // for the new physical source. Other additions still require cold build.
+    let relocated = false;
+    for (const layer of inputsOf(root, config).sourceLayers ?? []) {
+      if (!layer.overlayOf) continue;
+      for (const path of view.actual.keys()) {
+        const prefix = resolve(root, layer.path) + sep;
+        if (!path.startsWith(prefix) || this.files.has(path)) continue;
+        const base = resolve(root, layer.overlayOf, relative(prefix, path));
+        if (!this.files.has(base) || view.actual.has(base)) continue;
+        relocated = true;
+        this.files.set(path, this.files.get(base)); this.files.delete(base);
+        if (this.digests.has(base)) this.digests.set(path, this.digests.get(base));
+        if (this.actual.has(base)) this.actual.set(path, this.actual.get(base));
+        this.actual.delete(base);
+        if (this.held.has(base)) {this.held.set(path, this.held.get(base)); this.held.delete(base);}
+      }
+    }
+    if (relocated) {
+      // Enumeration determines init script order. Match a fresh registry's
+      // input walk while retaining parsed objects and their dependency links.
+      const ordered = new Map();
+      for (const path of view.wanted) {
+        const file = this.files.get(this.#logical(path, overlay));
+        const object = file && this.owner.get(file.filename);
+        if (object) ordered.set(key(object), object);
+      }
+      for (const object of this.reg.getObjects()) if (!ordered.has(key(object))) ordered.set(key(object), object);
+      this.reg.getObjects = function* () {yield* ordered.values();};
+    }
     // what the digests say changed, and what the registry holds ahead of the
     // generation (an edit refused, since reverted: the same digest again)
     const changed = [...new Set([...[...digests.keys()].filter((p) => this.digests.get(p) !== digests.get(p)), ...this.held.keys()])];

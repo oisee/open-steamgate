@@ -202,7 +202,7 @@ export async function runAll(entries, load, {mode, log = console.log} = {}) {
           // counted only when the method itself is reached
           ran++;
           try {
-            await own[m.name]();
+            await own[m.name.toLowerCase()]();
           } catch (error) {
             errors.push({phase: "method", error});
           }

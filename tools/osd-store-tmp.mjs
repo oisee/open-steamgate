@@ -1,9 +1,10 @@
+import {writable} from "./osd-source-write-check.mjs";
 // The object store's side of $TMP (tools/osd-tmp.mjs): its root, the
 // package entry every system has, who made what, and the checked write a
 // create goes through. Apart from tools/osd-store.mjs, which may not grow
 // (tools/osd-size-budget.json).
-import {closeSync, constants as fsConstants, existsSync, lstatSync, openSync, realpathSync, renameSync, rmSync, writeSync} from "node:fs";
-import {dirname, isAbsolute, join, relative, resolve} from "node:path";
+import {closeSync, constants as fsConstants, existsSync, openSync, renameSync, rmSync, writeSync} from "node:fs";
+import {dirname, join} from "node:path";
 import {TMP_FOLDER, TMP_PACKAGE, ensureTmp, forgetAuthor, isTmpPackage, nameProblem, recordAuthor, tmpAuthors, tmpDisabled, tmpRoot} from "./osd-tmp.mjs";
 // the store's own refusal, imported lazily-safe: osd-store re-exports it
 import {NotSupported} from "./osd-store.mjs";
@@ -55,33 +56,7 @@ export function authorNow(root, entry, authors = tmpAuthors(root) ?? {}) {
 // ($TMP), where a link anywhere -- local/, local/tmp/, a package folder -- is
 // how a write would be steered somewhere else. (A root itself may be a link,
 // a pack mounted from elsewhere, unless strict.)
-export function writable(base, inside, target, strict) {
-  const within = (outer, inner) => {
-    const rel = relative(outer, inner);
-    return rel === "" || (!isAbsolute(rel) && rel.split(/[\\/]/)[0] !== "..");
-  };
-  const outer = resolve(base, inside);
-  const full = resolve(base, target);
-  if (!within(outer, full) || full === outer) return false;
-  const from = strict ? resolve(base) : outer;
-  let at = from;
-  for (const step of relative(from, full).split(/[\\/]/).filter((p) => p !== "")) {
-    at = join(at, step);
-    let info;
-    try {
-      info = lstatSync(at);
-    } catch {
-      break; // nothing exists from here down
-    }
-    if (info.isSymbolicLink()) return false;
-  }
-  if (existsSync(outer)) {
-    let existing = full;
-    while (!existsSync(existing)) existing = dirname(existing);
-    if (!within(realpathSync(outer), realpathSync(existing))) return false;
-  }
-  return true;
-}
+export {writable} from "./osd-source-write-check.mjs";
 
 /** One file of a create: checked, written to a temp file opened only if new
  *  and without following a link, checked again, renamed into place. A

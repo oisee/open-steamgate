@@ -43,7 +43,7 @@ for (const st of getData().filter((x) => classes.size === 0 || classes.has(x.obj
       if (test.setup) await test.setup();
       if (test.FRIENDS_ACCESS_INSTANCE.setup) await test.FRIENDS_ACCESS_INSTANCE.setup();
       if (test.FRIENDS_ACCESS_INSTANCE.SUPER?.setup) await test.FRIENDS_ACCESS_INSTANCE.SUPER.setup();
-      await test.FRIENDS_ACCESS_INSTANCE[m.name]();
+      await test.FRIENDS_ACCESS_INSTANCE[m.name.toLowerCase()]();
     } catch (e) { row.status = "FAILED"; row.message = messageOf(e); }
     if (test) try {
       if (test.teardown) await test.teardown();

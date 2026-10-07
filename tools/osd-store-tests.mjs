@@ -66,7 +66,8 @@ function plansOf(root, generation, targets) {
 function stackOf(entry) {
   const key = objectOf(basename(entry.uri ?? ""));
   if (!key) return undefined;
-  const [type, name] = key.split(" ");
+  const [type, ...parts] = key.split(" ");
+  const name = parts.join(" ");
   const include = /\.clas\.(testclasses|locals_def|locals_imp|macros)\.abap$/.exec(entry.uri ?? "")?.[1];
   return {type, name, include: {locals_def: "definitions", locals_imp: "implementations"}[include] ?? include ?? "main",
     line: Number(entry.line ?? 0)};

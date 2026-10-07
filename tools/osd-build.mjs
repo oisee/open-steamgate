@@ -1,3 +1,4 @@
+import {userLayersOf} from "./osd-source-layers.mjs";
 // A generation: the transpiled system, built to the side, named by what
 // went into it, made live by renaming a link.
 //
@@ -173,7 +174,8 @@ export function inputsOf(root, config = loadConfig(root)) {
     pack.abap.some((dir) => existsSync(dir) && walk(dir).some((f) => !NOT_AN_INPUT.test(f))));
   const packFiles = packs.map((pack) => join(pack.dir, "osd-pack.json"));
   const packFolders = packs.flatMap((pack) => [pack.data, pack.ddic].filter(Boolean));
-  return {folders, libs, bspFolders, packFiles, packFolders, config: layout(root).config};
+  const sourceLayers = userLayersOf(root);
+  return {folders, libs, bspFolders, packFiles, packFolders, sourceLayers, config: layout(root).config};
 }
 
 /**
@@ -369,6 +371,9 @@ export function hashOf(root, inputs = inputsOf(root), options = {}) {
   // the rule that decides a name held by two inputs is part of what the
   // output is: a generation built under another rule is another generation
   h.update("layers\0later-wins\0");
+  for (const layer of inputs.sourceLayers ?? []) {
+    h.update("source-layer\0").update(JSON.stringify(layer)).update("\0");
+  }
   h.update("config\0").update(readFileSync(inputs.config)).update("\0");
   const folder = (label, dir, list) => {
     let entries = folders?.get(dir);
@@ -845,6 +850,7 @@ export async function build(options = {}) {
     const objects = made.objects;
 
     const manifest = {
+      sourceLayers: inputs.sourceLayers ?? [],
       hash,
       builtAt: new Date().toISOString(),
       ms: Date.now() - started,

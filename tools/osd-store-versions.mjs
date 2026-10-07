@@ -70,7 +70,7 @@ export class StoreVersions {
       return;
     }
     let changed = false;
-    for (const [key, record = {}] of Object.entries(saved.inactive ?? {})) {
+    for (const [key, record = {}] of [...Object.entries(saved.inactive ?? {}), ...Object.values(saved.retained ?? {}).map(record => [record.key, record])]) {
       const files = Array.isArray(record.files) ? record.files : [];
       if (files.length > 0 && !files.some((f) => existsSync(join(this.#store.root, f)))) {
         changed = true;
@@ -79,8 +79,18 @@ export class StoreVersions {
       const digest = this.#digestOf(files);
       const outside = record.outside === true || (record.digest !== undefined && digest !== record.digest);
       if (outside !== (record.outside === true) || digest !== record.digest) changed = true;
-      this.#store.inactive.add(key);
-      this.#saved.set(key, {files, digest, ...(outside ? {outside: true} : {})});
+      const restored = {files, digest, ...(outside ? {outside: true} : {})};
+      // Archive drafts and active copies belong to their overlay revision.
+      // Keep an unmounted draft durable without excluding a replacement's object.
+      const owner = files.map(f => /^local\/overlays\/[a-f0-9]{64}(?=\/)/.exec(f.replaceAll("\\", "/"))?.[0]).find(Boolean);
+      const [type, ...name] = key.split(" ");
+      if (owner && this.#store.find(type, name.join(" "))?.root !== owner) {
+        this.#retained.set(owner + "\0" + key, {key, ...restored});
+        changed = true;
+      } else {
+        this.#store.inactive.add(key);
+        this.#saved.set(key, restored);
+      }
     }
     if (changed) this.saveInactive();
     this.#dropOrphanCopies();
@@ -106,6 +116,7 @@ export class StoreVersions {
   }
 
   #saved = new Map();
+  #retained = new Map();
   #keepOrphans = false;
 
   // a copy that no saved object owns: what a crash between an activation's
@@ -114,7 +125,7 @@ export class StoreVersions {
     if (this.#keepOrphans) return;
     const folder = join(this.#store.root, this.#store.inactiveDir, "active");
     if (!existsSync(folder)) return;
-    const owned = new Set([...this.#saved.values()].flatMap((r) => r.files.map((f) => resolve(this.#store.root, this.#snapshotOf(f)))));
+    const owned = new Set([...this.#saved.values(), ...this.#retained.values()].flatMap((r) => r.files.map((f) => resolve(this.#store.root, this.#snapshotOf(f)))));
     for (const file of walkFiles(folder)) {
       if (!owned.has(resolve(file))) removeDurable(file);
     }
@@ -191,13 +202,13 @@ export class StoreVersions {
     for (const key of [...this.#saved.keys()]) {
       if (!this.#store.inactive.has(key)) this.#saved.delete(key);
     }
-    if (this.#store.inactive.size === 0 && !existsSync(dir)) return;
+    if (this.#store.inactive.size === 0 && this.#retained.size === 0 && !existsSync(dir)) return;
     mkdirDurable(dir);
     const inactive = Object.fromEntries([...this.#saved.entries()].sort(([a], [b]) => a.localeCompare(b)));
     const target = join(dir, "inactive.json");
     const temp = `${target}.${process.pid}.tmp`;
     // the bytes, flushed; then the name, flushed: durable once this returns
-    writeDurable(temp, JSON.stringify({inactive}, null, 1) + "\n");
+    writeDurable(temp, JSON.stringify({inactive, ...(this.#retained.size ? {retained: Object.fromEntries(this.#retained)} : {})}, null, 1) + "\n");
     this.crash("save:before-rename");
     renameDurable(temp, target);
     this.crash("save:after-rename");
@@ -240,6 +251,19 @@ export class StoreVersions {
       mkdirDurable(dirname(copy));
       copyDurable(active, copy);
       this.crash("keep:after-copy");
+    }
+  }
+
+  relocateActive(entry, copied) {
+    this.keepActive(entry);
+    for (const file of this.#filesOfEntry(entry)) {
+      const target = copied.file.slice(0, -TYPES[copied.type].ext.length) + file.slice(entry.file.length - TYPES[entry.type].ext.length);
+      const from = join(this.#store.root, this.#snapshotOf(file));
+      if (existsSync(from)) {
+        const to = join(this.#store.root, this.#snapshotOf(target));
+        mkdirDurable(dirname(to));
+        copyDurable(from, to);
+      }
     }
   }
 
@@ -392,7 +416,15 @@ export class StoreVersions {
     // Pre-save copies retain proven active input, including genuinely empty
     // bytes. keepActive leaves unavailable input absent, never a placeholder.
     const copy = join(this.#store.root, this.#snapshotOf(file));
-    if (!complete && existsSync(copy)) return copy;
+    const layer = this.#store.roots.find(root => root.path === entry.root);
+    if ((!complete || layer?.overlayOf) && existsSync(copy)) return copy;
+    // A freshly copied overlay still runs the archive's proven active bytes
+    // until it has been published. Never infer activity from the working copy.
+    if (complete && layer?.overlayOf) {
+      const original = join(layer.overlayOf, relative(layer.path, file));
+      const base = join(generation, "source", sourceSnapshotPath(original));
+      if (existsSync(base)) return base;
+    }
     if (!generation || !existsSync(generation)) return undefined;
     let inputs = this.#activeInputs?.generation === generation ? this.#activeInputs.inputs : undefined;
     if (inputs === undefined) {

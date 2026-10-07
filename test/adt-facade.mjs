@@ -606,7 +606,8 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       const xml = await res.text();
       expect(xml).to.match(/<nameditem:name>CLAS<\/nameditem:name>[\s\S]*?<nameditem:data>type:CLAS\/OC;usedBy:quick_search,virtual_folders<\/nameditem:data>/);
       const items = [...xml.matchAll(/<nameditem:namedItem>([\s\S]*?)<\/nameditem:namedItem>/g)].map((m) => m[1]);
-      expect(items.length).to.be.greaterThan(0);
+      expect(items.length).to.equal(15);
+      for (const type of ["SICF", "SAPC", "SAMC"]) expect(xml).not.to.include(`<nameditem:name>${type}</nameditem:name>`);
       for (const item of items) {
         expect(item, "data=null makes Eclipse call split on null").to.match(/<nameditem:data>type:[^<]+;usedBy:[^<]+<\/nameditem:data>/);
       }

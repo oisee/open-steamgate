@@ -42,6 +42,7 @@ export function installDaemons(abap) {
     const result = template.getRowType().clone();
     const f = result.get();
     f.name.set(row.name); f.instance_id.set(row.id); f.creator_client.set(row.client); f.creator_user.set(row.user);
+    f.used_dest.set(row.destination); f.application_server.set(row.server);
     f.creation_time.set(new Date(row.started).toISOString().replace(/[^0-9]/g, '').slice(0,14));
     return result;
   }
@@ -66,10 +67,15 @@ export function installDaemons(abap) {
   }
   function stop(row, message) { if (!row.stopping) { row.stopping = true; enqueue(row, 'on_stop', {i_message: message}); } }
   Manager.start = async (input) => {
-    const className = value(input.i_class_name).trim().toUpperCase();
+    const className = String(value(input.i_class_name) ?? '').trim().toUpperCase();
+    const daemonId = String(value(input.i_daemon_id) ?? '').trim().toUpperCase();
+    // No daemon-ID-to-class registry exists in OSG yet; never guess a class.
+    if (!className) return exception();
+    input.e_instance_id?.clear();
     if (!abap.Classes[className]) return exception();
     const id = globalThis.crypto.randomUUID(); // Web Crypto: in Node and in a service worker alike
-    const row = {id, name: value(input.i_name).trim(), className, creator: program(),
+    const row = {id, daemonId, destination: String(value(input.i_destination) ?? 'NONE'),
+      priority: Number(value(input.i_priority) ?? 1), server: 'OSG', name: value(input.i_name).trim(), className, creator: program(),
       client: abap.builtin.sy.get().mandt.get(), user: abap.builtin.sy.get().uname.get(), started: clock.now(),
       object: await new abap.Classes[className]().constructor_(), pending: 0, queue: Promise.resolve(), timers: new Map()};
     const param = input.i_parameter ?? ref(abap, await new abap.Classes.CL_AC_MESSAGE_TYPE_PCP().constructor_());
@@ -88,9 +94,14 @@ export function installDaemons(abap) {
     enqueue(row, 'on_start');
   };
   function owned(row) { return row && row.creator === program() && row.client === abap.builtin.sy.get().mandt.get() && row.user === abap.builtin.sy.get().uname.get(); }
-  Manager.get_daemon_info = async (input) => {
+  Manager.get_daemon_info = async (input = {}) => {
     const result = Manager.METHODS.GET_DAEMON_INFO.parameters.R_INFO_TABLE.type();
-    for (const row of instances.values()) if (owned(row) && row.className === value(input.i_class_name).trim().toUpperCase()) result.append(info(row));
+    const className = String(value(input.i_class_name) ?? '').trim().toUpperCase();
+    const daemonId = String(value(input.i_daemon_id) ?? '').trim().toUpperCase();
+    if (!className && !daemonId) return exception();
+    for (const row of instances.values()) {
+      if (owned(row) && (!className || row.className === className) && (!daemonId || row.daemonId === daemonId)) result.append(info(row));
+    }
     return result;
   };
   Manager.attach = async (input) => {

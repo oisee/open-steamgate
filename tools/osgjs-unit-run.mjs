@@ -42,7 +42,7 @@ try {
   const skipped = new Set((config.options?.skip ?? []).map((s) => `${s.object}/${s.class}/${s.method}`.toUpperCase()));
   const groups = owners.flatMap((owner) => reg.getObject("CLAS", owner).getABAPFiles().flatMap((file) =>
     file.getInfo().listClassDefinitions().filter((d) => d.isForTesting && !d.isAbstract && !d.isGlobal).map((d) => ({
-      owner, local: d.name, module: basename(file.getFilename()).replace(/\.abap$/, ".mjs"),
+      owner, local: d.name.toLowerCase(), module: basename(file.getFilename()).replace(/\.abap$/, ".mjs"),
       methods: d.methods.filter((m) => m.isForTesting).map((m) => m.name.toLowerCase()),
     }))));
   // A methodless include is a no-tests result, without an unnecessary build.

@@ -53,7 +53,8 @@
     "test/warm-process.mjs",
     "test/warm-update.mjs",
     "test/warm-snapshot.mjs",
-    "test/kernel-conformance.mjs"
+    "test/kernel-conformance.mjs",
+    "test/osd-zip-layer.mjs"
   ],
   "groups": {
     "gogen": [
