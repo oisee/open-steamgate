@@ -2386,8 +2386,10 @@ function statement(node, ctx) {
   // else sy-subrc 0; LINES OF an empty table clears the target
   if (isStmt(node, Statements.Concatenate)) {
     const kids = node.getChildren();
-    const respecting = /\bRESPECTING\s+BLANKS\b/i.test(text);
-    const lines = /^CONCATENATE\s+LINES\s+OF\b/i.test(text);
+    const keywords = node.getChildren().filter((k) => k instanceof Nodes.TokenNode).map((k) => upper(tokenStr(k)));
+    const hasKeywords = (...words) => keywords.some((_, i) => words.every((word, j) => keywords[i + j] === word));
+    const respecting = hasKeywords("RESPECTING", "BLANKS");
+    const lines = keywords[1] === "LINES" && keywords[2] === "OF";
     const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
     if (!["string", "c", "n", "d"].includes(target.type.k)) throw new Unsupported(`CONCATENATE into a ${target.type.k}`);
     const piece = (x) => {
