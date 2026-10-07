@@ -352,9 +352,18 @@ ENDCLASS.
   });
 
   it("a library object cannot be written or deleted", () => {
-    const withLibs = new ObjectStore();
+    // Keep even a regressed write guard from planting a writable shadow in
+    // the checkout and poisoning subsequent repository/library tests.
+    const libraryFile = join(root, "lib", "cl_abap_zip.clas.abap");
+    const source = readFileSync(new ObjectStore().find("CLAS", "CL_ABAP_ZIP").file, "utf8");
+    mkdirSync(join(root, "lib"));
+    writeFileSync(libraryFile, source);
+    const withLibs = new ObjectStore({root, libs: ["lib"]});
+    expect(withLibs.find("CLAS", "CL_ABAP_ZIP")).to.include({root: "lib", writable: false, library: true});
     expect(() => withLibs.write("CLAS", "CL_ABAP_ZIP", "nope")).to.throw(ReadOnly);
     expect(() => withLibs.delete("CLAS", "CL_ABAP_ZIP")).to.throw(ReadOnly);
+    expect(readFileSync(libraryFile, "utf8")).to.equal(source);
+    expect(existsSync(join(root, "src", "osd", "cl_abap_zip.clas.abap"))).to.equal(false);
   });
 
   it("the transpile behind an activation is a separate call, so the verdict is fast", async () => {
