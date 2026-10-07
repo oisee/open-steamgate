@@ -29,6 +29,24 @@ Format adapted from `larshp/hithub` (MIT).
 - Upstream version containing a fix: `...` or `unknown`
 
 ## Open anomalies
+### ANOMALY-2026-10-07-aunit-comparison-sign -- STORE comparison text differs from SAP
+
+- Status: `workaround`
+- Affected versions: locked transpiler/runtime `f3611417` (2.13.93), open-abap-core `8b397be`.
+- API: `cl_abap_unit_assert=>assert_equals`, projected by STORE `RUN_TESTS`.
+- Reproducer: `test/fixtures/aunit-x2/` (SYNTHETIC sources and XML).
+- Expected SAP behaviour: subtraction of 3 from 2 reports actual text `1-` and
+  testclasses stack line 7; addition reports one pass with no alerts.
+- Actual open-abap behaviour: its assertion dump uses a string template and
+  retains `-1`. Before the fix STORE exposed `-1`, line 7; ADT XML already
+  rendered `1-`, line 7. Counts, verdicts and green state agreed.
+- Smallest safe workaround: share the ADT numeric-text formatter with STORE's
+  JSON projection, including comparison details. Preserve the raw Unit runner,
+  documented JSON fields, empty values and nonnumeric text.
+- Upstream issue: none; this is the host's protocol projection. General numeric
+  conversion semantics are outside X2.
+- Regression: `OSD_HEAVY_RANGE=90-99 OSD_HEAVY_SLOTS=4 tools/osd-heavy.sh npx mocha test/adt-aunit-conformance-x2.mjs`.
+
 ### ANOMALY-2026-10-06-transpiler-validation-state -- runtimeError leaks into later compileError runs
 
 - Status: `workaround`

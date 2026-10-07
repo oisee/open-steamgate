@@ -16,6 +16,11 @@ const FRAME_INCLUDES = {
 };
 const CLASS_POOL_INCLUDES = {definitions: "CCDEF", implementations: "CCIMP", macros: "CCMAC", testclasses: "CCAU", main: "CP"};
 
+// SAP assertion comparison text, shared by XML and STORE JSON. Only a whole
+// negative numeric value changes; empty values and other strings stay as is.
+export const unitValueText = value => typeof value === "string" && /^-\d+(?:\.\d+)?$/.test(value)
+  ? `${value.slice(1)}-` : value;
+
 function classFrame(file) {
   if (typeof file !== "string") return undefined;
   const match = /^(.+)\.clas(?:\.([a-z_]+))?\.abap$/i.exec(file.split("/").pop());
@@ -114,9 +119,6 @@ function classUnitResultDocument(run, base, withNavigationUri) {
     return `            <stackEntry adtcore:uri="${xmlEscape(frameUri(entry.uri, entry.line, 0))}" adtcore:type="CLAS/OCN/${frame.include}" adtcore:name="${xmlEscape(frame.name)}" adtcore:description="${xmlEscape(description)}"/>`;
   };
   const detail = text => `            <detail text="${xmlEscape(text)}"/>`;
-  // The runner retains comparison values as text. Change only an entire
-  // negative numeric value; a string containing a hyphen stays unchanged.
-  const valueText = value => /^-\d+(?:\.\d+)?$/.test(value) ? `${value.slice(1)}-` : value;
   const alert = (a, c, m) => {
     const items = a.details ?? [];
     const comparison = items.filter(d => /^(Expected|Actual) \[[\s\S]*\]$/.test(d));
@@ -129,7 +131,7 @@ function classUnitResultDocument(run, base, withNavigationUri) {
       ? `Critical Assertion Error: '${methodName[0].toUpperCase()}${methodName.slice(1).toLowerCase()}: ${message}'` : title;
     const details = [];
     if (failedAssertion && comparison.length > 0) {
-      const text = comparison.map(d => d.replace(/^(Expected|Actual) \[([\s\S]*)\]$/, (_, kind, value) => `${kind} [${valueText(value)}]`)).join(" ");
+      const text = comparison.map(d => d.replace(/^(Expected|Actual) \[([\s\S]*)\]$/, (_, kind, value) => `${kind} [${unitValueText(value)}]`)).join(" ");
       details.push(`            <detail text="Different values"><details><detail text="${xmlEscape(text)}"/></details></detail>`);
     }
     details.push(...items.filter(d => !(failedAssertion && comparison.includes(d)) &&

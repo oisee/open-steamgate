@@ -321,7 +321,9 @@ EV_JSON (optional diagnostic fields shown):
   keep method verdict `fail`, including in setup/teardown. Only a runner failure uses run-level
   `failed`, with `failure_stage: runner|timeout` and `error {code,text}`.
 - **Assertions:** expected/actual are optional strings from the existing ADT Unit alert
-  data, including known empty strings. Stack entries use the existing source map
+  data, including known empty strings. Whole negative numeric comparison values
+  use SAP's trailing minus in JSON and comparison details (for example `"1-"`);
+  other text is preserved. Stack entries use the existing source map
   resolution; unavailable locations are omitted. Counts sum method verdicts;
   class errors without methods increase `classes`, not method `error`.
 - **Generation guard:** a supplied expected_generation different from the generation
@@ -367,6 +369,25 @@ Known limitations retained for this slice:
 - P3-2: STORE plans do not apply the ADT runner's HARMLESS-write risk guard.
 - P3-3: On Windows, early child rejection may leave its cwd busy and disposable-directory removal can fail.
 - P3-4: Source locks are per process; external build replacement or GC can race the module copy without a modules digest.
+
+#### X2: ABAP Unit conformance pair
+
+`test/adt-aunit-conformance-x2.mjs` publishes the test-only `ZCL_OSD_X2_DEMO`
+first with subtraction (red), then addition (green). STORE `RUN_TESTS`, the real
+OSG ADT XML route, and explicitly SYNTHETIC SAP result XML all map to the same
+expectations in `test/fixtures/aunit-x2/expected.json`: run state, counts, class
+name/state, method name/verdict and assertion kind/expected/actual/line. Red pins
+SAP's verbatim trailing-minus text `actual: "1-"`, `expected: "5"`, and numeric
+line `7` from the testclasses stack frame, counted from 1 in the unchanged
+include. Green pins one pass and no alerts. STORE's documented field names stay
+the same; the conformance adapter takes `line` from `alerts[].stack[]`.
+
+To add the next pair, place disposable ABAP, measured synthetic XML shapes and
+agreed expectations under `test/fixtures/`, register its suite in
+`test/suites.d/*.json`, and compare both published states through the same three
+paths. Preserve include bytes when pinning a line. Publish protocol shapes and
+fixture identities only, never captures or live identifiers; these fixtures are
+excluded from normal builds, packs and shipped seeds.
 
 ### Joint acceptance and interim path
 
