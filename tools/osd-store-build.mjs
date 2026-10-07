@@ -30,7 +30,7 @@ export async function transpileStore(store, options, activating, built) {
           return {ok: true, ms: Date.now() - started, objects: r.objects, hash: r.hash, cached: r.cached, warm: true,
             built: built(w.compiler.digests),
             modules: r.modules, hostHeld: r.hostHeld, from: r.from, stale: r.stale, steps: r.steps,
-            closure: r.closure, xrefRows: r.xrefRows, unverified: w.compiler.unverified.has(r.hash), superseded};
+            closure: r.closure, xrefRows: r.xrefRows, unverified: r.unverified ?? w.compiler.unverified.has(r.hash), superseded};
         } catch (error) {
           try { await acceptView(store, view, activating); } catch (changed) { error = changed; }
           if (["CHANGED", "INPUT_CHANGED"].includes(error.code)) {
@@ -46,15 +46,11 @@ export async function transpileStore(store, options, activating, built) {
               error: withoutHostPaths(error.message, store.root)};
           }
           w.reason = error.message;
-          await w.compiler.drop();
+          if (error.code !== "NOT_WARM") await w.compiler.drop();
           console.log(`warm: a cold build: ${error.message}`);
         }
       }
     }
-    // a comparison of a warm generation the tree has left would end
-    // inconclusive, and meanwhile it is a second cold transpile beside
-    // this one (WarmCompiler#cancelVerify)
-    if (w.compiler?.verifying !== undefined) w.compiler.cancelVerify(await store.sourceKey());
     try {
       const {build} = await import("./osd-build.mjs");
       const r = await build({...store.buildOptions, root: store.root, force: options.force === true, replace: options.replace === true, overlay, switch: false, expectedHash: view.hash});
@@ -62,7 +58,18 @@ export async function transpileStore(store, options, activating, built) {
       // only a build that made a generation live is one to prime on: after
       // a failed one the tree is not the live generation, and a prime on
       // demand would parse it to be told so
-      w.primeDue = w.on === true && !w.disabled;
+      if (w.on === true && !w.disabled && w.compiler?.primed) {
+        try {
+          // Generators may have rewritten gen/ during cold compilation.
+          const updated = await captureView(store, activating);
+          if (updated.hash !== r.hash) throw new Error("inputs moved after cold publication");
+          await warmOperation(store, () => w.compiler.update(activating, updated));
+        } catch (error) {
+          if (error.code !== "NOT_WARM") console.log(`warm: re-prime: ${error.message}`);
+          await w.compiler.drop();
+        }
+      }
+      w.primeDue = w.on === true && !w.disabled && w.compiler?.primed !== true;
       return {ok: true, ms: Date.now() - started, objects: r.objects, hash: r.hash, cached: r.cached, built: built(r.digests), superseded};
     } catch (error) {
       try { await acceptView(store, view, activating); } catch (changed) { error = changed; }

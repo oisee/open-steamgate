@@ -1,9 +1,10 @@
 // Retain the registry off the HTTP front's event loop. Verification remains
-// a front-owned child, using WarmCompiler's existing comparison/cancellation.
+// a front-owned child, comparing each generation's frozen compiler inputs.
 import {WarmCompiler} from "./osd-warm.mjs";
 import {spawn} from "./osd-child-process.mjs";
 import {toolCommand} from "./osd-host.mjs";
 import {compilerEnv} from "./osd-warm-env.mjs";
+import {sendIPC, onIPCFailure} from "./osd-ipc.mjs";
 import {fileURLToPath} from "node:url";
 import {join} from "node:path";
 
@@ -33,7 +34,6 @@ export class WarmCompilerProcess extends WarmCompiler {
   #serial = 0;
   #primed = false;
   #readers = new Map();
-  #verified = new Set();
   #epoch = 0;
   #closing = false;
 
@@ -62,11 +62,13 @@ export class WarmCompilerProcess extends WarmCompiler {
       if (this.#child === child) {
         this.#primed = false;
       }
-      for (const pending of this.#pending.values()) pending.reject(error);
-      this.#pending.clear();
+      for (const [id, pending] of this.#pending) {
+        if (pending.child !== child) continue;
+        pending.reject(error);
+        this.#pending.delete(id);
+      }
     };
-    child.on("error", fail);
-    child.on("disconnect", () => fail(new Error("warm compiler IPC disconnected")));
+    onIPCFailure(child, fail);
     this.#closed = new Promise(resolve => child.once("close", (code, signal) => {
       children.delete(child);
       fail(new Error(`warm compiler exited (${signal ?? code})`));
@@ -86,7 +88,8 @@ export class WarmCompilerProcess extends WarmCompiler {
       this.hash = s.hash;
       this.files = new Map(Array.from({length: s.files}, (_, i) => [i, undefined]));
       this.digests = new Map(s.digests);
-      this.unverified = new Set(s.unverified.filter(hash => !this.#verified.has(hash)));
+      this.unverified = new Set([...this.unverified, ...s.unverified]);
+      this.pruneVerification();
       this.#readers = new Map(s.readers);
       if (message.error) pending.reject(Object.assign(new Error(message.error.message), message.error));
       else pending.resolve(message.result);
@@ -108,13 +111,18 @@ export class WarmCompilerProcess extends WarmCompiler {
     const inactive = view?.inactive ?? this.inactiveSources(new Set());
     const folder = view?.folder ?? this.overlayOf(new Set())?.folder ?? join("build", "inactive", "active");
     return new Promise((resolve, reject) => {
-      this.#pending.set(id, {resolve, reject});
-      child.send({id, method, activating: [...activating], inactive, folder, view, check}, error => {
+      this.#pending.set(id, {resolve, reject, child});
+      sendIPC(child, {id, method, activating: [...activating], inactive, folder, view, check}, error => {
         if (error) { this.#pending.delete(id); reject(Object.assign(error, {code: "WARM_UNAVAILABLE"})); }
       });
     });
   }
 
+  async update(activating = new Set(), view = undefined) {
+    const result = await this.#call("update", activating, view);
+    if (this.recycleDue) await this.drop();
+    return result;
+  }
   prime(view) { return this.#call("prime", new Set(), view); }
   async check(object, view) {
     const result = await this.#call("check", new Set(), view, object);
@@ -122,17 +130,24 @@ export class WarmCompilerProcess extends WarmCompiler {
     return result;
   }
   async build(activating = new Set(), snapshot = undefined) {
-    await this.loadStoreView();
-    const view = snapshot ? snapshot.overlay : this.overlayOf(activating);
     const result = await this.#call("build", activating, snapshot);
-    this.views.set(result.hash, view);
+    result.unverified ??= this.unverified.has(result.hash);
     if (this.recycleDue) await this.drop();
+    if (result.unverified) this.unverified.add(result.hash);
+    this.pruneVerification();
     return result;
   }
   async verify(hash) {
     const result = await super.verify(hash);
-    if (result.verdict === "same") this.#verified.add(hash);
+    if (result.verdict === "same" && this.#child) {
+      sendIPC(this.#child, {method: "verified", hash}, () => {});
+    }
+    this.pruneVerification();
     return result;
+  }
+  retainVerification(hashes) {
+    super.retainVerification(hashes);
+    if (this.#child) sendIPC(this.#child, {method: "retainVerification", hashes: [...hashes]}, () => {});
   }
   readersOf(type, name) {
     if (!this.primed) return undefined;
@@ -155,17 +170,27 @@ export class WarmCompilerProcess extends WarmCompiler {
   drop() {
     this.#epoch++;
     this.#primed = false;
+    this.unverified.clear();
     // Kill even during a CPU-bound prime; a polite IPC stop would wait for it.
     const child = this.#child;
     this.#child = undefined;
+    // Discarding a baseline during mismatch recovery is an ordinary cold
+    // fallback. Reject its requests before disconnect can label them as an
+    // unavailable compiler and permanently disable warm builds.
+    for (const [id, pending] of this.#pending) {
+      if (pending.child !== child) continue;
+      pending.reject(Object.assign(new Error("warm compiler baseline discarded"),
+        {code: this.#closing ? "CLOSED" : "NOT_WARM"}));
+      this.#pending.delete(id);
+    }
     child?.kill("SIGKILL");
     return this.#closed;
   }
   async shutdown() {
     this.#closing = true;
     const verifying = this.verifying;
-    const verifiedExit = verifying && new Promise(resolve => verifying.once("exit", resolve));
-    this.cancelVerify(undefined, "the front is closing");
+    const verifiedExit = verifying?.exitCode === null && verifying?.signalCode === null && new Promise(resolve => verifying.once("exit", resolve));
+    if (verifiedExit) { verifying.osdCancelled = "the front is closing"; verifying.kill("SIGKILL"); }
     await this.drop();
     await verifiedExit;
   }

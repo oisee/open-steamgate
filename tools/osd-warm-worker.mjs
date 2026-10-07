@@ -4,7 +4,7 @@ import {checkView} from "./osd-store-compile-view.mjs";
 import {warmOverlay} from "./osd-warm-overlay.mjs";
 import {runsAs} from "./osd-main.mjs";
 import {join} from "node:path";
-import {sendIPC} from "./osd-ipc.mjs";
+import {sendIPC, onIPCFailure} from "./osd-ipc.mjs";
 
 export function main({beforeCompile = () => {}, afterCompile = () => {}, heapLimit = 512 * 1048576} = {}) {
   let inactive = [];
@@ -18,7 +18,9 @@ export function main({beforeCompile = () => {}, afterCompile = () => {}, heapLim
       inactive.map(entry => ({key: entry.key, files: entry.files.map(f => f.file)})), activating),
   });
   let heapBase;
-  const state = () => ({memory: process.memoryUsage(),
+  const state = () => {
+    compiler.pruneVerification();
+    return {memory: process.memoryUsage(),
     recycleDue: heapBase !== undefined && process.memoryUsage().heapUsed - heapBase > heapLimit,
     primed: compiler.primed, hash: compiler.hash, files: compiler.files?.size ?? 0,
     digests: [...(compiler.digests ?? [])], unverified: [...compiler.unverified],
@@ -26,11 +28,18 @@ export function main({beforeCompile = () => {}, afterCompile = () => {}, heapLim
       const type = o.getType(), name = o.getName();
       return [`${type} ${name}`, compiler.readersOf(type, name)];
     }) : [],
-  });
+    };
+  };
   let queue = Promise.resolve();
   process.on("message", message => {
-    if (!["prime", "build", "check"].includes(message.method)) return;
+    if (!["prime", "build", "check", "update", "verified", "retainVerification"].includes(message.method)) return;
     queue = queue.then(async () => {
+      if (message.method === "verified") {
+        compiler.unverified.delete(message.hash);
+        sendIPC(process, {type: "verified", hash: message.hash});
+        return;
+      }
+      if (message.method === "retainVerification") { compiler.retainVerification(message.hashes); return; }
       inactive = message.inactive;
       folder = message.folder;
       try {
@@ -48,7 +57,7 @@ export function main({beforeCompile = () => {}, afterCompile = () => {}, heapLim
       }
     }).catch(() => process.exit(1));
   });
-  process.on("disconnect", () => { compiler.drop(); process.exit(0); });
+  onIPCFailure(process, () => { compiler.drop(); process.exit(0); });
 }
 
 if (runsAs("osd-warm-worker.mjs")) main();

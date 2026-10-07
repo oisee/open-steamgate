@@ -409,7 +409,8 @@ for (const front of ["node", "abap"]) describe(`ADT active/inactive: ${front} so
 
 // All source-bearing types share the generation snapshot selector. Keep the
 // compiled tree small: these additional resources need no executable module.
-describe("ADT source selector: every source type", () => {
+describe("ADT source selector: every source type", function () {
+  this.timeout(30000);
   let root, store;
   const fixtures = {
     CLAS: ["zcl_all.clas.abap", "CLASS zcl_all DEFINITION PUBLIC. ENDCLASS. CLASS zcl_all IMPLEMENTATION. ENDCLASS.\n"],

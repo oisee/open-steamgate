@@ -19,7 +19,8 @@ import {userLayersOf} from "./osd-source-layers.mjs";
 //
 // Content hashing takes 105 ms here, 170 ms for the largest library;
 // generations are 44 MB. See docs/generations.md for the design.
-import {keepSourceInputs, keepGeneratedSources, completeSourceSnapshot, materializeSourceSnapshot, missingSourceInputs} from "./osd-source-snapshot.mjs";
+import {keepCompileInputs} from "./osd-compile-snapshot.mjs";
+import {keepSourceInputs, keepGeneratedSources, completeSourceSnapshot, materializeSourceSnapshot, keepCachedSources} from "./osd-source-snapshot.mjs";
 import {gc} from "./osd-build-gc.mjs";
 import {normalPath, stampOf, changedError} from "./osd-build-input-check.mjs";
 export {normalPath};
@@ -751,8 +752,8 @@ export async function build(options = {}) {
   let warmUnchecked = false;
   try {
     warmUnchecked = JSON.parse(readFileSync(warmSide, "utf8")).verified !== true;
-  } catch {
-    warmUnchecked = false;
+  } catch (error) {
+    warmUnchecked = error.code !== "ENOENT";
   }
   if (warmUnchecked) {
     options = {...options, force: true, replace: true};
@@ -777,14 +778,7 @@ export async function build(options = {}) {
     } else {
       log(`generation ${hash} is already built`);
     }
-    if (!existsSync(join(target, "source", ".complete"))) {
-      keepSourceInputs(root, target, digests, undefined, options.overlay);
-      keepGeneratedSources(root, target);
-      completeSourceSnapshot(target);
-    } else {
-      const missing = missingSourceInputs(root, target, digests, options.overlay);
-      if (missing.size) keepSourceInputs(root, target, missing, undefined, options.overlay);
-    }
+    keepCachedSources(root, target, digests, options.overlay);
     if (options.switch !== false && liveHash(root) !== hash) {
       switchTo(root, hash, log);
     }
@@ -836,6 +830,7 @@ export async function build(options = {}) {
     const changed = [];
     const generatedDigests = new Map();
     const made = await transpile({root, modules: loaded, config: own, log: (m) => { output += m + "\n"; },
+      onInputs: (files, libs) => keepCompileInputs(root, tmp, own, files, libs, options.overlay),
       onRead: (file, bytes) => {
         if (normalPath(file).startsWith(normalPath(join(root, "gen")) + "/")) {
           generatedDigests.set(normalPath(file), createHash("sha256").update(bytes).digest("hex"));
@@ -850,6 +845,7 @@ export async function build(options = {}) {
     if (changed.length > 0) throw changedError(root, changed);
     keepSourceInputs(root, tmp, digests, undefined, options.overlay);
     keepGeneratedSources(root, tmp, generatedDigests);
+    materializeSourceSnapshot(root, tmp); // Include compiler-only inputs such as $TMP's tadir.json on every build.
     completeSourceSnapshot(tmp);
     const objects = made.objects;
 

@@ -22,6 +22,8 @@
     "test/protocol-ni.mjs",
     "test/protocol-rfc.mjs",
     "test/osd-bind.mjs",
+    "test/osd-ipc.mjs",
+    "test/warm-verifier.mjs",
     "test/protocol-sap-compress.mjs",
     "test/shadowed-objects.mjs",
     "test/undo-on-exit.mjs",
