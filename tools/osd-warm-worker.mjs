@@ -18,7 +18,9 @@ export function main({beforeCompile = () => {}, afterCompile = () => {}, heapLim
       inactive.map(entry => ({key: entry.key, files: entry.files.map(f => f.file)})), activating),
   });
   let heapBase;
-  const state = () => ({memory: process.memoryUsage(),
+  const state = () => {
+    compiler.pruneVerification();
+    return {memory: process.memoryUsage(),
     recycleDue: heapBase !== undefined && process.memoryUsage().heapUsed - heapBase > heapLimit,
     primed: compiler.primed, hash: compiler.hash, files: compiler.files?.size ?? 0,
     digests: [...(compiler.digests ?? [])], unverified: [...compiler.unverified],
@@ -26,11 +28,13 @@ export function main({beforeCompile = () => {}, afterCompile = () => {}, heapLim
       const type = o.getType(), name = o.getName();
       return [`${type} ${name}`, compiler.readersOf(type, name)];
     }) : [],
-  });
+    };
+  };
   let queue = Promise.resolve();
   process.on("message", message => {
-    if (!["prime", "build", "check", "update"].includes(message.method)) return;
+    if (!["prime", "build", "check", "update", "verified"].includes(message.method)) return;
     queue = queue.then(async () => {
+      if (message.method === "verified") { compiler.unverified.delete(message.hash); return; }
       inactive = message.inactive;
       folder = message.folder;
       try {

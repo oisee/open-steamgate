@@ -3,6 +3,7 @@ import {mkdirSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {basename, join, resolve} from "node:path";
 import {layout} from "./osd-build.mjs";
 import {selectedModules, outputFiles, isBinaryFilename} from "./osd-transpile.mjs";
+import {generationIdentity} from "./osd-warm-verification.mjs";
 import {pinVerification} from "./osd-verify-pin.mjs";
 import {readCompileInputs, MissingCompileInputs} from "./osd-compile-snapshot.mjs";
 import {compareGenerations} from "./osd-generation-diff.mjs";
@@ -18,6 +19,7 @@ export async function verifyGeneration(hash, root = resolve(process.env.OSD_ROOT
   let unpin;
   try {
     unpin = await pinVerification(root, hash, basename(tmp));
+    const identity = generationIdentity(generation);
     const {config, files, libs} = readCompileInputs(root, generation);
     const loaded = selectedModules(root);
     assertToolchain(root, loaded);
@@ -39,9 +41,11 @@ export async function verifyGeneration(hash, root = resolve(process.env.OSD_ROOT
     for (const f of outputFiles(output, config, join(tmp, "output"), sources)) {
       writeFileSync(f.path, f.contents, isBinaryFilename(f.path) ? {encoding: "latin1"} : undefined);
     }
+    if (generationIdentity(generation) !== identity) return {verdict: "superseded", why: "generation replaced during verification"};
     const v = compareGenerations(join(generation, "output"), join(tmp, "output"));
     if (v.missing || v.files === 0) return {verdict: "inconclusive", why: v.missing
       ? `missing output under verification: ${v.missing}` : "zero output files compared under verification"};
+    if (generationIdentity(generation) !== identity) return {verdict: "superseded", why: "generation replaced during comparison"};
     const differing = [...v.differing, ...v.onlyInA, ...v.onlyInB];
     return {verdict: differing.length ? "differs" : "same", files: v.files, differing: differing.slice(0, 20), count: differing.length, ms: Date.now() - started};
   } catch (error) {

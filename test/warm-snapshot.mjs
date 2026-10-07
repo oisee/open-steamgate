@@ -1,5 +1,7 @@
 import {expect} from "chai";
 import {createHash} from "node:crypto";
+import fs from "node:fs";
+import {syncBuiltinESMExports} from "node:module";
 import {execFileSync} from "node:child_process";
 import {existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
@@ -72,7 +74,9 @@ Transpiler.prototype.run = async function(...args) {
     let edits = 0;
     const storm = setInterval(() => writeFileSync(input, source("zcl_snap", 10 + ++edits)), 200);
     try {
-      await sleep(650);
+      // Timer delivery can be delayed under the other heavy slot. Keep the
+      // 200 ms edit cadence, and wait for three actual writes.
+      for (let i = 0; i < 300 && edits < 3; i++) await sleep(20);
       // Source, generators and config can all leave the verified generation.
       writeFileSync(join(root, "gen", "zcl_generated.clas.abap"), source("zcl_generated", 20));
       writeFileSync(config(), readFileSync(config(), "utf8") + "\n");
@@ -150,6 +154,67 @@ Transpiler.prototype.run = async function(...args) {
     if (!existsSync(ready)) { writeFileSync(release, "resume"); throw new Error("verifier did not reach transpile"); }
     return {verifying, resume: () => writeFileSync(release, "resume")};
   };
+
+  it("always settles a sidecar that vanishes during the parent's read", async () => {
+    const {verifying, resume} = await pauseVerification();
+    const original = fs.readFileSync;
+    let raced = false;
+    fs.readFileSync = function(path, ...args) {
+      if (String(path) === side(generation)) {
+        raced = true;
+        rmSync(path, {force: true});
+      }
+      return original.call(this, path, ...args);
+    };
+    syncBuiltinESMExports();
+    try {
+      resume();
+      const result = await verifying;
+      expect(raced).to.equal(true);
+      expect(result.verdict, JSON.stringify(result)).to.equal("superseded");
+      expect(compiler.verifying).to.equal(undefined);
+    } finally { fs.readFileSync = original; syncBuiltinESMExports(); }
+  });
+
+  it("writes verified sidecars through a temporary file and rename", async () => {
+    const {verifying, resume} = await pauseVerification();
+    const original = fs.writeFileSync, writes = [];
+    fs.writeFileSync = function(path, ...args) {
+      if (String(path).startsWith(side(generation))) writes.push(String(path));
+      return original.call(this, path, ...args);
+    };
+    syncBuiltinESMExports();
+    try {
+      resume();
+      expect((await verifying).verdict).to.equal("same");
+      expect(writes).to.have.length(1);
+      expect(writes[0]).to.not.equal(side(generation));
+      expect(existsSync(writes[0])).to.equal(false);
+      expect(JSON.parse(readFileSync(side(generation), "utf8")).verified).to.equal(true);
+    } finally { fs.writeFileSync = original; syncBuiltinESMExports(); }
+  });
+
+  it("settles a vanished verification sidecar as superseded", async () => {
+    const {verifying, resume} = await pauseVerification();
+    rmSync(side(generation));
+    resume();
+    const result = await verifying;
+    expect(result.verdict, JSON.stringify(result)).to.equal("superseded");
+    expect(compiler.verifying).to.equal(undefined);
+    expect(existsSync(side(generation))).to.equal(false);
+  });
+
+  it("never certifies a concurrent cold replacement of mismatching warm output", async () => {
+    writeFileSync(join(root, "build", "by-input", generation, "output", "zcl_snap.clas.mjs"), "// deliberate mismatch");
+    const {verifying, resume} = await pauseVerification();
+    if (nodeOptions === undefined) delete process.env.NODE_OPTIONS; else process.env.NODE_OPTIONS = nodeOptions;
+    const cold = await build({root, generators: false, force: true, replace: true});
+    expect(cold.hash).to.equal(generation);
+    resume();
+    const result = await verifying;
+    expect(result.verdict, JSON.stringify(result)).to.equal("superseded");
+    expect(existsSync(side(generation))).to.equal(false);
+  });
 
   it("never certifies output removed during its cold transpile", async () => {
     const {verifying, resume} = await pauseVerification();

@@ -28,7 +28,7 @@
 import {keepCompileInputs} from "./osd-compile-snapshot.mjs";
 import {verifyGeneration} from "./osd-warm-verify.mjs";
 import {keepSourceInputs, linkGeneratedSources, completeSourceSnapshot} from "./osd-source-snapshot.mjs";
-import {spawn} from "./osd-child-process.mjs";
+import {startVerification, pruneVerification} from "./osd-warm-verification.mjs";
 import {createHash} from "node:crypto";
 import {copyFileSync, existsSync, linkSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, watch, writeFileSync} from "node:fs";
 import {basename, dirname, join, relative, resolve, sep} from "node:path";
@@ -38,7 +38,6 @@ import {sourceBuildOverlay, sourceBuildStore} from "./osd-source-build-view.mjs"
 import {assertToolchain} from "./osd-transpiler.mjs";
 import {mapStatementStarts} from "./osd-source-map-starts.mjs";
 import {runsAs} from "./osd-main.mjs";
-import {toolCommand} from "./osd-host.mjs";
 import {isBinaryFilename, listFiles, loadLibs, selectedModules, outputFiles, readAll} from "./osd-transpile.mjs";
 import {lowerNarrowSubmit} from "./osd-narrow-submit.mjs";
 import {orderRegistry} from "./osd-warm-order.mjs";
@@ -93,7 +92,7 @@ const SOURCE = /\.(clas(\.(locals_imp|locals_def|testclasses|macros))?\.abap|int
 const AMDP = /BY\s+DATABASE\s+(PROCEDURE|FUNCTION)/i;
 // every INTERFACES statement, the chained form (`INTERFACES: a, b.`) too,
 // as the words it names; a changed addition counts as a change
-const interfacesOf = (text) => [...text.matchAll(/(?:^|\.)\s*INTERFACES\b\s*:?([^.]*)\./gim)]
+const interfacesOf = (text) => [...text.matchAll(/(?:^|(?<=\.))\s*INTERFACES\b\s*:?([^.]*)\./gim)]
   .flatMap((m) => m[1].split(/[\s,]+/).filter(Boolean).map((w) => w.toUpperCase())).sort().join(",");
 
 /** why a content edit may not be built warm, or undefined when it may */
@@ -541,6 +540,7 @@ export class WarmCompiler {
   // forget the registry; the next build is cold, and prime() starts again
   drop() {
     this.reg = undefined;
+    this.unverified.clear();
     this.close();
   }
 
@@ -856,6 +856,8 @@ export class WarmCompiler {
     }
   }
 
+  pruneVerification() { pruneVerification(this); }
+
   // Explicit shutdown only; cold publications cannot invalidate frozen inputs.
   cancelVerify(keep, why) {
     const child = this.verifying;
@@ -867,36 +869,7 @@ export class WarmCompiler {
 
   // Compare the generation with a fresh cold registry of its frozen inputs.
   verify(hash) {
-    return new Promise((done) => {
-      const [cmd, ...args] = toolCommand(join(TOOLS, "osd-warm.mjs"), ["verify", hash]);
-      const child = spawn(cmd, args, {cwd: this.root, stdio: ["ignore", "pipe", "pipe"],
-        env: {...process.env, OSD_ROOT: this.root}});
-      this.verifying = child;
-      child.osdHash = hash;
-      let out = "";
-      child.stdout.on("data", (d) => { out += d; });
-      child.stderr.on("data", (d) => { out += d; });
-      child.on("error", error => {
-        this.verifying = undefined;
-        done({verdict: "failed", output: error.message});
-      });
-      child.on("exit", (code) => {
-        this.verifying = undefined;
-        let result;
-        try {
-          result = child.osdCancelled !== undefined ? {verdict: "cancelled", why: child.osdCancelled}
-            : JSON.parse(out.trim().split("\n").pop());
-        } catch {
-          result = {verdict: "failed", code, output: out.slice(-2000)};
-        }
-        if (result.verdict === "same") {
-          this.unverified.delete(hash);
-          const side = join(layout(this.root).byInput, `${hash}.warm.json`);
-          if (existsSync(side)) writeFileSync(side, JSON.stringify({...JSON.parse(readFileSync(side, "utf8")), verified: true, verifiedAt: new Date().toISOString()}, null, 2));
-        }
-        done(result);
-      });
-    });
+    return startVerification(this, hash, join(TOOLS, "osd-warm.mjs"));
   }
 }
 

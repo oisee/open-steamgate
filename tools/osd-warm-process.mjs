@@ -34,7 +34,6 @@ export class WarmCompilerProcess extends WarmCompiler {
   #serial = 0;
   #primed = false;
   #readers = new Map();
-  #verified = new Set();
   #epoch = 0;
   #closing = false;
 
@@ -89,7 +88,8 @@ export class WarmCompilerProcess extends WarmCompiler {
       this.hash = s.hash;
       this.files = new Map(Array.from({length: s.files}, (_, i) => [i, undefined]));
       this.digests = new Map(s.digests);
-      this.unverified = new Set(s.unverified.filter(hash => !this.#verified.has(hash)));
+      this.unverified = new Set(s.unverified);
+      this.pruneVerification();
       this.#readers = new Map(s.readers);
       if (message.error) pending.reject(Object.assign(new Error(message.error.message), message.error));
       else pending.resolve(message.result);
@@ -136,7 +136,10 @@ export class WarmCompilerProcess extends WarmCompiler {
   }
   async verify(hash) {
     const result = await super.verify(hash);
-    if (result.verdict === "same") this.#verified.add(hash);
+    if (result.verdict === "same" && this.#child) {
+      sendIPC(this.#child, {method: "verified", hash}, () => {});
+    }
+    this.pruneVerification();
     return result;
   }
   readersOf(type, name) {
@@ -160,6 +163,7 @@ export class WarmCompilerProcess extends WarmCompiler {
   drop() {
     this.#epoch++;
     this.#primed = false;
+    this.unverified.clear();
     // Kill even during a CPU-bound prime; a polite IPC stop would wait for it.
     const child = this.#child;
     this.#child = undefined;
@@ -178,8 +182,8 @@ export class WarmCompilerProcess extends WarmCompiler {
   async shutdown() {
     this.#closing = true;
     const verifying = this.verifying;
-    const verifiedExit = verifying && new Promise(resolve => verifying.once("exit", resolve));
-    this.cancelVerify(undefined, "the front is closing");
+    const verifiedExit = verifying?.exitCode === null && verifying?.signalCode === null && new Promise(resolve => verifying.once("exit", resolve));
+    if (verifiedExit) { verifying.osdCancelled = "the front is closing"; verifying.kill("SIGKILL"); }
     await this.drop();
     await verifiedExit;
   }

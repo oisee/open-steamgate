@@ -23,6 +23,7 @@ export function gc(root, options = {}) {
         continue;
       }
       rmSync(join(paths.byInput, g.hash), {recursive: true, force: true});
+      rmSync(join(paths.byInput, `${g.hash}.warm.json`), {force: true});
       removed.push(g.hash);
     }
     if (existsSync(paths.tmp)) {

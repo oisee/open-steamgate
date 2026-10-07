@@ -166,9 +166,11 @@ cost. Config/layer/library/toolchain changes, generator inputs such as AMDP or
 and require a full prime.
 
 Background comparisons yield to a full registry prime: an already running
-frozen comparison finishes first, and queued comparisons resume once priming
-settles. Saves remain available during that wait. This prevents verification
-work from competing with the compiler's bounded prime after a cold publication.
+frozen comparison has up to 30 seconds to finish. On timeout the front kills
+and reaps that verifier before priming; queued comparisons resume once priming
+settles. Saves remain available during that wait. Verifiers also have a
+30-second lifetime deadline, and acquiring their build-lock pins is bounded.
+This prevents a silent verifier from blocking later cold publications.
 
 ## The checks, and why each exists
 
@@ -201,10 +203,20 @@ work from competing with the compiler's bounded prime after a cold publication.
   so repeated packaging of identical inputs keeps the same seed ID. The verifier
   builds a fresh registry solely from
   these inputs. Live edits, cold publications and library/config changes cannot
-  invalidate it. Missing frozen inputs or output, and zero compared files, are
+  invalidate its inputs. A concurrent replacement of the same generation hash
+  supersedes the comparison: manifest identity and the sidecar captured before
+  spawning must still match before the parent records a verdict under the
+  build lock. Sidecars are written atomically, and a vanished sidecar always
+  settles the promise as superseded. Successful verifications are acknowledged
+  to the worker; both processes prune unchecked hashes against retained and
+  in-flight generations instead of keeping historical verdict sets.
+  Missing frozen inputs or output, and zero compared files, are
   `inconclusive` with a reason; corrupt provenance is a failure. A verifier pins
   its generation and scratch directory under the build lock until comparison
-  finishes, so concurrent GC retains both and their frozen source bytes. **It runs no
+  finishes, so concurrent GC retains both and their frozen source bytes. Pins
+  expire after five minutes even if their PID was reused; GC then removes
+  their scratch, and removes warm sidecars with unpinned generations.
+  **It runs no
   generators**: it compares the transpile of the frozen
   `gen/`, so it checks the warm build and not the rule of what is warm; a
   generator reading something the rule lets through would go unseen by it
