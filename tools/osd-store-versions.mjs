@@ -3,7 +3,10 @@ import {warmOverlay} from "./osd-warm-overlay.mjs";
 import {existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync} from "node:fs";
 import {createHash} from "node:crypto";
 import {dirname, join, relative, resolve} from "node:path";
-import * as abaplint from "@abaplint/core";
+import {createRequire} from "node:module";
+import {hostModules} from "./osd-host.mjs";
+const require = createRequire(import.meta.url);
+const compilerPackage = "@abaplint/core";
 import {hashOf, inputsOf, liveHash, normalPath} from "./osd-build.mjs";
 import {entityTag} from "./adt-entity.mjs";
 import {NotFound} from "./osd-store.mjs";
@@ -307,6 +310,7 @@ export class StoreVersions {
   // (#withSource's borrowing, for several files).
   withOverlay(activating, fn) {
     const registry = this.#store.registry();
+    const abaplint = hostModules()?.core ?? require(compilerPackage);
     const swapped = [];
     for (const key of this.#store.inactive) {
       if (activating.has(key)) continue;

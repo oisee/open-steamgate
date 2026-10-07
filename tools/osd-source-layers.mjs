@@ -4,7 +4,7 @@ import {createHash} from 'node:crypto';
 import {chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync} from 'node:fs';
 import {basename, delimiter, dirname, join, relative, resolve} from 'node:path';
 import {repositoryConfig, sourceFolder} from './osd-abapgit-config.mjs';
-import {writable} from './osd-store-tmp.mjs';
+import {writable} from './osd-source-write-check.mjs';
 import {archiveFiles} from './osd-source-zip.mjs';
 
 const slash = p => p.replaceAll('\\', '/');

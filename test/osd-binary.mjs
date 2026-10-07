@@ -159,6 +159,19 @@ describe("the binary: the same system, one file", function () {
     expect(offenders, "import these statically; the binary has no node_modules to require them from").to.deep.equal([]);
   });
 
+  it("runs CDS generation even when layer discovery already imported its parser", function () {
+    if (!built) this.skip();
+    const fixture = runtimeFixture.root;
+    rmSync(join(fixture, "gen/cds"), {recursive: true, force: true});
+    const result = spawnSync(binary, [...prefix, "gen", "cds2ddic.mjs"], {
+      cwd: fixture, env: {...process.env, OSD_ROOT: fixture, OSD_LAYERS: ""}, encoding: "utf8",
+    });
+    expect(result.status, result.stdout + result.stderr).to.equal(0);
+    for (const name of ["system", "process", "port", "service", "pack"]) {
+      expect(existsSync(join(fixture, "gen/cds", `zc_osd_${name}.view.xml`)), name).to.equal(true);
+    }
+  });
+
   it("the bundle renamed no runtime class, or the host put the names back", function () {
     if (!built) {
       this.skip();

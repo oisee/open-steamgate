@@ -149,8 +149,11 @@ switch (mode) {
       process.exit(2);
     }
     // the generator's own guard sees its name and runs its main
-    process.argv = [process.argv[0], name, ...args];
-    await GENERATORS[name]();
+    // Store diagnostics can import CDS parsing before generator dispatch.
+    // Invoke its entry explicitly even when the module is already cached.
+    process.argv = [process.argv[0], name === "cds2ddic.mjs" ? "osd-host" : name, ...args];
+    const generator = await GENERATORS[name]();
+    if (name === "cds2ddic.mjs") generator.main();
     break;
   }
   case "fetch": {
