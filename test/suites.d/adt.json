@@ -1,5 +1,6 @@
 {
   "files": [
+    "test/adt-aunit-types.mjs",
     "test/adt-aunit-conformance-x2.mjs",
     "test/adt-abap-a10.mjs",
     "test/adt-abap-a2.mjs",

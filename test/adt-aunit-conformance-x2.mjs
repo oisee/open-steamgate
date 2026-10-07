@@ -133,7 +133,10 @@ export async function setup(abap, schemas, insert) {
       </aunit:runConfiguration>`});
     expect(response.status).to.equal(200);
     expect(response.headers.get("content-type")).to.equal("application/vnd.sap.adt.abapunit.testruns.result.v2+xml; charset=utf-8");
-    const osgXML = xmlNormative(await response.text());
+    const resultXML = await response.text();
+    if (state === "red") expect(requestElements(resultXML).find(e => e.local === "title")?.text)
+      .to.equal("Critical Assertion Error: 'add'");
+    const osgXML = xmlNormative(resultXML);
     console.log(`      X2 ${state} STORE: ${JSON.stringify(osgStore)}; ADT: ${JSON.stringify(osgXML)}`);
     expect(osgStore, "OSG STORE").to.deep.equal(expected[state]);
     expect(sapXML, "synthetic SAP XML").to.deep.equal(expected[state]);

@@ -11,7 +11,7 @@ import {withSourceLock} from "./osd-store-source-lock.mjs";
 import {nameProblem} from "./osd-object-name.mjs";
 import {objectOf} from "./osd-inputs.mjs";
 import {UnitRun, unitClasses} from "./osd-unit.mjs";
-import {unitValueText} from "./adt-unit-result.mjs";
+import {unitValueText} from "./osd-unit-value.mjs";
 import {withoutHostPaths} from "./osd-build-issues.mjs";
 
 const refusal = (code, text) => Object.assign(new Error(text), {code});
@@ -72,12 +72,13 @@ function stackOf(entry) {
 function projectClass(target, result) {
   const methods = result.testMethods.map(method => {
     const alerts = method.alerts.map(alert => {
-      const value = alert.kind === "failedAssertion" ? unitValueText : v => v;
+      const value = (text, kind) => alert.kind === "failedAssertion"
+        ? unitValueText(text, alert.assertion?.[kind]) : text;
       return {kind: alert.kind, title: alert.title,
         details: (alert.details ?? []).map(d => d.replace(/^(Expected|Actual) \[([\s\S]*)\]$/,
-          (_, kind, text) => `${kind} [${value(text)}]`)),
-        ...(alert.expected !== undefined ? {expected: value(alert.expected)} : {}),
-        ...(alert.actual !== undefined ? {actual: value(alert.actual)} : {}),
+          (_, kind, text) => `${kind} [${value(text, kind.toLowerCase())}]`)),
+        ...(alert.expected !== undefined ? {expected: value(alert.expected, "expected")} : {}),
+        ...(alert.actual !== undefined ? {actual: value(alert.actual, "actual")} : {}),
         stack: (alert.stack ?? []).map(stackOf).filter(Boolean)};
     });
     const verdict = method.skipped ? "skipped" : !alerts.length ? "pass"

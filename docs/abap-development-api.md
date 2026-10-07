@@ -320,10 +320,29 @@ EV_JSON (optional diagnostic fields shown):
   execution failures make both that method and class error; failed assertions always
   keep method verdict `fail`, including in setup/teardown. Only a runner failure uses run-level
   `failed`, with `failure_stage: runner|timeout` and `error {code,text}`.
-- **Assertions:** expected/actual are optional strings from the existing ADT Unit alert
-  data, including known empty strings. Whole negative numeric comparison values
-  use SAP's trailing minus in JSON and comparison details (for example `"1-"`);
-  other text is preserved. Stack entries use the existing source map
+- **Assertions (X2):** expected/actual are optional strings, including known empty
+  strings. ASSERT_EQUALS failures carry each operand's RTTI type kind and decimals
+  from the assertion into the Unit result. ADT XML and STORE JSON share one
+  per-type formatter, measured on SAP 7.58:
+  `i`/`int8` use a trailing minus without padding (`"1-"`, `"7-"`, zero `"0"`);
+  `p` keeps decimals and its leading blank and final sign position
+  (`" 2.25 "`, `" 1.50-"` for LENGTH 8 DECIMALS 2);
+  `f` uses scientific notation with 17 significant digits and a leading minus
+  (`"2.0000000000000000E+00"`, `"-1.5000000000000000E+00"`);
+  `decfloat34` uses the shortest runtime scalar form with a leading minus
+  (`"2"`, `"-1.5"`); `c`/`string` trim trailing blanks and preserve text
+  (`"-1"`); `n` preserves leading zeros (`"0012"`). Unknown types retain the
+  runtime's text verbatim, without numeric inference. The formatter preserves
+  the runtime's available precision; it cannot recover digits already lost there.
+  Packed thousands separators and other magnitudes remain unmeasured.
+  In CLAS ADT XML, comparisons are nested under `Different values`, followed
+  by `Test 'CLASS->METHOD' in Main Program '<POOL>CP'`. Float Expected and Actual
+  are separate sibling details; other measured types use one combined detail.
+  Default titles use `Critical Assertion Error: 'I_Zero: ASSERT_EQUALS'`, with
+  uppercase at the start and after each underscore; custom messages retain their
+  text (X2's `add`). Methods sort by byte order of their uppercase names
+  (`INT8` before `I_NEG`). STORE expected/actual strings use the same value canon.
+  Stack entries use the existing source map
   resolution; unavailable locations are omitted. Counts sum method verdicts;
   class errors without methods increase `classes`, not method `error`.
 - **Generation guard:** a supplied expected_generation different from the generation
