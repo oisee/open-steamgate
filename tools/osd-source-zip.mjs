@@ -11,6 +11,7 @@ const crc32 = bytes => {
 };
 export function archiveFiles(bytes) {
   const fail = why => { throw new Error(`unsafe or unsupported source ZIP: ${why}`); };
+  if (bytes.length > 128 * 1024 * 1024) fail('compressed archive exceeds 128 MiB');
   let end = bytes.length - 22;
   for (; end >= Math.max(0, bytes.length - 65557); end--) {
     if (bytes.readUInt32LE(end) === 0x06054b50 && end + 22 + bytes.readUInt16LE(end + 20) === bytes.length) break;
@@ -19,6 +20,7 @@ export function archiveFiles(bytes) {
   if (bytes.readUInt16LE(end + 4) || bytes.readUInt16LE(end + 6)) fail('multi-disk ZIP');
   const count = bytes.readUInt16LE(end + 10), size = bytes.readUInt32LE(end + 12), start = bytes.readUInt32LE(end + 16);
   if (count === 65535 || start + size !== end || bytes.readUInt16LE(end + 8) !== count) fail('ZIP64 or inconsistent directory');
+  if (count > 20000) fail('archive exceeds 20000 entries');
   const files = new Map(), names = new Set();
   let at = start, total = 0;
   for (let i = 0; i < count; i++) {
@@ -37,6 +39,8 @@ export function archiveFiles(bytes) {
     if (names.has(name.toLowerCase())) fail(`duplicate path ${JSON.stringify(name)}`);
     names.add(name.toLowerCase());
     total += unpacked;
+    if (unpacked > 64 * 1024 * 1024) fail('entry exceeds 64 MiB');
+    if (unpacked > Math.max(1048576, packed * 1000)) fail('compression ratio exceeds 1000:1');
     if (total > 512 * 1024 * 1024) fail('expanded archive exceeds 512 MiB');
     if (offset + 30 > start || bytes.readUInt32LE(offset) !== 0x04034b50) fail('invalid local header');
     const localLength = bytes.readUInt16LE(offset + 26), localExtra = bytes.readUInt16LE(offset + 28);

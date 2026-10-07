@@ -19,7 +19,9 @@ Treat an abapGit archive as a content-named, immutable extracted source layer.
 before extraction: no absolute paths, drive paths, `..`, backslashes, symlinks
 or other special files, duplicate paths or file/directory collisions. Stored
 and deflated entries are supported, with CRC/size verification and a 512 MiB
-expanded size limit. Encrypted, multi-disk and ZIP64 archives are refused.
+expanded size limit, 128 MiB compressed archive limit, 64 MiB per-entry limit,
+20,000-entry limit and 1000:1 expansion ratio limit (entries under 1 MiB
+expanded are exempt from the ratio limit). Encrypted, multi-disk and ZIP64 archives are refused.
 An archive needs `.abapgit.xml` at its root; wrapper directories are refused.
 
 The SHA-256 of the exact archive bytes names `build/source-layers/<sha256>`.
@@ -35,8 +37,8 @@ ADT active source continues to use generation snapshots (#638).
 Every archive revision has an overlay at `local/overlays/<sha256>`, immediately
 above its base in layer order. The first write copies the **whole object**:
 main source, XML header, local definitions/implementations, macros and tests,
-plus package headers. A `.clas.abap` edit therefore retains its `.clas.xml`.
-Creation in an archive package copies its package header to the overlay.
+with package headers established at mount time before the first build. A `.clas.abap` edit therefore retains its `.clas.xml`.
+Creation in an archive package uses the mounted overlay package header.
 The active-source provenance of a copied object is retained before its saved
 bytes change; failed activation keeps serving the old active source.
 

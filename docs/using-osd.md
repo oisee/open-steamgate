@@ -596,7 +596,9 @@ through STORE or ADT copy the complete object to `local/overlays/<SHA-256>`;
 new objects in its packages also land there. Active source remains available
 from the generation snapshots. Reusing the ZIP reuses its cache and overlay;
 replacing its bytes starts a new cache and clean overlay. Prior revisions remain
-on disk. With other inputs fixed, any byte change produces a new generation.
+on disk. Startup warns about edited older revisions of the same root package;
+`osd doctor` lists orphaned overlays with recovery instructions. No edits carry
+over automatically. With other inputs fixed, any byte change produces a new generation.
 
 abapGit usually omits the root package name. A single custom prefix derives the
 local package (`ZCL_DEMO_*` → `$ZDEMO`); set `OSD_LAYER_PACKAGE` for an ambiguous

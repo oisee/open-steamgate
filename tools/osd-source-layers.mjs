@@ -4,6 +4,7 @@ import {createHash} from 'node:crypto';
 import {chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync} from 'node:fs';
 import {basename, delimiter, dirname, join, relative, resolve} from 'node:path';
 import {repositoryConfig, sourceFolder} from './osd-abapgit-config.mjs';
+import {writable} from './osd-store-tmp.mjs';
 import {archiveFiles} from './osd-source-zip.mjs';
 
 const slash = p => p.replaceAll('\\', '/');
@@ -84,6 +85,9 @@ export function userLayersOf(root, env = process.env) {
     // Each archive revision owns its overlay. Reusing identical bytes also
     // reuses edits; replacing the base starts clean, preserving the old revision.
     const overlay = join('local', 'overlays', id);
+    if (!writable(root, overlay, join(overlay, '.osd-overlay.txt'), true)) {
+      throw new Error(`ZIP overlay is redirected through a link: ${overlay}`);
+    }
     mkdirSync(join(root, overlay), {recursive: true});
     // Establish package inputs before the first generation is hashed/primed.
     // Copying these on first save otherwise introduces a new DEVC input and
@@ -94,6 +98,7 @@ export function userLayersOf(root, env = process.env) {
         if (entry.isDirectory()) headers(from);
         else if (entry.name.endsWith('.devc.xml')) {
           const to = join(root, overlay, relative(source, from));
+          if (!writable(root, overlay, relative(root, to), true)) throw new Error(`ZIP package header is redirected through a link: ${to}`);
           if (!existsSync(to)) {
             mkdirSync(dirname(to), {recursive: true});
             copyFileSync(from, to);

@@ -462,6 +462,10 @@ export class ObjectStore {
     if (!root) throw new ReadOnly(entry.type, entry.name);
     const sourceDir = dirname(entry.file);
     const targetDir = join(root.path, relative(entry.root, sourceDir));
+    const safe = writeCheck(this.root, {...root, tmp: true}, `${entry.type} ${entry.name}`);
+    for (const name of readdirSync(join(this.root, sourceDir))) {
+      if (name.startsWith(basename(entry.file).slice(0, -TYPES[entry.type].ext.length) + "." + entry.type.toLowerCase() + ".")) safe(join(targetDir, name));
+    }
     mkdirSync(join(this.root, targetDir), {recursive: true});
     const stem = basename(entry.file).slice(0, -TYPES[entry.type].ext.length);
     for (const name of readdirSync(join(this.root, sourceDir))) {
@@ -477,6 +481,7 @@ export class ObjectStore {
       const to = join(this.root, root.path, relative(entry.root, from), "package.devc.xml");
       if (existsSync(header) && !existsSync(to)) {
         mkdirSync(dirname(to), {recursive: true});
+        safe(relative(this.root, to));
         copyFileSync(header, to);
         chmodSync(to, 0o644);
       }
@@ -532,6 +537,9 @@ export class ObjectStore {
       }
       file = entry.file.replace(/\.clas\.abap$/, suffix);
     }
+    const writeRoot = this.roots.find(r => r.path === entry.root);
+    const safe = writeCheck(this.root, {...writeRoot, tmp: writeRoot?.overlayOf ? true : writeRoot?.tmp}, `${type} ${entry.name}`);
+    safe(file);
     mkdirSync(join(this.root, dirname(file)), {recursive: true});
     // One line ending, the repository's. An editor on Windows sends CRLF,
     // and a save that wrote it as it came turned a one-line comment into a
@@ -543,7 +551,7 @@ export class ObjectStore {
     this.#versions.crash("write:before-intent");
     this.#versions.markInactive(entry, new Map([[file, Buffer.from(text, "utf8")]]));
     this.#versions.crash("write:before-source");
-    writeFileSync(join(this.root, file), text);
+    writeChecked(this.root, file, text, safe, this.hooks);
     this.#forget();
     return {...entry, ...this.stateOf(entry), include, file, bytes: Buffer.byteLength(source, "utf8"),
       revision: this.#versions.sourceRevision(type, entry.name)};

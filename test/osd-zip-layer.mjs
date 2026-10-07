@@ -1,3 +1,6 @@
+import express from 'express';
+import {adtRouter} from '../tools/adt-facade.mjs';
+import {StoreDestination, withSystem} from '../tools/osd-store-destination.mjs';
 import {execFileSync} from 'node:child_process';
 import {expect} from 'chai';
 import {mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, symlinkSync, existsSync} from 'node:fs';
@@ -93,6 +96,34 @@ describe('immutable abapGit ZIP source layers', function () {
     const implicit=store.write('CLAS','ZCL_ZIP_IMPLICIT',source('new').replaceAll('zcl_zip_demo','zcl_zip_implicit'));
     expect(implicit.root).to.equal(layers[1].path); expect(implicit.package).to.equal('$ZDEMO');
   });
+  it('ADT PUT/create and the dev STORE API write only to the mounted overlay', async () => {
+    const layers = zip(), store = new ObjectStore({root, libs: [], build: {generators: false}});
+    const app = express(); app.use(adtRouter({store, data: {}, watch: false, logMisses: false}).router);
+    const server = await new Promise(resolve => {const listening = app.listen(0, '127.0.0.1', () => resolve(listening));});
+    const base = `http://127.0.0.1:${server.address().port}/sap/bc/adt`;
+    try {
+      const handshake = await fetch(base + '/core/discovery', {method: 'HEAD', headers: {'x-csrf-token': 'fetch'}});
+      const headers = {cookie: handshake.headers.getSetCookie().map(c => c.split(';')[0]).join('; '), 'x-csrf-token': handshake.headers.get('x-csrf-token'), 'sap-contextid-accept': 'header', 'x-sap-adt-sessiontype': 'stateful'};
+      const call = (path, method, body) => fetch(base + path, {method, body, headers});
+      await call('/oo/classes/ZCL_ZIP_DEMO', 'GET');
+      const lock = await call('/oo/classes/ZCL_ZIP_DEMO?_action=LOCK&accessMode=MODIFY', 'POST');
+      const lockXML = await lock.text(); expect(lock.status, lockXML).to.equal(200);
+      const handle = /<LOCK_HANDLE>([^<]+)<\/LOCK_HANDLE>/.exec(lockXML)?.[1];
+      expect(handle, lockXML).to.be.a('string');
+      const put = await call('/oo/classes/ZCL_ZIP_DEMO/source/main?lockHandle=' + encodeURIComponent(handle), 'PUT', source('ADT'));
+      expect(put.status, await put.text()).to.equal(200);
+      expect(store.find('CLAS', 'ZCL_ZIP_DEMO').root).to.equal(layers[1].path);
+      const body = '<class:abapClass xmlns:class="http://www.sap.com/adt/oo/classes" xmlns:adtcore="http://www.sap.com/adt/core" adtcore:name="ZCL_ZIP_CREATED"><adtcore:packageRef adtcore:name="$ZDEMO"/></class:abapClass>';
+      const create = await call('/oo/classes', 'POST', body); expect(create.status, await create.text()).to.equal(201);
+      expect(store.find('CLAS','ZCL_ZIP_CREATED').root).to.equal(layers[1].path);
+      const destination = new StoreDestination({store});
+      const dev = await withSystem(() => {}, () => destination.execute({IV_COMMAND: 'WRITE', IV_TYPE: 'CLAS', IV_NAME: 'ZCL_ZIP_IMPLICIT_API', IV_SOURCE: source('dev').replaceAll('zcl_zip_demo','zcl_zip_implicit_api')}), {store});
+      expect(dev.EV_ERROR ?? '').to.equal('');
+      expect(store.find('CLAS', 'ZCL_ZIP_IMPLICIT_API').root).to.equal(layers[1].path);
+      expect(readFileSync(join(root, layers[0].path, 'zcl_zip_demo.clas.abap'), 'utf8')).to.equal(source('base'));
+    } finally {server.closeAllConnections(); await new Promise(resolve => server.close(resolve));}
+  });
+
   it('warns once for edited old revisions by root package, lists them for doctor and never carries edits', () => {
     const first = zip(), store = new ObjectStore({root, libs: []});
     store.write('CLAS', 'ZCL_ZIP_DEMO', source('old edit'));
@@ -115,6 +146,17 @@ describe('immutable abapGit ZIP source layers', function () {
 
   it('reuses identical bytes and changes identity for different ZIP bytes, even just a comment', () => {
     const first=zip(), hash=hashOf(root,inputsOf(root));
+    writeFileSync(join(root,'local/overlays',first[0].archiveId+'.meta.txt'), JSON.stringify({key:'$ZDEMO',checked:true}));
+    expect(hashOf(root,inputsOf(root))).to.equal(hash);
+    const store = new ObjectStore({root,libs:[]});
+    store.write('CLAS','ZCL_ZIP_DEMO',source('hash edit'));
+    const overlayHash = hashOf(root,inputsOf(root));
+    expect(overlayHash).not.to.equal(hash);
+    store.write('CLAS','ZCL_ZIP_DEMO',source('hash edit'));
+    expect(hashOf(root,inputsOf(root))).to.equal(overlayHash);
+    rmSync(join(root,first[1].path,'zcl_zip_demo.clas.abap'));
+    rmSync(join(root,first[1].path,'zcl_zip_demo.clas.xml'));
+    rmSync(join(root,first[1].path,'zcl_zip_demo.clas.locals_def.abap'));
     expect(userLayersOf(root)).to.deep.equal(first); expect(hashOf(root,inputsOf(root))).to.equal(hash);
     const bytes=readFileSync(archive), extra=Buffer.from('comment'); bytes.writeUInt16LE(extra.length,bytes.length-2);
     writeFileSync(archive,Buffer.concat([bytes,extra]));
@@ -127,6 +169,28 @@ describe('immutable abapGit ZIP source layers', function () {
     process.env.OSD_LAYERS=repo;
     const store=new ObjectStore({root,libs:[],build:{generators:false}});
     expect(store.find('CLAS','ZCL_ZIP_DEMO').package).to.equal(logic==='FULL'?'CHILD':'$ZDEMO_CHILD');
+  });
+  it('refuses overlay links that would redirect mounting or STORE writes into the base', () => {
+    const layers = zip(), base = join(root, layers[0].path), overlay = join(root, layers[1].path);
+    symlinkSync(join(base, 'zcl_zip_demo.clas.abap'), join(overlay, 'zcl_zip_demo.clas.abap'));
+    expect(() => new ObjectStore({root, libs: []}).write('CLAS', 'ZCL_ZIP_DEMO', source('bad'))).to.throw(/link/);
+    expect(readFileSync(join(base, 'zcl_zip_demo.clas.abap'), 'utf8')).to.equal(source('base'));
+    rmSync(overlay, {recursive: true}); symlinkSync(base, overlay);
+    expect(() => userLayersOf(root)).to.throw(/link/);
+  });
+  it('bounds ZIP bombs and checks CRC and declared sizes before extraction', () => {
+    write('src/bomb.bin', Buffer.alloc(2 * 1024 * 1024));
+    expect(() => archiveFiles(zipInProcess(repo))).to.throw('compression ratio');
+    rmSync(join(repo, 'src/bomb.bin'));
+    const bytes = zipInProcess(repo), signature = Buffer.from([0x50,0x4b,1,2]);
+    const at = bytes.indexOf(signature);
+    const mutate = (offset, value) => {const copy = Buffer.from(bytes); copy.writeUInt32LE(value, at + offset); return copy;};
+    expect(() => archiveFiles(mutate(24, 64 * 1024 * 1024 + 1))).to.throw('entry exceeds 64 MiB');
+    expect(() => archiveFiles(mutate(24, 2 * 1024 * 1024))).to.throw('compression ratio');
+    expect(() => archiveFiles(mutate(16, 12345))).to.throw('CRC mismatch');
+    expect(() => archiveFiles(mutate(24, 1))).to.throw();
+    const many = Buffer.from(bytes); many.writeUInt16LE(20001, many.length - 14); many.writeUInt16LE(20001, many.length - 12);
+    expect(() => archiveFiles(many)).to.throw('20000 entries');
   });
   it('rejects traversal, absolute paths, backslashes, symlinks and corrupted entries before publication', () => {
     write('src/zsafe.prog.abap','REPORT zsafe.');
