@@ -24,7 +24,7 @@ import {chmodSync, copyFileSync, readdirSync, existsSync, mkdirSync, readFileSyn
 import {createHash} from "node:crypto";
 import {CREATABLE} from "./osd-store-create.mjs";
 import {StoreVersions} from "./osd-store-versions.mjs";
-import {buildRegistry, forgetRegistry, registryDependents, registryIssues, walkStoreFiles, withSource} from "./osd-store-registry.mjs";
+import {buildRegistry, forgetRegistry, registryDependents, registryIssues, updateRegistryFiles, walkStoreFiles, withSource} from "./osd-store-registry.mjs";
 import {warmCheck} from "./adt-warm-check.mjs";
 import {entityOf} from "./ddls-entity.mjs";
 import {inputFoldersOf, packRootsOf} from "./osd-packs.mjs";
@@ -1365,6 +1365,12 @@ export class ObjectStore {
   #forget(files) {
     this.ddlsEntityIndex = undefined;
     forgetRegistry(this, files);
+  }
+
+  // StoreVersions borrows the registry update from here so that it can be
+  // imported without the compiler (the Docker core image has none).
+  updateRegistryFiles(registry, replacements) {
+    return updateRegistryFiles(registry, replacements);
   }
 
   registry(configPath = "abaplint.jsonc") {

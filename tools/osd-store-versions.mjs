@@ -1,4 +1,3 @@
-import {updateRegistryFiles} from "./osd-store-registry.mjs";
 import {warmOverlay} from "./osd-warm-overlay.mjs";
 // Active/inactive versions, source snapshots and activation provenance.
 import {existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync} from "node:fs";
@@ -339,10 +338,10 @@ export class StoreVersions {
     }
     if (replacements.length === 0) return fn(registry);
     try {
-      updateRegistryFiles(registry, replacements);
+      this.#store.updateRegistryFiles(registry, replacements);
       return fn(registry);
     } finally {
-      updateRegistryFiles(registry, restore);
+      this.#store.updateRegistryFiles(registry, restore);
     }
   }
 
