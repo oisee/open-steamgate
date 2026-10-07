@@ -19,6 +19,14 @@ const unitRun = (argv, env = {}) => new Promise((resolveRun) => {
   child.stderr.on("data", (chunk) => { stderr += chunk; });
   child.on("close", (status) => resolveRun({status, stdout, stderr, result: stdout ? JSON.parse(stdout) : null}));
 });
+test("UTF-16 lengths, sections and surrogate halves run through ABAP Unit", {timeout: 120000}, async () => {
+  const run = await unitRun([join(here, "unit.mjs"), "--fixture", join(here, "testdata-unit-utf16"), "--no-cache"]);
+  assert.equal(run.status, 0, run.stderr || run.stdout);
+  assert.equal(run.result.classes, 1);
+  assert.equal(run.result.compiled, 1);
+  assert.equal(run.result.rows.length, 7);
+  assert.ok(run.result.rows.every((row) => row.status === "SUCCESS"), run.stdout);
+});
 test("a reused frontend registry keeps CDS to SQL view names", () => {
   const args = {folders: [join(here, "testdata")], objects: []};
   const first = compileProgram(args);
