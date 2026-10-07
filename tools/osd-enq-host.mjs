@@ -259,6 +259,26 @@ export function repositoryCaller() {
   return session.user;
 }
 
+/** Activation checks ownership without taking or releasing an editor's lock.
+ * The caller key, not sy-uname, identifies the same session. */
+export function preflightRepositoryActivation(type, name) {
+  const a = globalThis.abap;
+  // A standalone destination with no installed kernel has no enqueue table.
+  if (a?.__osdEnq !== true || !a.DDIC?.ZOSD_ADT_LOCK) return;
+  const key = sessionKey();
+  if (isEnded(key)) throw new EnqSessionEnded(key);
+  const types = type === "INCL" || type === "PROG" ? ["PROG", "INCL"] : [type];
+  for (const identity of types) {
+    const held = enqHolder("ZOSD_ADT_LOCK", {
+      mode_zosd_adt_lock: "X", objtype: String(identity).toUpperCase(),
+      objname: String(name).toUpperCase(), x_objtype: "X", x_objname: "X", _scope: "1",
+    });
+    if (held !== undefined && held.key !== key) {
+      throw Object.assign(new Error(`${type} ${name} is locked by another editing session of user ${held.user}`), {code: "CONFLICT"});
+    }
+  }
+}
+
 /** Short repository mutation in the caller's ENQ session. X refuses other
  * owners and reports 602 for our existing X lock, which must remain held. */
 export async function withRepositoryLock(type, name, work) {

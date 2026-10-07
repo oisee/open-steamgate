@@ -77,7 +77,7 @@ export class StoreIPCClient {
     this.unhookRepository?.();
     this.disconnected();
   }
-  request(parameters, name = "ZOSD_STORE", repositoryUser, repositorySession) {
+  request(parameters, name = "ZOSD_STORE", repositoryUser, repositorySession, repositoryActivationError) {
     if (!this.channel.connected) return Promise.reject(new Error("STORE needs the parent process channel"));
     const id = ++this.seq;
     const contextID = calls.getStore();
@@ -101,7 +101,7 @@ export class StoreIPCClient {
       }, 120000);
       this.pending.set(id, {resolve, reject, timer});
       if (repositorySession !== undefined) this.repositorySessions.set(id, repositorySession);
-      sendIPC(this.channel, {type: "store-request", id, context: contextID, step: token?.storeIPC, name, parameters, repositoryUser}, (error) => {
+      sendIPC(this.channel, {type: "store-request", id, context: contextID, step: token?.storeIPC, name, parameters, repositoryUser, repositoryActivationError}, (error) => {
         if (!error) return;
         const pending = this.pending.get(id);
         if (!pending) return;
@@ -122,6 +122,16 @@ export class StoreIPCClient {
     }
     const parameters = Object.fromEntries(Object.entries(signature.exporting ?? signature.EXPORTING ?? {})
       .map(([key, value]) => [key.toUpperCase(), typeof value?.get === "function" ? toJson(value) : value]));
+    if (command === "ACTIVATE") {
+      const {preflightRepositoryActivation} = await import("./osd-enq-host.mjs");
+      let rejection = null;
+      try { preflightRepositoryActivation(kind, givenText(signature, "IV_NAME").toUpperCase()); }
+      catch (error) { rejection = {code: error.code ?? "INTERNAL", message: error.message}; }
+      // Even a refusal reaches the parent journal and returns its op_id.
+      // This internal field is never read from IV_JSON or ABAP parameters.
+      fill(signature, await this.request(parameters, name, undefined, undefined, rejection));
+      return;
+    }
     if (command === "CREATE" || command === "DELETE") {
       const {storeCrud} = await import("./osd-store-crud.mjs");
       const {onRepositorySessionEnd, repositorySessionKey, repositoryCaller} = await import("./osd-enq-host.mjs");
@@ -229,7 +239,7 @@ export function attachStoreIPC(child, runtime) {
         const destination = runtime.storeDestination ?? new StoreDestination({reason: "no parent store installed"});
         values = await withSystem(context?.system ?? runtime.systemAnswers ?? (() => undefined),
           () => destination.execute(message.parameters), {store: context?.store, oneRuntime: true,
-            repositoryUser: message.repositoryUser,
+            repositoryUser: message.repositoryUser, repositoryActivationError: message.repositoryActivationError,
             repositoryGuard: mutation ? () => !channelFailed && child.connected && activeMutations.has(message.id) : undefined,
             deferActivate: message.step === undefined ? undefined : (continuation) => {
               if (channelFailed || !child.connected) throw new Error("activation child disconnected before scheduling");

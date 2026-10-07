@@ -111,10 +111,10 @@ try {
 /** Run work with `answers` ((kind, name, json) => value; throw to refuse) bound
  *  as the SYSTEM answers of every STORE call it makes, and `store` (the
  *  facade instance's ObjectStore, port-map risk 12) for every STORE command. */
-export function withSystem(answers, work, {store, deferActivate, oneRuntime, repositoryUser, repositoryGuard} = {}) {
+export function withSystem(answers, work, {store, deferActivate, oneRuntime, repositoryUser, repositoryGuard, repositoryActivationError} = {}) {
   if (systemCalls === undefined) throw new Error("SYSTEM needs an async context (Node or Bun)");
   const inherited = systemCalls.getStore();
-  return systemCalls.run({answers, repositoryUser, repositoryGuard, oneRuntime: oneRuntime ?? inherited?.oneRuntime, deferActivate: deferActivate ?? inherited?.deferActivate,
+  return systemCalls.run({answers, repositoryUser, repositoryGuard, repositoryActivationError, oneRuntime: oneRuntime ?? inherited?.oneRuntime, deferActivate: deferActivate ?? inherited?.deferActivate,
     store: store ?? inherited?.store}, work);
 }
 
@@ -514,7 +514,15 @@ export class StoreDestination {
       return {...rejected, EV_JSON: JSON.stringify(failed)};
     };
     let result;
-    try { [result] = prepareActivation(store, [{type, name}]); }
+    try {
+      // IPC checks in the child owning ENQ; local calls check this runtime.
+      // Keep the refusal in the tracked operation before validation/build.
+      const rejected = systemCalls?.getStore()?.repositoryActivationError;
+      if (rejected) throw Object.assign(new Error(rejected.message), {code: rejected.code});
+      const {preflightRepositoryActivation} = await import("./osd-enq-host.mjs");
+      if (rejected === undefined) preflightRepositoryActivation(type, name);
+      [result] = prepareActivation(store, [{type, name}]);
+    }
     catch (error) {
       return failedAnswer(error, "validation");
     }

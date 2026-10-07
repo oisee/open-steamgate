@@ -569,6 +569,91 @@ describe('STORE CREATE/DELETE repository lifecycle', function () {
     enqDrop(other,'ZOSD_ADT_LOCK','EZOSD_ADT_OBJ',input);
     expect((await execute('DELETE')).EV_ERROR).to.equal('');
   });
+  it('tracked ACTIVATE refuses another session of the same user before validation and keeps the owner lock', async () => {
+    await execute('CREATE');
+    const {dialogStep} = await import('../tools/osd-dialog-step.mjs');
+    const {bindEnqSession, reviveEnqSession, enqTake, enqDrop, enqHolder} = await import('../tools/osd-enq-host.mjs');
+    const input = {mode_zosd_adt_lock:'X', objtype:'CLAS', objname:name, x_objtype:'X', x_objname:'X', _scope:'1'};
+    reviveEnqSession(owner);
+    expect(enqTake(owner,'CREATOR','ZOSD_ADT_LOCK','EZOSD_ADT_OBJ',input).subrc).to.equal(0);
+    let checked = 0, scheduled = 0;
+    store.activate = () => { checked++; return {active:true, issues:[]}; };
+    const invoke = session => dialogStep(async () => {
+      reviveEnqSession(session); bindEnqSession(session, {user:'CREATOR'});
+      return withSystem(() => {}, () => destination.execute({IV_COMMAND:'ACTIVATE', IV_TYPE:'CLAS', IV_NAME:name}),
+        {store, deferActivate: () => { scheduled++; }});
+    }, 'STORE activation ownership');
+    try {
+      const refused = await invoke(other), failed = JSON.parse(refused.EV_JSON);
+      expect(failed).to.include({state:'failed', active:false, live:false});
+      expect(failed.error).to.include({code:'CONFLICT'});
+      expect(failed.error.message).to.include(name).and.include('CREATOR');
+      expect(failed.op_id).to.be.a('string').and.not.equal('');
+      expect(activationJournal(store).lookup(failed.op_id)).to.deep.equal(failed);
+      expect(checked).to.equal(0); expect(scheduled).to.equal(0);
+      expect(JSON.parse((await invoke(owner)).EV_JSON).state).to.equal('pending');
+      expect(checked).to.equal(1); expect(scheduled).to.equal(1);
+      expect(enqHolder('ZOSD_ADT_LOCK', input).key).to.equal(owner);
+      expect(enqTake(other,'CREATOR','ZOSD_ADT_LOCK','EZOSD_ADT_OBJ',input).subrc).to.equal(1);
+    } finally { enqDrop(owner,'ZOSD_ADT_LOCK','EZOSD_ADT_OBJ',input); }
+  });
+  it('IPC ACTIVATE checks child ENQ and returns a tracked refusal from the parent journal', async () => {
+    const {EventEmitter} = await import('node:events');
+    const {StoreIPCClient, attachStoreIPC} = await import('../tools/osd-store-ipc.mjs');
+    const {dialogStep} = await import('../tools/osd-dialog-step.mjs');
+    const {bindEnqSession, reviveEnqSession, enqTake, enqDrop, enqHolder} = await import('../tools/osd-enq-host.mjs');
+    const channel = new EventEmitter(); channel.connected = true;
+    const parent = new EventEmitter(); parent.connected = true;
+    const requests = [];
+    channel.send = message => { requests.push(message); queueMicrotask(() => parent.emit('message', message)); };
+    parent.send = message => queueMicrotask(() => channel.emit('message', message));
+    let checked = 0;
+    store.activate = () => { checked++; return {active:true, issues:[]}; };
+    attachStoreIPC(parent, {storeDestination:destination, adtContexts:new Map()});
+    const client = new StoreIPCClient(channel);
+    const input = {mode_zosd_adt_lock:'X',objtype:'CLAS',objname:name,x_objtype:'X',x_objname:'X',_scope:'1'};
+    reviveEnqSession(owner);
+    expect(enqTake(owner,'CREATOR','ZOSD_ADT_LOCK','EZOSD_ADT_OBJ',input).subrc).to.equal(0);
+    const invoke = session => dialogStep(async () => {
+      reviveEnqSession(session); bindEnqSession(session, {user:'CREATOR'});
+      const signature = {exporting:{IV_COMMAND:box('ACTIVATE'),IV_TYPE:box('CLAS'),IV_NAME:box(name)},
+        importing:{EV_ERROR:box(''),EV_JSON:box('')}};
+      await client.call('ZOSD_STORE', signature);
+      return JSON.parse(answerOf(signature).EV_JSON);
+    }, 'STORE activation IPC ownership');
+    try {
+      const refused = await invoke(other);
+      expect(refused.state).to.equal('failed');
+      expect(refused.error.code).to.equal('CONFLICT');
+      expect(refused.error.message).to.include(name);
+      expect(activationJournal(store).lookup(refused.op_id)).to.deep.equal(refused);
+      expect(checked).to.equal(0);
+      expect(requests.find(m => m.type === 'store-request').repositoryActivationError.code).to.equal('CONFLICT');
+      expect(enqHolder('ZOSD_ADT_LOCK', input).key).to.equal(owner);
+      store.publish = async () => ({ok:true, generation:'owned-generation', recycled:true});
+      store.completeActivation = () => true;
+      expect((await invoke(owner)).state).to.equal('pending');
+      expect(checked).to.equal(1);
+      expect(enqHolder('ZOSD_ADT_LOCK', input).key).to.equal(owner);
+    } finally { enqDrop(owner,'ZOSD_ADT_LOCK','EZOSD_ADT_OBJ',input); client.close(); parent.emit('exit'); }
+  });
+  it('tracked INCL ACTIVATE respects the owning program editor lock', async () => {
+    store.create('PROG','ZSTORE_ALIAS',{package:'$TMP'});
+    const {dialogStep} = await import('../tools/osd-dialog-step.mjs');
+    const {bindEnqSession, reviveEnqSession, enqTake, enqDrop} = await import('../tools/osd-enq-host.mjs');
+    const input = {mode_zosd_adt_lock:'X',objtype:'PROG',objname:'ZSTORE_ALIAS',x_objtype:'X',x_objname:'X',_scope:'1'};
+    reviveEnqSession(other);
+    expect(enqTake(other,'EDITOR','ZOSD_ADT_LOCK','EZOSD_ADT_OBJ',input).subrc).to.equal(0);
+    let checked = 0; store.activate = () => { checked++; throw new Error('preflight missed alias'); };
+    try {
+      const result = await dialogStep(async () => {
+        reviveEnqSession(owner); bindEnqSession(owner,{user:'CREATOR'});
+        return destination.execute({IV_COMMAND:'ACTIVATE',IV_TYPE:'INCL',IV_NAME:'ZSTORE_ALIAS'});
+      }, 'STORE alias activation');
+      expect(JSON.parse(result.EV_JSON).error.code).to.equal('CONFLICT');
+      expect(checked).to.equal(0);
+    } finally { enqDrop(other,'ZOSD_ADT_LOCK','EZOSD_ADT_OBJ',input); }
+  });
   it('creates and deletes through the actual ABAP CALL FUNCTION destination', async () => {
     const {dialogStep} = await import('../tools/osd-dialog-step.mjs');
     const {bindEnqSession, reviveEnqSession} = await import('../tools/osd-enq-host.mjs');

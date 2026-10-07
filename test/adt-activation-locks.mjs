@@ -283,3 +283,8 @@ for (const front of ["Node", "ABAP"]) for (const build of [false, true]) {
     });
   });
 }
+
+// Activation is still HOST in the ABAP route table, including mode 1.
+describe("ABAP-served ADT activation lock preflight gap", () => {
+  it.skip("OSD_ADT_ONE_RUNTIME=1 served-by ABAP activation refuses foreign locks and preserves owner locks");
+});

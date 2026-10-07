@@ -957,3 +957,29 @@ The ABAP group rejects `OSD_ADT=js` and asserts `X-OSD-Served-By: ABAP` on
 include GETs and object POSTs. Eclipse recovery is conditional on GET 404:
 POST `/includes`, PUT 200, then GET the saved source. Include creation and PUT
 remain HOST orchestration under one-runtime.
+
+### Activation lock coverage after merging #626 through #639
+
+ADT activation remains a HOST route behind the ABAP front in both
+`OSD_ADT_ONE_RUNTIME=0` and `1`. Its Node orchestration uses the session
+adapter's enqueue owner and preflights every reference before checking,
+building or promoting anything. Include references use the owning class;
+unsupported references remain named diagnostics; the owner can activate
+without losing the lock.
+
+**Explicit gap:** there is no ABAP-served ADT activation route yet. Therefore
+`OSD_ADT_ONE_RUNTIME=1` does not prove a `served-by ABAP` activation preflight.
+`test/adt-activation-locks.mjs` contains the pending test
+“OSD_ADT_ONE_RUNTIME=1 served-by ABAP activation refuses foreign locks and
+preserves owner locks”. It must be enabled when activation moves to ABAP.
+The executing ABAP-front tests today cover HOST activation using child ENQ.
+
+The development API's tracked STORE `ACTIVATE` applies the same ownership
+rule before validation. Local calls read their runtime's ENQ table; IPC
+calls preflight in the serving child and forward any refusal to the parent
+journal, preserving `op_id`, failed status and the named `CONFLICT` error.
+INCL/PROG aliases check both identities. Ownership compares session keys,
+so a second session of the same user is refused and an existing owner lock
+is kept. Standalone STORE destinations without an installed enqueue kernel
+have no editing lock table to check. The check is a preflight, as for ADT;
+it does not reserve an unlocked object for the later publication.
