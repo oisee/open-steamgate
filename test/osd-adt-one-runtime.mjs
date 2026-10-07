@@ -21,7 +21,10 @@ const BASE = "/sap/bc/adt";
 // Runtime start/recycle prepares the active source view. Even a read-only
 // door test can switch build/live, so every real runtime owns its build root.
 let runtimeRoot;
-before(() => {
+before(function () {
+  // copying the tree takes seconds on a loaded runner; a root-level hook
+  // gets mocha's 2 s default, not a suite's 60 s
+  this.timeout(60000);
   runtimeRoot = mkdtempSync(join(tmpdir(), "osd-one-runtime-host-"));
   for (const dir of ["src", "gen", "packs", "data", "webapp", "test"]) cpSync(resolve(dir), join(runtimeRoot, dir), {recursive: true});
   for (const file of ["package.json", "abap_transpile.json", "abaplint.jsonc", "libs.lock.json"]) cpSync(resolve(file), join(runtimeRoot, file));
