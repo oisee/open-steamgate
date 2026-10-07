@@ -239,7 +239,7 @@ export function abapRunner({handler, step, stale, remote}) {
 
 /** Finish deferred activation before replaying either remote entry point. */
 async function publicationRecord(runtime, context, record, options) {
-  const publications = await Promise.all(runtime.adtContexts.get(context).publications ?? []);
+  const publications = await Promise.all(runtime.adtContexts.get(context)?.publications ?? []);
   const failed = publications.filter(p => p.EV_ACTIVE !== "X");
   if (failed.length) {
     // Keep the child's boot free of adt-documents and its store dependencies.

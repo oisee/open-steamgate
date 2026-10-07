@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // L1 declarations from abaplint's registry, SyntaxLogic and expression tree.
 import {legacyTrace} from "./dsl-trace.mjs";
+import {builtEngine} from "./dsl-engine.mjs";
 import {readFileSync, readdirSync, statSync} from "node:fs";
 import {basename, join} from "node:path";
 import {pathToFileURL} from "node:url";
@@ -205,7 +206,7 @@ export function constantsModel(model, className) {
 // with the nearest @id on its data path, and, when a profile is named, what
 // ZCL_OSD_DSL_PROFILE finds on the result (with the trace in hand).
 export async function renderRecipe(data, template, {profile, templateText, templateOrigins} = {}) {
-  await import("../test/start.mjs");
+  await builtEngine();
   await import("../output/zcl_osd_tpl.clas.mjs");
   await import("../output/zcl_ajson.clas.mjs");
   if (profile) await import("../output/zcl_osd_dsl_profile.clas.mjs");

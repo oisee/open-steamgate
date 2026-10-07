@@ -398,3 +398,61 @@ The observer’s initial subprocess wrapper lost Node’s `util.promisify.custom
 A concurrent focused run against the already dirty DSL tree was also replaced by a clean-build focused run. None of these task-caused mismatches became allow-list entries. Valid root/generation evidence from the original shared runs is retained in the tables above.
 
 Logs, timing JSON and shard reports are retained as `/tmp/leakhook-*.log`, `.json` and `.md` for this session. Import crashes, `process.exit()`, native-extension children and untracked grandchildren remain outside normal final-boundary detection; Mocha parallel mode is explicitly refused.
+
+## Working-tree source invariant (2026-10-04)
+
+Measured in `test/isolation-tree-invariant`, base `8feda000`, without commits.
+Every heavy command used `OSD_HEAVY_RANGE=90-99 OSD_HEAVY_SLOTS=4 tools/osd-heavy.sh`; `npm run transpile` completed first. The `tree` invariant
+uses the same named-root manifest, metadata/digest cache, comparison,
+restoration classification, phase/kind allowance matcher and runner-end audit
+as `gen`. It observes checkout `src/`, every immediate `packs/*/src`, and the
+checkout/pack manifests, independently of the generation hash and enabled packs.
+
+The first focused regression run against the old hook was red: a file left
+`src/left.trace.meta.json`, but the child Mocha exited zero. The generalized hook
+names the originating file and path. Byte-identical write/restoration and a stale
+source run start pass. Further regressions cover source/manifest edits in each
+phase, new packs, restorations, filtered imports, bounded exceptions and the
+measured L2 allowance's refusal of an extra sidecar.
+
+The ADT fragment ran once with `OSD_ADT_ONE_RUNTIME=0` and the hook: **3,578
+passing across 52 files**. It named no `tree` leak; only the existing
+`adt-facade` temporary-root allowance was printed. Its tree manifests covered
+1,183 files at start, with 208 boundaries, median **9.906 ms/boundary**,
+58.699 ms initial hashing/manifest capture and 2,267.910 ms total observation.
+
+The source/pack scan combines the suites selected by grepping same-line
+`writeFileSync`/`rmSync`/`mkdirSync` calls mentioning `src/` or `packs/`, all
+DSL/pack/stg-compile suites, and the build/warm/notebook activation cases whose
+writes use path variables. ADT cases are covered by the fragment; cases already
+in shard 2 are covered there, except L2 is also scanned first without an allowance.
+
+At the L2 boundary the hook named **13 execution additions** under `src/l2demo`:
+11 main classes' `*.clas.testclasses.trace.meta.json` companions, plus
+`zcl_l2_ship_min_captains.clas.trace.meta.json` and
+`zcl_l2_recent_voyage.clas.trace.meta.json`. The nine other main-class companions
+are tracked at this base and unchanged. All 13 ignored companions were absent
+before the scan; no tracked file was removed to manufacture this result.
+The generation invariant did not report these files. The new `tree` allowance
+lists exactly these paths, each limited to one execution addition, with owner
+`osg-research` and [its repair entry](backlog/misc.md#isolation-dsl-l2-tree).
+Import changes, changed/removed companions and additional paths stay red.
+
+Raw logs, the selected file lists, optional-sidecar baseline and measurement
+script are retained locally under `.local/isolation-tree/`.
+
+The complete 39-file source/pack scan ended with **1,369 passing, two pending,
+11 failures**. Two were isolation failures observed before their new allowances:
+the L2 `tree` additions and one surviving `vsix-hidden-gen-*` root from the
+packaging fixture. Nine packaging failures were `EROFS` from its default external
+scratch cache, outside this workspace's writable roots. The hidden-gen setup
+failure left an empty root without moving `gen/`.
+Its setup now runs inside cleanup, including scratch-directory creation and
+the generation move; no packaging temporary-root allowance remains.
+The packaging rerun uses `OSD_VSIX_SCRATCH` inside the heavy runner's temporary
+directory, outside the checkout; ordinary failures remain part of the verdict.
+The scan additionally printed existing allowances for `amdp-pack`, `osd-bsp` and
+`osd-store` temporary roots, and `vscode-job-worker-integration` and `vscode-warm`
+generation drift. No other `tree` or `gen` origin was observed.
+Its 156 tree boundaries started with 1,185 files; median capture cost was
+**10.401 ms/boundary**, 1,755.096 ms total manifest time.

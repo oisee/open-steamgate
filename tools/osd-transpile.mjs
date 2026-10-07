@@ -53,6 +53,8 @@ export function modulesOf(root) {
   const identity = buildIdentity(root);
   const fromTranspiler = createRequire(join(where, "package.json"));
   const {Transpiler, Chunk} = fromTranspiler(where);
+  const validationFile = join(where, "build/src/validation.js");
+  const validationConfig = existsSync(validationFile) ? fromTranspiler(validationFile).config : undefined;
   if (!LOADED_IDENTITIES.has(Transpiler)) LOADED_IDENTITIES.set(Transpiler, identity);
   const core = fromTranspiler("@abaplint/core");
   const {CallFunctionTranspiler} = fromTranspiler(join(where, 'build/src/statements/call_function.js'));
@@ -63,11 +65,22 @@ export function modulesOf(root) {
   } catch {
     plugin = undefined;
   }
-  return prepareModules({Transpiler, Chunk, core, CallFunctionTranspiler, plugin, where, identityRoot: root, identity: LOADED_IDENTITIES.get(Transpiler), version: JSON.parse(readFileSync(join(where, "package.json"), "utf8")).version});
+  return prepareModules({Transpiler, Chunk, core, CallFunctionTranspiler, validationConfig, plugin, where, identityRoot: root, identity: LOADED_IDENTITIES.get(Transpiler), version: JSON.parse(readFileSync(join(where, "package.json"), "utf8")).version});
 }
 
 // Install on the selected copy, including bundled hosts and explicit modules.
+const VALIDATION_NORMALIZED = new WeakSet();
 function prepareModules(modules) {
+  if (modules.validationConfig && !VALIDATION_NORMALIZED.has(modules.Transpiler)) {
+    const validate = modules.Transpiler.prototype.validate;
+    modules.Transpiler.prototype.validate = function (reg) {
+      // The pinned validator sets this for runtimeError but never resets it.
+      // Every registry must use this instance's policy, not the previous one's.
+      modules.validationConfig.syntax.errorNamespace = this.options?.unknownTypes === "runtimeError" ? "VOID_EVERYTHING" : ".";
+      return validate.call(this, reg);
+    };
+    VALIDATION_NORMALIZED.add(modules.Transpiler);
+  }
   installRfcMessage(modules.CallFunctionTranspiler, modules.Chunk, modules.core);
   return modules;
 }
@@ -181,7 +194,7 @@ export function listFiles(root, config) {
 
 // the libraries: a folder beside the tree when there is one, a shallow
 // clone into a temporary folder when there is only a URL, gone after
-export async function loadLibs(root, config, log = () => {}) {
+export async function loadLibs(root, config, log = () => {}, onRead = undefined) {
   const files = [];
   for (const lib of config.libs ?? []) {
     let dir;
@@ -209,7 +222,7 @@ export async function loadLibs(root, config, log = () => {}) {
     const found = matching(dir, patterns)
       .filter((f) => f.endsWith(".clas.testclasses.abap") === false)
       .filter((f) => exclude.length === 0 || exclude.some((r) => r.test(f)) === false);
-    files.push(...await readAll(found, root));
+    files.push(...await readAll(found, root, undefined, onRead));
     log(`\t${found.length} files added from lib`);
     if (cleanup) {
       rmSync(dir, {recursive: true, force: true});
@@ -272,7 +285,7 @@ export async function transpile(options = {}) {
   if (config.write_source_map === true) mapStatementStarts(Chunk);
   const {files, skipped} = await loadFiles(root, config, core, options.onRead);
   log(`${files.length} files added from source, ${skipped} skipped`);
-  const libs = await loadLibs(root, config, log);
+  const libs = await loadLibs(root, config, log, options.onRead);
   const settings = {...config.options};
   if (config.write_source_map !== true) {
     settings.ignoreSourceMap = true;

@@ -1,5 +1,7 @@
 {
   "files": [
+    "test/adt-aunit-types.mjs",
+    "test/adt-aunit-conformance-x2.mjs",
     "test/adt-abap-a10.mjs",
     "test/adt-abap-a2.mjs",
     "test/adt-abap-a3b.mjs",
@@ -32,28 +34,34 @@
     "test/adt-abap-sessions.mjs",
     "test/adt-abapfs-conformance.mjs",
     "test/adt-active-inactive.mjs",
+    "test/adt-pack-active.mjs",
     "test/adt-activation.mjs",
     "test/adt-activation-locks.mjs",
     "test/adt-activation-wire.mjs",
     "test/adt-devloop.mjs",
+    "test/adt-include-objectpost-parity.mjs",
     "test/adt-editor.mjs",
     "test/adt-facade.mjs",
     "test/adt-host-seam.mjs",
     "test/adt-handle-migration.mjs",
     "test/adt-notebook.mjs",
     "test/adt-session.mjs",
+    "test/adt-rfc-context.mjs",
     "test/adt-session-recycle.mjs",
     "test/adt-versions.mjs",
     "test/http-codelens.mjs",
     "test/osd-adt-fork.mjs",
     "test/osd-adt-one-runtime.mjs",
     "test/store-history.mjs",
+    "test/store-cold-build.mjs",
     "test/tmp-package.mjs",
     "test/adt-xref-warm.mjs",
     "test/unit-risk-calls.mjs",
     "test/adt-request-xml.mjs",
     "test/adt-request-xml-corpus.mjs",
     "test/adt-request-xml-scaling.mjs",
-    "test/adt-unit-object-cold.mjs"
+    "test/adt-unit-object-cold.mjs",
+    "test/store-warm-activate.mjs",
+    "test/adt-unit-result.mjs"
   ]
 }

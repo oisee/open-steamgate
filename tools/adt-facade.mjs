@@ -1,4 +1,7 @@
-import {requestElements, elementsNamed, attributeValue, namespaces} from "./adt-request-xml.mjs";
+import {prepareActivation, publishActivation} from "./osd-publish-activation.mjs";
+import {unitResultDocument, unitResultOptions} from "./adt-unit-result.mjs";
+import {validateCreation, validationDocument} from "./adt-create-validation.mjs";
+import {requestElements, elementsNamed, attributeValue, namespaces, objectXMLRoots, invalidObjectXML} from "./adt-request-xml.mjs";
 import {requestXMLProfile, readRequestXML, RequestXMLError, XML_ERROR_TYPE, XML_ERROR_MESSAGE} from "./adt-request-xml.mjs";
 import {segwRegistrationsOf} from "./osd-store-destination.mjs";
 import {xrefFact} from "./adt-xref-facts.mjs";
@@ -48,7 +51,7 @@ import {SOURCE_PROPERTY_MIME, sourcePropertiesDocument} from "./adt-source-prope
 import {ObjectStore, TYPES, INCLUDES as CLASS_INCLUDES, NotFound, ReadOnly, NotSupported, Conflict, InvalidName} from "./osd-store.mjs";
 import {cdsEntityOf} from "./adt-cds.mjs";
 import {hashOf, liveHash} from "./osd-build.mjs";
-import {emptyFeedDocument, uriOf, ADT_TYPE, dataElementDocument, tableFieldsOf, tableDocument, tableSourceDocument, TREE_FOLDER, TREE_CATEGORY, TREE_TYPE_LABEL, TREE_CATEGORY_LABEL, classDocument, activationSuccessDocument, namedItemsDocument, objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, packageOf, nodeStructureDocument, nodePathDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, lockedByOtherDocument, activationFailureDocument, inactiveObjectsDocument, activationReferencesIn, objectFromUri, checkReportDocument, checkObjectsIn, unitResultDocument, transportCheckDocument, transportCheckRequest} from "./adt-documents.mjs";
+import {classIncludeTemplates, missingTestInclude, emptyFeedDocument, uriOf, ADT_TYPE, dataElementDocument, tableFieldsOf, tableDocument, tableSourceDocument, TREE_FOLDER, TREE_CATEGORY, TREE_TYPE_LABEL, TREE_CATEGORY_LABEL, classDocument, activationSuccessDocument, namedItemsDocument, objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, packageOf, nodeStructureDocument, nodePathDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, lockedByOtherDocument, activationFailureDocument, inactiveObjectsDocument, activationReferencesIn, objectFromUri, checkReportDocument, checkObjectsIn, transportCheckDocument, transportCheckRequest} from "./adt-documents.mjs";
 import {checkRunReport} from "./adt-checkrun.mjs";
 import {identity as osdIdentity} from "./osd-identity.mjs";
 import {gitObjectRevision, gitObjectState} from "./osd-git-history.mjs";
@@ -347,6 +350,9 @@ const ACCEPT = {
 // "repository" as "respository", because a client matching on the string
 // would not forgive the correction.
 const CATEGORY = {
+  "packages/settings": ["settings", "http://www.sap.com/wbobj/packages"],
+  "packages/validation": ["devck/validation", "http://www.sap.com/wbobj/packages"],
+  "oo/validation/objectname": ["validation", "http://www.sap.com/adt/categories/oo"],
   "programs/programs": ["programs", "http://www.sap.com/adt/categories/programs"],
   "programs/includes": ["includes", "http://www.sap.com/adt/categories/programs"],
   "oo/classes": ["classes", "http://www.sap.com/adt/categories/oo"],
@@ -415,6 +421,11 @@ const SEARCH_TEMPLATE =
   "{&userName*}{&releaseState*}{&language*}{&system*}{&version*}{&docu*}{&fav*}{&created*}{&month*}{&date*}{&comp*}";
 
 const TEMPLATE_LINKS = {
+  "packages": [
+    ["http://www.sap.com/wbobj/packages/devck/properties", "/sap/bc/adt/packages/{object_name}{?corrNr,lockHandle,version,accessMode,_action}"],
+    ...["applicationcomponents", "softwarecomponents", "transportlayers", "translationrelevances", "abaplanguageversions"].map((name) =>
+      [name, `/sap/bc/adt/packages/valuehelps/${name}`, "application/vnd.sap.adt.nameditems.v1+xml"]),
+  ],
   // the system's own template for a data element (a4h-adt.jsonl:121):
   // the lock handle and transport it carries are for the editor's save
   "ddic/dataelements": [
@@ -487,6 +498,9 @@ const WORKSPACE = (adt) => {
 };
 
 const TITLE = {
+  "packages/settings": "Package Settings",
+  "packages/validation": "Package Name Validation",
+  "oo/validation/objectname": "Validation of Object Name",
   "programs/programs": "Programs",
   "programs/includes": "Includes",
   "oo/classes": "Classes",
@@ -1669,6 +1683,12 @@ export function adtRouter(options = {}) {
           throw new NotFound(type, `${name} include ${include}`);
         }
         const part = store.read(type, name, include, req.query.version);
+        // READ's empty flag describes the requested version, including active snapshots.
+        if (part.empty === true && include === "testclasses") {
+          const missing = missingTestInclude(part.name);
+          return void refuse(res, 404, "ExceptionResourceNotFound", missing.message, missing);
+        }
+        if (part.empty === true && classIncludeTemplates[include]) { part.source = classIncludeTemplates[include]; part.etag = entityTag(part.source); }
         // VSP and the source links in class properties use this URL directly
         // with */*. Only an explicit include-property request wants XML.
         if (!String(req.headers.accept ?? "").includes("application/vnd.sap.adt.oo.classes.includes.")) {
@@ -1688,6 +1708,10 @@ export function adtRouter(options = {}) {
           throw new NotFound(type, `${req.params.name} include ${req.params.include}`);
         }
         const part = store.read(type, req.params.name, req.params.include, req.query.version);
+        if (part.empty === true && req.params.include === "testclasses") {
+          return void res.status(404).type("text/plain; charset=utf-8").send("No suitable resource found");
+        }
+        if (part.empty === true && classIncludeTemplates[req.params.include]) { part.source = classIncludeTemplates[req.params.include]; part.etag = entityTag(part.source); }
         const source = part.source;
         res.type("text/plain; charset=utf-8");
         sendEntity(req, res, source, part.etag);
@@ -1698,7 +1722,9 @@ export function adtRouter(options = {}) {
     // <include>/versions, and so does an interface's main include, which is
     // where vsp asks (resolveRevisionURL); everything else at .../source/main.
     const versionsOf = (req, res, include) => answer(res, () => {
-      const part = store.read(type, req.params.name, include, "active");
+      // Git history is keyed by the working file, independently of whether
+      // there is an active snapshot (the HISTORY host command does the same).
+      const part = store.read(type, req.params.name, include);
       const base = `${BASE}/${adt}/${encodeURIComponent(String(req.params.name).toLowerCase())}` +
         (include === undefined ? "/source/main/versions" : `/includes/${include}/versions`);
       const feed = objectVersions(store.root, part.empty ? undefined : part.file, identity.userName);
@@ -1708,10 +1734,11 @@ export function adtRouter(options = {}) {
       sendEntity(req, res, Buffer.from(versionsFeedDocument(part.name, type, base, feed)));
     });
     const versionContent = (req, res, include) => answer(res, () => {
-      const part = store.read(type, req.params.name, include, "active");
+      const working = store.read(type, req.params.name, include);
+      const part = req.params.version === "00000" ? store.read(type, req.params.name, include, "active") : working;
       let source;
       try {
-        source = versionSource(store.root, part.empty ? undefined : part.file, req.params.version, part.source);
+        source = versionSource(store.root, working.empty ? undefined : working.file, req.params.version, part.source);
       } catch (error) {
         throw new NotFound(type, `${req.params.name} version ${req.params.version} (${error.message})`);
       }
@@ -1891,7 +1918,7 @@ export function adtRouter(options = {}) {
       const previousEntry = store.find("CLAS", name);
       const previous = previousEntry === undefined ? undefined : store.read("CLAS", name).source;
       const previousActive = previousEntry !== undefined && store.stateOf(previousEntry).version === "active";
-      store.write("CLAS", name, asked.source, "main", {root: scratch.path});
+      await store.write("CLAS", name, asked.source, "main", {root: scratch.path});
       const checked = store.warmActivation("CLAS", name);
       let notebookBuilt;
       try {
@@ -1907,16 +1934,16 @@ export function adtRouter(options = {}) {
       } catch (error) {
         // The pack survives restarts, so a failed candidate must not become
         // the next launcher's build input. Keep the last source that built.
-        if (previous === undefined) store.delete("CLAS", name);
+        if (previous === undefined) await store.delete("CLAS", name);
         else {
-          store.write("CLAS", name, previous, "main", {root: scratch.path});
+          await store.write("CLAS", name, previous, "main", {root: scratch.path});
           // The old source is still the serving generation. write() marks it
           // inactive, so restore its earlier ADT state for that revision.
-          if (previousActive) store.completeActivation(store.warmActivation("CLAS", name));
+          if (previousActive) await store.completeActivation(store.warmActivation("CLAS", name));
         }
         throw error;
       }
-      if (!store.completeActivation(checked, notebookBuilt)) {
+      if (!(await store.completeActivation(checked, notebookBuilt))) {
         const error = new Error("source changed during activation; run the notebook cell again");
         error.code = "NOTEBOOK_ACTIVATION_FAILED";
         throw error;
@@ -1939,6 +1966,13 @@ export function adtRouter(options = {}) {
       res.status(status).json({error: {code: error?.code ?? "FAILED", message: String(error?.message ?? error)}});
     }
   });
+
+  for (const [path, kind] of [["oo/validation/objectname", "OO"], ["packages/validation", "PACKAGE"]]) {
+    router.post(`${BASE}/${path}`, (req, res) => {
+      res.status(200).type("application/vnd.sap.as+xml; charset=utf-8")
+        .send(validationDocument(validateCreation(store, {...req.query, kind})));
+    });
+  }
 
   // ---- the development loop: lock, write, unlock, activate.
   //
@@ -1981,7 +2015,7 @@ export function adtRouter(options = {}) {
           : attribute(body, "adtcore:packageRef", "adtcore:name") ?? attribute(body, "adtcore:packageRef", "adtcore:packageName");
         let made;
         try {
-          made = store.create(type, name, {
+          made = await store.create(type, name, {
             description: attribute(body, undefined, "adtcore:description") ?? "",
             package: home ?? "",
             // an object of $TMP carries who made it (tools/osd-tmp.mjs)
@@ -2032,7 +2066,7 @@ export function adtRouter(options = {}) {
           res.status(403).type("application/xml").send(lockedByOtherDocument(holder.session.user, String(name).toUpperCase()));
           return;
         }
-        const gone = store.delete(type, name);
+        const gone = await store.delete(type, name);
         // and a lock on an object that is gone holds nothing
         await req.adt.sessions.release(gone.type, gone.name);
         res.status(200).end();
@@ -2051,6 +2085,12 @@ export function adtRouter(options = {}) {
       if (entry === undefined) {
         res.status(404).type("application/xml").send(exceptionDocument("ExceptionResourceNotFound", `${type} ${req.params.name} does not exist`));
         return;
+      }
+
+      if (req.query._action === undefined && objectXMLRoots[type]) {
+        const invalid = invalidObjectXML(type, await rawBody(req));
+        if (invalid) return void refuse(res, 400, "ExceptionInvalidData", invalid.message, invalid);
+        return void refuse(res, 501, "ExceptionResourceNoAccess", "object XML updates are not supported here");
       }
 
       if (action === "LOCK") {
@@ -2146,17 +2186,19 @@ export function adtRouter(options = {}) {
       rawBody(req).then((body) => {
         answer(res, async () => {
           const include = req.params.include ?? "main";
-          // Validate the include name before writing. Known empty includes may
-          // be created, but arbitrary suffixes are not repository objects.
-          if (include !== "main") {
-            store.read(type, req.params.name, include);
+          // ADT requires explicit creation of testclasses. STORE WRITE remains
+          // an implicit create for the non-ADT dev API.
+          const part = store.read(type, req.params.name, include);
+          if (type === "CLAS" && include === "testclasses" && part.empty) {
+            const missing = missingTestInclude(part.name);
+            return void refuse(res, 500, "ExceptionResourceSaveFailure", missing.message, missing);
           }
           // The handle proves this request belongs to the locking session; it
           // does not exclude Git, a watcher, another session or another
           // process from changing the file. Compare immediately beside the write: an earlier
           // preflight GET leaves a race in which the newer source is lost.
           const expected = req.headers["if-match"];
-          const current = store.read(type, req.params.name, include).source;
+          const current = part.empty && classIncludeTemplates[include] ? classIncludeTemplates[include] : part.source;
           if (expected !== undefined && normalizedTag(expected) !== "*" &&
               normalizedTag(expected) !== entityTag(current)) {
             res.status(412).type("application/xml").send(exceptionDocument(
@@ -2172,7 +2214,8 @@ export function adtRouter(options = {}) {
           if (await stillHeld(req, res, () => store.write(type, req.params.name, body.toString("utf8"), include)) === false) {
             return;
           }
-          warmOutline();
+          // store.write invalidates the registry. SAVE only acknowledges
+          // the text; the next outline, Check or Activate rebuilds it.
           // The tag of what was just written, computed from what a read now
           // returns so that it is the tag the next GET will carry. The
           // client files it beside the source it saved; a save answered
@@ -2181,7 +2224,9 @@ export function adtRouter(options = {}) {
           // showed nothing at all after the save had in fact succeeded.
           const stored = store.read(type, req.params.name, include).source;
           res.set("ETag", entityTag(stored));
-          res.status(200).type("text/plain").send("");
+          // A4H acknowledges SAVE with no representation or Content-Type.
+          // An empty text/plain representation can replace the editor text.
+          res.status(200).end();
         });
       });
     };
@@ -2223,8 +2268,8 @@ export function adtRouter(options = {}) {
     }
   }
 
-  // Variant C keeps mutations on the host. Prime the outline registry here,
-  // before another request enters an ABAP step; compiler warm() is separate.
+  // Include creation and activation prime the outline registry on the host;
+  // source SAVE leaves it invalidated until requested. Compiler warm() is separate.
   function warmOutline() {
     try { store.registry?.(); }
     catch (error) { console.error(`outline: pre-warm failed: ${error.message}`); }
@@ -2312,7 +2357,7 @@ export function adtRouter(options = {}) {
 
   router.post(`${BASE}/checkruns`, async (req, res) => {
     const body = await rawBody(req);
-    answer(res, () => {
+    answer(res, async () => {
       // Every object this façade serves may be checked, not only the ones
       // with source. The data element editor checks its object the moment
       // it opens, and a URI it did not recognise here was a 400 — "Checking
@@ -2366,7 +2411,8 @@ export function adtRouter(options = {}) {
         res.status(400).type("application/xml").send(exceptionDocument("ExceptionInvalidRequest", "no check object in the request"));
         return;
       }
-      const reports = [...packageReports, ...objects.map((o) => ({uri: o.uri, ...checkRunReport(store, o)}))];
+      const reports = [...packageReports];
+      for (const o of objects) reports.push({uri: o.uri, ...await checkRunReport(store, o)});
       res.status(200).type("application/vnd.sap.adt.checkmessages+xml").send(checkReportDocument(reports));
     });
   });
@@ -2378,6 +2424,7 @@ export function adtRouter(options = {}) {
   // has no place for them and Eclipse ignores headers it does not know.
   const warmHeaders = (res, result) => {
     const t = result?.transpile ?? {};
+    if (result?.committed && result.generation) res.set("X-OSD-Generation", result.generation + (result.verified ? "" : " warm-unverified"));
     const w = store.warm?.();
     // a header value is one line of printable ASCII, whatever a reason says
     // and no host path, whatever a reason quotes (a refused swap names a module file)
@@ -2482,23 +2529,7 @@ export function adtRouter(options = {}) {
           return;
         }
       }
-      // With the warm registry primed (tools/osd-warm.mjs), a class or an
-      // interface is checked by the warm build itself: the transpiler checks
-      // what the change reaches and builds nothing when one is broken, and the
-      // issues come back per object, dependents included. The check below
-      // reparses the tree, ~3 s here, and stays for everything else.
-      const warm = store.warm?.();
-      // Forced cold activation also takes only a revision here: publish()
-      // still compiles/generates and must succeed before promotion. With
-      // transpilation disabled, activate() is the only validation, so keep
-      // it to prevent this test/embedded configuration promoting bad source.
-      if (options.transpileOnActivate !== false && (forced || (warm?.compiler?.primed === true &&
-          named.every((o) => o.type === "CLAS" || o.type === "INTF")))) {
-        checked = named.map((o) => store.warmActivation(o.type, o.name));
-        published = true;
-        return;
-      }
-      checked = named.map((o) => store.activate(o.type, o.name, {activating: named}));
+      checked = prepareActivation(store, named, {transpile: options.transpileOnActivate !== false, forced});
       const failed = checked.filter((r) => r.active === false);
       if (failed.length > 0) {
         // Include diagnostics for the named objects and any dependents
@@ -2511,7 +2542,7 @@ export function adtRouter(options = {}) {
     });
     if (published === false || options.transpileOnActivate === false) {
       if (published === true) {
-        if (!store.completeActivations(checked)) {
+        if (!(await store.completeActivations(checked))) {
           res.status(200).type("application/xml").send(failureDocument(
             named.map((o) => ({...o, issues: [{message: "source changed during activation; check and activate again", severity: "E", line: 1, column: 1}]})),
           ));
@@ -2536,7 +2567,7 @@ export function adtRouter(options = {}) {
       // inactive object is built with its last active one, or left out
       // (ObjectStore#overlay), so one broken save fails its own activation
       // and nobody else's
-      const result = await store.publish({activate: named});
+      const result = await publishActivation(store, checked);
       warmHeaders(res, result);
       if (result?.ok === false && result.transpile?.check === true && (result.transpile.issues ?? []).length > 0) {
         // the build refused, warm or cold: each object's own issues at their
@@ -2561,7 +2592,7 @@ export function adtRouter(options = {}) {
         return;
       }
       // promoted only if what was built is what was checked (and still saved)
-      if (!store.completeActivations(checked, result?.transpile?.built)) {
+      if (!result.committed) {
         res.status(200).type("application/xml").send(failureDocument(
           named.map((o) => ({...o, issues: [{message: "source changed during activation; check and activate again", severity: "E", line: 1, column: 1}]})),
         ));
@@ -2569,7 +2600,7 @@ export function adtRouter(options = {}) {
       }
       // Forced activation skips only the separate check. Compilation and
       // generation have succeeded before these properties are returned.
-      warmOutline();
+      if (result?.transpile?.warm !== true) warmOutline();
       res.status(200).type("application/xml").send(successDocument());
     } catch (e) {
       res.status(200).type("application/xml").send(failureDocument(
@@ -2601,10 +2632,9 @@ export function adtRouter(options = {}) {
   };
 
   // abap-adt-api follows every unit-test class and method with this request
-  // before it can publish the result into VS Code's Testing tree. OSD already
-  // puts an exact #start=line,column fragment in each navigationUri. Returning
-  // an empty, well-formed marker collection tells the client to keep that
-  // authoritative URI; a missing endpoint aborts the otherwise successful
+  // before it can publish the result into VS Code's Testing tree. Returning
+  // an empty, well-formed marker collection tells the client to keep the
+  // result's navigation selector; a missing endpoint aborts the successful
   // run and leaves the UI at 0/0.
   router.post(`${BASE}/abapsource/occurencemarkers`, async (req, res) => {
     await rawBody(req);
@@ -2638,7 +2668,7 @@ export function adtRouter(options = {}) {
       const runner = await store.unit();
       const run = await runner.runDetached(named[0].type, named[0].name);
       res.status(200).type(unitResultType(req, "evaluation.result"))
-        .send(unitResultDocument(run, {base: `${BASE}/${TYPES[named[0].type]?.adt ?? "oo/classes"}/${encodeURIComponent(named[0].name.toLowerCase())}`}));
+        .send(unitResultDocument(run, unitResultOptions(body, named[0])));
     } catch (e) {
       res.status(e?.code === "NOT_FOUND" ? 404 : 500).type("application/xml")
         .send(exceptionDocument("ExceptionTestRunFailed", String(e?.message ?? e)));
@@ -2678,7 +2708,7 @@ export function adtRouter(options = {}) {
       // ...api.junit.run-result.v1+xml" for the name vsp asks by. A client
       // that asks for the junit name still gets it.
       res.status(200).type(unitResultType(req, "result"))
-        .send(unitResultDocument(run, {base: `${BASE}/${TYPES[named[0].type]?.adt ?? "oo/classes"}/${encodeURIComponent(named[0].name.toLowerCase())}`}));
+        .send(unitResultDocument(run, unitResultOptions(body, named[0])));
     } catch (e) {
       const invalid = e instanceof URIError || e?.code === "INVALID_REQUEST";
       const missing = e?.code === "NOT_FOUND";
@@ -2694,6 +2724,9 @@ export function adtRouter(options = {}) {
   // a real repository arrives with its DEVC objects, the same two resources
   // answer from those instead.
   advertise("packages");
+  advertise("packages/validation");
+  advertise("packages/settings");
+  advertise("oo/validation/objectname");
   // The dropdowns of the package editor. Empty, because this façade has no
   // application components, software components or transport layers, and an
   // empty list is the true answer rather than a missing resource.

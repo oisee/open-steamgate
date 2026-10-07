@@ -21,6 +21,9 @@ import {existsSync, readFileSync, readdirSync, statSync} from "node:fs";
 import {execFileSync} from "node:child_process";
 import {credentials, generate} from "../tools/osd-tls.mjs";
 import {closeProtocols, listenProtocols} from "../tools/protocols/server.mjs";
+import {runtimeRootFixture} from "./helpers/runtime-root.mjs";
+
+const runtimeFixture = runtimeRootFixture();
 
 // an IPv4 address of this host that is not loopback, or undefined
 function outside() {
@@ -74,7 +77,7 @@ async function front(env) {
     if (childEnv[key] === undefined) delete childEnv[key];
   }
   const child = spawn(process.execPath, ["test/run.mjs"], {
-    cwd: process.cwd(),
+    cwd: runtimeFixture.root,
     env: childEnv,
     stdio: ["ignore", "pipe", "pipe"],
   });

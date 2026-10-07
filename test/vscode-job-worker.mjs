@@ -219,7 +219,7 @@ describe('VS Code jobs status poll grace and debugging', () => {
     await install();
     expect(item.text).to.equal('OSD jobs: paused (debugger)');
     expect(item.backgroundColor).to.equal(undefined);
-    expect(messages).to.deep.equal([]);
+    expect(messages).to.deep.equal(['OSD: Jobs: recent job summaries; Show raw job log switches to worker events and diagnostics.']);
     globalThis.fetch = async () => ({ok: true, json: async () => ({counts: {running: 0, queued: 0}})});
     api.debug.activeDebugSession = undefined;
     end(session);
@@ -243,7 +243,7 @@ describe('VS Code jobs status poll grace and debugging', () => {
     for (const time of [7500, 15000, 60000]) { now = time; await tick(); }
     expect(item.text).to.equal('OSD jobs: paused (debugger)');
     expect(item.backgroundColor).to.equal(undefined);
-    expect(messages).to.deep.equal([]);
+    expect(messages).to.deep.equal(['OSD: Jobs: recent job summaries; Show raw job log switches to worker events and diagnostics.']);
     globalThis.fetch = async () => ({ok: false, status: 503});
     end(session);
     await new Promise(resolve => setImmediate(resolve));
@@ -293,7 +293,7 @@ describe('VS Code jobs status poll grace and debugging', () => {
     now = 3000; await tick();
     expect(item.text).to.equal('OSD jobs: running 2, queued 1');
     expect(item.backgroundColor).to.equal(undefined);
-    expect(messages).to.deep.equal([]);
+    expect(messages).to.deep.equal(['OSD: Jobs: recent job summaries; Show raw job log switches to worker events and diagnostics.']);
     now = 4400;
     globalThis.fetch = async () => ({ok: true, json: async () => ({counts: {running: 0, queued: 0}})});
     await tick();
@@ -391,14 +391,17 @@ describe('VS Code readable job summaries', () => {
       expect(channels[0].content).to.include('ZBOOK | RUNNING').and.not.include('raw-id');
       expect(request.url).to.equal('http://127.0.0.1:8060/osd/batch-runs?limit=200');
       expect(request.options.headers.Authorization).to.equal('Bearer fixture');
-      expect(channels[1].shown).to.equal(0);
+      expect(channels.map(c => c.name)).to.deep.equal(['OSD: Jobs']);
       commands.get('osd.showRawJobLog')();
-      expect(channels[1].shown).to.equal(1);
-      expect(channels[1].content).to.equal(raw);
+      expect(channels[0].shown).to.equal(2);
+      expect(channels[0].content).to.equal('OSD: Jobs: raw worker JSON events and diagnostics; Show jobs returns to summaries.\n' + raw);
+      controller.jobsOutput.append('live diagnostic\n');
+      expect(channels[0].content).to.include(raw + 'live diagnostic\n');
       globalThis.fetch = async () => {throw Error('offline');};
       await commands.get('osd.showJobs')();
       expect(channels[0].content).to.include('Job summary unavailable: offline');
-      expect(channels[1].content).to.equal(raw);
+      commands.get('osd.showRawJobLog')();
+      expect(channels[0].content).to.include(raw + 'live diagnostic\n');
       controller.launcher = undefined;
       await commands.get('osd.showJobs')();
       expect(channels[0].content).to.include('Jobs unavailable');
@@ -418,7 +421,7 @@ describe('VS Code job status request lifecycle', () => {
     const channels = [];
     const api = {StatusBarAlignment:{Left:1}, ThemeColor: class {constructor(id) {this.id = id;}}, commands:{registerCommand(id, fn) {commands.set(id, fn); return {dispose(){}};}},
       window:{createOutputChannel(name) {
-        const channel = {content:'', clear(){record(`${name}: clear`); this.content = '';},
+        const channel = {content:'', append(value){record(value); this.content += value;}, clear(){record(`${name}: clear`); this.content = '';},
           appendLine(value){record(`${name}: ${value}`); this.content += value;}, show(){record(`${name}: show`);}, dispose(){}};
         channels.push(channel); return channel;
       }, createStatusBarItem(){return {show(){record('show');}, hide(){record('hide');}, dispose(){},
@@ -431,6 +434,17 @@ describe('VS Code job status request lifecycle', () => {
       dispose(){subscriptions.forEach(s => s.dispose()); disposed = true;}};
   });
   afterEach(() => {h.dispose(); globalThis.fetch = previous;});
+  it('does not overwrite explicit raw mode with a pending summary response', async () => {
+    let finish;
+    globalThis.fetch = () => new Promise(resolve => { finish = resolve; });
+    const pending = h.commands.get('osd.showJobs')();
+    h.controller.jobsOutput.append('worker diagnostic\n');
+    h.commands.get('osd.showRawJobLog')();
+    finish({ok:true,json:async()=>({runs:[{program:'ZBOOK',state:'RUNNING'}]})});
+    await pending;
+    expect(h.channels[0].content).to.include('raw worker JSON events').and.include('worker diagnostic');
+    expect(h.channels[0].content).not.to.include('ZBOOK');
+  });
   for (const endpoint of ['counts', 'summary']) {
     it(`ignores a pending ${endpoint} response after disposal and starts no further requests`, async () => {
       await h.commands.get('osd.showJobs')();
@@ -482,7 +496,8 @@ describe('VS Code job status request lifecycle', () => {
             now = 15000; await h.tick();
           } finally { Date.now = savedNow; }
           expect(h.writes.map(w => w.value)).to.include('OSD jobs: status unavailable');
-          expect(h.channels[1].content).to.include(failure === 'non-JSON' ? 'JSON' : `HTTP ${failure}`);
+          h.commands.get('osd.showRawJobLog')();
+          expect(h.channels[0].content).to.include(failure === 'non-JSON' ? 'JSON' : `HTTP ${failure}`);
         } else {
           await h.commands.get('osd.showJobs')();
           expect(h.channels[0].content).to.include('Job summary unavailable:').and.include('Use Show raw job log');

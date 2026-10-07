@@ -153,9 +153,11 @@ What works end to end:
 
 Gaps, by what an ABAP-FS user loses:
 
-1. **New-object name validation** (MISSING, `*/validation`). ABAP-FS's
-   create wizard validates first and stops on the 404, so no object can be
-   created from the UI at all.
+1. **New-object name validation**: class/interface (`oo/validation/objectname`)
+   and package (`packages/validation`) preflight now check repository names,
+   duplicates and writable parents. The other `*/validation` resources remain
+   missing, so their create wizards can still stop before POST. The snapshot
+   counts above predate this addition.
 2. **Code completion** (MISSING, `abapsource/codecompletion/proposal`).
 3. **Go to definition** (MISSING, `navigation/target`).
 4. **Function groups and modules cannot be opened** (MISSING, `functions/groups/*`).
@@ -215,3 +217,22 @@ for VS Code screenshots (`test/vscode-shots.mjs` there):
 Each gap this protocol layer names gets a UI step, so the UI layer shows the
 failure where the user would see it: completion, definition, the create
 wizard, and opening an FM or a message class.
+
+
+Creation compatibility (2026-10-05): the package document includes its own
+`adtcore:uri`. ABAP and Node Check decode UTF-8 base64 artifacts even when
+source contains one line, only a comment, or syntax errors. Live probes with
+ABAP-FS's pinned client passed package/class validation, create, read and
+cleanup; VSP `WriteSource(mode=create)` passed source check, write and
+activation. VSP `GetPackage` reads a node inventory; its empty top-level URI
+is not a measurement of the package document's URI. Eclipse wizard acceptance
+still needs an interactive check after deployment.
+
+Eclipse follow-up: discovery also advertises both implemented validation
+resources and measured package properties/value-help templates. A resource
+that works at a fixed URL is insufficient for clients that discover its URI.
+In demo RFC mode without configured backend credentials, the bridge forwards
+the logon user's name to the local backend, so new `$TMP` objects are owned
+by that user and appear in their tree. Explicit backend credentials stay
+unchanged. RFC tests cover owner-filtered trees and nodepath for the editor
+and source URI, including the `Link with Editor` follow-up.

@@ -80,6 +80,7 @@ CLASS zcl_osd_adt_package IMPLEMENTATION.
     rv_body = |<?xml version="1.0" encoding="utf-8"?>\n|
       && |<pak:package xmlns:pak="http://www.sap.com/adt/packages"\n|
       && |             xmlns:adtcore="http://www.sap.com/adt/core"\n|
+      && |             adtcore:uri="/sap/bc/adt/packages/{ zcl_osd_adt_uri=>encode_component( to_lower( io_json->get_string( `/name` ) ) ) }"\n|
       && |             adtcore:name="{ zcl_osd_adt_xml=>esc( io_json->get_string( `/name` ) ) }"\n|
       && |             adtcore:type="DEVC/K"\n|
       && |             adtcore:version="active"\n|

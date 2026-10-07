@@ -4,7 +4,9 @@ The default `tests` workflow still runs a clean binary build, pinned transpiler,
 
 The build job also builds a seeded Linux x64 binary and runs `scripts/smoke-binary.mjs`, as does the Linux x64 release binary job before upload. Bubblewrap exposes only OS files and a temporary directory containing the copied executable; the checkout and its node_modules are inaccessible. With fresh HOME and XDG_DATA_HOME, `osd up` must answer HTTP 200 at `/osd/serving` and `/sap/bc/adt/core/discovery` within five minutes. The smoke ignores inherited STG_PORT, selects an ephemeral loopback port and checks it is free immediately before spawning. It verifies the serving PID belongs to its live child process tree through Linux `/proc` namespace PID mapping, including after discovery answers. The smoke signals its own PID, and the private PID namespace reaps its children. This catches runtime assets that a successful bundle or a smoke beside the build checkout can miss.
 
-On ordinary PRs and pushes to `main`, the integration suite runs the ordinary `files` list and omits the named packaging group with four slow VSIX describes: changed-seed repackaging, selected-pack archives, prebuilt-generation reuse, and the installed package outside the checkout. The quick `seed tar` and version-stamp tests still run. The packaging job runs for changes to packaging code, package identity/payload, lock files or seed inputs (`src/`, `webapp/`, `tools/`, `data/`, any selectable in-tree pack, the root configuration files copied by `copySeedTree`, and shipped `test/` paths), and for weekly, manual and `vscode-v*` tag runs. `tools/osd-ci-vsix-profile.mjs` owns the changed-file rule. Root `docs/`, excluded `test/e2e/` and `test/fixtures/`, and the `TEST_ONLY_ABAP` doubles stay fast. Other `test/` files ship and therefore select full. Checkout `gen/` is regenerated inside the seed, not copied. The directory/file lists and test exclusions are imported from `scripts/build-vsix.mjs` so staging and CI agree. A menu-only change to `editors/vscode/package.json` stays in the fast profile; a version or entry-point change gets the full one.
+On ordinary PRs and pushes to `main`, the integration suite runs the ordinary `files` list and omits the named packaging group with four slow VSIX describes: changed-seed repackaging, selected-pack archives, prebuilt-generation reuse, and the installed package outside the checkout. The quick `seed tar` and version-stamp tests still run. The packaging job runs for changes to packaging code, package identity/payload, lock files or seed inputs (`src/`, `webapp/`, `tools/`, `data/`, any selectable in-tree pack, the root configuration files copied by `copySeedTree`, and shipped `test/` paths), and for weekly runs, manual runs, and tags matching `vscode-v*` or `vscode-stable-v*`. `tools/osd-ci-vsix-profile.mjs` owns the changed-file rule. Root `docs/`, excluded `test/e2e/` and `test/fixtures/`, and the `TEST_ONLY_ABAP` doubles stay fast. Other `test/` files ship and therefore select full. Checkout `gen/` is regenerated inside the seed, not copied. The directory/file lists and test exclusions are imported from `scripts/build-vsix.mjs` so staging and CI agree. A menu-only change to `editors/vscode/package.json` stays in the fast profile; a version or entry-point change gets the full one.
+
+The `adt-lifecycle` job is gated the same way, by `tools/osd-ci-lifecycle-gate.mjs`. Its rule fails closed by inversion: on a PR the measurements run unless *every* changed path matches a short list of provably unrelated paths -- `docs/` and any `*.md` outside `src/` (which covers the root `AGENDA`/`README`/`ANORMALIES`/`CHANGELOG`-type notes), `editors/` except the VS Code `launcher.js` entry point and the `resources/` installs ship, `test/e2e/` browser specs, `.github/workflows/` files other than `tests.yml`, `.github/ISSUE_TEMPLATE/`, and `LICENSE`. Everything else runs: all of `src/`, `tools/`, `webapp/` (activation runs the BSP generator, which reads its pages and manifests), `test/` outside e2e, `scripts/`, `bin/`, the in-tree `packs/`, `data/`, root configuration and lock files, `.github/ci/` pins such as `vsp.ref`, and `tools/abapfs-conformance/`, because the job executes the built server and both clients end to end and tracing that closure per file would fail open the first time it drifts. The diff is read with `git diff --no-renames --name-only -z`, so both endpoints of a rename count -- moving an ABAP source into an exempt-looking directory still shows the deletion and runs -- and no path can be quoted or split; an empty diff skips. A needlessly measured PR costs minutes, a silently skipped measurement costs the regression the job exists to catch. Scheduled, manual, tag and main-push runs always measure, so the main baseline the job compares against keeps refreshing. The `test` aggregate accepts `run:success` or `skip:skipped`, and the PR report shows a skipped row without missing-measurement errors exactly as it does for a fast-profile packaging job.
 
 The slow groups are intentionally real: two builds with changed seed content must produce different materialized copies; two builds with identical content must reuse one prebuilt generation; the installed VSIX must start away from this checkout. Keeping them on tags and scheduled runs preserves those checks without charging every feature PR for repeated packages.
 
@@ -163,6 +165,59 @@ writes retain the same-repository restriction; fork PRs still validate reports.
 
 Alice's merge policy (2026-10-03): **required checks are `test` + `scan` only**.
 Docker, gogen, preview, size and queue are advisory on PRs. The `test` rollup also requires retry-report validation/publication on PRs.
+
+## Downstream consumer smoke
+
+`consumer-smoke.yml` runs on every pull request and push to `main`, against
+the runtime tree checked out for that event. It bootstraps the runtime, then
+checks out `oisee/osg-demo` in a sibling directory at the full commit recorded
+in [`consumers.lock.json`](../consumers.lock.json), the only source of the pin.
+The osg-demo maintainers move that pin by PR when the book adopts a new tag.
+The consumer is separate from `libs.lock.json`, whose entries describe the
+transpiler's library closure.
+
+Six separate steps run the fleet slice on SQLite and DuckDB, the Go CLI,
+jobs, DSL L3 and C in ABAP. All six are attempted after earlier failures.
+Node 24, Go 1.26 (CLI only) and Ubuntu's `cc` are used; browser checks are
+disabled with `SLICE_SKIP_UI=1`. Setup needs network for checkouts, `npm ci`
+and bootstrap's pinned library/pack fetches; the tests use local services,
+with Go dependency downloads disabled. The initial consumer pin has no
+`package.json` or npm lockfile, so its install step reports no dependencies;
+a later pin with a package manifest must support `npm ci`.
+
+**Advisory for the first week by agreement:** `consumer-smoke` can go red,
+but is outside the required `test` aggregate and does not change the
+`test` + `scan` merge gate. Promotion to required status needs a separate
+agreement. Its job timeout is 75 minutes; expected runtime is about 5–6 minutes.
+Slice checks are bounded at eight minutes each, other checks and consumer
+installation at six minutes each. A timeout kills the command’s process group,
+records “timeout”, and allows the remaining checks and summary to run. Runtime
+setup and Go setup are bounded at ten and five minutes respectively. Consumer
+commands and install scripts receive no runner command-file variables or
+`ACTIONS_*` tokens, and their output is fenced with `stop-commands`.
+The job summary gives each command's result and elapsed time, lists lines
+containing `drift` as “generator output changed for consumers”, and supplies
+the exact command for each failure. Missing runs are shown explicitly.
+
+To reproduce, run `npm ci && npm run bootstrap` in your runtime checkout,
+clone osg-demo and check out the `osg-demo.ref` from `consumers.lock.json`.
+Run `npm ci` there if that pin has a package manifest. From osg-demo:
+
+```sh
+export OSD_HOME="<absolute path of your open-steamgate checkout>"
+export GOPROXY=off GOTOOLCHAIN=local
+SLICE_SKIP_UI=1 SLICE_L2_DRIFT=warn node test/slice.mjs
+SLICE_SKIP_UI=1 SLICE_L2_DRIFT=warn STG_DB=duckdb node test/slice.mjs
+node test/cli.mjs
+node test/jobs.mjs
+node test/l3.mjs
+node test/iti.mjs
+```
+
+For local heavy runs, prefix each command with
+`OSD_HEAVY_RANGE=80-89 "$OSD_HOME/tools/osd-heavy.sh" env` (put the slice
+environment assignments after `env`). There is no PR template in this tree;
+include a `Consumer impact:` line in PR descriptions.
 
 ### Per-file integration timing, 2026-09-29
 
@@ -472,3 +527,22 @@ and the retained timing refresh workflow. The suite list check passed with
 302 ordinary and seven grouped suites; the changed-file size guard passed
 with seven inherited main breaches. GitHub Actions and the heavy profile
 were not run locally.
+
+## ADT lifecycle performance job
+
+`adt-lifecycle` runs separately beside the suite shards using their shared built
+artifact and public pinned ABAP-FS/VSP clients. Functional operations, active readbacks,
+confirmed cleanup, known PROG/INCL/DDLS MISSING validation allowances and warm-swap
+correctness remain required by `test` and determine the PR report row. Timing is
+advisory: divide every sampled operation median by the same-run median of four untouched
+ABAP-FS CLAS/INTF `edit` and `readback-active` medians, then compare with the median of
+normalized values from up to five compatible green main push runs (newest first,
+scanning the latest 30 successful `tests.yml` runs with a 170-second elapsed budget
+and a three-minute step timeout; fewer when artifacts are missing,
+expired, unreadable, invalid or incompatible). Warn with a GitHub annotation and summary
+numbers when at least two operations are strictly above 1.3x or one reaches 2.0x;
+warnings never fail the job or PR row. No usable history or a zero/unavailable reference
+leaves timing explicitly pending. The required functional report saves the verdict
+before optional collection; collector and optional report failures cannot fail the
+job or suppress that report. See [ADT lifecycle](adt-lifecycle.md) for the exact
+controls, identity pins, evidence fixtures and local execution.

@@ -1,6 +1,6 @@
 // The ADT versions feed (tools/adt-versions.mjs) through the facade's own
 // router: a program's .../source/main/versions and a class include's
-// .../includes/<include>/versions list 00000 (empty without a generation) and one
+// .../includes/<include>/versions list 00000 (404 without source proof) and one
 // version per commit, oldest 00001, and each entry's content URI reads that
 // version back. What a client parses is abap-adt-api's reader contract
 // (atom:content@src, atom:title, atom:updated, atom:author/atom:name). The
@@ -82,8 +82,9 @@ describe("tools/adt-facade: versions of an object out of git", function () {
   it("reads each version back from its content URI, and refuses one that is not listed", async () => {
     const list = entries((await get("/sap/bc/adt/programs/programs/zver/source/main/versions")).text);
     const texts = await Promise.all(list.map((e) => get(e.src)));
-    expect(texts.map((t) => t.status)).to.deep.equal([200, 200, 200]);
-    expect(texts.map((t) => t.text)).to.deep.equal(["", "REPORT zver.\nWRITE 'two'.\n", "REPORT zver.\nWRITE 'one'.\n"]);
+    expect(texts.map((t) => t.status)).to.deep.equal([404, 200, 200]);
+    expect(texts[0].text).to.include("ExceptionResourceNotFound");
+    expect(texts.slice(1).map((t) => t.text)).to.deep.equal(["REPORT zver.\nWRITE 'two'.\n", "REPORT zver.\nWRITE 'one'.\n"]);
     const missing = await get(list[0].src.replace("/00000/", "/00009/"));
     expect(missing.status).to.equal(404);
   });
@@ -129,7 +130,7 @@ describe("tools/adt-facade: versions of an object out of git", function () {
     expect(response.headers.get("x-osd-history")).to.match(/^none: .*not tracked/);
     const list = entries(await response.text());
     expect(list.map((e) => e.id)).to.deep.equal(["00000"]);
-    expect((await get(list[0].src)).text).to.equal("");
+    expect((await get(list[0].src)).status).to.equal(404);
   });
 
   it("writes the feed root and the 00000 entry exactly as A4H does", async () => {

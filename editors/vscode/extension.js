@@ -629,7 +629,7 @@ class SystemController {
     return this.runningSourcesCache;
   }
 
-  /** A line on the "osd system" channel, from a command outside the class. */
+  /** A line on the "OSD: System log" channel, from a command outside the class. */
   debugNote(line) {
     this.#debugLog(line);
   }
@@ -648,7 +648,7 @@ class SystemController {
   /** `promise`, or `undefined` once `ms` have passed: no await on the debug
    *  path may hang a command for good (osg-demo, 0.5.1467: a command stopped
    *  after "inspector opened" and logged nothing). Logs the start, the end and
-   *  a give-up to the "osd system" channel. */
+   *  a give-up to the "OSD: System log" channel. */
   async #bounded(promise, ms, label) {
     const started = Date.now();
     this.#debugLog(`${label}: waiting (at most ${ms} ms)`);
@@ -1142,7 +1142,6 @@ class SystemController {
         : await launcher.start({...options, force});
       if (result === undefined) return false;
       await this.#pointUrlAt(launcher.port);
-      await this.#attachAfterStart();
       this.emitter.fire();
       return true;
     } catch (e) {
@@ -1163,21 +1162,10 @@ class SystemController {
     }
     if (result === undefined) return false;
     await this.#pointUrlAt(result.port);
-    await this.#attachAfterStart();
     vscode.window.setStatusBarMessage(
       `osd: running on :${result.port} · ${launcher.databaseLabel}, generation ${String(result.generation).slice(0, 8)}`, 5000);
     this.emitter.fire();
     return true;
-  }
-
-  // a system started with its inspector is attached to; one started
-  // without is given one now if .abap breakpoints are already waiting
-  async #attachAfterStart() {
-    const wanted = this.launcher?.debug === true || abapBreakpoints().length > 0;
-    if (!wanted) return;
-    if (await this.attachSystemDebugger({onDemand: true}) !== true && this.debuggerError !== undefined) {
-      this.output.appendLine(`osd debugger: ${this.debuggerError}`);
-    }
   }
 
   async #launcherError(launcher, error, label) {
@@ -1194,8 +1182,11 @@ class SystemController {
       return;
     }
     const issue = classify(logText, error);
-    const action = await vscode.window.showErrorMessage(`${label}: ${issue.message}`, ...issue.actions);
-    if (action === "Open log") {
+    const action = await vscode.window.showErrorMessage(
+      issue.kind === "version-mismatch" ? issue.message : `${label}: ${issue.message}`, ...issue.actions);
+    if (action === "Update") {
+      await vscode.commands.executeCommand("extension.open", "oisee.open-steamgate");
+    } else if (action === "Open log") {
       this.output.show(true);
     } else if (action === "Full rebuild") {
       await this.rebuild({forceBuild: true});
@@ -1381,7 +1372,12 @@ class SystemController {
           `osd: ${changed.objects.length} object(s) activated${build ? ` (${build})` : ""}${tests ? `, ${tests}` : ""}`, 5000);
       } else {
         this.output.appendLine(`osd rebuild (warm): ${result.issues.map((i) => `${i.objDescr || "?"}: ${i.message}`).join("; ")}`);
-        vscode.window.showErrorMessage(`osd rebuild (warm): ${result.issues.length} issue(s), see the output channel`);
+        const logText = result.issues.map((i) => i.message).join("\n");
+        if (classify(logText).kind === "version-mismatch") {
+          await this.#launcherError(this.launcher, {logText}, "osd rebuild (warm)");
+        } else {
+          vscode.window.showErrorMessage(`osd rebuild (warm): ${result.issues.length} issue(s), see the output channel`);
+        }
       }
       this.emitter.fire();
       return undefined;
@@ -2650,6 +2646,23 @@ function breakpointGuard(context) {
   }
 }
 
+/** Explain the independent debuggers once per workspace, including while stopped. */
+function debugOnboarding(context) {
+  if (!vscode.debug.onDidChangeBreakpoints) return;
+  const workspace = vscode.workspace.workspaceFile?.toString() ??
+    (vscode.workspace.workspaceFolders ?? []).map(folder => folder.uri.toString()).sort().join("|");
+  const key = `osd.debugOnboarding.v1:${workspace}`;
+  let seen = context.globalState.get(key, false);
+  context.subscriptions.push(vscode.debug.onDidChangeBreakpoints(event => {
+    if (seen || !(event.added ?? []).some(bp => bp instanceof vscode.SourceBreakpoint &&
+      /\.abap$/i.test(bp.location?.uri?.path ?? bp.location?.uri?.fsPath ?? "") &&
+      (!vscode.workspace.getWorkspaceFolder || vscode.workspace.getWorkspaceFolder(bp.location.uri)))) return;
+    seen = true;
+    void context.globalState.update(key, true);
+    void vscode.window.showInformationMessage("osd debugs without a launch configuration: set a breakpoint and press F9 or ▷. 'Attach to server' / 'ABAP on server' belong to the ABAP-FS extension and SAP systems.", "Got it");
+  }));
+}
+
 /** The debugger on demand, driven by breakpoints: one set (or enabled) in
  *  an .abap file while the system runs opens its inspector and attaches;
  *  the last one removed (or disabled) closes it again once the debug
@@ -2672,9 +2685,45 @@ function debugOnDemand(context, controllerOf = () => activeController) {
   }));
 }
 
+/** Title run and test actions follow the active object independently. */
+function editorRunContext(context) {
+  const refresh = () => {
+    const document = vscode.window.activeTextEditor?.document;
+    const object = document && adtObjectOf(document.fileName);
+    let source = document?.getText() ?? "", tests = false;
+    if (object?.type === "CLAS") {
+      const dir = path.dirname(document.fileName);
+      try {
+        if (object.include !== "main") source = fs.readFileSync(fileOf(dir, object, "main"), "utf8");
+        tests = hasTestMethods(fs.readFileSync(fileOf(dir, object, "testclasses"), "utf8"));
+      } catch { /* Missing includes carry no test methods. */ }
+    }
+    void vscode.commands.executeCommand("setContext", "osd.editorClassrun", object?.type === "CLAS" && implementsClassrun(source));
+    void vscode.commands.executeCommand("setContext", "osd.editorTests", tests);
+  };
+  refresh();
+  for (const subscribe of [vscode.window.onDidChangeActiveTextEditor, vscode.workspace.onDidChangeTextDocument,
+    vscode.workspace.onDidSaveTextDocument]) {
+    if (subscribe) context.subscriptions.push(subscribe(refresh));
+  }
+}
+
+function desktopOutputs(context) {
+  const definitions = [
+    ["OSD", "extension diagnostics and command/debugger activity."],
+    ["OSD: Console", "classrun (F9/▷) output and Check/Activate results."],
+    ["OSD: System log", "server builds, runtime and debugger attachment diagnostics."],
+  ];
+  return definitions.map(([name, purpose]) => {
+    const channel = vscode.window.createOutputChannel(name);
+    channel.appendLine(`${name}: ${purpose}`);
+    context.subscriptions.push(channel);
+    return channel;
+  });
+}
+
 function activate(context) {
-  const output = vscode.window.createOutputChannel("osd");
-  context.subscriptions.push(output);
+  const [output, classrunOutput, systemOutput] = desktopOutputs(context);
   require("./abapgit-zip-command.js").registerAbapgitZipCommand(vscode, context, output, osdHomeOf, isOpenSteamgatePath);
   // The cleanup is synchronous and precedes this window's own launcher.
   // A live lock from another window protects its home.
@@ -2694,14 +2743,6 @@ function activate(context) {
   } catch (error) {
     output.appendLine(`Old working copy cleanup skipped: ${error.message}`);
   }
-  // Q6b "Classrun" (docs/vscode-extension.md): F9's own channel, separate
-  // from "osd" above -- a class's console output is what somebody asked
-  // for, not a log line among the status bar's and F8's, and a second run
-  // should not have to be found again in the general channel's scrollback.
-  const classrunOutput = vscode.window.createOutputChannel("osd console");
-  context.subscriptions.push(classrunOutput);
-  const systemOutput = vscode.window.createOutputChannel("osd system");
-  context.subscriptions.push(systemOutput);
   const controller = new SystemController(context, systemOutput);
   activeController = controller;
   kernelDiagnostics = registerKernelDiagnostics(vscode, context, output, {
@@ -2718,6 +2759,7 @@ function activate(context) {
   jobsStatusBar(vscode, context, controller);
   breakpointToggleStatusBar(context);
   breakpointGuard(context);
+  debugOnboarding(context);
   debugOnDemand(context);
   context.subscriptions.push(testExplorer(context, output));
   context.subscriptions.push(vscode.commands.registerCommand("osd.showDumps", () => showDumps(output)));
@@ -2734,14 +2776,17 @@ function activate(context) {
   // Ctrl+F2 / Ctrl+F3 (docs/vscode-extension.md): one diagnostic collection
   // for both, so an activation that passes clears what a check had left, and
   // the other way round.
-  registerCheckActivateCommands(context, output);
+  registerCheckActivateCommands(context, output, classrunOutput);
+  editorRunContext(context);
+  context.subscriptions.push(vscode.commands.registerCommand("osd.runTitle", () => run(output, classrunOutput)));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.runUnit", () => vscode.commands.executeCommand("testing.runCurrentFile")));
   context.subscriptions.push(vscode.commands.registerCommand("osd.run", () => run(output, classrunOutput)));
   context.subscriptions.push(vscode.commands.registerCommand("osd.runWithDebugger", () => run(output, classrunOutput, true)));
 
   // Q6b "Classrun" (docs/vscode-extension.md): F9, "Run as ABAP Application
   // (Console)" -- osd.classrun on the current class, standalone (F9's own
   // binding) or reached through F8's dispatch (run(), above) when the class
-  // implements IF_OO_ADT_CLASSRUN and has no ABAP Unit tests.
+  // implements IF_OO_ADT_CLASSRUN, regardless of ABAP Unit tests.
   context.subscriptions.push(vscode.commands.registerCommand("osd.classrun", () => classrunCurrent(classrunOutput)));
   context.subscriptions.push(vscode.commands.registerCommand("osd.generateTaxiData", generateTaxiData));
   context.subscriptions.push(vscode.commands.registerCommand("osd.resetTaxiData", resetTaxiData));
@@ -3116,15 +3161,15 @@ function currentObject() {
   return object === undefined ? undefined : {editor, object};
 }
 
-function registerCheckActivateCommands(context, output) {
+function registerCheckActivateCommands(context, output, consoleOutput = output) {
   // check and activation keep separate collections: activation clears the
   // documents it no longer reports, which must never erase a check's findings
   const diagnostics = vscode.languages.createDiagnosticCollection("osd-abap");
   const activation = vscode.languages.createDiagnosticCollection("osd-activation");
   const activationDiagnostics = new Map();
   context.subscriptions.push(diagnostics, activation);
-  context.subscriptions.push(vscode.commands.registerCommand("osd.check", () => check(diagnostics, output)));
-  context.subscriptions.push(vscode.commands.registerCommand("osd.activate", () => activateCurrent(activation, output, activationDiagnostics)));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.check", () => check(diagnostics, output, consoleOutput)));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.activate", () => activateCurrent(activation, output, activationDiagnostics, consoleOutput)));
 }
 
 // severity -> vscode.DiagnosticSeverity; A and X are ABAP's abort/exception
@@ -3140,7 +3185,7 @@ function diagnosticAt(line, column, message, severity) {
   return new vscode.Diagnostic(new vscode.Range(at, at.translate(0, 1)), message, severityOf(severity));
 }
 
-async function check(diagnostics, output) {
+async function check(diagnostics, output, consoleOutput) {
   const current = currentObject();
   if (current === undefined) return;
   const {editor, object} = current;
@@ -3152,6 +3197,8 @@ async function check(diagnostics, output) {
     if (failed.length > 0) {
       vscode.window.showErrorMessage(`osd check: ${failed.map((r) => r.statusText).join("; ")}`);
     } else {
+      consoleOutput.appendLine(`osd check ${object.name}: ${issues.length === 0 ? "no findings" : `${issues.length} findings`}`);
+      consoleOutput.show?.(true);
       vscode.window.setStatusBarMessage(`osd check: ${issues.length === 0 ? "no errors" : `${issues.length} issue(s)`}`, 5000);
     }
   } catch (e) {
@@ -3160,7 +3207,7 @@ async function check(diagnostics, output) {
   }
 }
 
-async function activateCurrent(diagnostics, output, activationDiagnostics) {
+async function activateCurrent(diagnostics, output, activationDiagnostics, consoleOutput) {
   const current = currentObject();
   if (current === undefined) return;
   const {editor, object} = current;
@@ -3203,6 +3250,8 @@ async function activateCurrent(diagnostics, output, activationDiagnostics) {
       const build = activationBuildText(result);
       const tests = closureTestsText(result);
       const extra = [build, tests].filter(Boolean).join(", ");
+      consoleOutput.appendLine(`osd activate ${object.name}: activated, generation ${generation}${extra ? ` (${extra})` : ""}`);
+      consoleOutput.show?.(true);
       vscode.window.setStatusBarMessage(
         `osd: ${object.name} activated, generation ${generation}${extra ? ` (${extra})` : ""}`, 5000);
     } else {
@@ -3258,10 +3307,8 @@ async function activationDiagnosticUri(href, editor, current) {
 }
 
 // ---- F8: SE80's own key, dispatched by object type (lib.js RUN_TABLE).
-// A class with ABAP Unit tests, and now the cursor inside a SEGW _DPC_EXT
-// class's own `<set>_get_entityset` / `<set>_get_entity` method (Q2b,
-// below), reach a real action; everything else answers the text of the
-// server work its turn would add.
+// Classrun, reports, data preview and SEGW entity methods reach a run
+// action. ABAP Unit runs only through the testing commands.
 
 async function requireDebugSystem(output, action, controller = activeController) {
   controller?.debugNote?.(`${action} with debugger: attaching`);
@@ -3297,7 +3344,6 @@ async function run(output, classrunOutput, forceDebugger = false) {
   }
   const {editor, object} = current;
   if (kernelDiagnostics && !(await kernelDiagnostics.allow(editor.document.fileName))) return;
-  const hasUnitTests = fs.existsSync(fileOf(path.dirname(editor.document.fileName), object, "testclasses"));
   // Q6b: read straight off the buffer VS Code already has, not necessarily
   // saved -- the same "the editor's own text" Ctrl+F2 already does for a
   // check. Only asked for a CLAS; the regex would never match anything
@@ -3318,16 +3364,11 @@ async function run(output, classrunOutput, forceDebugger = false) {
       }
     }
   }
-  const action = runActionFor(object, {hasUnitTests, hasClassrun, entitySet, forceDebugger, file: editor.document.fileName});
+  const action = runActionFor(object, {hasClassrun, entitySet, forceDebugger, file: editor.document.fileName});
   // Q4: a run is server work, so it is a point the table this object's own
   // heat comes from may have changed -- fire-and-forget, the same as the
   // timer, so F8 does not wait on it.
   void refreshHotspots(output);
-  if (action.kind === "unit") {
-    if (forceDebugger) await vscode.commands.executeCommand("osd.debugCurrentTests", object);
-    else await vscode.commands.executeCommand("testing.runCurrentFile");
-    return;
-  }
   if (action.kind === "call-entityset") {
     await callEntitySet({service: action.service, set: action.set, kind: action.entityKind,
       file: editor.document.fileName, withDebugger: forceDebugger}, output);
@@ -3349,7 +3390,7 @@ async function run(output, classrunOutput, forceDebugger = false) {
     return;
   }
   output.appendLine(`osd run ${object.name}: ${action.text}`);
-  vscode.window.showInformationMessage(`osd: ${action.text}`);
+  vscode.window.showInformationMessage(action.kind === "nothing-to-run" ? action.text : `osd: ${action.text}`);
 }
 
 // ---- 0.5 O: F8 on a report -- `osd run` (tools/osd-run.mjs) builds it
@@ -3487,6 +3528,7 @@ async function resetTaxiData() {
 
 async function classrunObject(name, classrunOutput, withDebugger = false, file,
   {attach = requireDebugSystem, controller = activeController, client = osd} = {}) {
+  withDebugger ||= abapBreakpoints().length > 0;
   if (kernelDiagnostics && !(await kernelDiagnostics.allow(file, {type: "CLAS", name}))) return;
   if (withDebugger && !(await attach(classrunOutput, "Classrun"))) return;
   // A wait that gives up says so and runs anyway, as 0.4 did: an unattended
@@ -3502,6 +3544,20 @@ async function classrunObject(name, classrunOutput, withDebugger = false, file,
   }
   if (withDebugger) controller.debugNote?.(`classrun ${name}: sending the run`);
   classrunOutput.show(true);
+  const document = vscode.window.activeTextEditor?.document;
+  if (file && document && path.resolve(document.fileName) === path.resolve(file)) {
+    let changed = document.isDirty;
+    const available = controller?.launcher ? controller.launcher.state === "running" : servingAvailable === true;
+    if (!changed && available && typeof document.getText === "function") {
+      try {
+        const object = adtObjectOf(file);
+        const source = await client().activeSource(object);
+        const normalize = text => text.replace(/\r\n/g, "\n").replace(/\n+$/, "");
+        changed = normalize(source) !== normalize(document.getText());
+      } catch { /* An unavailable active source leaves the dirty-only hint. */ }
+    }
+    if (changed) classrunOutput.appendLine("osd: running the active version; your editor changes are not activated yet (Ctrl+F3)");
+  }
   classrunOutput.appendLine(`--- classrun ${name} ---`);
   try {
     const {text, ms, generation} = await client().classrun(name);
@@ -4209,7 +4265,13 @@ function testExplorer(context, output, {
     return building;
   };
 
+  const runningObjects = new Map();
+  const pendingDiscovery = new Map();
   const discover = async (item) => {
+    if (runningObjects.has(item.id)) {
+      pendingDiscovery.set(item.id, item);
+      return;
+    }
     const {object, dir} = objects.get(item.id);
     item.busy = true;
     try {
@@ -4237,6 +4299,10 @@ function testExplorer(context, output, {
           classItem.children.add(methodItem);
         }
         classes.push(classItem);
+      }
+      if (runningObjects.has(item.id)) {
+        pendingDiscovery.set(item.id, item);
+        return;
       }
       item.children.replace(classes);
       item.error = undefined;
@@ -4333,108 +4399,114 @@ function testExplorer(context, output, {
 
   const runHandler = async (request, token, forceDebugger = false) => {
     const run = controller.createTestRun(request);
-    const useDebugger = forceDebugger || osdDebugEnabled();
-    // `osd.database.tests` (docs/vscode-extension.md, "Databases"): read
-    // once per run, not once per object -- it does not change mid-run, and
-    // a per-object read would mean one call to context.secrets per object.
-    // `undefined` for "same" sends no dbEnv at all, exactly the route's own
-    // default.
-    const dbEnv = await testsDbEnv(context, activeController?.launcher?.osdHome ?? osdHomeOf());
-    // what was asked, expanded down to (or across) actual objects, then
-    // grouped by object: the server runs one object at a time
-    const asked = request.include ?? [...gather(controller.items)];
-    const selections = [];
-    for (const item of asked) {
-      if (objects.has(item.id)) {
-        selections.push({item, objectItem: item, testClass: undefined, method: undefined});
-        continue;
-      }
-      const ancestor = objectAncestorOf(item);
-      if (ancestor !== undefined) {
-        const suffix = item.id.slice(ancestor.id.length).replace(/^\//, "");
-        const [testClass, method] = suffix === "" ? [undefined, undefined] : suffix.split("/");
-        selections.push({item, objectItem: ancestor, testClass, method});
-        continue;
-      }
-      for (const objItem of objectDescendantsOf(item)) {
-        selections.push({item: objItem, objectItem: objItem, testClass: undefined, method: undefined});
-      }
-    }
-    const byObject = new Map();
-    for (const sel of selections) {
-      if (!byObject.has(sel.objectItem.id)) byObject.set(sel.objectItem.id, []);
-      byObject.get(sel.objectItem.id).push(sel);
-    }
-    // Cancel reaches the request in flight: an ordinary run used to pass no
-    // signal, so a cancelled Test Explorer run waited for the child it had
-    // already started (the façade kills the child when the request aborts)
-    const cancellation = new AbortController();
-    const cancelled = () => token.isCancellationRequested || cancellation.signal.aborted;
-    const subscription = token.onCancellationRequested?.(() => cancellation.abort());
-    const runSelection = async (sel, object, dir) => {
-      const methods = leaves(sel.item);
-      methods.forEach((m) => run.started(m));
-      try {
-        const source = fileOf(dir, object, "main");
-        if (kernelDiagnostics && !(await kernelDiagnostics.allow(source))) {
-          methods.forEach((m) => run.errored(m, new vscode.TestMessage("Kernel strict mode refused this object; see osd output for the finding and support link.")));
-          return;
-        }
-        const inspectPort = useDebugger ? await pickUnitInspectorPort() : undefined;
-        if (cancelled()) {
-          methods.forEach((m) => run.skipped(m));
-          return;
-        }
-        const execute = (signal) => osd().run(object, sel.testClass, sel.method, dbEnv, inspectPort,
-          inspectPort !== undefined, signal);
-        const answer = inspectPort === undefined ? await execute(cancellation.signal) : await runWithDebuggerAttach(
-          () => attachUnitDebugger({type: "unit-started", port: inspectPort}), execute, token);
-        const results = outcomes(answer, methods.map((m) => ({testClass: m.id.split("/")[1], method: m.id.split("/")[2]})));
-        for (const m of methods) {
-          const [, testClass, method] = m.id.split("/");
-          const result = results.find((r) => r.testClass === testClass && r.method === method);
-          if (result === undefined) {
-            run.skipped(m);
-          } else if (result.passed) {
-            run.passed(m, result.ms);
-          } else {
-            run.failed(m, result.alerts.map((a) => message(a, dir, m)), result.ms);
-          }
-        }
-        run.appendOutput(`${object.name}: ${answer.counts?.passed ?? 0} passed, ${answer.counts?.failed ?? 0} failed in ${answer.ms ?? 0} ms\r\n`);
-      } catch (e) {
-        const text = new vscode.TestMessage(String(e.message ?? e));
-        methods.forEach((m) => run.errored(m, text));
-        output.appendLine(String(e.message ?? e));
-      }
-    };
-    // one unit per object: its selections in the order asked, its risk and
-    // duration from the classes it runs (what discover() learned)
-    const units = [];
-    for (const [objectId, sels] of byObject) {
-      if (cancelled()) break;
-      const objectItemOf = sels[0].objectItem;
-      if (objectItemOf.children.size === 0) await discover(objectItemOf);
-      const {object, dir} = objects.get(objectId);
-      const classIds = new Set();
-      for (const sel of sels) {
-        if (sel.testClass !== undefined) classIds.add(`${objectId}/${sel.testClass}`);
-        else for (const [, child] of objectItemOf.children) classIds.add(child.id);
-      }
-      const schedules = [...classIds].map((id) => classSchedules.get(id));
-      units.push({
-        key: objectId,
-        risk: unitRiskOf(schedules),
-        duration: unitDurationOf(schedules),
-        run: async () => {
-          for (const sel of sels) {
-            if (cancelled()) break;
-            await runSelection(sel, object, dir);
-          }
-        },
-      });
-    }
+    let subscription;
+    const runObjectIds = new Set();
     try {
+      const useDebugger = forceDebugger || osdDebugEnabled() || abapBreakpoints().length > 0;
+      // `osd.database.tests` (docs/vscode-extension.md, "Databases"): read
+      // once per run, not once per object -- it does not change mid-run, and
+      // a per-object read would mean one call to context.secrets per object.
+      // `undefined` for "same" sends no dbEnv at all, exactly the route's own
+      // default.
+      const dbEnv = await testsDbEnv(context, activeController?.launcher?.osdHome ?? osdHomeOf());
+      // what was asked, expanded down to (or across) actual objects, then
+      // grouped by object: the server runs one object at a time
+      const asked = request.include ?? [...gather(controller.items)];
+      const selections = [];
+      for (const item of asked) {
+        if (objects.has(item.id)) {
+          selections.push({item, objectItem: item, testClass: undefined, method: undefined});
+          continue;
+        }
+        const ancestor = objectAncestorOf(item);
+        if (ancestor !== undefined) {
+          const suffix = item.id.slice(ancestor.id.length).replace(/^\//, "");
+          const [testClass, method] = suffix === "" ? [undefined, undefined] : suffix.split("/");
+          selections.push({item, objectItem: ancestor, testClass, method});
+          continue;
+        }
+        for (const objItem of objectDescendantsOf(item)) {
+          selections.push({item: objItem, objectItem: objItem, testClass: undefined, method: undefined});
+        }
+      }
+      const byObject = new Map();
+      for (const sel of selections) {
+        if (!byObject.has(sel.objectItem.id)) byObject.set(sel.objectItem.id, []);
+        byObject.get(sel.objectItem.id).push(sel);
+      }
+      // Cancel reaches the request in flight: an ordinary run used to pass no
+      // signal, so a cancelled Test Explorer run waited for the child it had
+      // already started (the façade kills the child when the request aborts)
+      const cancellation = new AbortController();
+      const cancelled = () => token.isCancellationRequested || cancellation.signal.aborted;
+      subscription = token.onCancellationRequested?.(() => cancellation.abort());
+      const runSelection = async (sel, object, dir) => {
+        const methods = leaves(sel.item);
+        if (!runObjectIds.has(sel.objectItem.id)) {
+          runningObjects.set(sel.objectItem.id, (runningObjects.get(sel.objectItem.id) ?? 0) + 1);
+          runObjectIds.add(sel.objectItem.id);
+        }
+        methods.forEach((m) => run.started(m));
+        try {
+          const source = fileOf(dir, object, "main");
+          if (kernelDiagnostics && !(await kernelDiagnostics.allow(source))) {
+            methods.forEach((m) => run.errored(m, new vscode.TestMessage("Kernel strict mode refused this object; see osd output for the finding and support link.")));
+            return;
+          }
+          const inspectPort = useDebugger ? await pickUnitInspectorPort() : undefined;
+          if (cancelled()) {
+            methods.forEach((m) => run.skipped(m));
+            return;
+          }
+          const execute = (signal) => osd().run(object, sel.testClass, sel.method, dbEnv, inspectPort,
+            inspectPort !== undefined, signal);
+          const answer = inspectPort === undefined ? await execute(cancellation.signal) : await runWithDebuggerAttach(
+            () => attachUnitDebugger({type: "unit-started", port: inspectPort}), execute, token);
+          const results = outcomes(answer, methods.map((m) => ({testClass: m.id.split("/")[1], method: m.id.split("/")[2]})));
+          for (const m of methods) {
+            const [, testClass, method] = m.id.split("/");
+            const result = results.find((r) => r.testClass === testClass && r.method === method);
+            if (result === undefined) {
+              run.skipped(m);
+            } else if (result.passed) {
+              run.passed(m, result.ms);
+            } else {
+              run.failed(m, result.alerts.map((a) => message(a, dir, m)), result.ms);
+            }
+          }
+          run.appendOutput(`${object.name}: ${answer.counts?.passed ?? 0} passed, ${answer.counts?.failed ?? 0} failed in ${answer.ms ?? 0} ms\r\n`);
+        } catch (e) {
+          const text = new vscode.TestMessage(String(e.message ?? e));
+          methods.forEach((m) => run.errored(m, text));
+          output.appendLine(String(e.message ?? e));
+        }
+      };
+      // one unit per object: its selections in the order asked, its risk and
+      // duration from the classes it runs (what discover() learned)
+      const units = [];
+      for (const [objectId, sels] of byObject) {
+        if (cancelled()) break;
+        const objectItemOf = sels[0].objectItem;
+        if (objectItemOf.children.size === 0) await discover(objectItemOf);
+        const {object, dir} = objects.get(objectId);
+        const classIds = new Set();
+        for (const sel of sels) {
+          if (sel.testClass !== undefined) classIds.add(`${objectId}/${sel.testClass}`);
+          else for (const [, child] of objectItemOf.children) classIds.add(child.id);
+        }
+        const schedules = [...classIds].map((id) => classSchedules.get(id));
+        units.push({
+          key: objectId,
+          risk: unitRiskOf(schedules),
+          duration: unitDurationOf(schedules),
+          run: async () => {
+            for (const sel of sels) {
+              if (cancelled()) break;
+              await runSelection(sel, object, dir);
+            }
+          },
+        });
+      }
       // a debug run stays one at a time: one debugger, one child. So does a
       // run on a shared database (osd.database.tests = HANA or PostgreSQL):
       // every child there uses the one schema, and even a HARMLESS one
@@ -4444,8 +4516,22 @@ function testExplorer(context, output, {
       await runUnitQueue(units, {poolSize: useDebugger || sharedDatabase ? 1 : unitPoolSize(), cancelled});
     } finally {
       subscription?.dispose?.();
+      run.end();
+      for (const id of runObjectIds) {
+        const count = runningObjects.get(id) - 1;
+        if (count > 0) runningObjects.set(id, count);
+        else runningObjects.delete(id);
+      }
+      // All selections in this run have finished; publish discoveries only
+      // after VS Code has received terminal states for the original items.
+      for (const [id] of pendingDiscovery) {
+        if (runningObjects.has(id)) continue;
+        pendingDiscovery.delete(id);
+        const item = controllerFind(id);
+        if (item === undefined || !objects.has(id)) continue;
+        void discover(item).catch(e => output.appendLine(String(e.message ?? e)));
+      }
     }
-    run.end();
   };
   controller.createRunProfile("Run", vscode.TestRunProfileKind.Run, runHandler, true);
   controller.createRunProfile("Debug", vscode.TestRunProfileKind.Debug,
@@ -4631,7 +4717,7 @@ async function deactivate() {
   await activeController?.stop({shutdown: true});
 }
 
-module.exports = {WAIT_CANCELLED, INSPECTOR_STEP_ESCAPE_MS, activate, deactivate, runReportInTerminal, SystemController, classrunObject, registerEntitySetCommands, debugOnDemand, testExplorer, readersLensProvider, OsdTreeProvider, TransactionItem, EntitySetItem,
+module.exports = {desktopOutputs, debugOnboarding, editorRunContext, WAIT_CANCELLED, INSPECTOR_STEP_ESCAPE_MS, activate, deactivate, runReportInTerminal, SystemController, classrunObject, registerEntitySetCommands, debugOnDemand, testExplorer, readersLensProvider, OsdTreeProvider, TransactionItem, EntitySetItem,
   httpLensProvider, openEntitySetMethod, statusBar, registerCheckActivateCommands, startStopStatusBar, runningParts, showRunning, sampleItems, openSample,
   openDataPreview,
   transactionProgramPath, clickTransaction, clickTreeNode, openPage, registerOpenCommands, closePageTabs, reloadPageTabs,

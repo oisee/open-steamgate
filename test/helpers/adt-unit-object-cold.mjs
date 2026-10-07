@@ -1,3 +1,5 @@
+import {copyRuntimeRoot} from "./runtime-root.mjs";
+import {rmSync} from "node:fs";
 // A fresh workbench process for both the latency regression and the benchmark.
 import {spawn} from "node:child_process";
 import {once} from "node:events";
@@ -9,8 +11,10 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 export async function coldUnitObject({mode = process.env.OSD_ADT_ONE_RUNTIME ?? "0",
   name = "ZCL_STG_SEGW_TEST", profile, timeoutMs = 120000} = {}) {
+  const root = copyRuntimeRoot();
   const started = performance.now();
   const child = spawn(process.execPath, [helper, "--server"], {
+    cwd: root,
     env: {...process.env, STG_SERVE: "child", STG_DB: "sqlite", STG_DB_PATH: "", STG_TLS: "0",
       OSD_ADT_ONE_RUNTIME: String(mode), OSD_UNIT_WARM: "1", OSD_BIND: "127.0.0.1"},
     stdio: ["ignore", "pipe", "pipe", "ipc"],
@@ -64,6 +68,7 @@ export async function coldUnitObject({mode = process.env.OSD_ADT_ONE_RUNTIME ?? 
       const kill = setTimeout(() => child.kill("SIGKILL"), 10000);
       try {await exited;} finally {clearTimeout(kill);}
     }
+    rmSync(root, {recursive: true, force: true});
   }
 }
 

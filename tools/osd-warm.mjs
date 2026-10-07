@@ -25,14 +25,14 @@
 // What is warm is decided file by file, and anything else is cold -- the
 // generators read the tree too, and a change they would see has to reach
 // them (see warmRule below).
-// Warm verification children can be launched from the serving runtime.
-import {keepSourceInputs, linkGeneratedSources, completeSourceSnapshot} from "./osd-source-snapshot.mjs";
+import {keepSourceInputs, linkGeneratedSources, completeSourceSnapshot, logicalSourcePath} from "./osd-source-snapshot.mjs";
 import {spawn} from "./osd-child-process.mjs";
 import {createHash} from "node:crypto";
 import {copyFileSync, existsSync, linkSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, watch, writeFileSync} from "node:fs";
 import {basename, dirname, join, relative, resolve, sep} from "node:path";
 import {fileURLToPath} from "node:url";
 import {generatorIdentity, hashOf, inputsOf, layout, liveHash, lock, linkRoots, ownConfig, prepare, rootsWanted, switchTo} from "./osd-build.mjs";
+import {sourceBuildOverlay, sourceBuildStore} from "./osd-source-build-view.mjs";
 import {assertToolchain} from "./osd-transpiler.mjs";
 import {mapStatementStarts} from "./osd-source-map-starts.mjs";
 import {runsAs} from "./osd-main.mjs";
@@ -41,6 +41,7 @@ import {isBinaryFilename, listFiles, loadLibs, selectedModules, outputFiles, rea
 import {lowerNarrowSubmit} from "./osd-narrow-submit.mjs";
 import {warmVerdict} from "./osd-hot.mjs";
 
+import {checkView, checkRead} from "./osd-store-compile-view.mjs";
 import {rowsFromRegistry} from "./osd-xref-seed.mjs";
 
 export {warmVerdict};
@@ -84,7 +85,7 @@ export const GENERATORS_READ = [
   "osd-fm-registry.mjs", "osd-gui-convert.mjs", "osd-tran-registry.mjs",
 ];
 
-const SOURCE = /\.(clas(\.(locals_imp|locals_def|testclasses|macros))?\.abap|intf\.abap)$/i;
+const SOURCE = /\.(clas(\.(locals_imp|locals_def|testclasses|macros))?\.abap|intf\.abap|prog\.abap)$/i;
 const AMDP = /BY\s+DATABASE\s+(PROCEDURE|FUNCTION)/i;
 // every INTERFACES statement, the chained form (`INTERFACES: a, b.`) too,
 // as the words it names; a changed addition counts as a change
@@ -98,9 +99,12 @@ export function warmRule({path, before, after, amdpText = ""}) {
     return `${name}: a generated file`;
   }
   if (!SOURCE.test(name)) {
-    return `${name}: not the source of a class or an interface`;
+    return `${name}: not the source of a class, interface or include`;
   }
-  if (/\bSUBMIT\b/i.test(after)) {
+  if (/\.prog\.abap$/i.test(name) && /^\s*(REPORT|PROGRAM|FUNCTION-POOL|MODULE-POOL)\b/im.test(before + "\n" + after)) {
+    return `${name}: a program declaration (report generators read it)`;
+  }
+  if (/\bSUBMIT\b/i.test(before + "\n" + after)) {
     return `${name}: a SUBMIT source is lowered during a cold build`;
   }
   if (AMDP.test(before) || AMDP.test(after)) {
@@ -164,29 +168,8 @@ export function importersOf(dir) {
 
 // ---------------------------------------------------------------------------
 
-/** whether this transpiler can build some objects of a registry kept across runs */
-export async function probe(Transpiler, core) {
-  const clas = (name, body) => new core.MemoryFile(`${name}.clas.abap`, `CLASS ${name} DEFINITION PUBLIC.
-  PUBLIC SECTION.
-    CLASS-METHODS m.
-ENDCLASS.
-CLASS ${name} IMPLEMENTATION.
-  METHOD m.
-    ${body}
-  ENDMETHOD.
-ENDCLASS.`);
-  const reg = new core.Registry();
-  reg.addFile(clas("zcl_warm_a", "DATA x TYPE i."));
-  reg.addFile(clas("zcl_warm_b", "DATA y TYPE i."));
-  await new Transpiler({ignoreSyntaxCheck: false}).run(reg);
-  const kept = reg.getObject("CLAS", "ZCL_WARM_A").syntaxResult;
-  const only = await new Transpiler({ignoreSyntaxCheck: false, only: (o) => o.getName() === "ZCL_WARM_B"}).run(reg);
-  if (only.objects.length !== 1) return "the transpiler has no `only` option (abaplint/transpiler#1900)";
-  if (kept === undefined || reg.getObject("CLAS", "ZCL_WARM_A").syntaxResult !== kept) {
-    return "a second run checks the whole registry again (abaplint/transpiler#1921)";
-  }
-  return undefined;
-}
+export {probe} from "./osd-warm-capabilities.mjs";
+import {probe} from "./osd-warm-capabilities.mjs";
 
 const key = (o) => o.getType() + " " + o.getName();
 const warmDiffers = (generationDir) => {
@@ -251,8 +234,9 @@ export class WarmCompiler {
     // registry is primed from the same view, and an activation of a set S is
     // a warm edit of it: S's saved sources replace their copies, every other
     // inactive object keeps serving its copy. `overlay(S)` is the store's
-    // (ObjectStore#overlay); without a store, the tree as it is.
+    // (ObjectStore#overlay); without a caller's store, load the persistent one.
     this.overlayOf = options.overlay ?? (() => undefined);
+    this.storeViewMissing = options.overlay === undefined;
     // the object a file belongs to, "TYPE NAME" (ObjectStore#objectKeyOf)
     this.keyOf = options.keyOf ?? (() => undefined);
     // the inactive objects and their copies (ObjectStore#inactiveSources)
@@ -261,36 +245,12 @@ export class WarmCompiler {
     this.views = new Map();
   }
 
-  // **The generators read the raw tree, not the build view** (#460's known
-  // limit): cds2ddic reads a saved DDLS, stg-compile a saved YAML, the
-  // registries a saved class's INTERFACES lines, whether or not the object
-  // is active. A warm build trusts gen/ as the last cold build left it, so
-  // an inactive object a generator would read differently than its active
-  // copy says makes every build cold -- a cold build is what runs the
-  // generators over it, and fails where they fail (critic on d75d8fdc: a
-  // DDLS inactive at the live build, saved again with an invalid source,
-  // and a class activation built warm over it). Any inactive object that is
-  // not a class or interface counts, and a class or interface whose saved
-  // source the warm rule would not take as an edit of its copy.
-  #generatorInput(activating = new Set()) {
-    for (const {key, type, files} of this.inactiveSources(activating)) {
-      if (type !== "CLAS" && type !== "INTF") return `${key} is inactive, and the generators read its saved source`;
-      for (const {file, before, after} of files) {
-        if (before === after) continue;
-        const reason = warmRule({path: file, before, after, amdpText: this.amdpText ?? ""});
-        if (reason !== undefined) return `${key} is inactive, and the generators read its saved source (${reason})`;
-      }
-    }
-    return undefined;
-  }
-
   // A file is known by where it lives in the tree, whichever copy the view
   // reads it from: an inactive object's active copy under
   // build/inactive/active/<file> and its promoted source at <file> are one
   // file whose contents changed, which is what makes a promotion warm.
   #logical(path, overlay) {
-    const folder = resolve(this.root, overlay?.folder ?? join("build", "inactive", "active")) + sep;
-    return path.startsWith(folder) ? resolve(this.root, path.slice(folder.length)) : path;
+    return logicalSourcePath(this.root, path, overlay);
   }
 
   // the view's files by their logical path: {actual: logical -> path, digests}
@@ -306,10 +266,21 @@ export class WarmCompiler {
     return this.reg !== undefined;
   }
 
+  async loadStoreView() {
+    if (this.storeViewMissing) {
+      const store = await sourceBuildStore(this.root);
+      this.overlayOf = activating => store.overlay(activating);
+      this.keyOf = file => store.objectKeyOf(file);
+      this.inactiveSources = activating => store.inactiveSources(activating);
+      this.storeViewMissing = false;
+    }
+  }
+
   // Load the live generation's inputs into a registry and transpile them
   // once, which is what makes the next save cheap. Refuses unless the tree
   // on disk is the live generation's and the result reproduces its files.
   async prime() {
+    await this.loadStoreView();
     const started = Date.now();
     this.reg = undefined;
     const root = this.root;
@@ -323,19 +294,18 @@ export class WarmCompiler {
     }
     const missing = await probe(Transpiler, core);
     if (missing !== undefined) {
-      throw new NotWarm(missing);
+      throw Object.assign(new NotWarm(missing), {pinMissing: true});
     }
     const live = liveHash(root);
     if (live === undefined) {
       throw new NotWarm("there is no live generation to start from");
     }
-    const input = this.#generatorInput();
-    if (input !== undefined) throw new NotWarm(input);
     const {config, stack} = prepare(root);
     // the libraries are pinned clones and most of the inputs; a watcher per
     // library lets a build reuse their walk until something moves in one
     this.#watchLibraries(inputsOf(root, config).libs);
     const overlay = this.overlayOf(new Set());
+    checkView(root, this.compileView, overlay);
     const raw = new Map();
     const hash = hashOf(root, inputsOf(root, config), {digests: raw, folders: this.folders, transpiler, overlay});
     // the view names the generation it would build; one saved since the live
@@ -360,7 +330,7 @@ export class WarmCompiler {
     const wanted = view.wanted;
     const digests = view.digests;
     const read = await readAll(wanted, resolve(root, own.output_folder),
-      (source, filename) => lowerNarrowSubmit(source, filename, core));
+      (source, filename) => lowerNarrowSubmit(source, filename, core), checkRead(this.compileView));
     this.files = new Map(wanted.map((path, i) => [this.#logical(path, overlay), read[i]]));
     this.actual = new Map(view.actual);
     // where the live generation read each copied file from: its copy, when
@@ -418,7 +388,7 @@ export class WarmCompiler {
       for (const [logical, f] of this.files) if (!files.has(logical)) files.set(logical, f);
       this.files = files;
     }
-    const libs = await loadLibs(root, own);
+    const libs = await loadLibs(root, own, undefined, checkRead(this.compileView));
     const reg = new core.Registry();
     for (const f of this.files.values()) reg.addFile(new core.MemoryFile(f.filename, f.contents));
     for (const l of libs) reg.addDependency(new core.MemoryFile(l.filename, l.contents));
@@ -521,6 +491,34 @@ export class WarmCompiler {
     return out;
   }
 
+  // Borrow the live registry for a check, without changing its build view,
+  // publishing a generation or retaining the editor's text. Invalidate the
+  // readers as well: checking a renamed method against cached callers lies.
+  async check({type, name, source, include = "main"}) {
+    if (!this.primed) throw new NotWarm("not primed");
+    if (liveHash(this.root) !== this.hash || this.#changes().edits.length) throw new NotWarm("the active sources changed");
+    const object = this.reg.getObject(type === "INCL" ? "PROG" : type, name.toUpperCase());
+    if (!object) throw new NotWarm("the check object is not in the live registry");
+    const suffix = {definitions: "locals_def", implementations: "locals_imp"}[include] ?? include;
+    const ending = type === "CLAS" && include !== "main" ? `.clas.${suffix}.abap` : `.${type === "INTF" ? "intf" : type === "CLAS" ? "clas" : "prog"}.abap`;
+    const file = [...this.files.values()].find(f => basename(f.filename).toLowerCase() === name.toLowerCase() + ending);
+    if (!file) throw new NotWarm("the check source is not in the live registry");
+    const before = this.reg.getFileByName(file.filename);
+    const affected = [...this.#closure([object])];
+    try {
+      this.reg.updateFile(new this.core.MemoryFile(file.filename, source));
+      for (const o of affected) o.setDirty();
+      this.reg.parse();
+      const found = this.#issuesOf(affected);
+      return {type, name, warm: true, issues: found.flatMap(entry => entry.issues.map(issue => ({...issue, type: entry.type, name: entry.name, severity: "E",
+        message: entry.name === name.toUpperCase() ? issue.message : `${entry.type} ${entry.name}: ${issue.message}`})))};
+    } finally {
+      this.reg.updateFile(before);
+      for (const o of affected) o.setDirty();
+      this.reg.parse();
+    }
+  }
+
   // forget the registry; the next build is cold, and prime() starts again
   drop() {
     this.reg = undefined;
@@ -546,6 +544,14 @@ export class WarmCompiler {
       if (!(o instanceof core.ABAPObject)) continue;
       for (const t of this.reads.get(key(o)) ?? []) this.readers.get(t)?.delete(o);
       const reads = new Set();
+      // INCLUDE is a dependency even when its body declares no identifier
+      // the consumer references (for example, it only writes a literal).
+      for (const file of o.getABAPFiles()) for (const statement of file.getStatements()) {
+        if (!(statement.get() instanceof core.Statements.Include)) continue;
+        const name = statement.findFirstExpression(core.Expressions.IncludeName)?.concatTokens();
+        const included = name && this.reg.getObject("PROG", name);
+        if (included && included !== o) reads.add(key(included));
+      }
       const top = new core.SyntaxLogic(this.reg, o).run().spaghetti?.getTop();
       const stack = top === undefined ? [] : [top];
       while (stack.length > 0) {
@@ -588,9 +594,8 @@ export class WarmCompiler {
     const transpiler = assertToolchain(root, this.loaded);
     // the view this build makes live: S promoted, every other inactive
     // object as its copy -- the overlay a cold build of S would read
-    const input = this.#generatorInput(activating);
-    if (input !== undefined) throw new NotWarm(input);
     const overlay = this.overlayOf(activating);
+    checkView(root, this.compileView, overlay);
     const raw = new Map();
     const hash = hashOf(root, inputsOf(root, config), {digests: raw, folders: this.folders, transpiler, overlay});
     const view = this.#view(overlay, raw, config, stack);
@@ -785,7 +790,7 @@ export class WarmCompiler {
       mark("generation");
       if (warmVerdict(target) === false) this.unverified.add(hash);
       this.views.set(hash, overlay);
-      switchTo(root, hash, undefined, {wanted});
+      if (this.switch !== false) switchTo(root, hash, undefined, {wanted});
       mark("switch");
       commit();
       this.hash = hash;
@@ -806,7 +811,9 @@ export class WarmCompiler {
       settled = true;
       const steps = Object.fromEntries(marks.slice(1).map(([w, t], i) => [w, t - marks[i][1]]));
       return {ok: true, hash, cached, warm: true, live: true, ms: Date.now() - started, objects: this.files.size,
-        modules, hostHeld: modules.filter((m) => HOST_HELD.includes(m)), stale: stale.size, from, steps,
+        // Program modules execute at import time. Compile their closure warm,
+        // but let a fresh runtime load it instead of executing it in a swap.
+        modules, hostHeld: modules.filter((m) => HOST_HELD.includes(m) || m.endsWith(".prog.mjs")), stale: stale.size, from, steps,
         closure, xrefRows};
     } finally {
       unlock();
@@ -841,7 +848,8 @@ export class WarmCompiler {
       // compared with a cold transpile of the same view, not of the raw tree
       const view = this.views.get(hash);
       const child = spawn(cmd, args, {cwd: this.root, stdio: ["ignore", "pipe", "pipe"],
-        env: {...process.env, OSD_ROOT: this.root, OSD_VERIFY_OVERLAY: view === undefined ? "" : JSON.stringify({exclude: [...(view.exclude ?? [])], folder: view.folder})}});
+        env: {...process.env, OSD_ROOT: this.root, OSD_VERIFY_OVERLAY: view === undefined ? this.views.has(hash) ? "null" : ""
+          : JSON.stringify({exclude: [...(view.exclude ?? [])], folder: view.folder})}});
       this.verifying = child;
       child.osdHash = hash;
       let out = "";
@@ -875,7 +883,8 @@ async function verifyMain(hash) {
   const {compareGenerations} = await import("./osd-generation-diff.mjs");
   const {transpile} = await import("./osd-transpile.mjs");
   const {config, stack} = prepare(root);
-  const overlay = process.env.OSD_VERIFY_OVERLAY ? JSON.parse(process.env.OSD_VERIFY_OVERLAY) : undefined;
+  const overlay = await sourceBuildOverlay(root, process.env.OSD_VERIFY_OVERLAY
+    ? {overlay: JSON.parse(process.env.OSD_VERIFY_OVERLAY)} : {});
   if (hashOf(root, inputsOf(root, config), {overlay}) !== hash) {
     return {verdict: "inconclusive", why: "the tree is not that generation any more"};
   }

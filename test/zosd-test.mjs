@@ -536,15 +536,15 @@ ${objects.map(([uri, name]) => `  <adtcore:objectReference adtcore:uri="${uri}" 
       expect(xml).to.contain('adtcore:name="ZCL_ZOSD_TEST_DEMO"');
       expect(xml).to.contain('<testClass adtcore:name="LTCL_ZOSD_TEST_DEMO"');
       const methods = [...xml.matchAll(/<testMethod adtcore:name="([^"]+)"/g)].map((m) => m[1]);
-      expect(methods).to.have.members(["GREETING_PASSES", "DELIBERATE_FAILURE"]);
+      expect(methods).to.deep.equal(["DELIBERATE_FAILURE", "GREETING_PASSES"]);
     });
 
     // A run that only ever reports passes says nothing about whether a
     // failure reaches the client at all, which is why the package carries
     // one of each.
-    it("one method passes, which is an empty alerts element", () => {
-      const method = /<testMethod adtcore:name="GREETING_PASSES"[\s\S]*?<\/testMethod>/.exec(xml)[0];
-      expect(method).to.contain("<alerts/>");
+    it("one method passes, which is a self-closing method without alerts", () => {
+      const method = /<testMethod adtcore:name="GREETING_PASSES"[^>]*\/>/.exec(xml)[0];
+      expect(method).to.not.contain("<alerts");
       expect(method).to.not.contain("<alert ");
     });
 
@@ -553,7 +553,12 @@ ${objects.map(([uri, name]) => `  <adtcore:objectReference adtcore:uri="${uri}" 
       expect(method).to.contain('<alert kind="failedAssertion"');
       expect(method).to.contain('severity="critical"');
       expect(method).to.contain("ZOSD_TEST: this assertion fails on purpose");
-      expect(method).to.match(/navigationUri="[^"]*\/includes\/testclasses\/source\/main#start=\d+,\d+"/);
+      expect(method).to.contain("<title>Critical Assertion Error: 'ZOSD_TEST: this assertion fails on purpose'</title>");
+      expect(method).to.contain('<detail text="Different values"><details><detail text="Expected [Open] Actual [Closed]"/></details></detail>');
+      expect(method).to.contain("Test 'LTCL_ZOSD_TEST_DEMO-&gt;DELIBERATE_FAILURE' in Main Program 'ZCL_ZOSD_TEST_DEMO============CP'");
+      expect(method).to.match(/navigationUri="[^"]*\/includes\/testclasses#type=CLAS%2FOLD;name=LTCL_ZOSD_TEST_DEMO(?:%20)+DELIBERATE_FAILURE"/);
+      expect(method).to.match(/<stackEntry adtcore:uri="[^"]*\/includes\/testclasses#start=\d+,0" adtcore:type="CLAS\/OCN\/testclasses"/);
+      expect(method).not.to.contain("/source/main");
     });
 
     it("exactly one of the two failed", () => {

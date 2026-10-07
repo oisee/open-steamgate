@@ -12,6 +12,7 @@ import {undoOnExit} from "./helpers/undo-on-exit.mjs";
 import {adtAbap} from "./helpers/adt-abap.mjs";
 import {SESSION_COOKIE} from "../tools/adt-session.mjs";
 import {activeFixture} from "./helpers/source-snapshot.mjs";
+import {liveHash} from "../tools/osd-build.mjs";
 
 // The state-changing half of the façade: lock, write, unlock, activate.
 //
@@ -167,7 +168,23 @@ describe("tools/adt-facade: the development loop", () => {
     return {status: res.status, xml, handle};
   };
 
+  it("creation preflight validates class and package before mutation", async () => {
+    const validate = async (path, values) => {
+      const res = await call(path + "?" + new URLSearchParams(values), {method: "POST"});
+      expect(res.status).to.equal(200);
+      return res.text();
+    };
+    const classValues = {objtype: "CLAS/OC", objname: "ZCL_NEW_VALID", packagename: "$TMP"};
+    expect(await validate("/oo/validation/objectname", classValues)).to.include("<CHECK_RESULT>X</CHECK_RESULT>");
+    expect(store.find("CLAS", "ZCL_NEW_VALID")).to.equal(undefined);
+    expect(await validate("/oo/validation/objectname", {...classValues, objname: "ZCL_ZOSD_TEST_DEMO"})).to.include("<SEVERITY>ERROR</SEVERITY>");
+    expect(await validate("/oo/validation/objectname", {...classValues, objname: "../invalid"})).to.include("<SEVERITY>ERROR</SEVERITY>");
+    expect(await validate("/oo/validation/objectname", {...classValues, packagename: "$NO_SUCH_PACKAGE"})).to.include("<SEVERITY>ERROR</SEVERITY>");
+    expect(await validate("/packages/validation", {objtype: "DEVC/K", objname: "$NEW_VALID", packagename: "$TMP"})).to.include("<CHECK_RESULT>X</CHECK_RESULT>");
+  });
+
   describe("locking", () => {
+
     it("a lock gives a handle in the envelope a client expects", async () => {
       // the object has to exist before it can be locked, so it is written
       // through the store first; the façade's own write is the next test
@@ -485,16 +502,17 @@ describe("tools/adt-facade: the development loop", () => {
       expect(xml).to.contain('adtcore:name="ZCL_STG_SEGW_TEST"');
       expect(xml).to.contain("<testClass ");
       expect(xml).to.contain("<testMethod ");
-      expect(xml).to.match(/executionTime="\d+\.\d+" unit="s"/);
+      expect(xml).to.match(/executionTime="\d+(?:\.\d+)?" unit="s"/);
     });
 
     it("a method that passed carries no alert, which is what passing means", async function () {
       this.timeout(180000);
       const xml = await (await testRun("ZCL_STG_SEGW_TEST")).text();
       const testClass = xml.match(/<testClass [^>]*>[\s\S]*?<testMethods>/)[0];
-      expect(testClass).to.contain("<alerts/>");
-      const method = xml.match(/<testMethod [^>]*>[\s\S]*?<\/testMethod>/)[0];
-      expect(method).to.contain("<alerts/>");
+      // an SAP system omits a class's empty <alerts> entirely (measured)
+      expect(testClass).to.not.contain("<alerts");
+      const method = xml.match(/<testMethod [^>]*\/>/)[0];
+      expect(method).to.not.contain("<alerts");
       expect(method).to.not.contain("<alert ");
     });
 
@@ -715,15 +733,21 @@ describe("tools/adt-facade: the development loop", () => {
       expect(await res.text()).to.contain("does not belong");
     });
 
-    it("every class and method points at the line it is written at", async function () {
+    it("every class and method navigates by its semantic source member selector", async function () {
       this.timeout(180000);
       const xml = await (await testRun("ZCL_STG_SEGW_TEST")).text();
-      // a client jumps to a failure instead of opening a file and searching
-      expect(xml).to.match(/navigationUri="[^"]*\/includes\/testclasses\/source\/main#start=\d+,\d+"/);
+      expect(xml).to.match(/navigationUri="[^"]*\/includes\/testclasses#type=CLAS%2FOCL;name=LTCL_[^"]+"/);
+      expect(xml).to.match(/navigationUri="[^"]*\/includes\/testclasses#type=CLAS%2FOLD;name=LTCL_[^" ]+(?:%20)+[A-Z_]+"/);
+      expect(xml).not.to.contain("/source/main");
+      const target = xml.match(/navigationUri="([^"]*\/includes\/testclasses#[^"]+)"/)[1];
+      const source = await call(target.replace("/sap/bc/adt", ""), {headers: {accept: "text/plain"}});
+      expect(source.status).to.equal(200);
+      expect(source.headers.get("content-type")).to.equal("text/plain; charset=utf-8");
+      expect(await source.text()).to.equal(store.read("CLAS", "ZCL_STG_SEGW_TEST", "testclasses").source);
     });
 
     it("answers the occurrence-marker follow-up without discarding the navigation URI", async () => {
-      const uri = "/sap/bc/adt/oo/classes/zcl_stg_segw_test/includes/testclasses/source/main#start=10,10";
+      const uri = "/sap/bc/adt/oo/classes/zcl_stg_segw_test/includes/testclasses#type=CLAS%2FOCL;name=LTCL_TREE";
       const res = await call(`/abapsource/occurencemarkers?uri=${encodeURIComponent(uri)}`, {
         method: "POST",
         headers: {"content-type": "text/plain", accept: "application/*"},
@@ -737,7 +761,7 @@ describe("tools/adt-facade: the development loop", () => {
     });
 
     it("maps a test include URI back through its packages to the owning class", async () => {
-      const uri = "/sap/bc/adt/oo/classes/zcl_stg_segw_test/includes/testclasses/source/main#start=10,10";
+      const uri = "/sap/bc/adt/oo/classes/zcl_stg_segw_test/includes/testclasses#start=10,0";
       const res = await call(`/repository/nodepath?uri=${encodeURIComponent(uri)}`, {method: "POST"});
       expect(res.status).to.equal(200);
       const xml = await res.text();
@@ -800,7 +824,8 @@ describe("tools/adt-facade: the development loop", () => {
       // this scratch class into the live generation or promote its source.
       expect(await again.text()).to.contain('adtcore:version="inactive"');
       const active = await call(`/oo/classes/${SCRATCH}/source/main?version=active`);
-      expect(await active.text()).to.equal("");
+      expect(active.status).to.equal(404);
+      expect(await active.text()).to.include("ExceptionResourceNotFound");
     });
 
     it("source that holds activates, and says so with its properties", async function () {
@@ -1037,7 +1062,7 @@ describe("tools/adt-facade: publication state", function () {
     expect((await failed.text())).to.contain('activationExecuted="false"');
     expect(store.stateOf(store.find("CLAS", name)).version).to.equal("inactive");
 
-    store.publish = async () => {activeFixture(root); return {ok: true, recycled: false};};
+    store.publish = async () => {activeFixture(root); return {ok: true, generation: liveHash(root), recycled: false};};
     const passed = await activate();
     expect((await passed.text())).to.contain('activationExecuted="true"');
     expect(store.stateOf(store.find("CLAS", name)).version).to.equal("active");
@@ -1052,8 +1077,13 @@ describe("tools/adt-facade: publication state", function () {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
     expect(release).to.be.a("function");
+    // The build read the checked revision before the next save. Keep that
+    // snapshot; creating one from the newer bytes would simulate publication
+    // of those bytes and make stateOf correctly recognize them as active.
+    activeFixture(root);
+    const generation = liveHash(root);
     store.write("CLAS", name, source.replace("'hello'", "'newer'"));
-    release({ok: true, recycled: false});
+    release({ok: true, generation, recycled: false});
     const response = await pending;
     expect(await response.text()).to.contain('activationExecuted="false"');
     expect(store.stateOf(store.find("CLAS", name)).version).to.equal("inactive");

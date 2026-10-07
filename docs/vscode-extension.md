@@ -26,6 +26,22 @@ for `tools/osd-serve.mjs` (#95).
 
 `osd: Prepare abapGit zip…` (Command Palette and OSD view overflow) picks a deploy unit from the checkout’s `deploy/manifest.json`, preferring the active file’s source unit, and saves its offline zip under `build/deploy/` by default. It runs the checkout’s zip tool with the extension host’s own Node (`process.execPath`, as Start does), logs to **osd**, preserves object-naming refusals, and offers Reveal in Explorer or Copy path on success. A checkout is required; units without sources must be prepared separately. Import the zip with abapGit; delivery to a system is not part of this command.
 
+## Layer version requirements
+
+A pack or workspace layer can require a minimum system version with
+`"osd": ">=0.6.1650"` in `osd-pack.json`. Only `>=x.y.z` is supported;
+omitting `osd` means no requirement. Versions compare numerically, and an
+invalid requirement refuses the build. The check runs before generation or
+transpilation, including cached and warm builds.
+
+Packaged systems carry `osd-version.json`, stamped with the extension version;
+seeded binaries use the same version rule. A source checkout without that
+marker, including a checkout-mode binary, skips the comparison and logs a
+debug line. A mismatch leaves the live generation untouched and tells you to
+update the extension or binary. In desktop VS Code, the error notification
+shows the diagnostic verbatim; **Update** opens the installed extension's
+entry in the Extensions view.
+
 ## Key bindings
 
 *2026-09-25.* `osd.keymap` (default `"abap"`) puts an ABAP developer's
@@ -46,9 +62,9 @@ Classrun do not reach either type (Q7, below).
 | Ctrl+F2 | Check | `osd.check` -- the current buffer (not necessarily saved) against `checkruns` (`tools/adt-facade.mjs` ~1683-1727), diagnostics on the lines | -- |
 | Ctrl+F3 | Activate | `osd.activate` -- saves the file, then `activation` (~1835-1924); a failure's issues go to Problems, a pass shows the generation that now serves it (`X-OSD-Generation`) | -- |
 | Ctrl+Shift+F3 | Activate all inactive | -- | **left out**: `GET .../activation/inactiveobjects` always answers an empty list by design (`tools/adt-facade.mjs`, "nothing here is ever inactive: an object is what the file says") -- there is no inactive set on the server for this to activate |
-| F8 | Run | `osd.run` -- dispatched by object type (`lib.js` `RUN_TABLE` / `runActionFor`, SE80's own dispatch, table below); a class with ABAP Unit tests runs them (Test Explorer's `testing.runCurrentFile`) | see the table below |
-| F9 | Run as ABAP Application (Console) | `osd.classrun` -- the current class against `oo/classrun` (Q6b, below), output in its own Output channel "osd console" | -- |
-| Ctrl+Shift+F10 | Run ABAP Unit | the built-in `testing.runCurrentFile` | -- |
+| F8 | Run | `osd.run` -- dispatched by object type (`lib.js` `RUN_TABLE` / `runActionFor`, SE80's own dispatch, table below); runs objects independently of ABAP Unit | see the table below |
+| F9 | Run as ABAP Application (Console) | `osd.classrun` -- the current class against `oo/classrun` (Q6b, below), output in its own Output channel "OSD: Console" | -- |
+| Ctrl+Shift+F10 | Run ABAP Unit | the built-in `testing.runCurrentFile`, also used by the beaker title button | -- |
 | F5 / F6 / F7 / F8, while execution is paused | Step Into / Step Over / Return / Continue | the built-in `workbench.action.debug.step{Into,Over,Out}` / `.continue`, remapped only `when debugState == 'stopped' && resourceExtname == .abap`, so an attached but running session leaves F8 and F9 available to run ABAP objects | -- |
 | Ctrl+Shift+B | Toggle breakpoint | the built-in `editor.debug.action.toggleBreakpoint` | -- |
 | F1 on a keyword | ABAP keyword documentation | -- | **left out**: ADT resolves a keyword to its help.sap.com page through its own shipped keyword-to-file index; a guessed URL (`abap` + the word + `.htm`) is wrong for enough keywords that a dead link is worse than no binding |
@@ -58,17 +74,19 @@ F8's dispatch by object type (`lib.js` `runActionFor`, held to this table by
 
 | Type | F8 here |
 | --- | --- |
-| CLAS, name ends `_DPC_EXT`, cursor inside a `<set>_get_entityset` / `<set>_get_entity` method | calls the set, the same as that method's CodeLens (Q2b, below) |
-| CLAS, name ends `_DPC_EXT` / `_MPC_EXT`, otherwise | not yet: the rest of a Gateway client |
-| CLAS, has an ABAP Unit test include | runs them (Test Explorer) |
-| CLAS, declares `IF_OO_ADT_CLASSRUN`, no tests | classrun (Q6b, below) -- ABAP Unit still wins when a class carries both |
-| CLAS, neither | not yet: put `IF_OO_ADT_CLASSRUN` on the class, or give it tests |
+| CLAS, declares `IF_OO_ADT_CLASSRUN` | classrun (Q6b, below), regardless of tests or class name |
+| CLAS, without classrun, name ends `_DPC_EXT`, cursor inside a `<set>_get_entityset` / `<set>_get_entity` method | calls the set, the same as that method's CodeLens (Q2b, below) |
+| CLAS, without classrun, name ends `_DPC_EXT` / `_MPC_EXT`, otherwise | not yet: the rest of a Gateway client |
+| CLAS, otherwise (with or without tests) | information message: “Nothing to run for <OBJ>. Tests: Ctrl+Shift+F10.” |
 | INTF | nothing of its own to run |
 | PROG | F8: asks for the report's arguments, then builds it with osabap and runs it in a terminal of its own (`osd run`, `docs/osabap-native.md`; needs a checkout and Go); empty arguments open its selection screen in the terminal. Run with debugger: opens its converted report's WebGUI transaction in a reusable VS Code panel (see `docs/gui-reports.md`), as the CodeLens above REPORT does |
 | FUGR | not yet: a test form from `GET /sap/bc/osd/rfc/functions/<NAME>`, then `POST /call` |
 | TABL, DDLS | data preview (Q7, below) |
 | IWSV | not yet: the Gateway client on the service document |
 | SICF | not yet: open the node's URL |
+
+F8 / ▷ / F9 never run ABAP Unit. Run tests with Ctrl+Shift+F10, the
+beaker button, or Test Explorer.
 
 ## Test Explorer groups
 
@@ -555,15 +573,14 @@ that is the process actually holding the connection there. Verified live on
 both: inline through the mocha suites below, served (child) mode by hand on
 a throwaway port (5, in the PR).
 
-**F9** (`osd.classrun`, its own Output channel "osd console") runs the
+**F9** (`osd.classrun`, its own Output channel "OSD: Console") runs the
 current class standalone, and **F8** dispatches to it
 (`RUN_TABLE.CLAS`, `ctx.hasClassrun`) for a class that declares the
-interface and carries no ABAP Unit tests -- tests still win when a class
-happens to have both. `ctx.hasClassrun` is `implementsClassrun`
+interface, even when it has ABAP Unit tests. `ctx.hasClassrun` is
+`implementsClassrun`
 (`editors/vscode/lib.js`), the same regex `tools/osd-classrun.mjs` runs
-server-side, over the editor's own buffer (not necessarily saved), the way
-`ctx.hasUnitTests` is a file-system fact and Ctrl+F2's check already reads
-the unsaved buffer.
+server-side, over the editor's own buffer (not necessarily saved), the same
+way Ctrl+F2's check already reads the unsaved buffer.
 
 ABAP and SQLScript cells are implemented as described above. The scratch
 root is a normal pack, discovered at startup like other packs, and notebook
@@ -648,7 +665,7 @@ install.
   `notebookFromJson` / `notebookToJson`, including a cell value carrying
   `<` and `&`; Q6b's `implementsClassrun` against the tracked demo fixture
   and against a comment merely naming the interface, and `RUN_TABLE.CLAS`'s
-  classrun branch (tests still win over it, a DPC_EXT still wins over both).
+  classrun branch (including classes with tests and DPC_EXT classes).
   The Services tree cases cover kind/pack grouping, valid context actions,
   app manifest data-source resolution, HTTP tests by URL, closure test union,
   service dump filtering, safe details HTML, and the services/transaction
@@ -746,7 +763,7 @@ Each pack BSP app rebases every OData data source whose URI names a service (`..
 Shadowing is already said out loud by the build itself
 (`osd-build: overridden: CLAS X: <hidden files> hidden by <winner>`,
 `tools/osd-build.mjs`), and since the launcher streams the build's stdout
-verbatim into the "osd system" Output channel, that line is already
+verbatim into the "OSD: System log" Output channel, that line is already
 visible there with no extra plumbing. A missing reference (the user's code
 calling something the system lacks) is not yet surfaced as an editor
 diagnostic in this spike — abaplint's own errors reach the build log the
@@ -773,9 +790,11 @@ which is stop-then-start, keeps them and reloads each once the system
 serves again, on the new port if it moved; a second, new status bar item
 (▶ / ■, left of the existing generation display, which assumes something
 is already serving) starts or stops the one `Launcher` this window
-drives, and the editor-title button on `.abap` files is `osd.run` (F8's
-own command) via `contributes.menus["editor/title"]` rather than new
-code. Once started, `osd.url` is written to the launched address
+drives. The editor-title run button uses `osd.classrun` (F9) for classrun
+classes and `osd.runTitle` (F8 dispatch) otherwise; the independent beaker
+uses `testing.runCurrentFile` (Ctrl+Shift+F10). These actions are contributed
+via `contributes.menus["editor/title"]`. Once started, `osd.url` is written
+to the launched address
 (Workspace target when the window has a folder, Global otherwise) —
 every existing feature reads that setting fresh on every call (`osd()` in
 `extension.js`), so nothing else had to change for the rest of the
@@ -853,7 +872,7 @@ warm rebuild restarts with the ordinary cached build and warm activation
 enabled; later supported class/interface activations can swap into the
 serving process. Full rebuild passes `--force` to `tools/osd-build.mjs`.
 Both actions can also be reached from the OSD view title bar. **Open log**
-shows Output → `osd system`.
+shows Output → `OSD: System log`.
 
 The page model is pure (`systemOverviewModel` in `lib.js`) and keeps the
 route for each set. The extension reads the existing `SystemSet`,
@@ -1324,7 +1343,7 @@ file with `code --install-extension <vsix> --force`. The build refuses to
 package while a selected pack is unfetched, so a successful install command
 has a complete bundled seed.
 
-The tracked `editors/vscode/package.json` keeps the release baseline (`0.6.0`, the 0.6 line since 2026-10-02; the last 0.5 release was `vscode-v0.5.1486`)
+The tracked `editors/vscode/package.json` keeps the release baseline (`0.7.0`, the 0.7 line since 2026-10-04; the last 0.6 release was `vscode-stable-v0.6.1666`)
 and supplies the major and minor for packaged builds. At packaging time, the
 build changes only the staged copy's patch to `git rev-list --count HEAD`;
 the tracked patch remains intact. Bump the major or minor by hand for a new
@@ -1750,7 +1769,8 @@ The Test Explorer has **Run** and **Debug** profiles. Debug starts the
 detached ABAP Unit child with its own free `--inspect-brk` port and
 `--enable-source-maps`; js-debug resumes it after attaching and installing
 breakpoints. With the inspector asked for at start, ordinary Test Explorer
-runs and F8 unit runs use the same attach path automatically.
+runs, including Ctrl+Shift+F10 and the beaker, use the same attach path
+automatically.
 
 The status bar's **Toggle ABAP breakpoints** item calls VS Code's global
 breakpoint activation command. It stops or resumes reactions to breakpoints

@@ -19,13 +19,16 @@ import {mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {createRequire} from "node:module";
+import {runtimeRootFixture} from "./helpers/runtime-root.mjs";
+
+const runtimeFixture = runtimeRootFixture();
 
 const require = createRequire(import.meta.url);
 const {Osd} = require("../editors/vscode/lib.js");
 
 const PORT = Number(process.env.STG_PORT ?? 3621);
 const BASE = `http://localhost:${PORT}`;
-const CLASS_FILE = "src/demo/zcl_zstg_demo_dpc_ext.clas.abap";
+const classFile = () => join(runtimeFixture.root, "src/demo/zcl_zstg_demo_dpc_ext.clas.abap");
 
 describe("T7 warm: OSD_WARM=1, an edit through Osd#activate() (editors/vscode/lib.js)", function () {
   this.timeout(180000);
@@ -33,16 +36,16 @@ describe("T7 warm: OSD_WARM=1, an edit through Osd#activate() (editors/vscode/li
   let databaseDir;
   let testIdentity;
   let originalSource;
-  let intendedDrift = false;
   const log = [];
 
   before(async () => {
-    originalSource = readFileSync(CLASS_FILE, "utf8");
+    originalSource = readFileSync(classFile(), "utf8");
     databaseDir = mkdtempSync(join(tmpdir(), "osd-vscode-warm-"));
     testIdentity = `osd-vscode-warm-${randomUUID()}`;
     child = spawn(process.execPath, ["test/run.mjs"], {
+      cwd: runtimeFixture.root,
       env: {
-        ...process.env, STG_DB: "file", STG_PORT: String(PORT), STG_TLS: "0", STG_SERVE: undefined,
+        ...process.env, STG_DB: "file", STG_PORT: String(PORT), STG_TLS: "0", STG_SERVE: "child",
         OSD_WARM: "1", OSD_USER_FULL: testIdentity, STG_DB_BASE: join(databaseDir, "base"),
         STG_DB_PATH: join(databaseDir, "osd.sqlite"),
       },
@@ -72,33 +75,25 @@ describe("T7 warm: OSD_WARM=1, an edit through Osd#activate() (editors/vscode/li
   });
 
   after(async () => {
-    // Only the preloaded detector receives this proof, while edited inputs
-    // still identify the live generation. Plain Mocha installs no observer.
-    const isolation = require.cache[require.resolve('../tools/osd-test-isolation.cjs')]?.exports;
-    // Before successful activation there is no recognized drift to prove.
-    // Leave any unexpected generation leak to the detector's after-all audit.
-    try { if (intendedDrift) await isolation?.observeGenerationDrift(); }
-    finally {
-      writeFileSync(CLASS_FILE, originalSource);
-      if (child && child.exitCode === null && child.signalCode === null) {
-        const stopped = once(child, "exit");
-        child.kill("SIGTERM");
-        await stopped;
-      }
-      if (databaseDir) rmSync(databaseDir, {recursive: true, force: true});
+    writeFileSync(classFile(), originalSource);
+    if (child && child.exitCode === null && child.signalCode === null) {
+      const stopped = once(child, "exit");
+      child.kill("SIGTERM");
+      await stopped;
     }
+    if (databaseDir) rmSync(databaseDir, {recursive: true, force: true});
   });
 
   it("edits the demo DPC's own comment, activates it, and reads X-OSD-Build off the answer", async () => {
-    // give the background prime (docs/warm-compile.md: ~8-9 s, synchronous)
-    // a chance to finish, the way the extension's own "warming up..." does,
-    // rather than racing the first activation against it
+    // Wait for startup and its prime, as the extension's "warming up..." does.
     let serving;
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0; i < 120; i++) {
       serving = await fetch(`${BASE}/osd/serving`).then((r) => r.json()).catch(() => undefined);
-      if (serving?.warm !== undefined && serving.warm.state !== "priming") break;
+      if (serving?.ready === true && serving.warm !== undefined && serving.warm.state !== "priming" &&
+          serving.warm.reason !== "not primed yet") break;
       await new Promise((r) => setTimeout(r, 500));
     }
+    console.log(log.join("").split("\n").filter(line => line.startsWith("warm:")).join("\n"));
     expect(serving?.warm, "OSD_WARM=1 is on, and /osd/serving carries the field (#108)").to.not.equal(undefined);
 
     const edited = originalSource.replace(
@@ -106,12 +101,11 @@ describe("T7 warm: OSD_WARM=1, an edit through Osd#activate() (editors/vscode/li
       `* The hand-written part a developer owns on a real system (T7 warm test ${randomUUID()}). Reads the`,
     );
     expect(edited, "the marker line exists to be replaced").to.not.equal(originalSource);
-    writeFileSync(CLASS_FILE, edited);
+    writeFileSync(classFile(), edited);
 
     const client = new Osd(BASE);
     const result = await client.activate({type: "CLAS", name: "ZCL_ZSTG_DEMO_DPC_EXT", base: "zcl_zstg_demo_dpc_ext"});
     expect(result.ok, `activation issues: ${JSON.stringify(result.issues)}`).to.equal(true);
-    intendedDrift = true;
     expect(result.build, "X-OSD-Build is on every activation answer once publish() ran").to.be.a("string");
 
     if (serving.warm.state === "primed") {

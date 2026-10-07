@@ -178,8 +178,7 @@ CLASS zcl_osd_adt_checkrun IMPLEMENTATION.
     TRY.
         lo_conv = cl_abap_conv_in_ce=>create( encoding = 'UTF-8' ).
         lo_conv->convert( EXPORTING input = lv_bytes IMPORTING data = lv_decoded ).
-        IF lv_decoded CA cl_abap_char_utilities=>cr_lf
-            AND lv_decoded NS cl_abap_codepage=>convert_from( 'EFBFBD' ).
+        IF lv_decoded NS cl_abap_codepage=>convert_from( 'EFBFBD' ).
           rv_text = lv_decoded.
         ENDIF.
       CATCH cx_sy_conversion_codepage.
@@ -211,6 +210,7 @@ CLASS zcl_osd_adt_checkrun IMPLEMENTATION.
         LOOP AT lt_members INTO lv_member.
           lv_path = `/issues/` && lv_member.
           CLEAR ls_issue.
+          ls_issue-uri = lo_json->get_string( lv_path && `/uri` ).
           ls_issue-line = lo_json->get( lv_path && `/line` ).
           ls_issue-col = lo_json->get( lv_path && `/column` ).
           ls_issue-severity = lo_json->get_string( lv_path && `/severity` ).

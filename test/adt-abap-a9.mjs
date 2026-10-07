@@ -15,6 +15,9 @@ import {Data} from "../tools/osd-data.mjs";
 import {ServingRuntime} from "../tools/osd-runtime.mjs";
 import {WarmCompiler} from "../tools/osd-warm.mjs";
 import {build} from "../tools/osd-build.mjs";
+import {runtimeRootFixture} from "./helpers/runtime-root.mjs";
+
+const runtimeFixture = runtimeRootFixture();
 const base = "/sap/bc/adt/core/http/xref/";
 const clean = s => s.replace(/\?$/, "");
 const str = s => new abap.types.String().set(s);
@@ -76,7 +79,7 @@ for (const remote of [false, true]) describe(`A9 ${remote ? "OSD_ADT_ONE_RUNTIME
     }
     store = new ObjectStore({root, libs:[], roots:[{path:"src",package:"$TMP",writable:true}]});
     if (remote) {
-      runtime = new ServingRuntime({root:process.cwd(), env:{OSD_ADT_ONE_RUNTIME:"1", STG_DB:"sqlite", STG_DB_PATH:"", STG_TLS:"0",
+      runtime = new ServingRuntime({root:runtimeFixture.root, env:{OSD_ADT_ONE_RUNTIME:"1", STG_DB:"sqlite", STG_DB_PATH:"", STG_TLS:"0",
         NODE_OPTIONS:[process.env.NODE_OPTIONS, `--import=${resolve("test/helpers/a9-child.mjs")}`].filter(Boolean).join(" ")}});
       runtime.storeDestination = new StoreDestination({store});await runtime.start();
       data = new Data({runtime});
@@ -206,7 +209,7 @@ for (const remote of [false, true]) describe(`A9 ${remote ? "OSD_ADT_ONE_RUNTIME
       expect((await data.query("SELECT include FROM wbcrossgt WHERE name = 'ZCL_A9_A'")).rows).to.have.length(1);
       const previous=store;
       try {
-        store=new ObjectStore({root:process.cwd()});
+        store=new ObjectStore({root:runtimeFixture.root});
         const sides=[await mount(false),await mount(true)];
         for(const route of ["readers","closure"]) {
           const result=await diff(`${route}?type=CLAS&name=ZCL_ZSTG_DEMO_MPC_EXT`,200,"GET",sides);
@@ -220,7 +223,7 @@ for (const remote of [false, true]) describe(`A9 ${remote ? "OSD_ADT_ONE_RUNTIME
 describe("A9 COLLATE V8 conformance", function() {
   this.timeout(60000);
   it("every demo store.list name and punctuation cases", async () => {
-    const store=new ObjectStore({root:process.cwd()});
+    const store=new ObjectStore({root:runtimeFixture.root});
     const names=[...new Set([...store.list().map(o=>o.name),"ZCL_A_B","ZCL_AB","ZCL_A1","/NS/ZCL_X","ZCL_A=","zcl_a","ZCL_A"])];
     const keys=await Promise.all(names.map(async name=>({name,key:(await abap.Classes.ZCL_OSD_ADT_JS.collate({iv_text:str(name)})).get()})));
     expect(keys.sort((a,b)=>a.key<b.key?-1:a.key>b.key?1:0).map(o=>o.name)).to.deep.equal([...names].sort((a,b)=>a.localeCompare(b)));

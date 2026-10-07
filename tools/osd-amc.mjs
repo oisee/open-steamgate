@@ -49,6 +49,12 @@ export function amcChannels(root = process.cwd(), roots = generatorFoldersOf(roo
   return [...new Map(definitions.map((row) => [keyOf(row.applicationId, row.path), row])).values()];
 }
 
+// A channel extension is CHAR 60 in the ABAP signatures, so trailing blanks
+// carry no meaning: a producer passes the padded value while an APC binding
+// keeps it in a STRING, which drops them. Compare the meaningful part only:
+// the padding is U+0020, so a trailing tab or no-break space still counts.
+const channelExtension = (extension) => String(extension ?? "").replace(/ +$/, "");
+
 export class AmcBroker {
   constructor(channels) {
     this.channels = new Map(channels.map((row) => [keyOf(row.applicationId, row.path), row]));
@@ -67,7 +73,7 @@ export class AmcBroker {
   // activity R = AMC consumer; C = an APC WebSocket bound with bind_amc_message_consumer.
   subscribe({app, path, program, session, receive, extension = "", client, username, activity = "R"}) {
     const channel = this.channel(app, path, activity, program);
-    const subscription = {channel, session, receive, extension, client, username, pending: [], active: true};
+    const subscription = {channel, session, receive, extension: channelExtension(extension), client, username, pending: [], active: true};
     this.subscribers.add(subscription);
     return {
       subscription,
@@ -79,8 +85,9 @@ export class AmcBroker {
     const channel = this.channel(app, path, "S", program);
     if (channel.type !== type) throw new Error(`AMC channel ${path} expects ${channel.type}, got ${type}.`);
     const publication = {type, message, client, username};
+    const wanted = channelExtension(extension);
     for (const sub of this.subscribers) {
-      if (!sub.active || sub.channel !== channel || sub.extension !== extension) continue;
+      if (!sub.active || sub.channel !== channel || sub.extension !== wanted) continue;
       if ((channel.scope === "C" || channel.scope === "U") && sub.client !== client) continue;
       if (channel.scope === "U" && sub.username !== username) continue;
       if (suppressEcho && sub.session === session) continue;

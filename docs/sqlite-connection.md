@@ -196,3 +196,67 @@ filters (1 test). The structural leak scan read all 25 changed files and
 found no matches; its exit status is 2 because this checkout lacks the
 private `.local/leak-identifiers.json` list, so host/user name scanning
 cannot be claimed as passed.
+
+## Atomic operations-ledger startup
+
+The read-only monitor change exposed a first-start race: `BatchRuns` created
+`batch_runs` in autocommit, then began the transaction that created its
+revision, steps, imports, logs and event tables. A retained monitor could
+therefore pass its `batch_runs` readiness check and fail with
+`no such table: batch_monitor_revision` before that transaction committed.
+
+Create `batch_runs` inside the same `BEGIN IMMEDIATE` transaction as the
+rest of the schema and migrations. This chooses writer-owned, atomic schema
+initialization: readers see either no ledger tables (empty runs/counts and
+revision sequence 0), or the complete committed schema. The existing empty
+in-memory fallback is not retained, so the next request sees the writer's
+commit. GETs perform no persistent schema writes.
+
+Read-only path audit of the change in #590:
+
+- Monitor lists, details, output and HTTP counts use `BatchRuns`; atomic
+  publication protects their revision, parent, steps and log queries.
+- `legacyCountUsed` checks for `batch_runs` and the required identity columns
+  before querying, returning false when no holder exists yet.
+- Job snapshots check the operations import/run/step schema; no import table
+  means no imported job yet. Technical-log reads check for `batch_job_log`
+  and return empty entries when it is absent. An inconsistent imported job
+  still reports an error rather than being hidden as an empty ledger.
+- Outbox readers and the status-port committed-identity check read the
+  business database, whose DDIC schema is installed before ABAP execution;
+  they do not depend on lazily created operations tables.
+
+The two startup-order regressions pause the real writer immediately after
+its first `CREATE TABLE`, with the monitor starting either before or after
+the writer. Both reproduced the exact missing-revision-table HTTP 500 before
+the fix. Afterwards both read empty state without changing `sqlite_master`,
+then observe the first queued job after schema commit.
+
+Validation on this fix:
+
+- Both new startup-order race regressions failed with the exact
+  `batch_monitor_revision` error before the change and passed afterwards.
+  The complete reader-lock suite passed 11 tests.
+- A fresh build and one focused invocation of 20 job/database suite files
+  passed 294 tests, with zero failures and 18 existing pending cases (17
+  selection-option anomalies and the existing space-COMMITMODE delete case).
+- One uninterrupted batch of 20 plain worker-integration invocations, each
+  under `timeout 600` and the heavy wrapper's range 50–59, completed with
+  **15 passes and 5 failures**. Runs 5, 12 and 19 failed in `JOB_OPEN` with
+  `database is locked`; runs 4 and 18 missed the first job's completion
+  deadline. No missing-table error appeared. The batch returned failure;
+  this is **not a passing 20-run proof**, and those failures remain unresolved.
+- Earlier exploratory plain sequences passed 28 of 32 invocations: three
+  JOB_OPEN locks and one completion deadline after cold activation failed.
+  Eleven supplementary traced invocations passed without capturing a native
+  SQLite error. They are separate from the plain batch and cannot identify
+  the lock holder or certify the required integration check.
+- Suite registration has no drift; changed paths pass the size guard, with
+  six inherited breaches in untouched files. Structural leak scanning found
+  no matches in the three changed files; the private identifier list is
+  absent, so host/user identifier scanning was unavailable.
+
+Detailed local logs are in `.local/monitor-revision-evidence/`; the complete
+20-invocation batch is under `plain-batch/`. The integration test's assertions,
+polling limits and deadlines were unchanged; no invocation was retried or
+omitted from that batch.

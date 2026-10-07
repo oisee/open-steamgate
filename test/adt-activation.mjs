@@ -307,7 +307,7 @@ ENDCLASS.
     store.served = {
       running: true, generation: "h1", swaps: 0, epoch: 1,
       hot: async () => { throw new Error("cannot load /home/some user/a tree/output/zcl_osd_act.clas.mjs"); },
-      recycle: async () => ({generation: "h2", ms: 7}),
+      recycle: async () => { store.served.generation = "h2"; return {generation: "h2", ms: 7}; },
     };
     const answer = await activate("CLAS", "ZCL_OSD_ACT");
     expect(ok(answer), answer.xml).to.equal(true);

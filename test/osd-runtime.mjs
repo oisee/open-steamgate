@@ -5,6 +5,9 @@ import {join} from "node:path";
 import {createServer} from "node:net";
 import {spawn} from "node:child_process";
 import {ServingRuntime, liveChildren} from "../tools/osd-runtime.mjs";
+import {runtimeRootFixture} from "./helpers/runtime-root.mjs";
+
+const runtimeFixture = runtimeRootFixture();
 
 // is that process still there?
 const alive = (pid) => {
@@ -32,7 +35,7 @@ describe("tools/osd-runtime: the process that can be replaced", function () {
   };
 
   it("starts, answers OData, and stops", async () => {
-    const runtime = new ServingRuntime();
+    const runtime = new ServingRuntime({root: runtimeFixture.root});
     try {
       const first = await runtime.start();
       expect(first).to.include({epoch: 1, started: true});
@@ -74,7 +77,7 @@ describe("tools/osd-runtime: the process that can be replaced", function () {
         return 0;
       }
     };
-    const runtime = new ServingRuntime();
+    const runtime = new ServingRuntime({root: runtimeFixture.root});
     try {
       await runtime.start();
       expect(await runtime.inspector({open: true, port})).to.include({open: true, port});
@@ -222,7 +225,7 @@ describe("tools/osd-runtime: the process that can be replaced", function () {
 
   it("a close recycles, with a silent debugger attached; the new child serves without an inspector", async () => {
     const port = await freePort();
-    const runtime = new ServingRuntime();
+    const runtime = new ServingRuntime({root: runtimeFixture.root});
     let socket;
     try {
       const first = await runtime.start();
@@ -252,7 +255,7 @@ describe("tools/osd-runtime: the process that can be replaced", function () {
   it("a move to another port recycles onto it, with a silent debugger on the old one", async () => {
     const one = await freePort();
     const two = await freePort();
-    const runtime = new ServingRuntime();
+    const runtime = new ServingRuntime({root: runtimeFixture.root});
     let socket;
     try {
       await runtime.start();
@@ -281,7 +284,7 @@ describe("tools/osd-runtime: the process that can be replaced", function () {
     // SQLite, which writes as it goes, and the suite may have set it
     const folder = mkdtempSync(join(tmpdir(), "osd-db-"));
     const port = await freePort();
-    const runtime = new ServingRuntime({database: join(folder, "osd.sqlite"), env: {STG_DB: undefined}});
+    const runtime = new ServingRuntime({root: runtimeFixture.root, database: join(folder, "osd.sqlite"), env: {STG_DB: undefined}});
     let socket;
     try {
       await runtime.start();
@@ -316,7 +319,7 @@ describe("tools/osd-runtime: the process that can be replaced", function () {
     // Found by review of #60: #stopChild forgot the child at once and waited
     // up to ten seconds for it to exit, so an ensure() in that window saw
     // nothing running and started a second process on the same database.
-    const runtime = new ServingRuntime();
+    const runtime = new ServingRuntime({root: runtimeFixture.root});
     // how many serving processes existed at once, sampled while it happens
     let most = 0;
     const sampler = setInterval(() => {
@@ -340,7 +343,7 @@ describe("tools/osd-runtime: the process that can be replaced", function () {
   it("a start during a recycle waits for it, and the recycle's readiness is announced", async () => {
     // Found by review of #60: start() did not wait for a recycle, joined its
     // spawn, and the recycle's announcement was lost -- whenReady() hung.
-    const runtime = new ServingRuntime();
+    const runtime = new ServingRuntime({root: runtimeFixture.root});
     try {
       await runtime.start();
       const recycled = runtime.recycle();
@@ -368,7 +371,7 @@ describe("tools/osd-runtime: the process that can be replaced", function () {
     // awaited the stop, so `recycle(); stop();` never settled, and every
     // start() and ensure() after it waited behind them.
     for (const order of ["recycle, stop", "stop, recycle"]) {
-      const runtime = new ServingRuntime();
+      const runtime = new ServingRuntime({root: runtimeFixture.root});
       try {
         await runtime.start();
         const [a, b] = order === "recycle, stop"
@@ -393,7 +396,7 @@ describe("tools/osd-runtime: the process that can be replaced", function () {
     const unhandled = [];
     const trap = (reason) => unhandled.push(reason);
     process.on("unhandledRejection", trap);
-    const runtime = new ServingRuntime();
+    const runtime = new ServingRuntime({root: runtimeFixture.root});
     runtime.command = [process.execPath, "-e", "process.exit(3)"];
     try {
       const answers = await Promise.allSettled([runtime.ensure(), runtime.ensure(), runtime.start()]);
@@ -412,7 +415,7 @@ describe("tools/osd-runtime: the process that can be replaced", function () {
     // the child has said "ready", and a second child opened the same
     // database. DuckDB does not survive two writers, and the file could not
     // be opened on the next start.
-    const runtime = new ServingRuntime();
+    const runtime = new ServingRuntime({root: runtimeFixture.root});
     try {
       const answers = await Promise.all([runtime.start(), runtime.ensure(), runtime.ensure(), runtime.start()]);
       expect(new Set(answers.map((a) => a.pid)).size, "one process").to.equal(1);
@@ -424,12 +427,13 @@ describe("tools/osd-runtime: the process that can be replaced", function () {
     // and a stop that arrives while one is still coming up stops it -- at
     // once, rather than after its boot (minutes on a remote HANA): the start
     // hears "stopped while starting" and no child is left
-    const late = new ServingRuntime();
+    const late = new ServingRuntime({root: runtimeFixture.root});
     const coming = late.start().catch((e) => e);
     await late.stop();
     const first = await coming;
     if (first instanceof Error) {
-      expect(first.message).to.equal("stopped while starting");
+      // Active-source preparation can still be running before child spawn.
+      expect(first.message).to.be.oneOf(["stopped while building", "stopped while starting"]);
     } else {
       expect(alive(first.pid), "the child that was coming up is stopped too").to.equal(false);
     }
@@ -437,7 +441,7 @@ describe("tools/osd-runtime: the process that can be replaced", function () {
   });
 
   it("a recycle is a new process, and the old one is gone", async () => {
-    const runtime = new ServingRuntime();
+    const runtime = new ServingRuntime({root: runtimeFixture.root});
     try {
       const first = await runtime.start();
       const before = first.port;
@@ -466,10 +470,10 @@ describe("tools/osd-runtime: the process that can be replaced", function () {
   it("changed modules are live after a recycle, and not before it", async () => {
     // the point of the whole exercise, so it is asserted rather than
     // described: a transpile writes output/, and only a new process reads it
-    const module = "output/zcl_zstg_demo_mpc.clas.mjs";
+    const module = join(runtimeFixture.root, "output/zcl_zstg_demo_mpc.clas.mjs");
     const before = readFileSync(module, "utf8");
     const name = async (url) => (/Name="([A-Za-z]*ancelTravel)"/.exec((await get(url, "/sap/opu/odata/sap/ZSTG_DEMO_SRV/$metadata")).text) ?? [])[1];
-    const runtime = new ServingRuntime();
+    const runtime = new ServingRuntime({root: runtimeFixture.root});
     try {
       await runtime.start();
       expect(await name(runtime.url)).to.equal("CancelTravel");
@@ -490,17 +494,17 @@ describe("tools/osd-runtime: the process that can be replaced", function () {
 
   it("every answer names its generation, and the registry knows the process", async () => {
     const {instances} = await import("../tools/osd-runtime.mjs");
-    const runtime = new ServingRuntime();
+    const runtime = new ServingRuntime({root: runtimeFixture.root});
     try {
       const first = await runtime.start();
       const answer = await fetch(`${first.url}/osd/serving`);
       expect(answer.headers.get("x-osd-generation"), "the child names the generation it was started with").to.equal(first.generation);
       expect(first.generation, "a name, not a counter, when there is a live build").to.match(/^[0-9a-f]{16}$|^\d+$/);
-      const mine = instances(process.cwd()).filter((e) => e.pid === first.pid);
+      const mine = instances(runtimeFixture.root).filter((e) => e.pid === first.pid);
       expect(mine.length, "registered while running").to.equal(1);
       expect(mine[0]).to.include({port: first.port, generation: first.generation, alive: true});
       await runtime.stop();
-      expect(instances(process.cwd()).some((e) => e.pid === first.pid), "gone from the registry once stopped").to.equal(false);
+      expect(instances(runtimeFixture.root).some((e) => e.pid === first.pid), "gone from the registry once stopped").to.equal(false);
     } finally {
       await runtime.stop();
     }
@@ -512,11 +516,11 @@ describe("tools/osd-runtime: the process that can be replaced", function () {
     // killed the child it replaced and nothing killed the last one.
     const runner = spawn(process.execPath, ["--input-type=module", "-e", `
       const {ServingRuntime} = await import("${join(process.cwd(), "tools", "osd-runtime.mjs")}");
-      const runtime = new ServingRuntime();
+      const runtime = new ServingRuntime({root: ${JSON.stringify(runtimeFixture.root)}});
       const up = await runtime.start();
       console.log("pid " + up.pid);
       setTimeout(() => undefined, 60000);
-    `], {cwd: process.cwd(), stdio: ["ignore", "pipe", "pipe"]});
+    `], {cwd: runtimeFixture.root, stdio: ["ignore", "pipe", "pipe"]});
 
     let pid;
     runner.stdout.on("data", (d) => {
@@ -542,7 +546,7 @@ describe("tools/osd-runtime: the process that can be replaced", function () {
     // found by open-steamgate reviewing the seam before wiring it: a stale
     // readiness is a success report for work that is not happening, which
     // is the same shape as the two false greens we closed today
-    const runtime = new ServingRuntime();
+    const runtime = new ServingRuntime({root: runtimeFixture.root});
     try {
       const first = await runtime.start();
       process.kill(first.pid, "SIGKILL");
@@ -573,7 +577,7 @@ describe("tools/osd-runtime: the process that can be replaced", function () {
   });
 
   it("a recycle that cannot come up says so, and then says nothing is serving", async () => {
-    const runtime = new ServingRuntime();
+    const runtime = new ServingRuntime({root: runtimeFixture.root});
     try {
       await runtime.start();
       // the next process will not exist, which is what a broken transpile
@@ -604,8 +608,8 @@ describe("tools/osd-runtime: the process that can be replaced", function () {
     // flagged by vsp: a branch under test is its own instance, so nothing
     // here may assume there is one of them
     const folder = mkdtempSync(join(tmpdir(), "osd-two-"));
-    const one = new ServingRuntime({database: join(folder, "one.sqlite")});
-    const two = new ServingRuntime({database: join(folder, "two.sqlite")});
+    const one = new ServingRuntime({root: runtimeFixture.root, database: join(folder, "one.sqlite")});
+    const two = new ServingRuntime({root: runtimeFixture.root, database: join(folder, "two.sqlite")});
     try {
       await one.start();
       await two.start();
@@ -635,7 +639,7 @@ describe("tools/osd-runtime: the process that can be replaced", function () {
     // a recycle would otherwise eat what a client created: the database here
     // is sql.js, which is memory only, so STG_DB_PATH is what carries it
     const folder = mkdtempSync(join(tmpdir(), "osd-db-"));
-    const runtime = new ServingRuntime({database: join(folder, "osd.sqlite")});
+    const runtime = new ServingRuntime({root: runtimeFixture.root, database: join(folder, "osd.sqlite")});
     const body = JSON.stringify({Project: "ZSTG_MAPPED", TravelId: "T7777", Description: "written before a recycle", Status: "O", Seats: 2});
     try {
       await runtime.start();
@@ -660,7 +664,7 @@ describe("tools/osd-runtime: the process that can be replaced", function () {
   it("without a file the database is still in memory, so a recycle starts clean", async () => {
     // The host defaults to a file backend; this case explicitly asks for
     // memory so it stays true even when the parent suite uses STG_DB=file.
-    const runtime = new ServingRuntime({env: {STG_DB: "sqlite", STG_DB_PATH: ""}});
+    const runtime = new ServingRuntime({root: runtimeFixture.root, env: {STG_DB: "sqlite", STG_DB_PATH: ""}});
     try {
       await runtime.start();
       await fetch(`${runtime.url}/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet`, {
@@ -693,7 +697,7 @@ describe("tools/osd-runtime: the process that can be replaced", function () {
     });
     const before = process.env.NODE_OPTIONS;
     process.env.OSD_INSPECT = String(inspectPort);
-    const runtime = new ServingRuntime({env: {STG_DB: "sqlite", STG_DB_PATH: ""}});
+    const runtime = new ServingRuntime({root: runtimeFixture.root, env: {STG_DB: "sqlite", STG_DB_PATH: ""}});
     try {
       await runtime.start();
       const list = await (await fetch(`http://127.0.0.1:${inspectPort}/json/list`)).json();

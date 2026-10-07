@@ -1,8 +1,9 @@
 import {expect} from "chai";
 import {ObjectStore} from "../tools/osd-store.mjs";
 import {UnitRun, alertOf, statementAfter, unitChildEnv} from "../tools/osd-unit.mjs";
-import {writeFileSync, rmSync} from "node:fs";
-import {join} from "node:path";
+import {mkdirSync, mkdtempSync, writeFileSync, rmSync, symlinkSync} from "node:fs";
+import {join, resolve} from "node:path";
+import {tmpdir} from "node:os";
 
 // The test run of OSD. vsp reads a program, its test classes, their test
 // methods and the alerts under a method, and a method with no alert is a
@@ -66,6 +67,34 @@ describe("tools/osd-unit: ABAP Unit for one object, shaped as ADT reports it", f
     const result = await runner.runDetached("CLAS", "ZCL_STG_SEGW_TEST", {testClass: "LTCL_TREE", method: "PROPERTIES_IN_FILE_ORDER"});
     expect(result.counts).to.include({methods: 1, passed: 1});
     expect(result.testClasses[0].testMethods[0].name).to.equal("PROPERTIES_IN_FILE_ORDER");
+  });
+
+  it('a single-class child that dies without JSON returns an execution alert', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'unit-broken-boot-'));
+    try {
+      mkdirSync(join(root, 'output'));
+      symlinkSync(resolve('node_modules'), join(root, 'node_modules'), 'junction');
+      writeFileSync(join(root, 'abap_transpile.json'), JSON.stringify({input_folder: [], output_folder: 'output', libs: []}));
+      writeFileSync(join(root, 'output/init.mjs'), `export async function initializeABAP() {throw new Error('broken unit boot');}`);
+      const plan = runner.classes('CLAS', 'ZCL_STG_SEGW_TEST');
+      plan.classes = plan.classes.filter(c => c.name === 'LTCL_TREE');
+      const result = await new UnitRun({root}).runDetached('CLAS', 'ZCL_STG_SEGW_TEST', {plan});
+      expect(result.ok).to.equal(false);
+      expect(result.counts).to.include({classes: 1, methods: 0, classAlerts: 1});
+      expect(result.testClasses[0].name).to.equal('LTCL_TREE');
+      expect(result.testClasses[0].testMethods).to.deep.equal([]);
+      expect(result.testClasses[0].alerts[0]).to.include({stage: 'execution', kind: 'shortDump'});
+      expect(result.testClasses[0].alerts[0].title).to.contain('broken unit boot');
+    } finally {rmSync(root, {recursive: true, force: true});}
+  });
+
+  it("a detached failure retains test include frames through the output generation symlink", async () => {
+    const result = await runner.runDetached("CLAS", "ZCL_ZOSD_TEST_DEMO", {method: "DELIBERATE_FAILURE"});
+    const alert = result.testClasses[0].testMethods[0].alerts[0];
+    expect(alert.kind).to.equal("failedAssertion");
+    const frame = alert.stack.find(e => e.uri === "zcl_zosd_test_demo.clas.testclasses.abap");
+    expect(frame, JSON.stringify(alert.stack)).not.to.equal(undefined);
+    expect(frame.line).to.equal(34);
   });
 
   it("a test class that was never transpiled is an alert, not silence", async () => {
@@ -154,6 +183,10 @@ ENDCLASS.
     thrown.EXTRA_CX = {INTERNAL_FILENAME: "cl_abap_unit_assert.clas.abap", INTERNAL_LINE: 460};
 
     const alert = alertOf(thrown, "text_table_of_the_project");
+    expect(alert).to.include({expected: "b", actual: "a", stage: "text_table_of_the_project"});
+    thrown.expected = {get: () => ""};
+    thrown.actual = {get: () => ""};
+    expect(alertOf(thrown, "empty_string")).to.include({expected: "", actual: ""});
     expect(alert).to.include({kind: "failedAssertion", severity: "critical", title: "Expected 'b', got 'a'"});
     expect(alert.details).to.include.members(["Expected [b]", "Actual [a]", "Raised in text_table_of_the_project"]);
     expect(alert.stack[0]).to.include({uri: "cl_abap_unit_assert.clas.abap", line: 460});
@@ -264,5 +297,35 @@ describe("tools/osd-unit: unitChildEnv (runDetached's own database, or a differe
     const {env, ownPath} = unitChildEnv({dbEnv: {STG_DB: "postgres", PGDATABASE: "osd_test", PGHOST: "pghost"}}, {});
     expect(ownPath).to.equal(undefined);
     expect(env).to.include({STG_DB: "postgres", PGDATABASE: "osd_test", PGHOST: "pghost"});
+  });
+});
+
+
+describe("tools/osd-unit: detached child event races", function () {
+  this.timeout(10000);
+  const run = async mode => {
+    const {spawn} = await import('node:child_process');
+    const child = spawn(process.execPath, [resolve('test/helpers/unit-child-events.mjs')],
+      {env: {...process.env, UNIT_EVENT_CASE: mode}, stdio: ['ignore', 'pipe', 'pipe']});
+    let out = '', err = '';
+    child.stdout.on('data', data => { out += data; });
+    child.stderr.on('data', data => { err += data; });
+    const code = await new Promise((resolve, reject) => {
+      child.on('error', reject); child.on('close', resolve);
+    });
+    expect(code, err).to.equal(0);
+    return JSON.parse(out.trim());
+  };
+  it('rejects if watchdog result reconstruction throws, instead of escaping close', async () => {
+    expect((await run('reconstruct')).error).to.match(/filter/);
+  });
+  it('rejects if a progress message handler throws, instead of escaping message', async () => {
+    expect((await run('message')).error).to.match(/kind/);
+  });
+  it('prefers child JSON when the watchdog fires before close', async () => {
+    expect((await run('race')).result).to.deep.equal({ok: true, marker: 'child-result'});
+  });
+  it('an explicit run abort still overrides parseable child JSON', async () => {
+    expect((await run('cancel')).error).to.equal('ABAP Unit run cancelled');
   });
 });

@@ -18,9 +18,14 @@
 //
 // Content hashing takes 105 ms here, 170 ms for the largest library;
 // generations are 44 MB. See docs/generations.md for the design.
-import {keepSourceInputs, keepGeneratedSources, completeSourceSnapshot, materializeSourceSnapshot, gcSourceInputs} from "./osd-source-snapshot.mjs";
+import {keepSourceInputs, keepGeneratedSources, completeSourceSnapshot, materializeSourceSnapshot, missingSourceInputs} from "./osd-source-snapshot.mjs";
+import {gc} from "./osd-build-gc.mjs";
+import {normalPath, stampOf, changedError} from "./osd-build-input-check.mjs";
+export {normalPath};
+export {gc};
 import {createHash} from "node:crypto";
 import {libraryPath} from "./osd-lib-path.mjs";
+import {checkLayerVersions} from "./layer-version/index.mjs";
 import {compareGenerations} from "./osd-generation-diff.mjs";
 import {execFileSync} from "node:child_process";
 import {run} from "./osd-build-command.mjs";
@@ -30,11 +35,12 @@ import {fileURLToPath} from "node:url";
 import {buildIdentity, assertToolchain, describeBuild} from "./osd-transpiler.mjs";
 import {describeDuplicates, excludePatterns, layers} from "./osd-inputs.mjs";
 import {transpile, selectedModules} from "./osd-transpile.mjs";
-import {inputFoldersOf, packsOf, webappsOf} from "./osd-packs.mjs";
+import {inputFoldersOf, packsOf, userFoldersOf, webappsOf} from "./osd-packs.mjs";
 import {describeUnfetched, unfetched} from "./osd-fetch.mjs";
 import {toolCommand, hosted} from "./osd-host.mjs";
 import {runsAs} from "./osd-main.mjs";
 import {forPublishing} from "./osd-tmp.mjs";
+import {sourceBuildOverlay} from "./osd-source-build-view.mjs";
 
 // the tools this build runs before the transpiler, in the order the old npm
 // script ran them; each writes its part of gen/ and says so
@@ -233,20 +239,28 @@ export function generatorClosure(toolsDir = TOOLS, generators = GENERATORS) {
     for (const m of text.matchAll(/import\("(\.[^"]+)"\)/g)) walk(join(dirname(abs), m[1]));
   };
   for (const [script] of generators) walk(join(toolsDir, script));
+  walk(join(toolsDir, "osd-generator-view.mjs"));
   return [...seen].sort();
 }
 
 /** the generators, in order, writing into the working `gen/` as they always do */
-export function runGenerators(root, log = () => {}) {
+export function runGenerators(root, log = () => {}, overlay = undefined) {
   let output = "";
   for (const [script, ...args] of GENERATORS) {
     log(`${script} ${args.join(" ")}`.trim());
     const [cmd, ...argv] = toolCommand(join(TOOLS, script), args);
-    output += run(cmd, argv, root);
+    const view = activeOverlay(overlay);
+    const env = {...process.env, OSD_ROOT: root};
+    delete env.OSD_ACTIVE_BUILD_OVERLAY;
+    if (view) {
+      env.OSD_ACTIVE_BUILD_OVERLAY = JSON.stringify({...view, exclude: [...view.exclude]});
+      // Hosted executables install this view in their gen dispatch.
+      if (!hosted()) argv.unshift("--import", join(TOOLS, "osd-generator-view.mjs"));
+    }
+    output += run(cmd, argv, root, env);
   }
   return output;
 }
-
 
 /**
  * What identifies the generators that will actually RUN.
@@ -616,6 +630,7 @@ export function switchTo(root, hash, log = () => {}, options = {}) {
 // (tools/osd-warm.mjs), so the two cannot disagree about what a tree is
 export function prepare(root, log = () => {}) {
   const config = loadConfig(root);
+  checkLayerVersions(root, packsOf(root), userFoldersOf(root), log);
   const missingLibs = missingLibraries(root, config);
   if (missingLibs.length > 0) {
     const e = new Error(`the build refuses: ${describeMissingLibraries(missingLibs)}`);
@@ -693,6 +708,7 @@ export function activeOverlay(overlay) {
 
 export async function build(options = {}) {
   const root = resolve(options.root ?? process.env.OSD_ROOT ?? process.cwd());
+  options = {...options, overlay: await sourceBuildOverlay(root, options)};
   const log = options.log ?? (() => {});
   const paths = layout(root);
   const started = Date.now();
@@ -721,8 +737,8 @@ export async function build(options = {}) {
   const stamps = new Map(watched.map((file) => [file, stampOf(file)]));
   const moved = watched.filter((file) => (existsSync(file) ? digestOf(file) : undefined) !== named.get(file));
   if (moved.length > 0) throw changedError(root, moved);
+  if (options.expectedHash !== undefined && hash !== options.expectedHash) throw changedError(root, []);
   const target = join(paths.byInput, hash);
-
   // a generation a warm build made (tools/osd-warm.mjs) is not a cache hit
   // until a cold transpile has been compared with it: it is built again,
   // compared, and replaced if it differs
@@ -749,7 +765,7 @@ export async function build(options = {}) {
       log(`generation ${hash} is already built, but gen/ has drifted from it -- regenerating`);
       const unlockAgain = lock(paths);
       try {
-        runGenerators(root, log);
+        runGenerators(root, log, options.overlay);
       } finally {
         unlockAgain();
       }
@@ -760,6 +776,9 @@ export async function build(options = {}) {
       keepSourceInputs(root, target, digests, undefined, options.overlay);
       keepGeneratedSources(root, target);
       completeSourceSnapshot(target);
+    } else {
+      const missing = missingSourceInputs(root, target, digests, options.overlay);
+      if (missing.size) keepSourceInputs(root, target, missing, undefined, options.overlay);
     }
     if (options.switch !== false && liveHash(root) !== hash) {
       switchTo(root, hash, log);
@@ -776,7 +795,7 @@ export async function build(options = {}) {
     // generators: false is for a tree with nothing to generate (a test's
     // tree of a few classes); every real build runs them
     if (options.generators !== false) {
-      output += runGenerators(root, log);
+      output += runGenerators(root, log, options.overlay);
     }
     await options.onStep?.("generated");
     // **The layers are read again once gen/ is written.** gen/ is a layer, and
@@ -817,7 +836,7 @@ export async function build(options = {}) {
           generatedDigests.set(normalPath(file), createHash("sha256").update(bytes).digest("hex"));
         }
         const known = digests.get(normalPath(file));
-        if (known !== undefined && createHash("sha256").update(bytes).digest("hex") !== known) changed.push(file);
+        if (known !== undefined && createHash("sha256").update(bytes).digest("hex") !== known) throw changedError(root, [file]);
       }});
     // and nothing the generators or the transpiler read was written since
     // it was named
@@ -929,42 +948,6 @@ export async function build(options = {}) {
   }
 }
 
-// keep the live generation and the newest N; drop the rest, every leftover
-// tmp, and the directories moved aside by the first switch
-export function gc(root, options = {}) {
-  const paths = layout(root);
-  const unlock = lock(paths);
-  try {
-    const keep = options.keep ?? 5;
-    const live = liveHash(root);
-    const removed = [];
-    const all = generations(root).reverse(); // newest first
-    for (const g of all.slice(keep)) {
-      if (g.hash === live) {
-        continue;
-      }
-      rmSync(join(paths.byInput, g.hash), {recursive: true, force: true});
-      removed.push(g.hash);
-    }
-    if (existsSync(paths.tmp)) {
-      for (const e of readdirSync(paths.tmp)) {
-        rmSync(join(paths.tmp, e), {recursive: true, force: true});
-        removed.push(`tmp/${e}`);
-      }
-    }
-    if (existsSync(paths.build)) {
-      for (const e of readdirSync(paths.build)) {
-        if (e.startsWith("legacy-")) {
-          rmSync(join(paths.build, e), {recursive: true, force: true});
-          removed.push(e);
-        }
-      }
-    }
-    gcSourceInputs(root);
-    return removed;
-  } finally {unlock();}
-}
-
 export async function main(args) {
   // a build for publishing leaves $TMP out (tools/osd-tmp.mjs)
   if (args.includes("--publish")) forPublishing(process.env);
@@ -1002,7 +985,8 @@ export async function main(args) {
     say(`${r.cached ? "reused" : "built"} ${r.hash} in ${r.ms} ms, ${r.objects} objects${r.live ? ", live" : ""}`);
     return 0;
   } catch (error) {
-    say(`${error.code ?? "FAILED"}: ${error.message}`);
+    if (error.code === "OSD_VERSION_MISMATCH") console.error(error.message);
+    else say(`${error.code ?? "FAILED"}: ${error.message}`);
     if (error.output) {
       console.error(String(error.output).slice(-3000));
     }
@@ -1013,26 +997,4 @@ export async function main(args) {
 
 if (runsAs("osd-build.mjs")) {
   main(process.argv.slice(2)).then((code) => process.exit(code));
-}
-
-// a path spelled one way: absolute, forward slashes
-export function normalPath(file) {
-  return resolve(file).split("\\").join("/");
-}
-
-// what changes with any write to a file, a write of the same bytes included
-function stampOf(file) {
-  try {
-    const st = statSync(file, {bigint: true});
-    return `${st.size}:${st.mtimeNs}:${st.ctimeNs}:${st.ino}`;
-  } catch {
-    return "absent";
-  }
-}
-
-function changedError(root, files) {
-  const names = [...new Set(files.map((f) => relative(root, f)))];
-  const error = new Error(`the tree changed while it was built: ${names.slice(0, 5).join(", ")}`);
-  error.code = "CHANGED";
-  return error;
 }

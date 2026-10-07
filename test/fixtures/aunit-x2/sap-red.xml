@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SYNTHETIC: measured ABAP Unit result shape; no system capture. -->
+<aunit:runResult xmlns:aunit="http://www.sap.com/adt/aunit">
+  <program xmlns:adtcore="http://www.sap.com/adt/core" adtcore:uri="/sap/bc/adt/oo/classes/zcl_osd_x2_demo" adtcore:type="CLAS/OC" adtcore:name="ZCL_OSD_X2_DEMO" uriType="semantic">
+    <testClasses>
+      <testClass adtcore:uri="/sap/bc/adt/oo/classes/zcl_osd_x2_demo#testclass=LTCL_ADD" adtcore:type="CLAS/OL" adtcore:name="LTCL_ADD" uriType="semantic" navigationUri="/sap/bc/adt/oo/classes/zcl_osd_x2_demo/includes/testclasses#type=CLAS%2FOCL;name=LTCL_ADD" durationCategory="short" riskLevel="harmless">
+        <testMethods>
+          <testMethod adtcore:uri="/sap/bc/adt/oo/classes/zcl_osd_x2_demo#testclass=LTCL_ADD;testmethod=ADD_2_3" adtcore:type="CLAS/OLI" adtcore:name="ADD_2_3" executionTime="0" uriType="semantic" navigationUri="/sap/bc/adt/oo/classes/zcl_osd_x2_demo/includes/testclasses#type=CLAS%2FOLD;name=LTCL_ADD%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20ADD_2_3" unit="s">
+            <alerts>
+              <alert kind="failedAssertion" severity="critical">
+                <title>Critical Assertion Error: 'add'</title>
+                <details>
+                  <detail text="Different values">
+                    <details><detail text="Expected [5] Actual [1-]"/></details>
+                  </detail>
+                  <detail text="Test 'LTCL_ADD-&gt;ADD_2_3' in Main Program 'ZCL_OSD_X2_DEMO===============CP'"/>
+                </details>
+                <stack>
+                  <stackEntry adtcore:uri="/sap/bc/adt/oo/classes/zcl_osd_x2_demo/includes/testclasses#start=7,0" adtcore:type="CLAS/OCN/testclasses" adtcore:name="ZCL_OSD_X2_DEMO" adtcore:description="Include: &lt;ZCL_OSD_X2_DEMO===============CCAU&gt; Line: &lt;7&gt; (ADD_2_3)"/>
+                </stack>
+              </alert>
+            </alerts>
+          </testMethod>
+        </testMethods>
+      </testClass>
+    </testClasses>
+  </program>
+</aunit:runResult>

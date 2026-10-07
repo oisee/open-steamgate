@@ -17,6 +17,7 @@ import {describe} from "./osd-describe.mjs";
 // process, commits when it is done and rolls back when it dumps -- the rule
 // the HTTP steps had and these did not (tools/osd-dialog-step.mjs)
 import {apcTimerSession} from "./osd-apc-timers.mjs";
+import {apcMailbox} from "./osd-apc-mailbox.mjs";
 import {dialogStep} from "./osd-dialog-step.mjs";
 import {installAmc} from "./osd-amc.mjs";
 export {describe};
@@ -185,7 +186,9 @@ export async function serveChannel(options) {
   // messages wait here and go out the moment the connection is real.
   let pending = [];
   let live = false;
+  const mailbox = apcMailbox();
   const sendFrame = (payload, opcode = OP.text) => {
+    if (mailbox.closed) return;
     if (live === false) {
       pending.push([payload, opcode]);
       return;
@@ -200,25 +203,22 @@ export async function serveChannel(options) {
     }
   };
   let shut = () => {};
-  let turn = Promise.resolve();
   const queue = (work) => {
-    turn = turn.then(work).catch((e) => {
+    return mailbox.enqueue(work).catch((e) => {
       log?.(`APC ${channel.path} (${channel.handler}): ${describe(e)}`);
       shut(1011, "handler failed");
     });
-    return turn;
   };
   const timers = channel.stateful === true
-    ? apcTimerSession(abap, (work) => queue(async () => {
-      await work();
-      await drain();
-    }))
+    ? apcTimerSession(abap, queue, undefined, drain)
     : {step: dialogStep, close() {}};
   let closed = false;
   const subscriptions = [];
   shut = (code, reason) => {
     if (closed) return;
     closed = true;
+    mailbox.close();
+    pending = [];
     for (const subscription of subscriptions) subscription.close();
     timers.close();
     if (live === false) return;
@@ -229,6 +229,10 @@ export async function serveChannel(options) {
   };
   socket.on("error", () => shut(1011, "socket error"));
   socket.on("close", () => shut(1000, "socket closed"));
+  // A client FIN half-closes an upgraded socket: "end" comes without "close"
+  // (half-open connections are allowed), and queued messages must not run
+  // for a peer that has left. An already committed event still publishes.
+  socket.on("end", () => shut(1000, "socket ended"));
 
   // The handler runs before the upgrade, not after.
   //
@@ -237,33 +241,50 @@ export async function serveChannel(options) {
   // "this channel is here", and if the class is not in this runtime, or the
   // handler refuses the connection, that is knowable now and should be said
   // in the language the client is still speaking — HTTP.
-  const start = () => timers.step(async () => {
-    await host.constructor_({
-      iv_handler: new abap.types.String().set(channel.handler),
-      it_fields: fieldsOf(req.url, options.host),
-    });
-    const accepted = await host.open();
-    await drain();
-    if (accepted.get() === "X" && typeof host.bindings === "function") {
-      const broker = installAmc(abap, options.root);
-      const bindings = await host.bindings();
-      for (const row of bindings.array()) {
-        const binding = row.get();
-        let last = Promise.resolve();
-        subscriptions.push(broker.subscribe({
-          app: binding.application_id.get(), path: binding.channel_id.get(),
-          extension: binding.extension_id.get(), activity: "C",
-          program: channel.handler.toUpperCase().padEnd(30, "=") + "CP",
-          session: timers.session,
-          client: abap.builtin.sy.get().mandt.get(), username: abap.builtin.sy.get().uname.get(),
-          receive: (publication) => {
-            last = last.then(() => deliverAmcPublication(publication, () => closed, sendFrame))
-              .catch((e) => log?.(`APC AMC delivery: ${describe(e)}`));
-          },
-        }));
+  const start = () => mailbox.enqueue(async () => {
+    const accepted = await timers.step(async () => {
+      await host.constructor_({
+        iv_handler: new abap.types.String().set(channel.handler),
+        it_fields: fieldsOf(req.url, options.host),
+      });
+      const accepted = await host.open();
+      await drain();
+      if (accepted.get() === "X" && typeof host.bindings === "function") {
+        const broker = installAmc(abap, options.root);
+        const bindings = await host.bindings();
+        for (const row of bindings.array()) {
+          const binding = row.get();
+          let last = Promise.resolve();
+          subscriptions.push(broker.subscribe({
+            app: binding.application_id.get(), path: binding.channel_id.get(),
+            extension: binding.extension_id.get(), activity: "C",
+            program: channel.handler.toUpperCase().padEnd(30, "=") + "CP",
+            session: timers.session,
+            client: abap.builtin.sy.get().mandt.get(), username: abap.builtin.sy.get().uname.get(),
+            receive: (publication) => {
+              last = last.then(() => deliverAmcPublication(publication, () => closed, sendFrame))
+                .catch((e) => log?.(`APC AMC delivery: ${describe(e)}`));
+            },
+          }));
+        }
       }
-    }
-    return accepted.get() === "X";
+      return accepted.get() === "X";
+    });
+    if (closed || !accepted) return accepted;
+    // Startup, publication and the open notification are the first mailbox
+    // turn. An immediately due timer must wait for all three.
+    socket.write([
+      "HTTP/1.1 101 Switching Protocols",
+      "Upgrade: websocket",
+      "Connection: Upgrade",
+      `Sec-WebSocket-Accept: ${acceptKey(key)}`,
+      `X-OSD-Channel: ${channel.name}`,
+      "", "",
+    ].join("\r\n"));
+    live = true;
+    for (const [payload, opcode] of pending) socket.write(frame(payload, opcode));
+    pending = [];
+    return accepted;
   });
 
   let accepted;
@@ -278,33 +299,18 @@ export async function serveChannel(options) {
   }
   if (closed) return undefined;
   if (accepted === false) {
+    mailbox.close();
     timers.close();
     socket.end("HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\n\r\nthe handler refused the connection");
     return undefined;
   }
-
-  // the handshake, once the handler is known to be there and willing
-  socket.write([
-    "HTTP/1.1 101 Switching Protocols",
-    "Upgrade: websocket",
-    "Connection: Upgrade",
-    `Sec-WebSocket-Accept: ${acceptKey(key)}`,
-    // which channel answered, the same kind of receipt the OData path carries
-    `X-OSD-Channel: ${channel.name}`,
-    "", "",
-  ].join("\r\n"));
-
-  live = true;
-  for (const [payload, opcode] of pending) {
-    socket.write(frame(payload, opcode));
-  }
-  pending = [];
 
   let buffer = Buffer.isBuffer(head) && head.length > 0 ? Buffer.from(head) : Buffer.alloc(0);
 
   // one conversation at a time: a stateful handler is a single object, and
   // two messages in flight would interleave inside it
   socket.on("data", (chunk) => {
+    if (mailbox.closed) return;
     buffer = buffer.length === 0 ? chunk : Buffer.concat([buffer, chunk]);
     for (;;) {
       let parsed;
@@ -321,15 +327,18 @@ export async function serveChannel(options) {
       if (parsed.opcode === OP.text) {
         const text = parsed.payload.toString("utf8");
         queue(() => timers.step(async () => {
+          if (mailbox.closed) return;
           await host.message({iv_text: new abap.types.String().set(text)});
           await drain();
         }));
       } else if (parsed.opcode === OP.ping) {
         socket.write(frame(parsed.payload, OP.pong));
       } else if (parsed.opcode === OP.close) {
-        queue(() => timers.step(async () => {
+        timers.close();
+        mailbox.closeTurn(() => timers.step(async () => {
           await host.close({iv_reason: new abap.types.String().set("closed by the client"), iv_code: new abap.types.Integer().set(1000)});
-        })).finally(() => shut(1000, "bye"));
+        })).catch(e => log?.(`APC ${channel.path}: ${describe(e)}`))
+          .finally(() => shut(1000, "bye"));
         return;
       }
     }

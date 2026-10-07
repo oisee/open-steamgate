@@ -1,3 +1,5 @@
+import {rmSync} from "node:fs";
+import {copyRuntimeRoot} from "./runtime-root.mjs";
 // Fresh reduced parent kernel: xref must keep using the serving database.
 import assert from "node:assert/strict";
 import express from "express";
@@ -12,12 +14,13 @@ import {abapRunner} from "../../tools/adt-abap-front.mjs";
 import {dialogStep} from "../../tools/osd-dialog-step.mjs";
 const servers=[],served=[],sides=[];
 let runtime;
+const runtimeRoot = copyRuntimeRoot();
 try {
   const kernel=await loadAdtKernel({output:resolve("output"),setup});
   assert.equal((await abap.Classes.ZCL_OSD_KERNEL_GUARD.has_serving_database({})).get()," ");
-  runtime=new ServingRuntime({root:process.cwd(),env:{OSD_ADT_ONE_RUNTIME:"0",STG_DB:"sqlite",STG_DB_PATH:"",STG_TLS:"0"}});
+  runtime=new ServingRuntime({root:runtimeRoot,env:{OSD_ADT_ONE_RUNTIME:"0",STG_DB:"sqlite",STG_DB_PATH:"",STG_TLS:"0"}});
   await runtime.start();
-  const store=new ObjectStore({root:process.cwd()}), data=new Data({runtime});
+  const store=new ObjectStore({root:runtimeRoot}), data=new Data({runtime});
   const db=abap.context.databaseConnections.DEFAULT;
   const select=db.select;
   db.select=function(input) {if(/wbcrossgt/i.test(input.select)) throw new Error("parent xref read");return select.call(this,input);};
@@ -42,5 +45,6 @@ try {
 } finally {
   for(const s of servers) await new Promise(done=>s.close(done));
   await runtime?.stop();
+  rmSync(runtimeRoot, {recursive: true, force: true});
   await globalThis.abap?.context?.databaseConnections?.DEFAULT?.disconnect();
 }

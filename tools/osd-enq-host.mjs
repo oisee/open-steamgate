@@ -197,6 +197,7 @@ function retireNow(sid, key, tell) {
  * go, and the key stays ended */
 export function endEnqSession(key) {
   markEnded(key);
+  for (const callback of repositoryEnds) callback(key);
   dropEnqSession(key);
   for (const [sid, k] of [...doomed]) if (k === key) retireNow(sid, key, false);
 }
@@ -237,6 +238,48 @@ export function enqHolder(table, input) {
     if (sid === row.session) key = k;
   }
   return {key, user: row.user};
+}
+
+const repositoryEnds = new Set();
+export function onRepositorySessionEnd(callback) {
+  repositoryEnds.add(callback);
+  return () => repositoryEnds.delete(callback);
+}
+export function repositorySessionKey() { return sessionKey(); }
+export function repositorySessionGuard() {
+  const key = sessionKey(), sid = currentEnqSession();
+  return () => !isEnded(key) && sessions.get(key) === sid && locks().sessions.has(sid);
+}
+
+/** Author identity of the caller's live ENQ session, not mutable sy-uname. */
+export function repositoryCaller() {
+  const sid = currentEnqSession();
+  const session = locks().sessions.get(sid);
+  if (!session) throw new EnqSessionEnded(sessionKey());
+  return session.user;
+}
+
+/** Short repository mutation in the caller's ENQ session. X refuses other
+ * owners and reports 602 for our existing X lock, which must remain held. */
+export async function withRepositoryLock(type, name, work) {
+  if (type === "INCL" || type === "PROG") {
+    return repositoryLock("PROG", name, () => repositoryLock("INCL", name, work));
+  }
+  return repositoryLock(type, name, work);
+}
+async function repositoryLock(type, name, work) {
+  const r = request(globalThis.abap, "ZOSD_ADT_LOCK", "EZOSD_ADT_OBJ", {
+    mode_zosd_adt_lock: "X", objtype: String(type).toUpperCase(),
+    objname: String(name).toUpperCase(), x_objtype: "X", x_objname: "X", _scope: "1",
+  });
+  const sid = currentEnqSession();
+  const result = locks().tryEnqueue(sid, r);
+  const existing = result.msgno === "602";
+  if (result.subrc !== 0 && !existing) {
+    throw Object.assign(new Error(`${type} ${name} is locked by another session`), {code: "CONFLICT"});
+  }
+  try { return await work(); }
+  finally { if (!existing) locks().dequeue(sid, r); }
 }
 
 /** ENQUEUE_<object> on behalf of the bound session key, without a step:

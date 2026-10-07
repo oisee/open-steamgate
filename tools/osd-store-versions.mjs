@@ -1,3 +1,4 @@
+import {warmOverlay} from "./osd-warm-overlay.mjs";
 // Active/inactive versions, source snapshots and activation provenance.
 import {existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync} from "node:fs";
 import {createHash} from "node:crypto";
@@ -5,7 +6,8 @@ import {dirname, join, relative, resolve} from "node:path";
 import * as abaplint from "@abaplint/core";
 import {hashOf, inputsOf, liveHash, normalPath} from "./osd-build.mjs";
 import {entityTag} from "./adt-entity.mjs";
-import {writeSourceSnapshot} from "./osd-source-snapshot.mjs";
+import {NotFound} from "./osd-store.mjs";
+import {writeSourceSnapshot, sourceSnapshotPath, sourceOriginalPath} from "./osd-source-snapshot.mjs";
 import {copyDurable, mkdirDurable, removeDurable, renameDurable, writeDurable} from "./osd-durable.mjs";
 import {TYPES, INCLUDES} from "./osd-store-types.mjs";
 
@@ -88,7 +90,7 @@ export class StoreVersions {
   #recoverFromCopies() {
     const folder = join(this.#store.root, this.#store.inactiveDir, "active");
     if (!existsSync(folder)) return;
-    const copies = new Set(walkFiles(folder).map((f) => relative(folder, f).split("\\").join("/")));
+    const copies = new Set(walkFiles(folder).map((f) => sourceOriginalPath(relative(folder, f))));
     if (copies.size === 0) return;
     this.#keepOrphans = true;
     for (const entry of this.#entries().values()) {
@@ -130,9 +132,8 @@ export class StoreVersions {
   // that comes late -- are that same inactive source, and wait for it to be
   // activated, however long.
   // The inactive objects other than `activating`, each with its files'
-  // active copy (empty when it never had one) and saved text: what a warm
-  // build asks to refuse a generator input the build view cannot cover
-  // (WarmCompiler#generatorInput).
+  // active copy (empty when it never had one) and saved text: the captured
+  // source view sent to a warm compiler process.
   inactiveSources(activating = new Set()) {
     const out = [];
     for (const key of this.#store.inactive) {
@@ -215,7 +216,7 @@ export class StoreVersions {
   }
 
   #snapshotOf(file) {
-    return join(this.#store.inactiveDir, "active", file);
+    return join(this.#store.inactiveDir, "active", sourceSnapshotPath(file));
   }
 
   #hasCopy(entry) {
@@ -278,40 +279,12 @@ export class StoreVersions {
   // publication's objects are not this one's: each build is given its own.
   // undefined when there is nothing to keep out.
   overlay(activating = new Set()) {
-    const kept = [];
-    const copied = [];
-    const unused = [];
-    const owned = new Set();
-    for (const key of this.#store.inactive) {
+    const entries = [...this.#store.inactive].flatMap(key => {
       const [type, ...rest] = key.split(" ");
       const entry = this.#store.find(type, rest.join(" "));
-      if (entry === undefined) continue;
-      const mine = activating.has(key);
-      for (const file of this.#filesOfEntry(entry)) {
-        const copy = this.#snapshotOf(file);
-        const hasCopy = existsSync(join(this.#store.root, copy));
-        if (mine) {
-          if (hasCopy) unused.push(resolve(this.#store.root, copy));
-          continue;
-        }
-        if (existsSync(join(this.#store.root, file))) kept.push(resolve(this.#store.root, file));
-        if (hasCopy) {
-          copied.push(copy);
-          owned.add(resolve(this.#store.root, copy));
-        }
-      }
-    }
-    // no copy is an input: the tree's own inactive files are all there is
-    // to leave out, and nothing at all is the build as it always was --
-    // which keeps an ordinary save-then-activate on the warm path
-    if (copied.length === 0) return kept.length === 0 ? undefined : {exclude: kept.sort()};
-    // a copy nobody inactive owns any more (an object deleted under us) is
-    // not an input either
-    const folder = join(this.#store.root, this.#store.inactiveDir, "active");
-    for (const file of walkFiles(folder)) {
-      if (!owned.has(resolve(file))) unused.push(resolve(file));
-    }
-    return {exclude: [...new Set([...kept, ...unused])].sort(), folder: join(this.#store.inactiveDir, "active")};
+      return entry === undefined ? [] : [{key, files: this.#filesOfEntry(entry)}];
+    });
+    return warmOverlay(this.#store.root, join(this.#store.inactiveDir, "active"), entries, activating);
   }
 
   // The registry as the build of `activating` would see the system: every
@@ -422,7 +395,7 @@ export class StoreVersions {
     const hash = (this.#store.served?.running === true ? this.#store.served.generation : undefined) ?? liveHash(this.#store.root);
     const generation = hash && join(this.#store.root, "build", "by-input", hash);
     const complete = generation && existsSync(join(generation, "source", ".complete"));
-    const snapshot = generation && join(generation, "source", file);
+    const snapshot = generation && join(generation, "source", sourceSnapshotPath(file));
     if (complete && existsSync(snapshot)) return snapshot;
     // Pre-save copies retain proven active input, including genuinely empty
     // bytes. keepActive leaves unavailable input absent, never a placeholder.
@@ -455,7 +428,7 @@ export class StoreVersions {
     if (typeof digest !== "string" || !/^[a-f0-9]{64}$/.test(digest)) return undefined;
     const shared = join(this.#store.root, "build", "source-by-digest", digest);
     if (existsSync(join(generation, "source-shared")) && existsSync(shared)) return shared;
-    const target = join(generation, "source", file);
+    const target = join(generation, "source", sourceSnapshotPath(file));
     if (existsSync(target) && createHash("sha256").update(readFileSync(target)).digest("hex") === digest) return target;
     const working = join(this.#store.root, file);
     if (!existsSync(working)) return undefined;
@@ -466,15 +439,20 @@ export class StoreVersions {
     return target;
   }
 
-  #activeSource(file, entry) {
-    const active = this.#activeFile(file, entry);
-    return active && existsSync(active) ? readFileSync(active, "utf8") : "";
-  }
-
   sourceVersion(part, version) {
     const active = version === "active";
-    const source = active ? this.#activeSource(part.file, part) : part.source;
-    return {...part, source, etag: entityTag(active ? "active\0" + source : source)};
+    const activeFile = active ? this.#activeFile(part.file, part) : undefined;
+    const classInclude = part.type === "CLAS" && part.include !== "main";
+    // Class includes use READ's per-version absence flag. The ADT routes
+    // turn it into measured missing-test errors or standard templates.
+    // A main source without active proof has no readable representation.
+    if (active && activeFile === undefined && !classInclude) {
+      throw new NotFound(part.type, `${part.name} active version (${part.include ?? "main"})`);
+    }
+    const source = active ? (activeFile === undefined ? "" : readFileSync(activeFile, "utf8")) : part.source;
+    // Retained active bytes, including zero bytes, survive working-file removal.
+    const presence = active ? {empty: activeFile === undefined} : {};
+    return {...part, ...presence, source, etag: entityTag(active ? "active\0" + source : source)};
   }
 
 }

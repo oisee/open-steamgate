@@ -7,6 +7,7 @@
     "test/taxi-import.mjs",
     "test/bootstrap.mjs",
     "test/pins.mjs",
+    "test/transpiler-pin.mjs",
     "test/e2e-instance.mjs",
     "test/gui-reports.mjs",
     "test/journal.mjs",
@@ -28,7 +29,9 @@
     "test/osd-suites.mjs",
     "test/osd-test-isolation.mjs",
     "test/ci-wait-tests.mjs",
+    "test/ci-lifecycle-gate.mjs",
     "test/smoke-binary.mjs",
+    "test/consumer-smoke.mjs",
     "test/preflight.mjs",
     "test/fae-batching.mjs",
     "test/lift-r1.mjs",
@@ -55,6 +58,7 @@
     "test/xml-wellformed.mjs",
     "test/prove-on-system.mjs",
     "test/prove-inplace.mjs",
-    "test/sxml-contract.mjs"
+    "test/sxml-contract.mjs",
+    "test/adt-lifecycle-report.mjs"
   ]
 }

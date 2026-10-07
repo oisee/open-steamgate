@@ -21,9 +21,35 @@ const genAllowancePatch = `allowances['test/gen-allowance-fixture.mjs']=${JSON.s
     ],
   },
 })};`;
-function run(files, options = [], allowancePatch, preload, hook = true) {
-  const root = mkdtempSync(join(tmpdir(), 'isolation-proof-'));
+// Exercise the removed warm allowance only in synthetic child processes.
+// Real host tests keep the strict generation invariant and private roots.
+const warmProofFile = 'test/warm-proof-fixture.mjs';
+const warmAllowancePatch = `allowances[${JSON.stringify(warmProofFile)}]=${JSON.stringify({
+  "generation": {
+    "reason": "Synthetic restored-inputs proof fixture; real warm hosts now use private roots.",
+    "owner": "test fixture",
+    "backlog": "test/osd-test-isolation.mjs",
+    "drift": {
+      "kind": "restored-inputs",
+      "paths": [
+        "src/demo/zcl_zstg_demo_dpc_ext.clas.abap"
+      ],
+      "maxCount": 1,
+      "restoreContent": {
+        "pattern": "\\* The hand-written part a developer owns on a real system \\(T7 warm test [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\)\\. Reads the",
+        "replacement": "* The hand-written part a developer owns on a real system. Reads the"
+      }
+    }
+  }
+})};`;
+function run(files, options = [], allowancePatch, preload, hook = true, nested = false) {
+  const scratch = mkdtempSync(join(tmpdir(), 'isolation-proof-'));
+  const root = nested ? join(scratch, 'system') : scratch;
+  if (nested) mkdirSync(root);
   try {
+    // Generation fixtures start with their config; import/execution changes
+    // then measure the behavior under test, rather than fixture construction.
+    writeFileSync(join(root, 'abap_transpile.json'), JSON.stringify({input_folder: 'src', libs: []}));
     const entries = Array.isArray(files) ? files.map((source, index) => [`${index}.cjs`, source]) : Object.entries(files);
     const paths = entries.map(([name, source]) => {
       const path = join(root, name);
@@ -43,12 +69,195 @@ function run(files, options = [], allowancePatch, preload, hook = true) {
       requires.push('--require', patch);
     }
     const result = spawnSync(process.execPath, [mocha, ...requires, ...(hook ? ['--require', plugin] : []), '--reporter', 'spec', ...options, ...paths], {cwd: root, encoding: 'utf8', timeout: 15000});
-    return {status: result.status, output: result.stdout + result.stderr, filesAfterExit: readdirSync(root, {recursive: true})};
-  } finally { rmSync(root, {recursive: true, force: true}); }
+    return {status: result.status, output: result.stdout + result.stderr, filesAfterExit: listTree(root)};
+  } finally { rmSync(scratch, {recursive: true, force: true}); }
+}
+// Like readdirSync(root, {recursive: true}), but a symlinked directory is
+// listed and never entered: a probe may link a pack outside the checkout.
+function listTree(root, prefix = '') {
+  return readdirSync(join(root, prefix), {withFileTypes: true}).flatMap((entry) => {
+    const name = prefix ? `${prefix}/${entry.name}` : entry.name;
+    return entry.isDirectory() ? [name, ...listTree(root, name)] : [name];
+  });
 }
 describe('per-file process isolation detector', function () {
   this.timeout(30000);
 
+  it('names a new source file left by its originating file', () => {
+    const result = run(["it('leaks',()=>{const fs=require('node:fs');fs.mkdirSync('src',{recursive:true});fs.writeFileSync('src/left.trace.meta.json','{}')});", "it('inherits',()=>{});"]);
+    expect(result.status, result.output).to.be.greaterThan(0);
+    expect(result.output).to.include('0.cjs: tree:').and.include('src/left.trace.meta.json').and.include('"added"');
+    expect(result.output).not.to.include('1.cjs: tree:');
+    expect(result.filesAfterExit).to.include('src/left.trace.meta.json');
+  });
+  it('passes a source write restored byte-identically, including metadata changes', () => {
+    const result = run(["it('restores',()=>{const fs=require('node:fs');fs.writeFileSync('src/probe.abap','edited');fs.writeFileSync('src/probe.abap','original')});"], [], undefined,
+      "const fs=require('node:fs');fs.mkdirSync('src');fs.writeFileSync('src/probe.abap','original');");
+    expect(result.status, result.output).to.equal(0);
+    expect(result.output).not.to.include('0.cjs: tree:');
+  });
+  it('does not blame a stale source run start', () => {
+    const result = run(["it('unchanged',()=>{});"], [], undefined,
+      "const fs=require('node:fs');fs.mkdirSync('src');fs.writeFileSync('src/stale.trace.meta.json','stale');");
+    expect(result.status, result.output).to.equal(0);
+    expect(result.output).not.to.include('0.cjs: tree:');
+  });
+  for (const path of ['osd-pack.json', 'abap_transpile.json', 'libs.lock.json', 'src/probe.abap', 'packs/disabled/src/probe.abap', ...['osd-pack.json', 'abap_transpile.json', 'libs.lock.json'].map((file) => `packs/disabled/${file}`)]) {
+    for (const phase of ['import', 'execution']) {
+      it(`names ${phase} edits to ${path}, independent of configured build roots`, () => {
+        const edit = `fs.writeFileSync('${path}','edited');`;
+        const source = `const fs=require('node:fs');${phase === 'import' ? edit : ''}it('edits',()=>{${phase === 'execution' ? edit : ''}});`;
+        const result = run([source], [], undefined,
+          `const fs=require('node:fs');fs.mkdirSync('${dirname(path)}',{recursive:true});fs.writeFileSync('${path}','original');`);
+        expect(result.status, result.output).to.be.greaterThan(0);
+        expect(result.output).to.include('0.cjs: tree:').and.include(path).and.include('"changed"').and.include(`"phase":"${phase}"`);
+      });
+    }
+  }
+  it('discovers a newly created pack source and manifests at the next boundary', () => {
+    const result = run(["it('new pack',()=>{const fs=require('node:fs');fs.mkdirSync('packs/new/src',{recursive:true});fs.writeFileSync('packs/new/src/probe.abap','left');fs.writeFileSync('packs/new/osd-pack.json','{}');fs.writeFileSync('packs/new/data.json','unobserved')});"]);
+    expect(result.status, result.output).to.be.greaterThan(0);
+    expect(result.output).to.include('0.cjs: tree:').and.include('packs/new/src/probe.abap').and.include('packs/new/osd-pack.json');
+    expect(result.output).not.to.include('packs/new/data.json');
+  });
+  it('walks an in-checkout symlinked gen root', () => {
+    const result = run(["it('leaves output',()=>require('node:fs').writeFileSync('gen/left.abap','left'));"], [], undefined,
+      "const fs=require('node:fs');fs.mkdirSync('actual-gen');fs.writeFileSync('actual-gen/old.abap','original');fs.symlinkSync('actual-gen','gen','dir');");
+    expect(result.status, result.output).to.be.greaterThan(0);
+    const changes = JSON.parse(result.output.match(/test-isolation: 0.cjs: gen: (.*)/)[1]);
+    expect(changes.map(({path, kind}) => ({path, kind}))).to.deep.equal([{path: 'gen/left.abap', kind: 'added'}]);
+  });
+  for (const mutation of ['new-link', 'source', 'retarget']) {
+    it(`observes an in-checkout symlinked pack root: ${mutation}`, () => {
+      const edit = mutation === 'new-link' ? "fs.symlinkSync('../local/first','packs/disabled','dir');"
+        : mutation === 'source' ? "fs.writeFileSync('packs/disabled/src/probe.abap','edited');"
+        : "fs.unlinkSync('packs/disabled');fs.symlinkSync('../local/second','packs/disabled','dir');";
+      const result = run([`it('mutates',()=>{const fs=require('node:fs');${edit}});`], [], undefined,
+        `const fs=require('node:fs');for(const name of ['first','second']){fs.mkdirSync('local/'+name+'/src',{recursive:true});fs.writeFileSync('local/'+name+'/src/probe.abap','same bytes')}fs.mkdirSync('packs');${mutation === 'new-link' ? '' : "fs.symlinkSync('../local/first','packs/disabled','dir');"}`);
+      expect(result.status, result.output).to.be.greaterThan(0);
+      expect(result.output).to.include('0.cjs: tree:');
+      expect(result.output).to.include(mutation === 'retarget' ? '"path":"packs/disabled"' : 'packs/disabled/src/probe.abap');
+    });
+  }
+  for (const target of ['outside', 'missing']) {
+    it(`reports a symlinked pack's ${target} target as an unobserved root`, () => {
+      const result = run([`it('adds link',()=>{const fs=require('node:fs');fs.mkdirSync('packs');fs.symlinkSync(${target === 'outside' ? "require('node:path').dirname(process.cwd())" : "'../missing'"},'packs/disabled','dir')});`]);
+      expect(result.status, result.output).to.be.greaterThan(0);
+      expect(result.output).to.include('0.cjs: tree:').and.include('"path":"packs/disabled"').and.include('Unobserved root:');
+      if (target === 'outside') expect(result.output).to.include('resolves outside checkout');
+    });
+  }
+  for (const [invariant, path] of [['gen', 'gen/probe.abap'], ['tree', 'packs/disabled/src/probe.abap']]) {
+    for (const initial of ['file', 'symlink']) {
+      it(`${invariant}: distinguishes ${initial} replacement from equal content and restoration`, () => {
+        const create = (type, content) => type === 'file' ? `fs.writeFileSync('${path}','${content}');` : `fs.symlinkSync('${content}','${path}');`;
+        const other = initial === 'file' ? 'symlink' : 'file';
+        const replace = (type, content) => `fs.unlinkSync('${path}');${create(type, content)}`;
+        const result = run([
+          `it('replaces equal content',()=>{const fs=require('node:fs');${replace(other, 'replacement.abap')}require('node:assert/strict').equal(fs.readFileSync('${path}','utf8'),'${other === 'symlink' ? 'other bytes' : 'replacement.abap'}')});`,
+          `it('restores original type',()=>{const fs=require('node:fs');${replace(initial, 'replacement.abap')}});`,
+          `it('changes bytes',()=>{const fs=require('node:fs');${replace(initial, 'changed.abap')}});`,
+          `it('changes type',()=>{const fs=require('node:fs');${replace(other, 'replacement.abap')}});`,
+          `it('restores type',()=>{const fs=require('node:fs');${replace(initial, 'replacement.abap')}});`,
+        ], [], undefined, `const fs=require('node:fs');fs.mkdirSync('${dirname(path)}',{recursive:true});fs.writeFileSync('${dirname(path)}/replacement.abap','other bytes');${create(initial, 'replacement.abap')}`);
+        expect(result.status, result.output).to.be.greaterThan(0);
+        for (const index of [0, 3]) expect(result.output).to.include(`${index}.cjs: ${invariant}:`).and.not.include(`${index}.cjs: ${invariant} restoration:`);
+        for (const index of [1, 4]) expect(result.output).to.include(`${index}.cjs: ${invariant} restoration:`).and.not.include(`${index}.cjs: ${invariant}:`);
+        const changes = JSON.parse(result.output.match(new RegExp(`test-isolation: 0.cjs: ${invariant}: (.*)`))[1]);
+        expect(changes).to.have.length(1);
+        expect(changes[0].before.type).to.equal(initial);
+        expect(changes[0].after.type).to.equal(other);
+        expect(changes[0].before.sha256).not.to.equal(changes[0].after.sha256);
+      });
+    }
+  }
+  it('removes the hidden-gen scratch root when VSIX setup throws', () => {
+    const scratch = mkdtempSync(join(tmpdir(), 'isolation-vsix-setup-'));
+    const resources = require('../tools/osd-test-resources.cjs');
+    const before = resources.manifest('gen');
+    const hiddenRoots = () => readdirSync('.local').filter((name) => name.startsWith('vsix-hidden-gen-')).sort();
+    const rootsBefore = hiddenRoots();
+    try {
+      const blocked = join(scratch, 'blocked');
+      writeFileSync(blocked, 'scratch creation must fail');
+      const result = spawnSync(process.execPath, [mocha, '--require', plugin, '--grep', 'builds a Zork-only archive without checkout gen/', 'test/vscode-vsix-packaging.mjs'], {
+        cwd: process.cwd(), env: {...process.env, OSD_VSIX_SCRATCH: blocked}, encoding: 'utf8', timeout: 20000,
+      });
+      const output = result.stdout + result.stderr;
+      expect(result.status, output).to.equal(1);
+      expect(output, output).to.match(/EEXIST|ENOTDIR/);
+      expect(output).to.include(blocked).and.include('1 failing');
+      expect(output).not.to.include('temporary-roots:').and.not.to.include('TEMPORARY ALLOW');
+      expect(hiddenRoots()).to.deep.equal(rootsBefore);
+      expect(resources.manifestDifference(before, resources.manifest('gen'))).to.deep.equal([]);
+      expect(require('../tools/osd-test-isolation-allow.json')).not.to.have.property('test/vscode-vsix-packaging.mjs');
+    } finally { rmSync(scratch, {recursive: true, force: true}); }
+  });
+  for (const phase of ['import', 'execution']) {
+    it(`reports ${phase} restoration to run-start sources without excusing the origin`, () => {
+      const source = (content) => `const fs=require('node:fs');${phase === 'import' ? `fs.writeFileSync('src/probe.abap','${content}');` : ''}it('works',()=>{${phase === 'execution' ? `fs.writeFileSync('src/probe.abap','${content}');` : ''}});`;
+      const result = run([source('edited'), source('original')], [], undefined,
+        "const fs=require('node:fs');fs.mkdirSync('src');fs.writeFileSync('src/probe.abap','original');");
+      expect(result.status, result.output).to.be.greaterThan(0);
+      expect(result.output).to.include('0.cjs: tree:').and.include('1.cjs: tree restoration:');
+      expect(result.output).not.to.include('1.cjs: tree:');
+    });
+  }
+  for (const options of [['--grep', 'not selected'], []]) {
+    it(`audits source mutations in unselected imports (${options.length ? 'all filtered' : 'only'})`, () => {
+      const result = run(["const fs=require('node:fs');fs.mkdirSync('src');fs.writeFileSync('src/import.abap','left');it('ignored',()=>{});", "it.only('selected',()=>{});"], options);
+      expect(result.status, result.output).to.be.greaterThan(0);
+      expect(result.output).to.include('0.cjs: tree:').and.include('src/import.abap').and.include('"phase":"import"');
+    });
+  }
+  const treeAllowance = `allowances['test/tree-fixture.mjs']=${JSON.stringify({tree: {
+    reason: 'Synthetic bounded source fixture', owner: 'test fixture', backlog: 'test/osd-test-isolation.mjs',
+    files: [{path: 'src/allowed.abap', maxCount: 1, phase: 'import', kinds: ['added']}],
+  }})};`;
+  for (const mutation of ['known', 'phase', 'kind', 'path']) {
+    it(`bounds tree allowances by phase, kind and identity: ${mutation}`, () => {
+      const edit = `fs.writeFileSync('src/${mutation === 'path' ? 'other' : 'allowed'}.abap','left');`;
+      const result = run({'test/tree-fixture.mjs': `import fs from 'node:fs';${mutation !== 'phase' ? edit : ''}it('works',()=>{${mutation === 'phase' ? edit : ''}});`}, [], treeAllowance,
+        `const fs=require('node:fs');fs.mkdirSync('src');${mutation === 'kind' ? "fs.writeFileSync('src/allowed.abap','original');" : ''}`);
+      expect(result.output).to.include('test/tree-fixture.mjs: tree:');
+      if (mutation === 'known') {
+        expect(result.status, result.output).to.equal(0);
+        expect(result.output).to.include('TEMPORARY ALLOW');
+      } else {
+        expect(result.status, result.output).to.be.greaterThan(0);
+        expect(result.output).not.to.include('TEMPORARY ALLOW');
+      }
+    });
+  }
+  it('bounds a tree prefix count and rejects invalid root identities', () => {
+    const result = run({'test/tree-fixture.mjs': "import fs from 'node:fs';fs.writeFileSync('src/narrow/one.abap','one');fs.writeFileSync('src/narrow/two.abap','two');it('works',()=>{});"}, [],
+      treeAllowance + "allowances['test/tree-fixture.mjs'].tree.files=[{prefix:'src/narrow/',maxCount:1,phase:'import',kinds:['added']}];",
+      "require('node:fs').mkdirSync('src/narrow',{recursive:true});");
+    expect(result.status, result.output).to.be.greaterThan(0);
+    expect(result.output).to.include('test/tree-fixture.mjs: tree:').and.not.include('TEMPORARY ALLOW');
+    const invalid = run(["it('works',()=>{});"], [], treeAllowance + "allowances['test/tree-fixture.mjs'].tree.files[0].path='packs/any/data/leak.json';");
+    expect(invalid.status, invalid.output).to.be.greaterThan(0);
+    expect(invalid.output).to.include('invalid tree path/prefix/count/phase/kinds');
+  });
+  for (const mutation of ['known', 'extra']) {
+    it(`keeps the measured L2 tree allowance bounded: ${mutation}`, () => {
+      const entry = require('../tools/osd-test-isolation-allow.json')['test/dsl-l2.mjs'].tree;
+      expect(entry.owner).to.equal('osg-research');
+      expect(entry.files).to.have.length(13);
+      const paths = entry.files.map(({path}) => path);
+      if (mutation === 'extra') paths.push('src/l2demo/unrelated.trace.meta.json');
+      const result = run({'test/dsl-l2.mjs': `import fs from 'node:fs';it('renders companions',()=>{for(const path of ${JSON.stringify(paths)})fs.writeFileSync(path,'{}')});`}, [], undefined,
+        "require('node:fs').mkdirSync('src/l2demo',{recursive:true});");
+      expect(result.output).to.include('test/dsl-l2.mjs: tree:');
+      if (mutation === 'known') {
+        expect(result.status, result.output).to.equal(0);
+        expect(result.output).to.include('TEMPORARY ALLOW');
+      } else {
+        expect(result.status, result.output).to.be.greaterThan(0);
+        expect(result.output).not.to.include('TEMPORARY ALLOW');
+      }
+    });
+  }
   it('names a deleted gen file, leaves it deleted and does not blame downstream files', () => {
     const result = run([
       "it('leaves gen alone',()=>{});",
@@ -395,25 +604,35 @@ describe('per-file process isolation detector', function () {
   for (const hook of ['finally', 'after']) {
     it(`preserves a body failure before the intended edit in ${hook}`, () => {
       const builder = new URL('../tools/osd-build.mjs', import.meta.url).href;
-      // Exercise each caller's actual proof gate, so removing it makes this
-      // regression red without running a server or inducing a database flake.
-      const caller = hook === 'finally' ? 'vscode-job-worker-integration.mjs' : 'vscode-warm.mjs';
-      const source = readFileSync(new URL(caller, import.meta.url), 'utf8');
-      const proof = source.match(/(?:if \(intendedDrift\) )?await isolation\?\.observeGenerationDrift/)[0].replace('?.', '.') + '();';
+      const proof = 'if (intendedDrift) await isolation.observeGenerationDrift();';
       const body = `fs.unlinkSync('build/live');fs.symlinkSync('by-input/unexpected','build/live');
         throw Error('BODY failed before edit');`;
-      const result = run({'test/vscode-warm.mjs': `import fs from 'node:fs';import {hashOf} from ${JSON.stringify(builder)};import isolation from ${JSON.stringify(plugin)};
+      const result = run({[warmProofFile]: `import fs from 'node:fs';import {hashOf} from ${JSON.stringify(builder)};import isolation from ${JSON.stringify(plugin)};
         fs.mkdirSync('src/demo',{recursive:true});fs.mkdirSync('build');fs.writeFileSync('abap_transpile.json',JSON.stringify({input_folder:'src',libs:[]}));
         const file='src/demo/zcl_zstg_demo_dpc_ext.clas.abap';const original='* The hand-written part a developer owns on a real system. Reads the\\n';
         fs.writeFileSync(file,original);fs.symlinkSync('by-input/'+hashOf(process.cwd()),'build/live');
         let intendedDrift = false;
         ${hook === 'finally'
           ? `it('fails before edit',async()=>{try{${body}intendedDrift=true;}finally{try{${proof}}finally{fs.writeFileSync(file,original)}}});`
-          : `it('fails before edit',async()=>{${body}intendedDrift=true;});after(async()=>{try{${proof}}finally{fs.writeFileSync(file,original)}});`}`});
+          : `it('fails before edit',async()=>{${body}intendedDrift=true;});after(async()=>{try{${proof}}finally{fs.writeFileSync(file,original)}});`}`}, [], warmAllowancePatch);
       expect(result.status, result.output).to.be.greaterThan(0);
-      expect(result.output).to.include('BODY failed before edit').and.include('test/vscode-warm.mjs: generation');
+      expect(result.output).to.include('BODY failed before edit').and.include(`${warmProofFile}: generation`);
       expect(result.output).to.include('2 failing'); // Body and after-all invariant fail separately.
       expect(result.output).not.to.include('unrecognized originating generation drift').and.not.to.include('TEMPORARY ALLOW');
+    });
+  }
+  for (const file of ['test/vscode-warm.mjs', 'test/vscode-job-worker-integration.mjs']) {
+    it(`refuses the retired generation allowance for ${file}`, () => {
+      const builder = new URL('../tools/osd-build.mjs', import.meta.url).href;
+      const result = run({[file]: `import fs from 'node:fs';import {hashOf} from ${JSON.stringify(builder)};import isolation from ${JSON.stringify(plugin)};
+        fs.mkdirSync('src');fs.mkdirSync('build');fs.writeFileSync('src/probe.abap','original');
+        fs.symlinkSync('by-input/'+hashOf(process.cwd()),'build/live');
+        it('cannot excuse a checkout edit',async()=>{fs.writeFileSync('src/probe.abap','edited');
+          fs.unlinkSync('build/live');fs.symlinkSync('by-input/'+hashOf(process.cwd()),'build/live');
+          try{await isolation.observeGenerationDrift()}finally{fs.writeFileSync('src/probe.abap','original')}});`});
+      expect(result.status, result.output).to.be.greaterThan(0);
+      expect(result.output).to.include('No restored-inputs exception for the running file').and.include(`${file}: generation`);
+      expect(result.output).not.to.include('TEMPORARY ALLOW');
     });
   }
   for (const mutation of ['fresh', 'delete', 'hash-error']) {
@@ -451,7 +670,7 @@ describe('per-file process isolation detector', function () {
       expect(result.output).not.to.include('lost proof');
     });
   }
-  for (const mutation of ['known', 'fresh-live', 'other-content', 'other-input', 'inactive-view', 'inactive-drift', 'inactive-before']) {
+  for (const mutation of ['known', 'fresh-live', 'other-content', 'other-input', 'inactive-view', 'inactive-external', 'inactive-drift', 'inactive-before']) {
     it(`enforces the originating warm input proof: ${mutation}`, () => {
       const builder = new URL('../tools/osd-build.mjs', import.meta.url).href;
       const original = '* The hand-written part a developer owns on a real system. Reads the\n';
@@ -459,7 +678,12 @@ describe('per-file process isolation detector', function () {
       const edited = `* The hand-written part a developer owns on a real system (T7 warm test ${randomUUID()}). Reads the\n`;
       const extra = mutation === 'other-input' ? "fs.writeFileSync('src/unrelated.clas.abap','unrelated');" : '';
       const inactive = mutation.startsWith('inactive-');
-      const inactiveSetup = inactive ? "fs.writeFileSync('src/other.clas.abap','saved');fs.mkdirSync('build/inactive/active/src',{recursive:true});fs.writeFileSync('build/inactive/active/src/other.clas.abap','active');fs.writeFileSync('build/inactive/inactive.json',JSON.stringify({inactive:{OTHER:{files:['src/other.clas.abap']}}}));" : '';
+      const external = mutation === 'inactive-external';
+      const inactiveFile = external ? '../external/src/other.clas.abap' : 'src/other.clas.abap';
+      const inactiveSetup = inactive ? `fs.mkdirSync(${JSON.stringify(external ? '../external/src' : 'src')},{recursive:true});fs.writeFileSync(${JSON.stringify(inactiveFile)},'saved');
+        const {sourceSnapshotPath}=await import(${JSON.stringify(new URL('../tools/osd-source-snapshot.mjs', import.meta.url).href)});
+        const copy='build/inactive/active/'+sourceSnapshotPath(${JSON.stringify(inactiveFile)});fs.mkdirSync(copy.slice(0,copy.lastIndexOf('/')),{recursive:true});fs.writeFileSync(copy,'active');
+        fs.writeFileSync('build/inactive/inactive.json',JSON.stringify({inactive:{OTHER:{files:[${JSON.stringify(inactiveFile)}]}}}));` : '';
       const beforeProof = mutation === 'inactive-before' ? "fs.writeFileSync('build/inactive/active/src/other.clas.abap','unrelated active edit');" : '';
       const afterProof = mutation === 'fresh-live' ? "fs.unlinkSync('build/live');fs.symlinkSync('by-input/fresh-corruption','build/live');" : mutation === 'inactive-drift' ? "fs.writeFileSync('build/inactive/active/src/other.clas.abap','unrelated active edit');" : '';
       const proofRejected = ['other-content', 'other-input', 'inactive-before'].includes(mutation);
@@ -467,10 +691,10 @@ describe('per-file process isolation detector', function () {
       const checkMutation = mutation === 'other-input' ? "assert.equal(fs.readFileSync('src/unrelated.clas.abap','utf8'),'unrelated');"
         : mutation === 'fresh-live' ? "assert.equal(fs.readlinkSync('build/live'),'by-input/fresh-corruption');"
         : ['inactive-before', 'inactive-drift'].includes(mutation) ? "assert.equal(fs.readFileSync('build/inactive/active/src/other.clas.abap','utf8'),'unrelated active edit');" : '';
-      const viewOptions = inactive ? ",undefined,{overlay:{exclude:[process.cwd()+'/src/other.clas.abap'],folder:'build/inactive/active'}}" : '';
+      const viewOptions = inactive ? `,undefined,{overlay:{exclude:[${external ? "process.cwd()+'/../external/src/other.clas.abap'" : "process.cwd()+'/src/other.clas.abap'"}],folder:'build/inactive/active'}}` : '';
       // The proof loads real warm/store modules asynchronously. Give this
       // child its own timeout; the outer mocha timeout does not reach it.
-      const result = run({'test/vscode-warm.mjs': `import fs from 'node:fs';import assert from 'node:assert/strict';import {hashOf} from ${JSON.stringify(builder)};import isolation from ${JSON.stringify(plugin)};
+      const result = run({[warmProofFile]: `import fs from 'node:fs';import assert from 'node:assert/strict';import {hashOf} from ${JSON.stringify(builder)};import isolation from ${JSON.stringify(plugin)};
         fs.mkdirSync('src/demo',{recursive:true});fs.mkdirSync('build');fs.writeFileSync('abap_transpile.json',JSON.stringify({input_folder:'src',libs:[]}));
         const file='src/demo/zcl_zstg_demo_dpc_ext.clas.abap';const original=${JSON.stringify(original)};fs.writeFileSync(file,original);${inactiveSetup}fs.symlinkSync('by-input/'+hashOf(process.cwd()),'build/live');
         it('activates',async()=>{const edited=${JSON.stringify(mutation === 'other-content' ? 'unrelated replacement' : edited)};fs.writeFileSync(file,edited);${extra}${beforeProof}
@@ -478,21 +702,22 @@ describe('per-file process isolation detector', function () {
           fs.unlinkSync('build/live');const activated='by-input/'+hashOf(process.cwd()${viewOptions});fs.symlinkSync(activated,'build/live');assert.equal(fs.readlinkSync('build/live'),activated);
           ${proofRejected ? checkMutation + reached : ''}
           try{await isolation.observeGenerationDrift()}finally{fs.writeFileSync(file,original)}
-          assert.equal(fs.readFileSync(file,'utf8'),original);${afterProof}${proofRejected ? '' : checkMutation + reached}});`}, ['--timeout', '10000']);
+          assert.equal(fs.readFileSync(file,'utf8'),original);${afterProof}${proofRejected ? '' : checkMutation + reached}});`}, ['--timeout', '10000'], warmAllowancePatch, `const fs=require('node:fs');
+          fs.mkdirSync('src/demo',{recursive:true});fs.writeFileSync('src/demo/zcl_zstg_demo_dpc_ext.clas.abap',${JSON.stringify(original)});${inactive ? "fs.writeFileSync('src/other.clas.abap','saved');" : ''}`, true, external);
       expect(result.output).to.include(`mutation reached: warm ${mutation}`);
-      if (mutation === 'known' || mutation === 'inactive-view') {
+      if (mutation === 'known' || mutation === 'inactive-view' || external) {
         expect(result.status, result.output).to.equal(0);
         expect(result.output).to.include('TEMPORARY ALLOW');
       } else {
         expect(result.status, result.output).to.be.greaterThan(0);
         expect(result.output).not.to.include('TEMPORARY ALLOW');
         if (proofRejected) expect(result.output).to.include('unrecognized originating generation drift');
-        else expect(result.output).to.include('1 passing').and.include('test/vscode-warm.mjs: generation');
+        else expect(result.output).to.include('1 passing').and.include(`${warmProofFile}: generation`);
       }
     });
   }
   for (const mutation of ['known', 'unknown-sidecar', 'source-drift', 'config-drift']) {
-    it(`ignores navigation metadata but detects real generation drift: ${mutation}`, () => {
+    it(`checks navigation metadata independently of generation drift: ${mutation}`, () => {
       const builder = new URL('../tools/osd-build.mjs', import.meta.url).href;
       const sidecar = mutation === 'unknown-sidecar' ? 'src/l2demo/unrelated.trace.meta.json' : 'src/l2demo/zcl_l2_recent_voyage.clas.trace.meta.json';
       const extra = mutation === 'config-drift' ? "fs.writeFileSync('abap_transpile.json',JSON.stringify({input_folder:'src',libs:[],output_folder:'new-output'}));"
@@ -503,14 +728,12 @@ describe('per-file process isolation detector', function () {
         it('renders',()=>{fs.writeFileSync(${JSON.stringify(sidecar)},'{}');${extra}
           assert.equal(fs.readFileSync(${JSON.stringify(sidecar)},'utf8'),'{}');
           ${mutation === 'config-drift' ? "assert.equal(JSON.parse(fs.readFileSync('abap_transpile.json','utf8')).output_folder,'new-output');" : ''}
-          console.log('mutation reached: added-input ${mutation}');});`});
+          console.log('mutation reached: added-input ${mutation}');});`}, [], "delete allowances['test/dsl-l2.mjs'];", "const fs=require('node:fs');fs.mkdirSync('src/l2demo',{recursive:true});fs.writeFileSync('src/base.clas.abap','baseline');");
       expect(result.output).to.include(`mutation reached: added-input ${mutation}`).and.include('1 passing');
       expect(result.output).not.to.include('TEMPORARY ALLOW');
-      if (mutation === 'known' || mutation === 'unknown-sidecar') {
-        expect(result.status, result.output).to.equal(0);
-      } else {
-        expect(result.status, result.output).to.be.greaterThan(0);
-      }
+      expect(result.status, result.output).to.be.greaterThan(0);
+      expect(result.output).to.include('test/dsl-l2.mjs: tree:').and.include(sidecar);
+      if (mutation === 'known' || mutation === 'unknown-sidecar') expect(result.output).not.to.include('test/dsl-l2.mjs: generation:');
     });
   }
   it('refuses parallel workers rather than sharing serial attribution state', () => {

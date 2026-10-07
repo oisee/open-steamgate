@@ -176,13 +176,13 @@ speed task than splitting the costly integration cases (`docs/ci-tests.md`).
 
 - <a id="isolation-prove-inplace-temporary-roots"></a> `test/prove-inplace.mjs` — `temporary-roots`; evidence: run() at test/prove-inplace.mjs:304 defaults to a fresh osd-prove-inplace-* directory and does not remove it; the explicit runs directory near line 688 also survives. Shard 1 on base 11122e9f observed 31 roots. Keep evidence visible until the fixture owner fixes cleanup. Owner: **stoker**.
 
-- <a id="isolation-vscode-warm-generation"></a> `test/vscode-warm.mjs` — `generation`; evidence: the shared shard-1 run changed live from 759177bda0d12f33 to ee8b686b9cf3721d, then restored source bytes without restoring the live generation. The final tree still hashes to 759177bda0d12f33. Confirmed on base 11122e9f; fixture owner must restore both. Owner: **stoker**.
+- Fixed 2026-10-06: <a id="isolation-vscode-warm-generation"></a> `test/vscode-warm.mjs` now owns a private source/build root; its generation allowance was removed. Owner: **stoker**.
 
 - <a id="isolation-dsl-l2-generation"></a> **Resolved:** `test/dsl-l2.mjs` — the generation hash now excludes optional navigation metadata and the temporary drift allowance is removed. Original evidence: setup at test/dsl-l2.mjs:112 writes 13 previously absent ignored trace.meta.json sidecars under src/l2demo and leaves live at 759177bda0d12f33 while the tree becomes a1e53ac46cfb6ea1. A read-only hash excluding exactly those 13 files returns 759177bda0d12f33. Recorded in shard 2 on base 11122e9f; no cleanup/rebuild is performed by the detector. Owner: **stoker**.
 
 - <a id="isolation-osd-bsp-temporary-roots"></a> `test/osd-bsp.mjs` — `temporary-roots`; evidence: the osd-bsp fixture creates an osd-bsp-* root and leaves it on disk. Shared shard 2 on base 11122e9f observed one survivor; the fixture owner must remove it. Owner: **stoker**.
 
-- <a id="isolation-vscode-job-worker-integration-generation"></a> `test/vscode-job-worker-integration.mjs` — `generation`; evidence: this fixture starts Launcher over process.cwd() with a disposable notebook pack, activates its class and removes the pack in finally, but leaves the repository live link at e5315ee4149d11ec while the restored tree hashes to a1e53ac46cfb6ea1. A second originating generation leak in shard 2 on base 11122e9f. Owner: **stoker**.
+- Fixed 2026-10-06: <a id="isolation-vscode-job-worker-integration-generation"></a> `test/vscode-job-worker-integration.mjs` now owns a private source/build root; its generation allowance was removed. Owner: **stoker**.
 
 - <a id="isolation-amdp-pack-temporary-roots"></a> `test/amdp-pack.mjs` — `temporary-roots`; evidence: shared shard 4 on base 11122e9f observed one osd-amdp-pack-* fixture root still present at the file boundary. The generated AMDP pack fixture has no removal; repair belongs to its test owner. The detector retains the full root evidence. Owner: **stoker**.
 
@@ -196,3 +196,5 @@ speed task than splitting the costly integration cases (`docs/ci-tests.md`).
 
 - <a id="isolation-prove-on-system-temporary-roots"></a> `test/prove-on-system.mjs` — `temporary-roots`; evidence: fake-system proof cases use run() at test/prove-on-system.mjs:364 and explicit receipt directories, each creating osd-prove-runs-* without removal. Shared shard 3 on base 11122e9f observed 80 roots. Receipt cleanup belongs to the fixture owner. Owner: **stoker**.
 
+
+- <a id="isolation-dsl-l2-tree"></a> `test/dsl-l2.mjs` — `tree`; evidence: the source/pack scan on base `8feda000` leaves 13 previously absent ignored navigation companions under `src/l2demo` in execution: 11 `*.clas.testclasses.trace.meta.json` companions and the main-class companions for `zcl_l2_ship_min_captains` and `zcl_l2_recent_voyage`. Nine other main-class companions are already tracked and untouched. The hook names these additions independently of the generation hash, which excludes them. The allowance lists the 13 exact paths, each bounded to one execution addition; changes, removals, import mutations and extra paths remain red. Repair the before/after fixture so it restores or isolates its navigation output. Owner: **osg-research**.

@@ -19,10 +19,25 @@ import {devLoop} from "../tools/osd-dev.mjs";
 import {existsSync} from "node:fs";
 import {HotLoader, rewrite} from "../tools/osd-hot.mjs";
 import {modulesOf} from "../tools/osd-transpile.mjs";
+import {WarmCompilerProcess} from "../tools/osd-warm-process.mjs";
 
 const REPO = resolve(".");
 
 describe("tools/osd-warm: what a save may be built warm", () => {
+  it("compileError rejects an unresolved type after a runtimeError run", async () => {
+    const {modulesOf} = await import("../tools/osd-transpile.mjs");
+    const {Transpiler, core} = modulesOf(process.cwd());
+    const registry = () => {
+      const reg = new core.Registry();
+      reg.addFile(new core.MemoryFile("zcl_policy.clas.abap",
+        "CLASS zcl_policy DEFINITION PUBLIC. PUBLIC SECTION. DATA value TYPE zunknown_policy. ENDCLASS. CLASS zcl_policy IMPLEMENTATION. ENDCLASS."));
+      return reg;
+    };
+    await new Transpiler({unknownTypes: "runtimeError"}).run(registry());
+    let error;
+    try { await new Transpiler({unknownTypes: "compileError"}).run(registry()); } catch (e) { error = e; }
+    expect(error?.message).to.match(/unknown_types.*VALUE/i);
+  });
   const clas = "CLASS zcl_x DEFINITION PUBLIC.\n  PUBLIC SECTION.\n    INTERFACES zif_y.\nENDCLASS.\nCLASS zcl_x IMPLEMENTATION.\nENDCLASS.\n";
 
   it("was read against the generators the cold build runs", () => {
@@ -198,10 +213,14 @@ describe("tools/osd-warm: a refused swap is not answered as warm", () => {
   });
 
   const activateWith = async (publishResult) => {
+    // Coordinator fixtures use symbolic generations; the activation publisher
+    // still requires the build and acknowledged generation to name each other.
+    publishResult = {...publishResult, generation: publishResult.generation ?? publishResult.transpile?.hash};
+    const root = mkdtempSync(join(tmpdir(), "warm-activation-stub-"));
     const express = (await import("express")).default;
     const {adtRouter} = await import("../tools/adt-facade.mjs");
     const store = {
-      roots: [], find: () => undefined, root: REPO,
+      roots: [], find: () => undefined, root,
       warm: () => ({on: true, compiler: {primed: true}}),
       warmActivation: (type, name) => ({type, name, active: true, revision: "r1"}),
       completeActivations: () => true,
@@ -224,6 +243,7 @@ describe("tools/osd-warm: a refused swap is not answered as warm", () => {
       return {build: res.headers.get("x-osd-build"), swap: res.headers.get("x-osd-swap-ms")};
     } finally {
       await new Promise((done) => server.close(done));
+      rmSync(root, {recursive: true, force: true});
     }
   };
 
@@ -244,8 +264,9 @@ describe("tools/osd-warm: a refused swap is not answered as warm", () => {
   // call publish() side by side. They shared one build and both swapped
   // from its base; the second swap was refused ("the runtime carries h1,
   // and the swap is from h0") and recycled (vsp-i7, 2026-10-02). The real
-  // transpile() runs here over a stand-in warm compiler that, like the real
-  // one, moves its base to every generation it builds.
+  // publication coordinator runs here over a stand-in transpile boundary
+  // that moves its base to every generation it builds. Snapshot/publication
+  // checks against real generations are exercised in warm-process.mjs.
   describe("two publish() calls at once", () => {
     const setup = () => {
       const dir = mkdtempSync(join(tmpdir(), "osd-warm-concurrent-"));
@@ -267,6 +288,9 @@ describe("tools/osd-warm: a refused swap is not answered as warm", () => {
         },
       };
       store.warmState = {on: true, compiler, reason: undefined};
+      // This fixture models compilation with symbolic generations. Exercise
+      // the real publish coordinator; real disk compilation is tested below.
+      store.transpile = async () => ({...await store.warmState.compiler.build(), warm: true});
       const log = [];
       store.served = {
         running: true, generation: "h0", swaps: 0, recycles: 0,
@@ -445,6 +469,7 @@ describe("tools/osd-warm: an activation answers once its source is live", () => 
       },
     };
     store.warmState = {on: true, compiler, reason: undefined};
+    store.transpile = async () => ({...await store.warmState.compiler.build(), warm: true});
     store.served = {
       running: true, epoch: 1, generation: nameOf(src.text), swaps: 0, recycling: undefined, starting: undefined,
       async hot(swap) {
@@ -615,6 +640,125 @@ describe("tools/osd-warm: an activation answers once its source is live", () => 
     }
   });
 
+  it("an open APC socket defers the swap-count recycle until it closes", async () => {
+    const {store, src, events, done} = setup();
+    try {
+      store.warmSwapLimit = 1;
+      store.served.openChannels = 1;
+      src.text = "rv = 2.";
+      await activate(store);
+      expect(events.map((e) => e.what), "a recycle cut the open socket").to.deep.equal(["swap g1->g2"]);
+      store.served.openChannels = 0;
+      src.text = "rv = 3.";
+      await activate(store);
+      expect(events.map((e) => e.what)).to.deep.equal(["swap g1->g2", "swap g2->g3", "recycle"]);
+    } finally {
+      done();
+    }
+  });
+
+  it("an open APC socket defers the quiet recycle, which comes a quiet period after it closes", async () => {
+    const {store, src, events, done} = setup();
+    try {
+      store.warmQuietMs = 60;
+      store.served.openChannels = 1;
+      src.text = "rv = 2.";
+      await activate(store);
+      await sleep(250);
+      expect(events.map((e) => e.what), "a quiet recycle cut the open socket").to.deep.equal(["swap g1->g2"]);
+      store.served.openChannels = 0;
+      await sleep(200);
+      expect(events.map((e) => e.what)).to.deep.equal(["swap g1->g2", "recycle"]);
+    } finally {
+      done();
+    }
+  });
+
+  it("a pool's swap reports the heap of every work process", async () => {
+    const pool = new RuntimePool({size: 2});
+    pool.runtimes[0].hot = async () => ({ms: 1, swaps: 1, heap: 100});
+    pool.runtimes[1].hot = async () => ({ms: 1, swaps: 1, heap: 800});
+    expect(await pool.hot({})).to.deep.include({swaps: 1, heaps: [100, 800]});
+  });
+
+  it("the heap limit sees any work process grow, past an open APC socket", async () => {
+    const MB = 1024 * 1024;
+    for (const [first, later] of [[[100, 1000], [800, 1000]], [[100, 100], [100, 700]]]) {
+      const {store, src, events, done} = setup();
+      try {
+        store.served.openChannels = 1;
+        let heaps = first;
+        const hot = store.served.hot;
+        store.served.hot = async function (swap) { return {...await hot.call(this, swap), heaps: heaps.map((h) => h * MB)}; };
+        src.text = "rv = 2.";
+        await activate(store);
+        heaps = later;
+        src.text = "rv = 3.";
+        await activate(store);
+        expect(events.map((e) => e.what), `${first} -> ${later}`).to.deep.equal(["swap g1->g2", "swap g2->g3", "recycle"]);
+      } finally {
+        done();
+      }
+    }
+  });
+
+  it("the APC upgrade proxy releases a socket whose client only half-closes", async () => {
+    const {createServer, connect} = await import("node:net");
+    const {upgradeProxy} = await import("../tools/osd-proxy.mjs");
+    // like the real HTTP child: an upgraded socket may stay half-open
+    const held = new Set();
+    const child = createServer({allowHalfOpen: true}, (socket) => { held.add(socket); socket.on("data", () => {}); });
+    await new Promise((ok) => child.listen(0, "127.0.0.1", ok));
+    const runtime = {url: `http://127.0.0.1:${child.address().port}`, async ensure() {}};
+    const http = (await import("node:http")).createServer();
+    http.on("upgrade", upgradeProxy(runtime, ["/sap/bc/apc/x"]));
+    await new Promise((ok) => http.listen(0, "127.0.0.1", ok));
+    let client;
+    try {
+      client = connect({port: http.address().port, host: "127.0.0.1", allowHalfOpen: true});
+      await new Promise((ok) => client.once("connect", ok));
+      client.write("GET /sap/bc/apc/x HTTP/1.1\r\nHost: x\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n");
+      for (let i = 0; i < 50 && runtime.openChannels !== 1; i++) await sleep(10);
+      expect(runtime.openChannels).to.equal(1);
+      client.end();
+      for (let i = 0; i < 50 && runtime.openChannels !== 0; i++) await sleep(10);
+      expect(runtime.openChannels, "a half-closed socket still counted").to.equal(0);
+    } finally {
+      client?.destroy();
+      for (const socket of held) socket.destroy();
+      http.closeAllConnections?.();
+      await new Promise((ok) => http.close(ok));
+      await new Promise((ok) => child.close(ok));
+    }
+  });
+
+  it("the APC upgrade proxy counts the sockets it holds open on the runtime", async () => {
+    const {createServer, connect} = await import("node:net");
+    const {upgradeProxy} = await import("../tools/osd-proxy.mjs");
+    const child = createServer((socket) => socket.on("data", () => {}));
+    await new Promise((ok) => child.listen(0, "127.0.0.1", ok));
+    const runtime = {url: `http://127.0.0.1:${child.address().port}`, async ensure() {}};
+    const http = (await import("node:http")).createServer();
+    http.on("upgrade", upgradeProxy(runtime, ["/sap/bc/apc/x"]));
+    await new Promise((ok) => http.listen(0, "127.0.0.1", ok));
+    let client;
+    try {
+      client = connect(http.address().port, "127.0.0.1");
+      await new Promise((ok) => client.once("connect", ok));
+      client.write("GET /sap/bc/apc/x HTTP/1.1\r\nHost: x\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n");
+      for (let i = 0; i < 50 && runtime.openChannels !== 1; i++) await sleep(10);
+      expect(runtime.openChannels).to.equal(1);
+      client.destroy();
+      for (let i = 0; i < 50 && runtime.openChannels !== 0; i++) await sleep(10);
+      expect(runtime.openChannels).to.equal(0);
+    } finally {
+      client?.destroy();
+      http.closeAllConnections?.();
+      await new Promise((ok) => http.close(ok));
+      await new Promise((ok) => child.close(ok));
+    }
+  });
+
   it("a build the serving process already runs loads nothing: no recycle of unchanged code", async () => {
     const {store, events, done} = setup();
     try {
@@ -709,6 +853,8 @@ describe("tools/osd-warm: an activation answers once its source is live", () => 
     const {store, done} = setup();
     const runtime = store.served;
     try {
+      writeFileSync(join(store.root, "abap_transpile.json"), JSON.stringify({input_folder: "src", libs: [], output_folder: "output"}));
+      delete store.sourceKey;
       let primed = 0;
       store.warmState.compiler = {primed: false, async prime() { primed++; this.primed = true; return {}; }};
       let settle;
@@ -991,8 +1137,8 @@ describe("tools/osd-warm: the build view, with other objects inactive", function
     store.warmState = {on: true, compiler: undefined, priming: undefined, reason: undefined, verifying: undefined, next: undefined, last: undefined, timer: undefined};
     expect(await store.warmUp()).to.not.equal(undefined, store.warmState.reason);
   });
-  after(() => {
-    store?.warmState?.compiler?.drop();
+  after(async () => {
+    await store?.warmState?.compiler?.drop();
     clearTimeout(store?.warmState?.timer);
     clearTimeout(store?.warmState?.reprime);
     if (root !== undefined) rmSync(root, {recursive: true, force: true});
@@ -1015,6 +1161,7 @@ describe("tools/osd-warm: the build view, with other objects inactive", function
     const v = await store.warmState.compiler.verify(r.transpile.hash);
     expect(v.verdict, JSON.stringify(v)).to.equal("same");
   });
+
 
   it("a failed warm activation leaves the registry on the old view, and the next activation is warm", async () => {
     store.write("CLAS", A, src(A, 3).replace("rv = 3.", "rv = nope."));
@@ -1052,6 +1199,32 @@ describe("tools/osd-warm: the build view, with other objects inactive", function
     const v = await store.warmState.compiler.verify(r.transpile.hash);
     expect(v.verdict, JSON.stringify(v)).to.equal("same");
   });
+  it("an activation during priming waits and publishes the saved source", async () => {
+    await store.warmState.compiler.drop();
+    await store.write("CLAS", A, src(A, 25));
+    const prime = store.warmUp();
+    expect(store.warmState.priming).to.equal(prime);
+    let settled = false;
+    prime.then(() => { settled = true; });
+    const result = await activate(A);
+    expect(settled, "activation waited for the in-flight prime").to.equal(true);
+    expect(result.ok, JSON.stringify(result.transpile)).to.equal(true);
+    expect(out(A)).to.include("IntegerFactory.get(25)");
+    expect(out(B), "the other object's active copy stays live").to.include("IntegerFactory.get(20)");
+    if (result.transpile.warm) {
+      const verified = await store.warmState.compiler.verify(result.transpile.hash);
+      expect(verified.verdict, JSON.stringify(verified)).to.equal("same");
+    }
+  });
+
+  it("closing immediately after scheduling a prime does not start a compiler afterward", async () => {
+    const compiler = new WarmCompilerProcess({root});
+    const prime = compiler.prime().catch(error => error);
+    await compiler.shutdown();
+    expect((await prime).code).to.equal("CLOSED");
+    expect(compiler.primed).to.equal(false);
+  });
+
 });
 
 // critic on ab4ded7c: a prime whose view names the live generation
@@ -1152,10 +1325,9 @@ describe("tools/osd-warm: a renamed view is primed only on proof", function () {
 // critic on d75d8fdc: the generators read the raw tree, not the build view.
 // A DDLS inactive when live was built, saved again with a source cds2ddic
 // refuses, hashes as its unchanged active copy -- and a class activation
-// built warm over the gen/ of the last cold build, where a cold build runs
-// cds2ddic over the saved source and fails. Until the generators read the
-// build view, an inactive generator input forces cold.
-describe("tools/osd-warm: an inactive generator input forces cold", function () {
+// builds against the same active view as the cold generators. A broken
+// inactive generator input must no longer block prime or an unrelated edit.
+describe("tools/osd-warm: an inactive generator input keeps its active view", function () {
   this.timeout(180000);
   let root;
   let store;
@@ -1195,20 +1367,23 @@ describe("tools/osd-warm: an inactive generator input forces cold", function () 
     expect(r.ok, JSON.stringify(r.transpile)).to.equal(true);
     expect(store.stateOf(store.find("DDLS", "ZWG_V")).version).to.equal("inactive");
   });
-  after(() => {
-    store?.warmState?.compiler?.drop?.();
+  after(async () => {
+    await store?.warmState?.compiler?.drop?.();
     clearTimeout(store?.warmState?.reprime);
     if (root !== undefined) rmSync(root, {recursive: true, force: true});
   });
 
-  it("the DDLS saved again with a source a generator refuses: the class activation is not warm", async () => {
+  it("a broken inactive DDLS does not block warm prime or class activation", async () => {
     store.warmState = {on: true, compiler: undefined, priming: undefined, reason: undefined, verifying: undefined, next: undefined, last: undefined, timer: undefined};
     await store.warmUp();
     store.write("DDLS", "ZWG_V", "define view ZWG_V as select from { this is not cds\n");
     store.write("CLAS", "ZCL_WG_A", src("ZCL_WG_A", 3));
     const r = await activate("ZCL_WG_A");
-    expect(r.transpile.warm, "built warm over an inactive generator input").to.not.equal(true);
-    expect(store.warmState.reason).to.match(/DDLS ZWG_V is inactive, and the generators read its saved source/);
+    expect(r.ok, JSON.stringify(r)).to.equal(true);
+    expect(r.transpile.warm).to.equal(true);
+    expect(store.stateOf(store.find("DDLS", "ZWG_V")).version).to.equal("inactive");
+    expect(store.read("DDLS", "ZWG_V", "main", "active").source).to.equal(view("mandt"));
+    expect(store.read("DDLS", "ZWG_V").source).to.include("this is not cds");
   });
 });
 

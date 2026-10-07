@@ -230,8 +230,22 @@ What that means in practice:
 - probe an ADT resource with `X-CSRF-Token: fetch`, HEAD first and GET after —
   some systems mint nothing on a HEAD;
 - keep the token beside the cookie jar whose session it belongs to, one per
-  conversation, because a jar shared between two clients shares an ADT context
-  between them;
+  conversation;
+- Eclipse may SAVE or UNLOCK through another pooled RFC connection. For a
+  known `lockHandle`, continue its owner's backend context only when the
+  authenticated RFC user and client match. Unknown, stale or foreign handles
+  use the caller's own context and remain subject to the backend's ownership
+  and object checks. Requests sharing a context serialize cookie and token
+  updates; closing its owner removes this association;
+- establish a stateful backend context for each conversation: the bridge
+  sends `X-SAP-ADT-SessionType: stateful` on its CSRF probes and defaults
+  tunneled requests to it when the client omitted the header. An explicit
+  client session-type header is retained; a stateless read does not end an
+  established stateful context;
+- when the RFC socket closes, wait for any pending backend request, then
+  log off its context using that conversation's cookie jar. Cleanup is
+  bounded to five seconds and is not retried; backend idle expiry remains
+  the fallback when it is unavailable;
 - send it on `POST`, `PUT`, `DELETE` and `PATCH`;
 - `"Required"` arrives in the same header as a token and **is not one**;
 - a `403` that is *not* a CSRF refusal is the backend's own answer and belongs
@@ -239,6 +253,37 @@ What that means in practice:
 - a backend that mints no token is not an error, it is a backend without CSRF
   protection — this project's own façade is one — so the request goes without
   the header.
+
+Measured on A4H with a disposable program, 2026-10-04: a LOCK in a session
+that never requested state returns 200 and a 40-character handle, but the
+lock does not survive the request: another session can also LOCK it and a
+subsequent PUT returns 423. After establishing a stateful context, LOCK,
+read, PUT and UNLOCK work without repeating the session-type header, and a
+foreign LOCK returns 403. OSG retains its 400 refusal for a direct HTTP LOCK
+without a persistent context; the RFC bridge now establishes that context
+instead of handing the client a handle whose lock has already gone.
+
+The Eclipse reproduction entered a separate RFC conversation for LOCK after
+opening the source. Before this fix the new conversation's CSRF probe
+created a stateless context and LOCK returned 400. The regression in
+`test/adt-rfc-context.mjs` sends header-free synthetic RFC requests through
+the real bridge and ABAP front, checks both a read-first and write-first
+conversation, same-user pooled SAVE and UNLOCK, foreign and stale handles,
+explicit logoff and disconnect cleanup, including a disconnect while LOCK
+or a pooled SAVE is still in flight. The same Eclipse run reproduced a 409
+on SAVE in a different RFC conversation; continuing the known handle's
+context addresses that failure without relaxing direct HTTP ownership.
+
+The same disposable A4H probe returned an empty 200 for successful source
+PUT with no Content-Type. OSG now sends that acknowledgement and retains
+the saved source's ETag. Its former empty `text/plain` representation
+coincided with Eclipse clearing the editor after a successful SAVE, while
+the file and subsequent GET still contained the full saved source.
+Source SAVE also leaves the invalidated registry unparsed: the synchronous
+full parse formerly added 4.6–4.9 seconds to PUT on the diagnostic tree.
+The next requested outline or Check/Activate builds a fresh registry;
+dependent checks still use a full fresh parse rather than an incremental
+cache that could retain stale diagnostics.
 
 ## Identity
 

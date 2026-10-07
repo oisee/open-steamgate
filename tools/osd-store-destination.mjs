@@ -41,16 +41,20 @@ export async function segwRegistrationsOf(store) {
 // TOKENS was one more until 2026-09-25: the editor colours in ABAP now
 // (ZCL_OSD_ABAP_TOKENS, a word list), the same on every host, so the one
 // command that needed a parse per display is gone (host-tools review S1/C2)
-export const COMMANDS = ["LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "CAPABILITIES", "HISTORY", "REVISION", "OBJECT", "COMMANDS", "SYSTEM", "PACKAGE", "CHECKRUN", "PARSE", "PACKAGES", "SEARCH"];
+export const COMMANDS = ["LIST", "READ", "WRITE", "CREATE", "DELETE", "CHECK", "ACTIVATE", "ACTIVATION_STATUS", "RUN_TESTS", "CAPABILITIES", "HISTORY", "REVISION", "OBJECT", "COMMANDS", "SYSTEM", "PACKAGE", "CHECKRUN", "PARSE", "PACKAGES", "SEARCH"];
 
 /** What this host can do, as the screen asks it (CAPABILITIES, EV_NOTE):
  *  the editor draws a button only for a command named here. Node holds the
  *  compiler and the build, so it offers all five; a host that cannot check
  *  or activate (OSGo, a built binary) leaves them out and the screen shows
  *  no button that would only be refused (host-tools review 2026-09-25, D2). */
-export const CAPABILITIES = ["LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "HISTORY", "REVISION", "CHECKRUN", "PARSE"];
+export const CAPABILITIES = ["LIST", "READ", "WRITE", "CREATE", "DELETE", "CHECK", "ACTIVATE", "ACTIVATION_STATUS", "RUN_TESTS", "HISTORY", "REVISION", "CHECKRUN", "PARSE"];
 
 const PARSE_KINDS = {
+  CREATE_VALIDATION: async (store, input) => {
+    const {validateCreation} = await import("./adt-create-validation.mjs");
+    return validateCreation(store, {...input, kind: input.resource});
+  },
   OUTLINE: async (store, input) => {
     const {structureOf} = await import("./adt-documents.mjs");
     const outline = structureOf(store, String(input.type ?? "").toUpperCase(), input.name ?? "");
@@ -107,10 +111,10 @@ try {
 /** Run work with `answers` ((kind, name, json) => value; throw to refuse) bound
  *  as the SYSTEM answers of every STORE call it makes, and `store` (the
  *  facade instance's ObjectStore, port-map risk 12) for every STORE command. */
-export function withSystem(answers, work, {store, deferActivate, oneRuntime} = {}) {
+export function withSystem(answers, work, {store, deferActivate, oneRuntime, repositoryUser, repositoryGuard} = {}) {
   if (systemCalls === undefined) throw new Error("SYSTEM needs an async context (Node or Bun)");
   const inherited = systemCalls.getStore();
-  return systemCalls.run({answers, oneRuntime: oneRuntime ?? inherited?.oneRuntime, deferActivate: deferActivate ?? inherited?.deferActivate,
+  return systemCalls.run({answers, repositoryUser, repositoryGuard, oneRuntime: oneRuntime ?? inherited?.oneRuntime, deferActivate: deferActivate ?? inherited?.deferActivate,
     store: store ?? inherited?.store}, work);
 }
 
@@ -166,6 +170,16 @@ export class StoreDestination {
     try { answer = await this.#answer(givenText(signature, "IV_COMMAND", "LIST").toUpperCase(), signature); }
     catch (error) { answer = refusal(error); }
     if (answer.EV_ERROR && !answer.EV_JSON) answer = {...answer, ...refusal(answer.EV_ERROR)};
+    // The ABAP host wrapper imports JSON and SOURCE only. Keep the older
+    // scalar/table response, but expose the check verdict through that seam
+    // too: an empty EV_ERROR alone does not mean the check passed.
+    const command = givenText(signature, "IV_COMMAND", "LIST").toUpperCase();
+    if (["CHECK", "ACTIVATE"].includes(command) && !answer.EV_JSON) {
+      answer = {...answer, EV_JSON: JSON.stringify({
+        active: answer.EV_ACTIVE === "X", live: answer.EV_LIVE === "X",
+        note: answer.EV_NOTE ?? "", issues: answer.ET_ISSUE ?? [],
+      })};
+    }
     return {...EMPTY, ...answer};
   }
 
@@ -206,12 +220,21 @@ export class StoreDestination {
       const include = givenText(signature, "IV_INCLUDE", "main") || "main";
       const source = given(signature, "IV_SOURCE");
       switch (command) {
+        case "CREATE":
+        case "DELETE": {
+          const {storeCrud} = await import("./osd-store-crud.mjs");
+          const result = await storeCrud(store, command, {type, name,
+            json: givenText(signature, "IV_JSON"), source: source === undefined ? undefined : String(source),
+            repositoryUser: systemCalls?.getStore()?.repositoryUser, repositoryGuard: systemCalls?.getStore()?.repositoryGuard});
+          return {EV_JSON: JSON.stringify(result), EV_MS: String(Date.now() - started),
+            EV_FILE: result.file ?? "", EV_PACKAGE: result.package ?? "", EV_VERSION: result.version ?? ""};
+        }
         case "PARSE": {
           return {EV_JSON: JSON.stringify(await PARSE_KINDS[parseInput.kind](store, parseInput))};
         }
         case "CHECKRUN": {
           const {checkRunReport} = await import("./adt-checkrun.mjs");
-          return {EV_JSON: JSON.stringify(checkRunReport(store, {type, name,
+          return {EV_JSON: JSON.stringify(await checkRunReport(store, {type, name,
             include: givenText(signature, "IV_INCLUDE") || undefined,
             source: givenText(signature, "IV_FILTER") === "SOURCE" ? givenText(signature, "IV_SOURCE") : undefined}))};
         }
@@ -260,6 +283,22 @@ export class StoreDestination {
         case "READ": return this.#read(type, name, include, store, givenText(signature, "IV_REVISION"));
         case "WRITE": return this.#write(type, name, include, source, started, store);
         case "CHECK": return this.#check(type, name, include, source, started, store);
+        case "RUN_TESTS": {
+          const {runStoreTests} = await import("./osd-store-tests.mjs");
+          const result = await runStoreTests(store, givenText(signature, "IV_JSON"));
+          return {EV_JSON: JSON.stringify(result), EV_MS: String(result.ms)};
+        }
+        case "ACTIVATION_STATUS": {
+          let request;
+          try { request = JSON.parse(givenText(signature, "IV_JSON")); }
+          catch { return refusal("ACTIVATION_STATUS needs IV_JSON {op_id}", "INVALID_NAME"); }
+          const {activationJournal} = await import("./osd-activation-journal.mjs");
+          try { return {EV_JSON: JSON.stringify(activationJournal(store).lookup(request?.op_id))}; }
+          catch (error) {
+            if (error.code !== "NOT_FOUND") throw error;
+            return {EV_JSON: JSON.stringify({state: "not_found", code: "NOT_FOUND", op_id: request.op_id})};
+          }
+        }
         case "ACTIVATE": return await this.#activate(type, name, started, store);
         case "HISTORY": return await this.#history(type, name, include, signature, store);
         case "REVISION": return await this.#revision(type, name, include, givenText(signature, "IV_REVISION"), store);
@@ -432,14 +471,15 @@ export class StoreDestination {
     };
   }
 
-  #write(type, name, include, source, started, store) {
+  async #write(type, name, include, source, started, store) {
     if (source === undefined) {
       // not "an empty source": a screen that posts a form with no text area
       // in it would otherwise silently empty the object it was showing
       return {EV_ERROR: "WRITE without IV_SOURCE: nothing was written"};
     }
-    const written = store.write(type, name, String(source), include);
+    const written = await store.write(type, name, String(source), include);
     return {
+      EV_JSON: JSON.stringify({written: true, type: written.type ?? type, name: written.name ?? name, revision: written.revision}),
       EV_FILE: String(written.file ?? ""),
       EV_PACKAGE: String(written.package ?? ""),
       EV_VERSION: written.version ?? "inactive",
@@ -460,7 +500,24 @@ export class StoreDestination {
   }
 
   async #activate(type, name, started, store) {
-    const result = store.activate(type, name);
+    const {prepareActivation, publishActivation} = await import("./osd-publish-activation.mjs");
+    const {activationJournal, recordBaselineGeneration} = await import("./osd-activation-journal.mjs");
+    const journal = activationJournal(store);
+    const {liveHash} = await import("./osd-build.mjs");
+    recordBaselineGeneration(store, () => store.served?.generation ?? liveHash(store.root));
+    const operation = journal.create(type, name);
+    const failedAnswer = (error, stage) => {
+      const rejected = refusal(error);
+      const envelope = JSON.parse(rejected.EV_JSON).error;
+      const failed = journal.update(operation.op_id, {state: "failed", active: false, live: false,
+        failure_stage: stage, note: String(error.message ?? error), error: envelope});
+      return {...rejected, EV_JSON: JSON.stringify(failed)};
+    };
+    let result;
+    try { [result] = prepareActivation(store, [{type, name}]); }
+    catch (error) {
+      return failedAnswer(error, "validation");
+    }
     // An activation refused by a *dependent* is the case activation exists
     // for, and the screen has to be able to say which caller broke -- so the
     // dependent's own name travels on its rows and is not flattened into the
@@ -472,6 +529,7 @@ export class StoreDestination {
     ];
     if (result.active !== true) {
       return {
+        EV_JSON: JSON.stringify(journal.update(operation.op_id, {state: "failed", failure_stage: "validation", issues})),
         EV_ACTIVE: "",
         EV_COUNT: String(issues.length),
         EV_MS: String(Date.now() - started),
@@ -505,9 +563,10 @@ export class StoreDestination {
     // nobody opened is hiding the part worth seeing.
     let failureEntries;
     const publish = async () => {
+      try {
       const before = snapshotOf(join(store.root, "gen"));
-      const published = await store.publish({activate: [{type, name}]});
-      const committed = published?.ok !== false && await store.completeActivation(result, published?.transpile?.built);
+      const published = await publishActivation(store, [result]);
+      const committed = published.committed;
       if (!committed) {
         const issues = published?.transpile?.issues ?? [];
         if (published?.ok === false && published?.transpile?.check === true && issues.length) {
@@ -525,12 +584,20 @@ export class StoreDestination {
         ...regenerated.removed.map((path) => generatedRow(path, "removed")),
       ];
       return {
+        EV_JSON: JSON.stringify(journal.update(operation.op_id, {
+          state: committed && published?.generation ? "published" : "failed",
+          generation_id: committed && published?.generation ? published.generation : "",
+          active: committed, live: published.live, verified: published.verified,
+          failure_stage: published.failureStage,
+          note: !committed ? "publication failed or checked source changed" : published.verified ? "published" : "published; warm-unverified",
+          issues: failureEntries?.flatMap(entry => (entry.issues ?? []).map(issue => issueRow(issue, entry))) ?? [],
+        })),
         EV_ACTIVE: committed ? "X" : "",
-        EV_LIVE: committed && published?.recycled === true ? "X" : "",
+        EV_LIVE: published.live ? "X" : "",
         EV_NOTE: published?.ok === false
           ? `the check held and the build did not: ${published?.error ?? published?.transpile?.error ?? "no reason given"}`
           : !committed ? "source changed during activation; check and activate again"
-          : `${published?.recycled === true
+          : `${published.live
             ? `built and live (generation ${published?.generation ?? "?"})`
             : "built, and the process serving this screen still runs the code it started with -- it is replaced when it is next restarted"}`
             + (objects.length === 0 ? "" : `; ${objects.length} generated object${objects.length === 1 ? "" : "s"} rewritten`),
@@ -539,11 +606,26 @@ export class StoreDestination {
         ET_ISSUE: [],
         ET_OBJECT: objects,
       };
+      } catch (error) {
+        return failedAnswer(error, "build");
+      }
     };
-    const defer = systemCalls?.getStore()?.deferActivate;
+    journal.update(operation.op_id, {state: "pending", active: true, note: "publication pending"});
+    const {currentStepToken, holderToken, stepContextTracked, onAfterStep} = await import("./osd-dialog-step.mjs");
+    const token = stepContextTracked() ? currentStepToken() : holderToken();
+    const defer = systemCalls?.getStore()?.deferActivate ?? (token?.afterStep === undefined ? undefined
+      : continuation => onAfterStep(({dumped}) => dumped
+        ? continuation.fail("activation step dumped") : continuation()));
     if (defer !== undefined) {
-      defer(async () => ({...await publish(), type, name, failureEntries}));
-      return {EV_ACTIVE: "X", EV_LIVE: "", EV_NOTE: "live after the step", EV_COUNT: "0", EV_MS: String(Date.now() - started)};
+      const continuation = async () => ({...await publish(), type, name, failureEntries});
+      continuation.fail = note => journal.update(operation.op_id, {state: "failed", active: false, failure_stage: "step", note});
+      try { defer(continuation); }
+      catch (error) { return failedAnswer(error, "step"); }
+      return {EV_JSON: JSON.stringify(journal.lookup(operation.op_id)), EV_ACTIVE: "X", EV_LIVE: "", EV_NOTE: "live after the step", EV_COUNT: "0", EV_MS: String(Date.now() - started)};
+    }
+    if (token !== undefined) {
+      const note = "ACTIVATE inside a step needs an after-step publication binding";
+      return failedAnswer(Object.assign(new Error(note), {code: "NOT_SUPPORTED"}), "step");
     }
     return publish();
   }

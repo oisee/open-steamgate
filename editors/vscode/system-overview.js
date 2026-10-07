@@ -56,7 +56,7 @@ function systemOverviewHtml(model, {sysinfoUrl} = {}) {
     ? `<iframe title="System information" src="${escapeHtml(sysinfoUrl)}"></iframe>`
     : `<p class="muted">System information is available after the system starts at <code>${escapeHtml(model.sources.sysinfo)}</code>.</p>`;
   const settingsLink = "command:workbench.action.openSettings?%5B%22osd%22%5D";
-  const panelFacts = ["OSD view: the OSD Activity Bar icon", "ABAP Unit: the Testing view", "Build and server log: Output → osd system"];
+  const panelFacts = ["OSD view: the OSD Activity Bar icon", "ABAP Unit: the Testing view", "Build and server log: Output → OSD: System log"];
   const sourceFacts = [
     `Serving process: ${model.sources.serving}`,
     `System status: ${Object.values(model.sources.status).join(", ")}`,

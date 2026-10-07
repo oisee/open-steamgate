@@ -91,7 +91,7 @@ CLASS zcl_osd_adt_request_xml IMPLEMENTATION.
         rv_prefix = `aunit`.
       WHEN `http://www.sap.com/adt/ddic/ddlsources`.
         rv_prefix = `ddl`.
-      WHEN `http://www.sap.com/adt/ddic/srvd`.
+      WHEN `http://www.sap.com/adt/ddic/srvdsources`.
         rv_prefix = `srvd`.
       WHEN `http://www.w3.org/2005/Atom`.
         rv_prefix = `atom`.
@@ -127,7 +127,7 @@ CLASS zcl_osd_adt_request_xml IMPLEMENTATION.
         rv_prefix = `pack`.
       WHEN `ddlSource`.
         rv_prefix = `ddl`.
-      WHEN `serviceDefinition`.
+      WHEN `srvdSource`.
         rv_prefix = `srvd`.
       WHEN `runConfiguration`.
         rv_prefix = `aunit`.

@@ -544,3 +544,66 @@ SUBTRACT returns on a real kernel (an A4H probe; not a blocker).
   are enough; revisit with a count limit (attributes per element, namespace
   declarations per document, explicit 400) if this is seen in practice.
   Owner: adt-i5.
+
+## Lifecycle compiler readiness after creation (2026-10-05)
+
+The lifecycle timing probe in the default split-runtime mode completed its
+initial five-object activation but did not regain compiler readiness within
+90 s. The compiler reported a newly created class XML as an inactive
+generator input. The same creation sequence in ONE_RUNTIME=1 regained
+readiness and passed repeated class/interface/include edits. Reproducer:
+use the local lifecycle probe against an isolated OSD_WARM=1 server with
+OSD_ADT_ONE_RUNTIME=0; create all six types and activate the five source
+objects. Owner: adt-i5. Investigate state promotion/priming across the
+parent ADT kernel before claiming equivalent lifecycle performance in both
+modes. No timeout extension or exclusion of this finding. The CI performance
+job currently measures the ONE_RUNTIME=1 deployment used for Eclipse.
+
+## Track X — dev-express: one development contract for OSG, SAP and the VSIX (brainstorm 2026-10-06)
+
+The question was whether one development API can serve the inside of OSG, the inside of a real SAP system (A4H) and our VSIX at once. The first consumer is PIA (oisee/pia), an ABAP-native coding agent that lives in OSG. A second opinion came from a separate model review. What was decided, sorted by value against cost:
+
+```
+X.1  the contract inside OSG                                           [Must 0.8, M]
+     ├─ zif_osd_devx_files / _build / _tests over the store-seam, one adapter
+     ├─ CREATE / DELETE, structured RUN_TESTS, activate with op_id + status
+     │  (checked → waiting for publication → published / error)
+     └─ payload: abapGit file sets; PIA's wishlist W2/W3/W6/W7
+X.2  the conformance suite is the contract                             [Must 0.8, S–M]
+     ├─ PIA's scenario: create → red test → activate → fix → green → delete
+     └─ the same scenario on OSG, then on A4H through ADT, A4H the oracle
+X.3  activation receipts                                               [Should 0.8, S]
+     └─ op_id + file hashes + check result in a table; for audit, reviewers, resume
+X.4  tests by where-used closure                                       [Should 0.8, S–M]
+     └─ only the test classes a change reaches; the base for wallaby-abap
+X.5  the VSIX as a client to a real SAP through ADT                    [next, M]
+     └─ the same F9 / tests / Jobs UI; local OSG and SAP as two servers
+X.6  pull a package from SAP into OSG for offline work                 [next, M]
+X.7  AFF (SAP/abap-file-formats, MIT) as a second wire format          [next, M]
+     └─ negotiated by capabilities; storage stays abapGit XML
+X.8  git push into SAP                                                 [with Lars]
+     ├─ Lars's hithub (git smart HTTP with receive-pack, MIT) or abapGitServer
+     │  takes the push; a hook pulls through abapGit and activates
+     └─ the import is described by a .yaml contract: order, activation,
+        recovery after a dump or a failed activation; the same contract ADT
+        follows. This is an import contract, not a CI or checks product.
+X.9  an ICF dev-express service on SAP                                 [on request]
+     └─ only if a customer asks: auditors see a custom ADT without SAP support
+X.10 export-only job on strict systems: a package to a zip on a schedule [on request, S]
+```
+
+Why abapGit is the payload and an adapter, and never the contract:
+- abapGit's stable parts are the file format and the per-type `zif_abapgit_object`.
+- Its entry points are internal classes without a compatibility promise. `zcl_abapgit_objects=>serialize` takes `io_i18n_params`, and `deserialize` needs a repository object.
+- The standalone report has only local classes, so it has no API.
+
+Parked ideas, in the archive:
+- SAP as a git remote with its version history;
+- semantic AST diff;
+- dual-run F9 on OSG and SAP side by side;
+- an event stream over AMC;
+- an agent swarm in OSG with one merged push;
+- dev-express in the osgo binary;
+- vscode.dev to a real SAP;
+- time travel;
+- package "capsules".

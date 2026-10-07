@@ -22,6 +22,7 @@
 import * as runtime from "@abaplint/runtime";
 import * as core from "@abaplint/core";
 import {Transpiler, Chunk} from "@abaplint/transpiler";
+import {config as validationConfig} from "@abaplint/transpiler/build/src/validation.js";
 import {CallFunctionTranspiler} from "@abaplint/transpiler/build/src/statements/call_function.js";
 import * as guiConverter from "../.local/lars/open-abap-gui/converter/src/api.mjs";
 import * as setup from "../test/setup.mjs";
@@ -90,7 +91,7 @@ if (typeof Bun !== "undefined") {
     },
   });
 }
-setHostModules({identity: toolchainIdentity, Transpiler, Chunk, core, CallFunctionTranspiler, guiConverter: embeddedSeed ? guiConverter : undefined, plugin: undefined, where: "bundled", version: "bundled"});
+setHostModules({identity: toolchainIdentity, Transpiler, Chunk, core, CallFunctionTranspiler, validationConfig, guiConverter: embeddedSeed ? guiConverter : undefined, plugin: undefined, where: "bundled", version: "bundled"});
 
 const GENERATORS = {
   "gogen-unit.mjs": () => import(pathToFileURL(resolve(process.cwd(), "tools/gogen/unit.mjs")).href),
@@ -109,6 +110,7 @@ const GENERATORS = {
   "osd-gui-convert.mjs": () => import("../tools/osd-gui-convert.mjs"),
   // not a generator: the warm build's comparison with a cold transpile
   "osd-warm.mjs": () => import("../tools/osd-warm.mjs"),
+  "osd-warm-worker.mjs": () => import("../tools/osd-warm-worker.mjs"),
   // not a generator: osabap, for `osd run`; a checkout's tool, so imported
   // by a computed URL the bundler leaves alone rather than carried in it
   "osabap.mjs": () => import(new URL("../tools/gogen/osabap.mjs", import.meta.url).href),
@@ -135,6 +137,8 @@ switch (mode) {
     break;
   }
   case "gen": {
+    const {installGeneratorView} = await import("../tools/osd-generator-view.mjs");
+    installGeneratorView();
     const [name, ...args] = rest;
     if (GENERATORS[name] === undefined) {
       console.error(`osd gen: not a generator: ${name}`);
@@ -205,6 +209,8 @@ switch (mode) {
       console.log(`system id: invalid -- ${error.message}`);
       process.exitCode = 1;
     }
+    const {doctorWarmPin} = await import("../tools/osd-warm-capabilities.mjs");
+    await doctorWarmPin(Transpiler, core);
     // what the bundle did to the runtime: a class the runtime looks up by
     // its name must still carry that name after bundling
     const renamed = [];

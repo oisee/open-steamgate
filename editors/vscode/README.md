@@ -22,12 +22,48 @@ The status bar shows **OSD running/stopped**, the serving **OSD generation**, an
 
 VS Code 1.101 or newer is required. The system runs locally on desktop or in a Remote-WSL or Remote-SSH workspace. It does not need a SAP or ADT connection.
 
+The editor’s ▷ button runs classrun (F9) when the class implements
+`IF_OO_ADT_CLASSRUN`. The beaker runs ABAP Unit and appears for classes
+with test methods; it runs exactly the same command as **Ctrl+Shift+F10**
+(`testing.runCurrentFile`). Tests also run through the Test Explorer.
+**F8 / ▷ / F9 never run ABAP Unit.** F8 runs classrun for a class implementing
+`IF_OO_ADT_CLASSRUN`, even when it has tests; reports run in a terminal,
+and tables/CDS views open Data Preview. Other supported run actions keep
+their object dispatch. A class with nothing to run shows
+“Nothing to run for <OBJ>. Tests: Ctrl+Shift+F10.” Each button’s tooltip
+names its action and key.
+
 ## What works
 
 - Start and stop the local server; inspect its services and generation in the OSD tree.
 - Run ABAP Unit in Test Explorer; check, activate, and run ABAP files with familiar keys.
 - Open local OData and Fiori apps, inspect short dumps, use SQL notebooks, and debug ABAP through VS Code's Node debugger.
 - Add an abapGit-style workspace layer over the bundled source.
+
+## What connects to what
+
+The **osd system** is a local ABAP server. Start builds and launches it on
+its allocated HTTP port (shown in **OSD running** and System overview).
+`osd.url` points extension requests to that listener; independently started
+systems default to port 3030.
+
+The ABAP-FS mount **OSD (local)** (`osd-local`) exposes source from that
+same server over ADT. It is a filesystem connection, independent of debugging.
+
+The osd debugger attaches VS Code’s Node debugger on demand when you set an
+ABAP breakpoint while the system runs, or press **F9** / **▷** with a
+breakpoint already set. **Start system never starts a debug session**, even
+with saved breakpoints. No launch configuration is needed. The SAP ADT and
+ABAP-FS debuggers are unrelated to osd: **Attach to server**, **ABAP on server**,
+and **ABAP Replay Debugger** target SAP systems.
+
+Each Output channel starts with a line explaining its contents:
+
+- **OSD**: extension diagnostics and command/debugger activity.
+- **OSD: Console**: classrun/F9 output and Check/Activate feedback.
+- **OSD: System log**: server build/runtime logs and debugger attachment diagnostics.
+- **OSD: Jobs**: job summaries, or worker JSON events and diagnostics after
+  the explicit **Show raw job log** action. **Show jobs** restores summaries.
 
 ## ABAP values in the debugger
 
@@ -92,12 +128,14 @@ show a one-line state with **Start system**. Only imported saved runs are
 listed; unimported reservations are outside this API, and step variants/users
 are shown only when recorded. No cancel, repeat or delete actions are included.
 
-Use **OSD: Show jobs** for a readable **OSD jobs** summary:
+Use **OSD: Show jobs** for a readable **OSD: Jobs** summary:
 one line per run, newest first, with its name, state, start time, duration,
 step/output counts where available, and failure reason. The summary refreshes
 every two seconds after opening and shows up to 200 recent runs.
 **Show raw job log** in the action menu or command palette opens the unchanged
-worker JSON events and diagnostics in **OSD jobs raw log**.
+worker JSON events and diagnostics in **OSD: Jobs**. This explicit action switches the channel to raw mode;
+**Show jobs** restores summaries. Raw mode streams live events and retains
+the worker log for this window’s session.
 
 ## Local ABAP-FS connection
 

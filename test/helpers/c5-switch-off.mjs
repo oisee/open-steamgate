@@ -1,3 +1,4 @@
+import {copyRuntimeRoot} from "./runtime-root.mjs";
 // Fresh process: load the reduced parent kernel, never the whole generation.
 import assert from "node:assert/strict";
 import express from "express";
@@ -16,6 +17,7 @@ import {dialogStep} from "../../tools/osd-dialog-step.mjs";
 const root = mkdtempSync(join(tmpdir(), "osd-c5-off-"));
 const servers = [];
 let runtime;
+const runtimeRoot = copyRuntimeRoot();
 try {
   mkdirSync(join(root, "src"));
   symlinkSync(resolve("output"), join(root, "output"));
@@ -24,7 +26,7 @@ try {
   const kernel = await loadAdtKernel({output: resolve("output"), setup});
   assert.equal(abap.Classes.ZCL_OSD_CLASSRUN_DEMO, undefined, "parent kernel has no user class");
   assert.equal((await abap.Classes.ZCL_OSD_KERNEL_GUARD.has_generation({})).get(), " ");
-  runtime = new ServingRuntime({root: process.cwd(), env: {OSD_ADT_ONE_RUNTIME: "0", STG_DB: "sqlite", STG_DB_PATH: "", STG_TLS: "0"}});
+  runtime = new ServingRuntime({root: runtimeRoot, env: {OSD_ADT_ONE_RUNTIME: "0", STG_DB: "sqlite", STG_DB_PATH: "", STG_TLS: "0"}});
   await runtime.start();
   const store = new ObjectStore({root, libs: []});
   const sides = [];
@@ -58,6 +60,7 @@ try {
 } finally {
   for (const s of servers) await new Promise(done => s.close(done));
   await runtime?.stop();
+  rmSync(runtimeRoot, {recursive: true, force: true});
   await abap?.context?.databaseConnections?.DEFAULT?.disconnect();
   rmSync(root, {recursive: true, force: true});
 }

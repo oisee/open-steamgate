@@ -1,3 +1,6 @@
+import {runtimeRootFixture} from "./helpers/runtime-root.mjs";
+import {createServer as portProbe} from "node:net";
+const runtimeFixture = runtimeRootFixture();
 import {expect} from "chai";
 import {diff, normalise, readLog} from "../tools/osd-replay.mjs";
 import {lockResultDocument} from "../tools/adt-documents.mjs";
@@ -123,31 +126,52 @@ describe("the first sieve: two answers, and whether they are the same one", () =
 // calibration that cannot see those is a calibration that proves nothing.
 describe("one system served twice answers the same thing", function () {
   this.timeout(180000);
-  const PORTS = [3151, 3152];
+  const PORTS = [];
   const servers = [];
+  const logs = [];
 
   before(async () => {
     const {spawn} = await import("node:child_process");
-    for (const port of PORTS) {
-      servers.push(spawn(process.execPath, ["-e",
+    for (let i = 0; i < 2; i++) {
+      const port = await new Promise((resolve, reject) => {
+        const probe = portProbe().listen(0, "127.0.0.1", () => {
+          const port = probe.address().port;
+          probe.close(() => resolve(port));
+        }).once("error", reject);
+      });
+      PORTS.push(port);
+      const index = servers.length;
+      logs.push("");
+      const child = spawn(process.execPath, ["--input-type=module", "-e",
         'const {startServer} = await import("./test/start.mjs"); startServer(true); setInterval(() => {}, 1e9);'],
-        {stdio: "ignore", env: {...process.env, STG_PORT: String(port)}}));
-    }
-    // waiting for the port rather than for a number of seconds: a fixed sleep
-    // is a flake on a loaded machine and a waste on an idle one
-    for (const port of PORTS) {
+        {cwd: runtimeFixture.root, stdio: ["ignore", "pipe", "pipe"], env: {...process.env, STG_PORT: String(port), STG_TLS: "0", STG_PROTOCOLS: "0", STG_DB: "sqlite", STG_DB_PATH: ""}});
+      child.stdout.on("data", data => { logs[index] += data; });
+      child.stderr.on("data", data => { logs[index] += data; });
+      servers.push(child);
+      // Each source host prepares its generation before listening. Start
+      // them in order so they do not contend for the private build lock.
+      let ready = false;
       for (let i = 0; i < 120; i += 1) {
+        if (servers[index].exitCode !== null || servers[index].signalCode !== null) throw new Error(logs[index]);
         try {
           await fetch(`http://localhost:${port}/sap/bc/adt/core/http/build`);
+          ready = true;
           break;
         } catch {
           await new Promise((r) => setTimeout(r, 500));
         }
       }
+      expect(ready, logs[index]).to.equal(true);
     }
   });
 
-  after(() => servers.forEach((s) => s.kill()));
+  after(async () => {
+    await Promise.all(servers.map(server => new Promise(resolve => {
+      if (server.exitCode !== null || server.signalCode !== null) return resolve();
+      server.once("exit", resolve);
+      server.kill();
+    })));
+  });
 
   it("every call answers, and the two answers are one answer", async () => {
     const {replay} = await import("../tools/osd-replay.mjs");
@@ -172,9 +196,15 @@ describe("one system served twice answers the same thing", function () {
 describe("asking nothing is not a recording", () => {
   it("record exits 2 when no call could be asked at all", async () => {
     const {execFileSync} = await import("node:child_process");
+    const port = await new Promise((resolve, reject) => {
+      const probe = portProbe().listen(0, "127.0.0.1", () => {
+        const port = probe.address().port;
+        probe.close(() => resolve(port));
+      }).once("error", reject);
+    });
     let code = 0;
     try {
-      execFileSync(process.execPath, ["tools/osd-replay.mjs", "record", "http://localhost:59999"],
+      execFileSync(process.execPath, ["tools/osd-replay.mjs", "record", `http://localhost:${port}`],
         {stdio: "pipe"});
     } catch (error) {
       code = error.status;

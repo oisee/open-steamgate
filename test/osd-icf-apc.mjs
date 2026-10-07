@@ -3,6 +3,9 @@ import {spawn} from "node:child_process";
 import {mkdtempSync, rmSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
+import {runtimeRootFixture} from "./helpers/runtime-root.mjs";
+
+const runtimeFixture = runtimeRootFixture();
 
 describe("ICF object pages expose the APC implementation separately from HTTP", function () {
   this.timeout(40000);
@@ -15,7 +18,7 @@ describe("ICF object pages expose the APC implementation separately from HTTP", 
       const {startServer} = await import('./test/start.mjs');
       const server = startServer(true);
       server.on('listening', () => process.send({port: server.address().port}));
-    `], {env: {...process.env, STG_SERVE: "inline", STG_PORT: "0", STG_TLS: "0",
+    `], {cwd: runtimeFixture.root, env: {...process.env, STG_SERVE: "inline", STG_PORT: "0", STG_TLS: "0",
       STG_DB: "file", STG_DB_PATH: join(directory, "test.sqlite")},
       stdio: ["ignore", "pipe", "pipe", "ipc"]});
     let log = "";

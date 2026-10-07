@@ -34,8 +34,8 @@ release a lock, rebuild code or switch generations:
   Trees with no live generation have nothing to compare. Owner:
   `osd-build.mjs`, `generationStateSnapshot()`.
 - **gen:** generated outputs under checkout `gen/` keep the same paths and
-  contents. Owner:
-  `osd-test-resources.cjs`, `genManifest()` / `genDifference()`. Snapshots
+  contents. Both filesystem invariants use the same named-root machinery. Owner:
+  `osd-test-resources.cjs`, `manifest(name)` / `manifestDifference()`. Snapshots
   read directory entries and metadata, caching a SHA-256 digest per absolute
   path, size, `mtimeMs`, `ctimeMs` and `ino`. Each file is hashed once when first
   seen; unchanged metadata reuses its cached digest. A difference in any of
@@ -52,6 +52,17 @@ release a lock, rebuild code or switch generations:
   This detects sweeps that the generation hash cannot see: `gen/` is an
   output and excluded from that hash. It does not validate pre-existing
   output against a build manifest or assign a stale run start to a file.
+- **tree:** working-tree sources under `src/` and every `packs/*/src`, plus
+  `osd-pack.json`, `abap_transpile.json` and `libs.lock.json` at checkout and
+  pack roots, keep their paths and bytes. Discovery scans every immediate pack
+  directory at each boundary, including disabled, unconfigured and new packs;
+  it does not use the generation hash's input list, exclusions or `OSD_PACKS`.
+  Optional `*.trace.meta.json` navigation companions are included. A test that
+  leaves one is named by this invariant even if the generation still matches.
+  Owner: `osd-test-resources.cjs`, the same `manifest(name)` cache and
+  `manifestDifference()` used for `gen`. Baselines, import/execution attribution,
+  restoration reporting, runner-end/exit audits and byte-identical rewrites
+  have the same semantics for both names.
 - **children:** no serving child or asynchronous spawned process remains
   alive. Owner: `osd-runtime.mjs`, `servingStateSnapshot()`, and
   `osd-test-resources.cjs`, `resourceStateSnapshot(file)`.
@@ -75,7 +86,7 @@ absolute paths resolved against the cwd at helper invocation, including callback
 and promise completion after a cwd change. This does not enumerate
 arbitrary directories, grandchildren, or processes started by native extensions.
 A run terminated during import or with `process.exit()` cannot finish all checks;
-the exit audit can still report gen changes from already completed imports.
+the exit audit can still report gen and tree changes from already completed imports.
 
 ## Intentional generation changes
 
@@ -105,7 +116,8 @@ paths; environment evidence names the changed keys. An unchanged inherited gener
 boundary. The detector re-baselines its observation state for the next file;
 a new live link, missing generation, hash error or additional tree drift remains red.
 The detector does not re-baseline the filesystem.
-The `gen` check compares both import entry/exit and execution entry/exit
+The `gen` and `tree` checks are anchored to the checkout cwd at hook load, even
+if a fixture later changes cwd. Each compares both import entry/exit and execution entry/exit
 (after user cleanup). Import-time generator calls therefore belong to the
 file importing them, including files with no selected tests. Each file gets
 its own observation baseline; a downstream file that leaves already missing
@@ -137,21 +149,24 @@ Each invariant entry requires `reason`, `owner` and a `backlog` item link;
 malformed entries fail at load time. Root exceptions enumerate basename prefixes
 and maximum surviving counts. A different prefix or an excess count remains red.
 Generation exceptions describe the originating input changes and maximum count.
-`gen` exceptions use a nonempty `files` array of `{path, maxCount: 1, phase, kinds}` or
-`{prefix, maxCount, phase, kinds}` identities rooted under `gen/`. Each identity
+`gen` and `tree` exceptions use a nonempty `files` array of `{path, maxCount: 1, phase, kinds}` or
+`{prefix, maxCount, phase, kinds}` identities rooted under their invariant's observed paths. `tree` paths may name
+checkout manifests, `src/` files, pack manifests or `packs/<name>/src/` files;
+its prefixes must narrow `src/` or a specific pack's `src/` to a subdirectory.
+Unobserved paths such as pack `data/` are rejected. Each identity
 requires `phase: 'import' | 'execution'` and a nonempty `kinds` array containing
 only `'removed'`, `'changed'` or `'added'`. Evidence preserves each observation's
 phase and kind, so an import allowance cannot waive an execution mutation of
 the same path. Prefixes end in `/`
-and must name a narrower directory than `gen/` itself. Every changed path
+and must name a narrower directory than the invariant's source/output root itself. Every changed path
 must match an identity and every identity's count must stay within its bound;
 overlapping identities cannot multiply a bound. Counts cover unique paths
 matching each identity's phase and kinds. The shadowed-objects exception allows
 only the observed import removals and rewrites, with its existing prefix/count
 bounds. Evidence is still printed in full. The
 `allowGenerationMismatch()` API cannot waive this separate invariant.
-For added trace sidecars the detector proves that excluding exactly those new
-paths returns the baseline hash. For restored activation inputs the originating
+The separate `tree` allowances for trace sidecars match exact paths and their
+observed phase/kind; they do not grant a generation exemption. For restored activation inputs the originating
 fixture calls the already-loaded detector's `observeGenerationDrift()` while
 edited inputs still exist; it verifies their identity/count, the hash they name,
 and the restored tree hash. A warm runtime may use persisted active copies of
@@ -170,7 +185,7 @@ is complete. See the [run report](test-isolation-runs.md).
 
 Each checked file prints total baseline and final snapshot time in milliseconds;
 this includes detector proof captures and excludes test work and user cleanup.
-The run also prints the one-time `gen` baseline hashing/manifest cost (files,
+For each of `gen` and `tree`, the run also prints the one-time baseline hashing/manifest cost (files,
 decimal MB and milliseconds), manifest boundary count, initial file count, median
 milliseconds per boundary, comparison/hash time and total added observation
 time. This total includes import observations as well as execution snapshots;

@@ -3,7 +3,7 @@ import {expect} from "chai";
 import express from "express";
 import {createServer} from "node:net";
 import {createHash} from "node:crypto";
-import {mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, readdirSync} from "node:fs";
+import {mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, readdirSync, readlinkSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import "./start.mjs";
@@ -16,6 +16,11 @@ import {ServingRuntime} from "../tools/osd-runtime.mjs";
 import {abapRunner} from "../tools/adt-abap-front.mjs";
 import {locks} from "../tools/osd-enq.mjs";
 import {dialogStep} from "../tools/osd-dialog-step.mjs";
+import {runtimeRootFixture} from "./helpers/runtime-root.mjs";
+
+const runtimeFixture = runtimeRootFixture();
+
+import {activeFixture} from "./helpers/source-snapshot.mjs";
 
 const base = "/sap/bc/adt/";
 const core = "http://www.sap.com/adt/core";
@@ -30,7 +35,7 @@ const envelopes = [
   ["oo/interfaces", `<intf:abapInterface xmlns:intf="http://www.sap.com/adt/oo/interfaces" xmlns:adtcore="${core}" adtcore:name="ZIF_XML"/>`, 409],
   ["programs/includes", `<include:abapInclude xmlns:include="http://www.sap.com/adt/programs/includes" xmlns:adtcore="${core}" adtcore:name="ZINCL_XML"/>`, 409],
   ["ddic/ddl/sources", `<ddl:ddlSource xmlns:ddl="http://www.sap.com/adt/ddic/ddlsources" xmlns:adtcore="${core}" adtcore:name="ZDDL_XML"/>`, 409],
-  ["ddic/srvd/sources", `<srvd:serviceDefinition xmlns:srvd="http://www.sap.com/adt/ddic/srvd" xmlns:adtcore="${core}" adtcore:name="ZSRV_XML"/>`, 501],
+  ["ddic/srvd/sources", `<srvd:srvdSource xmlns:srvd="http://www.sap.com/adt/ddic/srvdsources" xmlns:adtcore="${core}" adtcore:name="ZSRV_XML"/>`, 501],
   ["programs/programs/zxml?_action=LOCK", refs, 400],
   ["programs/programs/zxml?_action=UNLOCK", refs, 200],
   ["packages", `<pack:package xmlns:pack="http://www.sap.com/adt/packages" xmlns:adtcore="${core}" adtcore:name="$TMP"><pack:superPackage adtcore:name="$TMP"/></pack:package>`, 409],
@@ -69,7 +74,7 @@ const variants = {
 const wireAnswers = new Map();
 for (const front of ["node", "abap"]) describe(`T12/T13 XML requests ${front} mode=${process.env.OSD_ADT_ONE_RUNTIME ?? "0"}`, function () {
   this.timeout(180000);
-  let root, store, server, origin, auth, facade, runtime;
+  let root, store, server, origin, auth, facade, runtime, lockAuth;
   const workCalls = [];
   before(async () => {
     root = mkdtempSync(join(tmpdir(), "adt-xml-")); mkdirSync(join(root, "src"));
@@ -79,12 +84,14 @@ for (const front of ["node", "abap"]) describe(`T12/T13 XML requests ${front} mo
     writeFileSync(join(root, "src/zxml.prog.abap"), "REPORT zxml.\nWRITE 'active'.\n");
     writeFileSync(join(root, "src/zcl_xml.clas.abap"), "CLASS zcl_xml DEFINITION PUBLIC. ENDCLASS. CLASS zcl_xml IMPLEMENTATION. ENDCLASS.");
     writeFileSync(join(root, "src/zcl_xml.clas.testclasses.abap"), "CLASS ltcl_xml DEFINITION FOR TESTING. PRIVATE SECTION. METHODS test FOR TESTING. ENDCLASS. CLASS ltcl_xml IMPLEMENTATION. METHOD test. ENDMETHOD. ENDCLASS.");
+    activeFixture(root);
     store = new ObjectStore({root,libs:[],roots:[{path:"src",package:"$TMP",writable:true}]});
     writeFileSync(join(root,"src/zif_xml.intf.abap"),"INTERFACE zif_xml PUBLIC. ENDINTERFACE.");
     writeFileSync(join(root,"src/zincl_xml.prog.abap"),"FORM demo. ENDFORM.");
     writeFileSync(join(root,"src/zincl_xml.prog.xml"),"<abapGit><PROGDIR><SUBC>I</SUBC></PROGDIR></abapGit>");
     writeFileSync(join(root,"src/zddl_xml.ddls.asddls"),"define view entity ZDDL_XML as select from ztable { key id }");
     writeFileSync(join(root,"src/zsrv_xml.srvd.srvdsrv"),"define service ZSRV_XML { expose ZDDL_XML; }");
+    activeFixture(root);
     store = new ObjectStore({root,libs:[],roots:[{path:"src",package:"$TMP",writable:true}]});
     for(const method of ["activate","check","publish","create","write","read","unit","find"]) {
       const original = store[method];
@@ -94,7 +101,7 @@ for (const front of ["node", "abap"]) describe(`T12/T13 XML requests ${front} mo
     let runner;
     if (front === "abap") {
       if (process.env.OSD_ADT_ONE_RUNTIME === "1") {
-        runtime = new ServingRuntime({root:process.cwd(),env:{OSD_ADT_ONE_RUNTIME:"1",STG_DB:"sqlite",STG_DB_PATH:"",STG_TLS:"0",NODE_OPTIONS:[process.env.NODE_OPTIONS,`--import=${new URL("./helpers/adt-xml-child.mjs",import.meta.url).pathname}`].filter(Boolean).join(" ")}});
+        runtime = new ServingRuntime({root:runtimeFixture.root,env:{OSD_ADT_ONE_RUNTIME:"1",STG_DB:"sqlite",STG_DB_PATH:"",STG_TLS:"0",NODE_OPTIONS:[process.env.NODE_OPTIONS,`--import=${new URL("./helpers/adt-xml-child.mjs",import.meta.url).pathname}`].filter(Boolean).join(" ")}});
         runtime.storeDestination = new StoreDestination({store}); await runtime.start(); runner = abapRunner({remote:runtime});
       } else runner = abapRunner({handler:abap.Classes.ZCL_OSD_ADT_HANDLER,step:dialogStep});
     }
@@ -106,13 +113,26 @@ for (const front of ["node", "abap"]) describe(`T12/T13 XML requests ${front} mo
     const hello = await fetch(origin+base+"core/discovery",{method:"HEAD",headers:{"x-csrf-token":"fetch"}});
     auth = {"content-type":"application/xml",cookie:hello.headers.getSetCookie().map(c => c.split(";")[0]).join("; "),"x-csrf-token":hello.headers.get("x-csrf-token")};
     const locked = await fetch(origin+base+"core/discovery",{method:"HEAD",headers:{"x-csrf-token":"fetch","x-sap-adt-sessiontype":"stateful"}});
-    const lockAuth = {cookie:locked.headers.getSetCookie().map(c => c.split(";")[0]).join("; "),"x-csrf-token":locked.headers.get("x-csrf-token"),"x-sap-adt-sessiontype":"stateful"};
+    lockAuth = {cookie:locked.headers.getSetCookie().map(c => c.split(";")[0]).join("; "),"x-csrf-token":locked.headers.get("x-csrf-token"),"x-sap-adt-sessiontype":"stateful"};
     const lock = await fetch(origin+base+"oo/interfaces/zif_xml?_action=LOCK",{method:"POST",headers:lockAuth});
     expect(lock.status,await lock.text()).to.equal(200);
     // An inactive save preserves an active copy: rejection must keep both.
     store.write("PROG","ZXML","REPORT zxml.\nWRITE 'saved'.\n");
   });
-  after(async () => {if(server) await new Promise(r => server.close(r)); if(runtime) await runtime.stop(); if(root) rmSync(root,{recursive:true,force:true});});
+  after(async () => {
+    // Closing a listener does not end a stateful ADT session or its enqueue.
+    // Release the XML probes' holder before the next suite shares this runtime.
+    if (server) {
+      if (lockAuth) {
+        const response = await fetch(origin + "/sap/public/bc/icf/logoff", {headers: lockAuth});
+        await response.arrayBuffer();
+        expect(response.status).to.equal(200);
+      }
+      await new Promise(r => server.close(r));
+    }
+    if(runtime) await runtime.stop();
+    if(root) rmSync(root,{recursive:true,force:true});
+  });
   const post = async (path,body) => {
     const r = await fetch(origin+base+path,{method:"POST",headers:auth,body});
     return {status:r.status,type:r.headers.get("content-type"),location:r.headers.get("location"),body:await r.text()};
@@ -134,7 +154,7 @@ for (const front of ["node", "abap"]) describe(`T12/T13 XML requests ${front} mo
   const digest = async () => {
     const files = [];
     const walk = dir => {for(const entry of readdirSync(dir,{withFileTypes:true}).sort((a,b) => a.name.localeCompare(b.name))) {
-      const path = join(dir,entry.name); if(entry.isDirectory()) walk(path); else files.push([path.slice(root.length),readFileSync(path).toString("hex")]);
+      const path = join(dir,entry.name); if(entry.isDirectory()) walk(path); else files.push([path.slice(root.length),entry.isSymbolicLink() ? {link:readlinkSync(path)} : readFileSync(path).toString("hex")]);
     }};
     walk(root);
     const holders = [];

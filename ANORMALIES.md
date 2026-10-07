@@ -29,6 +29,55 @@ Format adapted from `larshp/hithub` (MIT).
 - Upstream version containing a fix: `...` or `unknown`
 
 ## Open anomalies
+### ANOMALY-2026-10-07-aunit-comparison-sign -- E.2 type-blind comparison formatting
+
+- Status: `fixed locally`
+- Affected versions: locked transpiler/runtime `f3611417` (2.13.93), open-abap-core `8b397be`.
+- API: `cl_abap_unit_assert=>assert_equals`, projected by ADT XML and STORE `RUN_TESTS`.
+- Reproducer: `test/fixtures/aunit-x2/` and `test/fixtures/aunit-types/`
+  (synthetic sources; X2 XML is synthetic too).
+- Expected SAP behaviour: subtraction of 3 from 2 reports actual text `1-` and
+  testclasses stack line 7; addition reports one pass with no alerts.
+- Actual open-abap behaviour: its assertion dump erases operand types into strings.
+  E.2 (#628) inferred numeric types from those strings in ADT XML, so a character
+  or string `'-1'` incorrectly became `"1-"`. X2 initially reused that formatter
+  in STORE: the adapters agreed on this common error. Packed padding, float
+  detail splitting, and underscore title casing also differed from SAP.
+- Resolution: `tools/osd-unit-assert.mjs` wraps the existing assertion during Unit
+  runs, retaining RTTI kind/decimals and scalar values on the original exception.
+  `alertOf` carries that provenance through detached result JSON.
+  `tools/osd-unit-value.mjs` formats each known type for both adapters; unknown
+  types retain runtime text. XML splits float details and cases method titles
+  at underscores, and sorts uppercase names by byte order. Comparisons and raw
+  exception messages are unchanged; X2 still reports integer actual `"1-"`.
+- Limits: packed thousands separators/other magnitudes are unmeasured; decimal
+  float precision remains limited by the runtime scalar representation.
+- Upstream issue: none; this is the host's protocol projection.
+- Regression: `OSD_HEAVY_RANGE=90-99 OSD_HEAVY_SLOTS=4 tools/osd-heavy.sh npx mocha test/adt-aunit-types.mjs test/adt-aunit-conformance-x2.mjs test/adt-unit-result.mjs`.
+
+### ANOMALY-2026-10-06-transpiler-validation-state -- runtimeError leaks into later compileError runs
+
+- Status: `workaround`
+- Affected version: locked transpiler `f3611417`, version 2.13.93.
+- Reproducer: run a registry with `unknownTypes: runtimeError`, then a new registry with `unknownTypes: compileError` in the same process. `build/src/validation.js` leaves its exported `config.syntax.errorNamespace` at `VOID_EVERYTHING` instead of restoring `.`.
+- Expected: each build uses its requested unknown-type policy, independent of previous builds.
+- Actual: earlier DSL suites change later cold output for IF_ALV_MESSAGE and both SALV exception classes; a fresh warm compiler refuses the byte comparison.
+- Workaround: when the selected transpiler exposes `build/src/validation.js`, normalize its validation namespace before every validation, including directly constructed instances and bundled hosts. Linked fixture transpilers without that module skip the normalization; errors loading an existing validator still propagate.
+- Regression: `test/warm.mjs`, runtimeError followed by compileError rejects an unresolved type.
+- Upstream: not filed; this task authorizes local CI repair only. No SAP calls were needed for this compiler-state defect.
+
+### ANOMALY-2026-10-06-adt-unit-result-uris - ABAP Unit results name invalid class source suffixes
+
+- Status: `fixed locally`
+- Discovery: user-supplied SAP protocol measurement, 2026-10-06; no SAP calls made for this fix.
+- Affected path: `tools/adt-documents.mjs` result and frame URI rendering (now extracted into `tools/adt-unit-result.mjs`), and both facade result callers.
+- Expected: class results use semantic class/method selectors, include navigation selectors, and include stack URIs with `#start=line,0`. Class include URIs have no `/source/main` suffix. Disabling navigation removes class/method types as well as navigation attributes. Assertion comparisons are nested under `Different values`.
+- Actual: class/method identities and stack frames used `/includes/testclasses/source/main#start=...`; Eclipse rejected the suffix after running the tests. Navigation options were ignored and comparison details were flat.
+- Resolution: render the measured CLAS shapes, preserve available failure text, and read the navigation option on run and evaluation. Program result shapes stay as before except for the navigation switch. Activation and check diagnostics retain their existing source suffix explicitly when calling the shared frame helper.
+- Regression: `test/adt-unit-result.mjs`, plus the existing development-loop and reference-package run assertions. The new contract suite fails against the old renderer. Include navigation GETs read a synthetic source file; no captures or measured object names are stored.
+- Execution seam: Node stack paths resolve the output generation symlink. The runner now compares frames with that resolved output directory so the test include reaches the renderer; previously only the assertion library's explicit frame survived. `test/osd-unit.mjs` checks the real failure line.
+- Upstream: none; the renderer is an open-steamgate implementation.
+
 ### ANOMALY-2026-10-04-sqlite-like-case -- sql.js Open SQL LIKE ignores ASCII case
 
 - Status: `workaround`
@@ -2030,6 +2079,18 @@ for `zosd_status_app`, which has been deployed for a day.
 - Regression-test location: `test/amc.mjs` (program mapping and refused send), `test/unit/zcl_osd_amc_test.clas.testclasses.abap` (authorised and unauthorised sends).
 - Upstream version containing a fix: none.
 
+### ANOMALY-2026-10-06-amc-one-process — an AMC message sent from a background job never reaches the server's APC subscribers
+
+- Status: `open` (by design so far: the supervisor broker is step 6 of `docs/abap-daemons.md` and is not built)
+- Discovery date: `2026-10-06` (reported by PIA)
+- Affected versions: the one-process AMC host in `tools/osd-amc.mjs`, with every background job running in its own `tools/osd-batch-runs.mjs worker` process
+- Affected runtime API: `cl_amc_channel_manager=>create_message_producer( )->send( )` in a job step, received by an APC WebSocket bound with `bind_amc_message_consumer` in the serving process
+- Expected SAP behaviour: AMC is not tied to a work process. A job (or a daemon) that sends on a channel reaches an APC client bound to it in a dialog work process. PIA's job mode on A4H relies on this. It is reported by PIA and has not been probed by OSG yet.
+- Actual open-abap behaviour: each process has its own `AmcBroker`. The worker's `SEND` is delivered to subscribers in the worker only, and the APC client in the server receives nothing. Measured by PIA: the job completed in 34 s and its terminal got no message.
+- Impact on open-steamgate: any "job reports progress over AMC" pattern is silent. A sender inside the serving process (an HTTP step, an APC handler, a daemon in the same process) is not affected.
+- Smallest safe workaround: send from the serving process. PIA 0.1.1 runs the work inline in the APC handler instead of as a job.
+- Regression-test location: none yet; it belongs with the supervisor broker (`docs/backlog/jobs.md`).
+
 ### ANOMALY-2026-09-29-amc-scope-assumption — AMC cross-identity delivery has no A4H measurement
 
 - Status: `open` (local policy implemented, system semantics unmeasured)
@@ -3720,4 +3781,74 @@ SNAPSHOT_MISMATCH and the doctor retry.
 - Workaround: ADT request XML no longer uses sXML. Its strict tokenizer validates the scalar value, constructs the complete UTF-16 surrogate pair, and converts that pair together. No dependency file is changed.
 - Regression: the common `test/fixtures/adt-request-xml-corpus.json` exercises both references, literal pairs, text and attributes through Node and the transpiled ABAP class.
 - Upstream: needs an issue in open-abap-core; no upstream filing requested.
+- Upstream version containing a fix: unknown.
+
+### ANOMALY-2026-10-06-http-client-send-synchronous - cl_http_client send( ) blocks, receive( ) does nothing
+
+- Status: `open`
+- Discovery: PIA's fan-out probe (ZCL_PIA_PROBE_FAN), measured on A4H (SAP 7.58, background job) and on an OSG instance. It was reported by the PIA session on 2026-10-06; dell confirmed the source.
+- Affected path: open-abap-core `src/http/cl_http_client.clas.abap` (pin 8b397be). `if_http_client~send` awaits the whole request (`await postData(...)`, around line 195) and fills the response there. `if_http_client~receive` is empty ("handled in send()").
+- Reproducer: create three clients for `http://httpbin.org/delay/2`. Call `send( )` on each, then `receive( )` on each.
+- Expected SAP behaviour: `send( )` returns immediately and `receive( )` waits for its own response, so the three requests overlap. On A4H the send phase took 1 ms, the receives 2174 / 1 / 58 ms, and the fan-out 2234 ms in total, against 6525 ms sequentially.
+- Actual local behaviour: each `send( )` completes its request (about 7 s for all three) and every `receive( )` returns at once, so a fan-out runs sequentially. Code written in the ZLLM style gains nothing.
+- Possible fix: `send` keeps the pending promise without awaiting it; `receive` awaits it and fills the response. `http_communication_failure` then moves from `send` to `receive`, as on SAP. The per-client agent uses `maxSockets: 1`, which is fine per client.
+- Workaround: none in the tree. PIA runs its turn in a background unit and makes one LLM call per step. Whether two background units run concurrently in OSG has not been measured.
+- Regression: none yet.
+- Upstream: needs an issue in open-abap-core, after our critic pass; no upstream filing requested.
+- Upstream version containing a fix: unknown.
+
+### ANOMALY-2026-10-06-get-run-time-delta - GET RUN TIME returns ms since the previous call
+
+- Status: `open`
+- Discovery: the same probe printed "A sequential: 6525 ms" on A4H and "7 ms" on OSG, while the OSG wall clock was 13.6 s for six 2-second requests. dell confirmed the source.
+- Affected path: `@abaplint/runtime` `build/src/statements/get_run_time.js`. It keeps a module-level `prev`. The first call sets 0; every later call sets `Date.now() - prev` and moves `prev`.
+- Expected SAP behaviour: the first `GET RUN TIME FIELD` returns 0 and fixes the origin. Every later call returns the microseconds elapsed since that origin, so the value only grows. After `WAIT UP TO 1 SECONDS` twice, the three calls give 0, about 1000000 and about 2000000.
+- Actual local behaviour: milliseconds since the previous call, which here gives 0, about 1000 and about 1000. `( t1 - t0 ) / 1000` yields seconds labelled as milliseconds, and differences between non-adjacent calls are meaningless. The origin is also module-global, shared by every session in the Node process, while on SAP it belongs to the internal session.
+- Reproducer: `GET RUN TIME FIELD t0. WAIT UP TO 1 SECONDS. GET RUN TIME FIELD t1. WAIT UP TO 1 SECONDS. GET RUN TIME FIELD t2.` Derived from the source and the probe; this exact snippet has not been run on both systems yet.
+- Possible fix: keep a fixed `start`, set `(now - start) * 1000` (or `performance.now()` for sub-millisecond resolution), and scope the origin to the session.
+- Workaround: none; measure with `GET TIME STAMP FIELD` of type `timestampl` instead.
+- Regression: none yet.
+- Upstream: needs an issue in abaplint/transpiler (runtime), after our critic pass; no upstream filing requested.
+- Upstream version containing a fix: unknown.
+
+### ANOMALY-2026-10-06-uccpi-high-byte - cl_abap_conv_out_ce=>uccpi multiplies the high byte by 255
+
+- Status: `open`
+- Discovery: PIA's first deployment to A4H 7.58 (zcl_pia_00_json_util, 29 tests, 29/29 on both systems after fixes), reported by the PIA session on 2026-10-06. dell confirmed the source.
+- Affected path: open-abap-core `src/conv/cl_abap_conv_out_ce.clas.abap`, method `uccpi`. It converts to encoding 4103 (UTF-16LE, low byte first), then computes `ret = lv_hex(1)` followed by `ret = ret + lv_hex+1(1) * 255`. The factor must be 256.
+- Reproducer: `cl_abap_conv_out_ce=>uccpi( 'Ж' )` and `cl_abap_conv_out_ce=>uccpi( '€' )`.
+- Expected SAP behaviour: 1046 (U+0416) and 8364 (U+20AC).
+- Actual local behaviour: 1042 and 8332, wrong by the high byte for every character above U+00FF. ASCII and Latin-1 are unaffected, because their high byte is 0.
+- Workaround: none in the tree; PIA does not use `uccpi`. ANOMALY-2026-10-04-sxml-supplementary-ref already avoids sXML numeric references, which convert through `cl_abap_conv_in_ce=>uccpi`.
+- Regression: none yet.
+- Upstream: needs an issue in open-abap-core, a one-character fix, after our critic pass; no upstream filing requested.
+- Upstream version containing a fix: unknown.
+
+### ANOMALY-2026-10-06-data-value-variable - DATA ... VALUE accepts a variable
+
+- Status: `open`
+- Discovery: PIA's first A4H deployment. Code that compiled in OSG was refused on SAP.
+- Affected path: the syntax check that the transpiler runs (abaplint).
+- Reproducer: `DATA lv_start TYPE i.` followed by `DATA lv_pos TYPE i VALUE lv_start.`
+- Expected SAP behaviour: a syntax error, "LV_START" is not a constant. VALUE takes only a literal, a constant or IS INITIAL.
+- Actual local behaviour: it compiles and runs. Code built in OSG then fails to transport to SAP.
+- Workaround: none; authors must use a constant or a literal.
+- Regression: none yet.
+- Upstream: needs an issue in abaplint/abaplint (syntax check), after our critic pass; no upstream filing requested.
+- Upstream version containing a fix: unknown.
+
+Not an anomaly, recorded for porting: on 7.58, `FIND ... REGEX` (POSIX) raises a deprecation that vsp deploy treats as an error. PIA moved to PCRE, which OSG supports.
+
+### ANOMALY-2026-10-06-uccp-lone-surrogate - uccp drops a surrogate code unit
+
+- Status: `open`
+- Discovery: PIA's test escape_emoji_pair passes 30/30 on A4H 7.58 and fails only in OSG. It was triggered by an emoji in a model answer and reported by the PIA session on 2026-10-06. dell confirmed the path in source.
+- Affected path: open-abap-core `src/conv/cl_abap_conv_in_ce.clas.abap`. `uccp` turns the hex into an integer and calls `uccpi`, which decodes the two bytes through a UTF-16LE (4103) converter. A lone surrogate does not survive that decode, and `uccp` swallows `cx_sy_conversion_codepage` (`* todo, hmm`), which leaves the result empty.
+- Reproducer: `cl_abap_conv_in_ce=>uccp( 'D83D' ) && cl_abap_conv_in_ce=>uccp( 'DE0A' )`.
+- Expected SAP behaviour: each call returns its UTF-16 code unit unchanged, so the concatenation is U+1F60A with strlen 2.
+- Actual local behaviour: both halves are lost, so PIA's `unescape(😊)` returns an empty string.
+- Related, milder: on SAP, `cl_abap_conv_codepage=>create_out( )->convert( )` of a lone surrogate raises `CX_SY_CONVERSION_CODEPAGE`, while OSG appears to produce `EF BF BD` silently. This is not measured in OSG yet.
+- Workaround: none in the tree. The same family as ANOMALY-2026-10-04-sxml-supplementary-ref and ANOMALY-2026-10-06-uccpi-high-byte.
+- Regression: none yet.
+- Upstream: needs an issue in open-abap-core (code-unit level `uccp`, without a decode round trip), after our critic pass; no upstream filing requested.
 - Upstream version containing a fix: unknown.

@@ -1,3 +1,4 @@
+import {copyRuntimeRoot} from "./helpers/runtime-root.mjs";
 // Persistence gate for the public CL_BALI_* facade. Runs two OSD processes
 // against one disposable SQLite file: write in the first, read in the second.
 import {spawn, spawnSync} from "node:child_process";
@@ -6,11 +7,11 @@ import {tmpdir} from "node:os";
 import {createServer} from "node:net";
 import {join} from "node:path";
 
-const root = process.cwd();
+const root = copyRuntimeRoot();
 const scratch = mkdtempSync(join(tmpdir(), "osd-bal-persist-"));
 const database = join(scratch, "business.sqlite");
 const build = spawnSync("npm", ["run", "-s", "transpile"], {cwd: root, stdio: "inherit"});
-if (build.status !== 0) process.exit(build.status ?? 1);
+if (build.status !== 0) { rmSync(root, {recursive: true, force: true}); process.exit(build.status ?? 1); }
 
 const port = await new Promise((resolve, reject) => {
   const probe = createServer().listen(0, "127.0.0.1", () => {
@@ -96,4 +97,5 @@ try {
 } finally {
   if (child) await stop(child);
   rmSync(scratch, {recursive: true, force: true});
+  rmSync(root, {recursive: true, force: true});
 }

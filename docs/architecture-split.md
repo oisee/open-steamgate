@@ -108,7 +108,7 @@ surface documented in `adt-surface.md`.
 
 Why it is a unit: fact 2. It parses with abaplint and serves a source tree; it
 does not import the runtime. It **supervises** A (fact 3) and calls into it
-for one thing: running unit tests, and by the same route F8. Everything an IDE
+for execution: ABAP Unit runs and classrun applications. Everything an IDE
 does to *code* — open, edit, lock, activate, search, the tree — works with no
 runtime process at all.
 

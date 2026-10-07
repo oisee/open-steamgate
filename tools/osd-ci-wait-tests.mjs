@@ -28,7 +28,7 @@ async function main() {
   const [tag, sha] = process.argv.slice(2);
   const repo = process.env.GITHUB_REPOSITORY;
   const token = process.env.GITHUB_TOKEN;
-  if (!/^vscode-v[0-9]+\.[0-9]+\.[0-9]+$/.test(tag || "") ||
+  if (!/^vscode-(?:stable-)?v[0-9]+\.[0-9]+\.[0-9]+$/.test(tag || "") ||
       !/^[0-9a-f]{40}$/.test(sha || "") ||
       !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo || "") || !token) {
     throw new Error("Expected release tag, 40-character commit SHA, GITHUB_REPOSITORY and GITHUB_TOKEN");

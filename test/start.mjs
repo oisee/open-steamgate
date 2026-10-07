@@ -20,6 +20,7 @@ import {abapRunner} from "../tools/adt-abap-front.mjs";
 import {kernelFreshness} from "../tools/adt-abap-kernel.mjs";
 import {liveHash} from "../tools/osd-build.mjs";
 import {warmUnitPlan} from "../tools/osd-unit.mjs";
+import {closeWarm} from "../tools/osd-store-warm.mjs";
 import {ObjectStore} from "../tools/osd-store.mjs";
 import {Data} from "../tools/osd-data.mjs";
 import {DEFAULT_DATABASE} from "../tools/sqlite-file-client.mjs";
@@ -64,6 +65,8 @@ const MODE = process.env.STG_SERVE === "child" ? "child" : "inline";
 let closing;
 
 async function loadInline() {
+  const {ensureSourceBuild} = await import("../tools/osd-source-build-view.mjs");
+  await ensureSourceBuild(process.cwd());
   const from = (file) => import(new URL(`../output/${file}`, import.meta.url).href);
   const {initializeABAP} = await from("init.mjs");
   const {cl_express_icf_shim} = await from("cl_express_icf_shim.clas.mjs");
@@ -96,6 +99,10 @@ async function loadInline() {
   const {zcl_osd_demo_data} = await from("zcl_osd_demo_data.clas.mjs");
   await ensureDemoData(zcl_osd_demo_data);
   return {cl_express_icf_shim, zcl_osd_adt_handler, zcl_apc_host, zcl_osd_status, icf};
+}
+if (MODE === "child") {
+  const {ensureSourceBuild} = await import("../tools/osd-source-build-view.mjs");
+  await ensureSourceBuild(process.cwd());
 }
 const inline = MODE === "inline" ? await loadInline() : undefined;
 
@@ -626,7 +633,9 @@ export function startServer(quiet) {
   }
 
   // Open the sockets first. Discovery waits for this same warm-up on both
-  // fronts, with a silence bound. The synchronous registry parse still blocks
+  // fronts, with a silence bound. This parent registry serves ADT Unit plans
+  // and risk/xref reads independently of the compiler registry. Keep both
+  // (measured RSS in docs/warm-compile.md). The synchronous parse still blocks
   // readiness and unrelated routes until it finishes. Bind-only tests opt out.
   if (quiet !== true && process.env.OSD_UNIT_WARM !== "0") {
     facade.store.unitReady = new Promise((resolve) => setImmediate(resolve))
@@ -675,20 +684,16 @@ export function startServer(quiet) {
   // holds the port and the database the next listener needs, and `void` on
   // it meant "start stopping and carry on".
   server.close = (cb) => {
-    if (typeof cb === "function") {
-      secure?.close();
-      void runtime?.stop();
-      closing = new Promise((resolve) => close((...a) => {
-        cb(...a);
-        resolve();
-      }));
-      return server;
-    }
     closing = (async () => {
+      await closeWarm(facade.store);
       await new Promise((resolve) => (secure === undefined ? resolve() : secure.close(resolve)));
       await runtime?.stop();
       await new Promise((resolve) => close(resolve));
     })();
+    if (typeof cb === "function") {
+      closing.then(() => cb(), error => cb(error));
+      return server;
+    }
     return closing;
   };
   return server;

@@ -38,24 +38,6 @@
       ]
     }
   },
-  "test/vscode-warm.mjs": {
-    "generation": {
-      "reason": "Temporary: the shared shard-1 run changed live from 759177bda0d12f33 to ee8b686b9cf3721d, then restored source bytes without restoring the live generation. The final tree still hashes to 759177bda0d12f33. Confirmed on base 11122e9f; fixture owner must restore both.",
-      "owner": "stoker",
-      "backlog": "docs/backlog/misc.md#isolation-vscode-warm-generation",
-      "drift": {
-        "kind": "restored-inputs",
-        "paths": [
-          "src/demo/zcl_zstg_demo_dpc_ext.clas.abap"
-        ],
-        "maxCount": 1,
-        "restoreContent": {
-          "pattern": "\\* The hand-written part a developer owns on a real system \\(T7 warm test [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\)\\. Reads the",
-          "replacement": "* The hand-written part a developer owns on a real system. Reads the"
-        }
-      }
-    }
-  },
   "test/osd-bsp.mjs": {
     "temporary-roots": {
       "reason": "Temporary: the osd-bsp fixture creates an osd-bsp-* root and leaves it on disk. Shared shard 2 on base 11122e9f observed one survivor; the fixture owner must remove it.",
@@ -67,22 +49,6 @@
           "maxCount": 1
         }
       ]
-    }
-  },
-  "test/vscode-job-worker-integration.mjs": {
-    "generation": {
-      "reason": "Temporary: this fixture starts Launcher over process.cwd() with a disposable notebook pack, activates its class and removes the pack in finally, but leaves the repository live link at e5315ee4149d11ec while the restored tree hashes to a1e53ac46cfb6ea1. A second originating generation leak in shard 2 on base 11122e9f.",
-      "owner": "stoker",
-      "backlog": "docs/backlog/misc.md#isolation-vscode-job-worker-integration-generation",
-      "drift": {
-        "kind": "restored-inputs",
-        "pathSuffixes": [
-          "/packs/notebook-scratch/src/zcl_vs_jobs_probe.clas.abap"
-        ],
-        "maxCount": 1,
-        "packSuffix": "/packs/notebook-scratch",
-        "contentDigest": "865dbefb97ac563e3bec65a5ec558a79025e028909390bb2748d4030ba8acee9"
-      }
     }
   },
   "test/amdp-pack.mjs": {
@@ -159,6 +125,119 @@
         {
           "prefix": "osd-prove-runs-",
           "maxCount": 80
+        }
+      ]
+    }
+  },
+  "test/dsl-l2.mjs": {
+    "tree": {
+      "reason": "Temporary: the L2 before hook renders 13 absent navigation companions under src/l2demo and removes only its scratch directory. The source/pack scan on base 8feda000 observed these exact execution additions; the generation hash excludes them. Restore or isolate them in the fixture.",
+      "owner": "osg-research",
+      "backlog": "docs/backlog/misc.md#isolation-dsl-l2-tree",
+      "files": [
+        {
+          "path": "src/l2demo/zcl_l2_grounded_ship_crew.clas.testclasses.trace.meta.json",
+          "maxCount": 1,
+          "phase": "execution",
+          "kinds": [
+            "added"
+          ]
+        },
+        {
+          "path": "src/l2demo/zcl_l2_maintenance_ship.clas.testclasses.trace.meta.json",
+          "maxCount": 1,
+          "phase": "execution",
+          "kinds": [
+            "added"
+          ]
+        },
+        {
+          "path": "src/l2demo/zcl_l2_recent_voyage.clas.testclasses.trace.meta.json",
+          "maxCount": 1,
+          "phase": "execution",
+          "kinds": [
+            "added"
+          ]
+        },
+        {
+          "path": "src/l2demo/zcl_l2_recent_voyage.clas.trace.meta.json",
+          "maxCount": 1,
+          "phase": "execution",
+          "kinds": [
+            "added"
+          ]
+        },
+        {
+          "path": "src/l2demo/zcl_l2_ship_busy.clas.testclasses.trace.meta.json",
+          "maxCount": 1,
+          "phase": "execution",
+          "kinds": [
+            "added"
+          ]
+        },
+        {
+          "path": "src/l2demo/zcl_l2_ship_captain.clas.testclasses.trace.meta.json",
+          "maxCount": 1,
+          "phase": "execution",
+          "kinds": [
+            "added"
+          ]
+        },
+        {
+          "path": "src/l2demo/zcl_l2_ship_cargo_limit.clas.testclasses.trace.meta.json",
+          "maxCount": 1,
+          "phase": "execution",
+          "kinds": [
+            "added"
+          ]
+        },
+        {
+          "path": "src/l2demo/zcl_l2_ship_max_cargo.clas.testclasses.trace.meta.json",
+          "maxCount": 1,
+          "phase": "execution",
+          "kinds": [
+            "added"
+          ]
+        },
+        {
+          "path": "src/l2demo/zcl_l2_ship_min_captains.clas.testclasses.trace.meta.json",
+          "maxCount": 1,
+          "phase": "execution",
+          "kinds": [
+            "added"
+          ]
+        },
+        {
+          "path": "src/l2demo/zcl_l2_ship_min_captains.clas.trace.meta.json",
+          "maxCount": 1,
+          "phase": "execution",
+          "kinds": [
+            "added"
+          ]
+        },
+        {
+          "path": "src/l2demo/zcl_l2_ship_min_crew.clas.testclasses.trace.meta.json",
+          "maxCount": 1,
+          "phase": "execution",
+          "kinds": [
+            "added"
+          ]
+        },
+        {
+          "path": "src/l2demo/zcl_l2_ship_restricted.clas.testclasses.trace.meta.json",
+          "maxCount": 1,
+          "phase": "execution",
+          "kinds": [
+            "added"
+          ]
+        },
+        {
+          "path": "src/l2demo/zcl_l2_ship_voyage_limit.clas.testclasses.trace.meta.json",
+          "maxCount": 1,
+          "phase": "execution",
+          "kinds": [
+            "added"
+          ]
         }
       ]
     }

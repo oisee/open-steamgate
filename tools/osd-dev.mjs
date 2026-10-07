@@ -71,7 +71,7 @@ export function devLoop(options = {}) {
         log(`${t.check ? "check" : "build"} failed after ${t.ms ?? "?"} ms: ${result.error ?? t.error ?? "see the output below"}; the running system is untouched`);
         return {ok: false, stage: t.check ? "check" : "build", result};
       }
-      if (!store.completeActivations(checked, result.transpile?.built)) {
+      if (!(await store.completeActivations(checked, result.transpile?.built))) {
         log("source changed during build; leaving the new edit inactive for the next pass");
         return {ok: false, stage: "changed", result};
       }
@@ -115,7 +115,7 @@ export function devLoop(options = {}) {
       }
       return {ok: false, stage: "build", result};
     }
-    if (!store.completeActivations(checked, result.transpile?.built)) {
+    if (!(await store.completeActivations(checked, result.transpile?.built))) {
       log("source changed during build; leaving the new edit inactive for the next pass");
       return {ok: false, stage: "changed", result};
     }

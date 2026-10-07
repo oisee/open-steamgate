@@ -1,3 +1,8 @@
+import {packageChildName} from "./osd-object-name.mjs";
+import {transpileStore} from "./osd-store-build.mjs";
+import {deferSourceMutation} from "./osd-store-source-lock.mjs";
+import {warmUp} from "./osd-store-warm.mjs";
+import {recordBaselineGeneration, recordStoreGeneration} from "./osd-activation-journal.mjs";
 // The object store of OSD, the off-stack doppelgänger: what sits behind
 // the ADT façade. A client asks for an object by type and name; this finds
 // the file, reads it, writes it, checks it and activates it. The façade
@@ -17,11 +22,11 @@ import {createHash} from "node:crypto";
 import {CREATABLE} from "./osd-store-create.mjs";
 import {StoreVersions} from "./osd-store-versions.mjs";
 import {buildRegistry, forgetRegistry, registryIssues, walkStoreFiles, withSource} from "./osd-store-registry.mjs";
+import {warmCheck} from "./adt-warm-check.mjs";
 import {entityOf} from "./ddls-entity.mjs";
 import {inputFoldersOf, packRootsOf} from "./osd-packs.mjs";
 import {libraryFiles} from "./osd-inputs.mjs";
-import {hashOf, inputsOf, loadConfig, normalPath} from "./osd-build.mjs";
-import {transpileIssues, withoutHostPaths} from "./osd-build-issues.mjs";
+import {hashOf, inputsOf, loadConfig, normalPath, liveHash} from "./osd-build.mjs";
 import {TMP_FOLDER, TMP_TEXT, isTmpPackage, tmpAuthors, tmpRoot} from "./osd-tmp.mjs";
 import {authorNow, checkName, indexTmp, noteAuthor, tmpChild, tmpDelete, tmpPackageFile, withTmp, writeCheck, writeChecked} from "./osd-store-tmp.mjs";
 export {InvalidName} from "./osd-store-tmp.mjs";
@@ -40,8 +45,6 @@ const WARM_SWAPS = Number(process.env.OSD_WARM_SWAPS ?? 25);
 const WARM_QUIET_MS = Number(process.env.OSD_WARM_QUIET_MS ?? 60000);
 // ... or whose heap has grown this much since its first swap
 const WARM_HEAP_MB = Number(process.env.OSD_WARM_HEAP_MB ?? 512);
-// how long after a cold build the registry waits before it is primed again
-const WARM_REPRIME_MS = Number(process.env.OSD_WARM_REPRIME_MS ?? 5000);
 // how long a publish waits for a runtime changing hands (a recycle, a
 // start) before it answers that it is still changing rather than hang
 const TRANSITION_MS = Number(process.env.OSD_TRANSITION_MS ?? 60000);
@@ -192,7 +195,7 @@ export class ObjectStore {
     // killed there would (#crash)
     this.crashAt = options.crashAt;
     this.#versions = new StoreVersions(this, () => this.#entries());
-    this.#versions.loadInactive();
+    if (process.env.OSD_GENERATOR_ACTIVE_VIEW !== "1") this.#versions.loadInactive();
   }
 
   #versions;
@@ -438,6 +441,8 @@ export class ObjectStore {
   // a write lands a file; a new object goes to the first writable root unless
   // a caller with a specific layer (the notebook scratch pack) names one
   write(type, name, source, include = "main", options = {}) {
+    const queued = deferSourceMutation(this, "write", [...arguments]);
+    if (queued) return queued;
     const meta = TYPES[type];
     if (meta === undefined) {
       throw new NotSupported(`object type ${type}`);
@@ -485,7 +490,8 @@ export class ObjectStore {
     this.#versions.crash("write:before-source");
     writeFileSync(join(this.root, file), text);
     this.#forget();
-    return {...entry, ...this.stateOf(entry), include, file, bytes: Buffer.byteLength(source, "utf8")};
+    return {...entry, ...this.stateOf(entry), include, file, bytes: Buffer.byteLength(source, "utf8"),
+      revision: this.#versions.sourceRevision(type, entry.name)};
   }
 
   // A new object, in the folder of the package it is asked for. The two
@@ -502,6 +508,8 @@ export class ObjectStore {
   // name does not continue its parent's cannot be a folder, and is refused
   // rather than misfiled.
   create(type, name, options = {}) {
+    const queued = deferSourceMutation(this, "create", [...arguments]);
+    if (queued) return queued;
     const meta = TYPES[type];
     if (meta === undefined || CREATABLE[type] === undefined) {
       throw new NotSupported(`creating an object of type ${type}`);
@@ -524,7 +532,7 @@ export class ObjectStore {
     const description = String(options.description ?? "");
     let file = tmpPackageFile(this.root, parent, upper, folder, type); // $TMP: tools/osd-store-tmp.mjs
     if (file === undefined && type === "DEVC") {
-      if (!upper.startsWith(parent + "_") || upper.length === parent.length + 1) {
+      if (!packageChildName(parent, upper)) {
         throw new NotSupported(`a package under ${parent} is named ${parent}_<FOLDER>; ${upper}`);
       }
       file = join(folder, upper.slice(parent.length + 1).toLowerCase(), "package.devc.xml");
@@ -614,6 +622,8 @@ export class ObjectStore {
   }
 
   delete(type, name) {
+    const queued = deferSourceMutation(this, "delete", [...arguments]);
+    if (queued) return queued;
     const entry = this.find(type, name);
     if (entry === undefined) {
       throw new NotFound(type, name);
@@ -897,6 +907,15 @@ export class ObjectStore {
       if (this.#queued === entry) this.#queued = undefined;
       this.#running = entry;
       return this.#publish({...options, activating}, entry);
+    }).then(result => {
+      if (result?.ok === true && result.generation) {
+        if (result.transpile?.built && typeof result.transpile.built === "object") {
+          this.#publishedBuilds.set(result.transpile.built, result.generation);
+        }
+        // Builds with no activating source already contain only active input.
+        if (activating.size === 0) recordStoreGeneration(this, () => result.generation);
+      }
+      return result;
     }).finally(() => {
       if (this.#running === entry) this.#running = undefined;
       entry.rejectBuilt(new Error("the publish ended before its build"));
@@ -907,6 +926,7 @@ export class ObjectStore {
   }
 
   #publishing = Promise.resolve();
+  #publishedBuilds = new WeakMap();
   // the publish waiting for its turn (not forced), and the one in its turn
   #queued = undefined;
   #running = undefined;
@@ -924,6 +944,7 @@ export class ObjectStore {
   }
 
   async #publish(options, entry = {}) {
+    recordBaselineGeneration(this, () => this.served?.generation ?? liveHash(this.root));
     let transpile;
     try {
       transpile = await this.transpile(options);
@@ -948,7 +969,9 @@ export class ObjectStore {
       runtime = this.served;
     }
     if (runtime === undefined || runtime.running !== true) {
-      return {ok: true, transpile, recycled: false};
+      // The complete generation is available to a fresh detached context,
+      // even when this source host has no serving process to recycle.
+      return {ok: true, transpile, recycled: false, generation: transpile.hash};
     }
     // nothing to load: the process already serves the generation this build
     // named (a no-op warm build, a cached cold one), so no swap and no
@@ -996,8 +1019,8 @@ export class ObjectStore {
       }
     }
     if (transpile.warm === true && (transpile.hostHeld ?? []).length > 0) {
-      console.log(`warm: ${transpile.hostHeld.join(", ")} is held by the serving process itself, recycling instead of swapping`);
-      why = `${transpile.hostHeld.join(", ")} is held by the serving process itself`;
+      why = `${transpile.hostHeld.join(", ")} requires a fresh runtime`;
+      console.log(`warm: ${why}, recycling instead of swapping`);
     }
     try {
       const bounded = await this.#bounded(runtime.recycle(), "the recycle");
@@ -1103,6 +1126,7 @@ export class ObjectStore {
       swaps: this.served?.swaps ?? 0,
       copies: c?.copies ?? 0,
       lastVerify: w.last,
+      compilerMemory: c?.memory,
     };
   }
 
@@ -1143,39 +1167,7 @@ export class ObjectStore {
 
   // prime in the background; a failure leaves every build cold and says why
   warmUp() {
-    const w = this.warm();
-    if (w.on !== true) return undefined;
-    if (w.priming !== undefined) return w.priming;
-    // not while the runtime changes hands: the prime holds this process for
-    // seconds (11 s on vsp-i7, 17-30 s here under load), and a boot the
-    // supervisor cannot hear meanwhile is a recycle that reads as that much
-    // slower -- the reprime five seconds after a cold build landed in the
-    // middle of that build's recycle every time. Not as `priming` either: a
-    // build awaits that, and must not wait on a transition through it.
-    const changing = this.served?.recycling ?? this.served?.starting;
-    if (changing !== undefined) {
-      return changing.catch(() => undefined).then(() => this.warmUp());
-    }
-    w.primeDue = false;
-    clearTimeout(w.reprime);
-    w.priming = (async () => {
-      const {WarmCompiler} = await import("./osd-warm.mjs");
-      // primed on the build view: inactive objects as their active copies
-      w.compiler ??= new WarmCompiler({root: this.root, log: (m) => console.log(m), overlay: (activating) => this.overlay(activating),
-        keyOf: (file) => this.objectKeyOf(file), inactiveSources: (activating) => this.inactiveSources(activating)});
-      try {
-        const r = await w.compiler.prime();
-        w.reason = undefined;
-        return r;
-      } catch (error) {
-        w.reason = error.message;
-        console.log(`warm: builds stay cold: ${error.message}`);
-        return undefined;
-      } finally {
-        w.priming = undefined;
-      }
-    })();
-    return w.priming;
+    return warmUp(this);
   }
 
   // after a swap: compare the generation with a cold transpile of the same
@@ -1183,8 +1175,12 @@ export class ObjectStore {
   // replace it with one started on the live generation
   #afterSwap(hash, swap = {}) {
     const w = this.warm();
-    w.heapBase ??= swap.heap;
-    const grown = (swap.heap ?? 0) - (w.heapBase ?? 0);
+    // one heap per work process (a pool reports each, tools/osd-pool.mjs),
+    // each measured against its own at the first swap
+    const heaps = swap.heaps ?? [swap.heap];
+    w.heapBase ??= heaps;
+    const grown = Math.max(0, ...heaps.map((heap, i) =>
+      typeof heap === "number" && typeof w.heapBase[i] === "number" ? heap - w.heapBase[i] : 0));
     if (w.compiler?.unverified.has(hash)) {
       w.next = hash;
       this.#verifyNext();
@@ -1192,29 +1188,52 @@ export class ObjectStore {
     const runtime = this.served;
     clearTimeout(w.timer);
     // the limits are reached by a swap, so the recycle is the swap's
-    // publish's to await (undefined when nothing is recycled)
-    if ((runtime?.swaps ?? 0) >= this.warmSwapLimit) {
-      return this.#catchUp(`${runtime.swaps} swaps`);
-    } else if (grown > WARM_HEAP_MB * 1024 * 1024) {
+    // publish's to await (undefined when nothing is recycled). The heap is
+    // the safety limit and always recycles; the swap count and a quiet
+    // minute are housekeeping and wait while a client holds an APC socket,
+    // which a recycle would cut (PIA, 2026-10-06: its terminal dropped
+    // while a turn waited on its model).
+    if (grown > WARM_HEAP_MB * 1024 * 1024) {
       return this.#catchUp(`a heap ${Math.round(grown / 1048576)} MB larger than at the first swap`);
+    } else if ((runtime?.swaps ?? 0) >= this.warmSwapLimit && !this.#channelsOpen(`${runtime.swaps} swaps`)) {
+      return this.#catchUp(`${runtime.swaps} swaps`);
     } else {
-      w.timer = setTimeout(() => {
-        // the live generation is compared once the saves have stopped, if
-        // the comparison of it was cut short by the next save
-        const live = this.served?.generation;
-        if (live !== undefined && w.compiler?.unverified.has(live)) {
-          w.next = live;
-          this.#verifyNext();
-        }
-        this.#catchUp("quiet");
-      }, WARM_QUIET_MS);
-      w.timer.unref?.();
+      this.#armQuiet();
     }
     return undefined;
   }
 
+  // a quiet minute after the last swap brings the catch-up recycle, unless
+  // an APC socket is open: then it is asked again a quiet period later
+  #armQuiet() {
+    const w = this.warm();
+    clearTimeout(w.timer);
+    w.timer = setTimeout(() => {
+      // the live generation is compared once the saves have stopped, if
+      // the comparison of it was cut short by the next save
+      const live = this.served?.generation;
+      if (live !== undefined && w.compiler?.unverified.has(live)) {
+        w.next = live;
+        this.#verifyNext();
+      }
+      if (this.#channelsOpen("quiet")) this.#armQuiet();
+      else this.#catchUp("quiet");
+    }, this.warmQuietMs);
+    w.timer.unref?.();
+  }
+
+  // the APC sockets the serving process holds (counted by upgradeProxy,
+  // tools/osd-proxy.mjs); says once per deferral why nothing is recycled
+  #channelsOpen(why) {
+    const open = this.served?.openChannels ?? 0;
+    if (open > 0) console.log(`warm: recycle after ${why} deferred: ${open} APC connection(s) open`);
+    return open > 0;
+  }
+
   // the swap count that brings a catch-up recycle (OSD_WARM_SWAPS); a test lowers it
   warmSwapLimit = WARM_SWAPS;
+  // the quiet period after a swap that brings one (OSD_WARM_QUIET_MS); likewise
+  warmQuietMs = WARM_QUIET_MS;
   // how long a publish waits for a runtime changing hands (OSD_TRANSITION_MS)
   transitionMs = TRANSITION_MS;
 
@@ -1325,6 +1344,9 @@ export class ObjectStore {
     const target = this.#fileFor(type, name, entry, options.include ?? "main");
     return withSource(this, target.file, options.source, (registry) => registryIssues(registry, type, target.name));
   }
+
+  // The Node store owns compiler IPC; browser check runners remain portable.
+  checkWarm(object) { return warmCheck(this, object); }
 
 
   // which file a source belongs in: the object's own, the class include the
@@ -1441,6 +1463,8 @@ export class ObjectStore {
   // others and dropped the active copy. Without `built` (no build ran: a
   // façade whose activation does not transpile) the disk is compared alone.
   completeActivations(results, built = undefined) {
+    const queued = deferSourceMutation(this, "completeActivations", [...arguments]);
+    if (queued) return queued;
     // An ADT request may activate several objects. Do not mark the first
     // active if a later one was saved again during the same build.
     const key = (result) => `${result.type} ${String(result.name).toUpperCase()}`;
@@ -1449,6 +1473,12 @@ export class ObjectStore {
         result.revision !== this.#versions.sourceRevision(result.type, result.name))) return false;
     for (const result of results) {
       this.#versions.markActive(result.type, result.name);
+    }
+    // ADT and STORE share promotion. Update the same publication checkpoint
+    // only for the exact successful build whose source revisions were promoted.
+    const generation = built && this.#publishedBuilds.get(built);
+    if (generation && liveHash(this.root) === generation) {
+      recordStoreGeneration(this, () => generation);
     }
     return true;
   }
@@ -1472,10 +1502,6 @@ export class ObjectStore {
     this.buildingSet = set;
     this.building = (async () => {
       await before?.catch(() => undefined);
-      const started = Date.now();
-      const w = this.warm();
-      // read once, at the start of the build, so the build and its name agree
-      const overlay = this.overlay(activating);
       // what this build read of the objects it activates: the revision a
       // completion must match, not the bytes on disk when it completes
       const built = (read) => {
@@ -1483,79 +1509,12 @@ export class ObjectStore {
         const digests = new Map([...read].map(([file, digest]) => [normalPath(file), digest]));
         return Object.fromEntries([...activating].map((key) => [key, this.#versions.builtRevision(key, digests)]));
       };
-      // the warm registry holds the build view (#460's overlay), and a build
-      // of `activating` is a warm edit of it: those objects' saved sources
-      // replace their active copies, every other inactive object keeps its
-      // copy (WarmCompiler#overlayOf) -- an ADT save makes its object
-      // inactive, so without this every activation through ADT was cold
-      // a prime that is due (after a cold build) and not yet run is run now,
-      // when nothing is changing hands: it costs a parse of the tree, and the
-      // cold build it saves costs that, the transpile and a recycle. An ADT
-      // client saves and activates in one breath, so the activation after a
-      // create's cold build used to come before the reprime and go cold too.
-      if (w.on === true && options.force !== true && w.primeDue === true && w.priming === undefined &&
-          (this.served?.recycling ?? this.served?.starting) === undefined) {
-        await this.warmUp();
-      }
-      if (w.on === true && options.force !== true) {
-        await w.priming;
-        if (w.compiler?.primed === true) {
-          try {
-            const r = await w.compiler.build(activating);
-            return {ok: true, ms: Date.now() - started, objects: r.objects, hash: r.hash, cached: r.cached, warm: true,
-              built: built(w.compiler.digests),
-              modules: r.modules, hostHeld: r.hostHeld, from: r.from, stale: r.stale, steps: r.steps,
-              closure: r.closure, xrefRows: r.xrefRows, unverified: w.compiler.unverified.has(r.hash)};
-          } catch (error) {
-            if (error.code !== "NOT_WARM") {
-              // `check`: the transpiler refused the change; anything else
-              // (BUSY, a disk that failed) is a build that did not happen
-              return {ok: false, ms: Date.now() - started, objects: 0, warm: true, check: error.check === true,
-                issues: error.issues, output: withoutHostPaths(String(error.output || error.message).slice(-2000), this.root),
-                error: withoutHostPaths(error.message, this.root)};
-            }
-            w.reason = error.message;
-            w.compiler.drop();
-            console.log(`warm: a cold build: ${error.message}`);
-          }
-        }
-      }
-      // a comparison of a warm generation the tree has left would end
-      // inconclusive, and meanwhile it is a second cold transpile beside
-      // this one (WarmCompiler#cancelVerify)
-      if (w.compiler?.verifying !== undefined) w.compiler.cancelVerify(await this.sourceKey());
-      try {
-        const {build} = await import("./osd-build.mjs");
-        const r = await build({...this.buildOptions, root: this.root, force: options.force === true, replace: options.replace === true, overlay});
-        // only a build that made a generation live is one to prime on: after
-        // a failed one the tree is not the live generation, and a prime on
-        // demand would parse it to be told so
-        w.primeDue = w.on === true;
-        return {ok: true, ms: Date.now() - started, objects: r.objects, hash: r.hash, cached: r.cached, built: built(r.digests)};
-      } catch (error) {
-        // the transpiler's refusal names each object and line; the rest of
-        // the log is for the host's console and never for a client: it
-        // carries absolute paths of the machine that built it
-        const issues = transpileIssues(error.message);
-        console.log(`build failed: ${String(error.message).slice(0, 2000)}${error.output ? `\n${String(error.output).slice(-2000)}` : ""}`);
-        return {ok: false, ms: Date.now() - started, objects: 0, check: issues.length > 0, issues,
-          output: withoutHostPaths(String(error.output || error.message).slice(-2000), this.root),
-          error: withoutHostPaths(String(error.message).split("\n")[0], this.root)};
-      } finally {
-        // a cold build is a new start for the warm registry, primed once the
-        // saves have stopped for a while: the prime holds this process for
-        // its 8-9 s, and a burst of cold saves would pay it each time
-        if (w.on === true && w.compiler?.primed !== true) {
-          clearTimeout(w.reprime);
-          w.reprime = setTimeout(() => this.warmUp(), WARM_REPRIME_MS);
-          w.reprime.unref?.();
-        }
-      }
+      return transpileStore(this, options, activating, built);
     })();
     const building = this.building;
-    building.finally(() => {
+    building.then(() => {
       if (this.building === building) this.building = undefined;
-    });
+    }, () => { if (this.building === building) this.building = undefined; });
     return building;
   }
 }

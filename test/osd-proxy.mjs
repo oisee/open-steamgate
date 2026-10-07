@@ -2,6 +2,9 @@ import {expect} from "chai";
 import {ObjectStore} from "../tools/osd-store.mjs";
 import {forward, odataProxy, NotForwardable} from "../tools/osd-proxy.mjs";
 import express from "express";
+import {runtimeRootFixture} from "./helpers/runtime-root.mjs";
+
+const runtimeFixture = runtimeRootFixture();
 
 // The seam between the listener a client points at and the process that
 // actually answers OData. What matters here is not that bytes arrive: it is
@@ -12,7 +15,7 @@ describe("tools/osd-proxy: the OData front, in another process", () => {
 
   before(async function () {
     this.timeout(120000);
-    runtime = new ObjectStore().serving({root: process.cwd()});
+    runtime = new ObjectStore().serving({root: runtimeFixture.root});
     await runtime.start();
   });
 
@@ -54,7 +57,7 @@ describe("tools/osd-proxy: the OData front, in another process", () => {
   // forwarding to nothing is an error, not an empty success: the proxy that
   // quietly answers 200 for a runtime that is gone is the false-green again
   it("forwarding with nothing serving refuses rather than invents an answer", async () => {
-    const idle = new ObjectStore().serving({root: process.cwd()});
+    const idle = new ObjectStore().serving({root: runtimeFixture.root});
     let thrown;
     await forward(idle, {method: "GET", originalUrl: "/x", headers: {}}, {}).catch((e) => {
       thrown = e;

@@ -2,8 +2,8 @@
 import {spawnSync} from "node:child_process";
 import {basename} from "node:path";
 
-export function run(cmd, args, cwd) {
-  const r = spawnSync(cmd, args, {cwd, encoding: "utf8", maxBuffer: 64 << 20});
+export function run(cmd, args, cwd, env = process.env) {
+  const r = spawnSync(cmd, args, {cwd, env, encoding: "utf8", maxBuffer: 64 << 20});
   const output = (r.stdout ?? "") + (r.stderr ?? "");
   if (r.status !== 0) {
     const e = new Error(`${basename(cmd)} ${args.join(" ")} exited ${r.status ?? r.signal}`);
