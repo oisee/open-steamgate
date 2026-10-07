@@ -370,7 +370,8 @@ describe("B0 ABAP boot rebuild measurements", function () {
 });
 
 describe("B0 parent publication step", function () {
-  this.timeout(30000);
+  // Two boots may each build a cold generation before loading the child.
+  this.timeout(120000);
   it("can boot a child while the publishing parent step is held", async () => {
     const runtime = new ServingRuntime({root: runtimeFixture.root, env: {STG_DB: "sqlite", STG_DB_PATH: "", OSD_DEMO_ROWS: "0", OSD_ADT_ONE_RUNTIME: "1"},
       adtSnapshot: parentAdtSnapshot});
