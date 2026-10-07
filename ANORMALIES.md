@@ -3842,11 +3842,11 @@ Not an anomaly, recorded for porting: on 7.58, `FIND ... REGEX` (POSIX) raises a
 
 - Status: `fixed locally` (our runner); `open` upstream (the transpiler's own unit script)
 - Discovery: PIA's agent on OSG, F1 run of 2026-10-07: RUN_TESTS answered `test.FRIENDS_ACCESS_INSTANCE[declared.method] is not a function`. A repro matrix of 33 classes showed LOCAL FRIENDS has nothing to do with it; the trigger is the case of the declared name.
-- Affected path: the transpiler keys `FRIENDS_ACCESS_INSTANCE` and a test include's exports in lower case (`traversal.ts` `buildFriendsAccess`), while abaplint's `listClassDefinitions()` keeps names as written. `tools/osd-unit.mjs` (the runner behind RUN_TESTS and ADT) looked methods and local classes up by the written name; so do the transpiler's `unit_test.ts` (`methods.push(m.name)`, then `FRIENDS_ACCESS_INSTANCE[m.name]()`), `tools/osd-unit-all.mjs` (`npm run unit`) and `tools/gogen/node-unit-results.mjs`.
+- Affected path: the transpiler keys `FRIENDS_ACCESS_INSTANCE` in lower case (`traversal.ts` `buildFriendsAccess`) and exports a test include's local classes in lower case (`handlers/handle_abap.ts`), while abaplint's `listClassDefinitions()` keeps names as written. Before this fix `tools/osd-unit.mjs` (the runner behind RUN_TESTS and ADT) looked methods and local classes up by the written name, and `tools/osd-unit-all.mjs` (`npm run unit`), `tools/gogen/node-unit-results.mjs` and `tools/osgjs-unit-run.mjs` each had one such lookup. Upstream, the transpiler's own `unit_test.ts` keeps the method's written spelling (`methods.push(m.name)`, then `FRIENDS_ACCESS_INSTANCE[m.name]()`), though it already lower-cases the class.
 - Reproducer: a test class with `METHODS First_Test FOR TESTING.` (or `CLASS LTCL_Probe DEFINITION FOR TESTING`), implementation `METHOD first_test.`; run its tests.
 - Expected SAP behaviour: ABAP names are case-insensitive; the method runs.
 - Actual local behaviour: the method is a runtime failure ("is not a function"); a mixed-case local class is "not exported".
-- Workaround: the lookups lower-case the name (`tools/osd-unit.mjs`, `tools/osd-unit-all.mjs`, `tools/gogen/node-unit-results.mjs`); the reported name stays upper case.
+- Workaround: the lookups lower-case the name (`tools/osd-unit.mjs`, `tools/osd-unit-all.mjs`, `tools/gogen/node-unit-results.mjs`, `tools/osgjs-unit-run.mjs`); the reported name stays upper case.
 - Regression: `test/osd-unit.mjs` "a test method or class written in mixed case is looked up the way the transpiler keys it".
 - Upstream: needs an issue/PR in abaplint/transpiler (`unit_test.ts` lower-cases the method name as it already does the class), after our critic pass.
 - Upstream version containing a fix: unknown.

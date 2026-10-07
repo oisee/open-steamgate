@@ -158,26 +158,26 @@ ENDCLASS.
     const name = "ZCL_OSD_MIXED_CASE_PROBE";
     const file = join("src", "zcl_osd_mixed_case_probe.clas.abap");
     const tests = join("src", "zcl_osd_mixed_case_probe.clas.testclasses.abap");
-    writeFileSync(file, `CLASS zcl_osd_mixed_case_probe DEFINITION PUBLIC CREATE PUBLIC.
-ENDCLASS.
-
-CLASS zcl_osd_mixed_case_probe IMPLEMENTATION.
-ENDCLASS.
-`);
-    writeFileSync(tests, `CLASS LTCL_Probe DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
-  PRIVATE SECTION.
-    METHODS First_Test FOR TESTING RAISING cx_static_check.
-    METHODS SECOND_TEST FOR TESTING RAISING cx_static_check.
-ENDCLASS.
-
-CLASS LTCL_Probe IMPLEMENTATION.
-  METHOD first_test.
-  ENDMETHOD.
-  METHOD second_test.
-  ENDMETHOD.
-ENDCLASS.
-`);
     try {
+      writeFileSync(file, `CLASS zcl_osd_mixed_case_probe DEFINITION PUBLIC CREATE PUBLIC.
+  ENDCLASS.
+
+  CLASS zcl_osd_mixed_case_probe IMPLEMENTATION.
+  ENDCLASS.
+  `);
+      writeFileSync(tests, `CLASS LTCL_Probe DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
+    PRIVATE SECTION.
+      METHODS First_Test FOR TESTING RAISING cx_static_check.
+      METHODS SECOND_TEST FOR TESTING RAISING cx_static_check.
+  ENDCLASS.
+
+  CLASS LTCL_Probe IMPLEMENTATION.
+    METHOD first_test.
+    ENDMETHOD.
+    METHOD second_test.
+    ENDMETHOD.
+  ENDCLASS.
+  `);
       const {classes} = new UnitRun(new ObjectStore()).classes("CLAS", name);
       expect(classes.map((c) => [c.name, c.localClass])).to.deep.equal([["LTCL_PROBE", "ltcl_probe"]]);
       expect(classes[0].testMethods.map((m) => [m.name, m.method])).to.deep.equal([
