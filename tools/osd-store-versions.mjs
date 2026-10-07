@@ -10,6 +10,7 @@ import {NotFound} from "./osd-store.mjs";
 import {writeSourceSnapshot, sourceSnapshotPath, sourceOriginalPath} from "./osd-source-snapshot.mjs";
 import {copyDurable, mkdirDurable, removeDurable, renameDurable, writeDurable} from "./osd-durable.mjs";
 import {TYPES, INCLUDES} from "./osd-store-types.mjs";
+import {forgetMissingObjectOutcomes} from "./osd-activation-journal.mjs";
 
 // Owned privately by ObjectStore. The callback reads its private index without
 // adding an index accessor to the store's public API.
@@ -44,6 +45,7 @@ export class StoreVersions {
   // active copy, until somebody activates it; nothing claims an activation
   // that did not happen. An object whose files are all gone is gone.
   loadInactive() {
+    forgetMissingObjectOutcomes(this.#store);
     const file = join(this.#store.root, this.#store.inactiveDir, "inactive.json");
     let saved;
     try {

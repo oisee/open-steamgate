@@ -390,7 +390,11 @@ EV_JSON (optional diagnostic fields shown):
   The latest failed activation of any requested object returns `not_run` with
   `PUBLICATION_FAILED`, its `op_id`, `failure_stage`, `text` and `issues`, even when
   the old generation is still available. A later published activation of that
-  object clears this refusal, as does deleting the object. This per-object outcome
+  object clears this refusal, as does deleting the object. Attempts are ordered
+  by their per-object sequence at start; an older completion cannot replace a
+  newer outcome. Deletion fences pending attempts too. External removal or rename
+  clears the old object's outcome when the source host reloads its inactive set.
+  This per-object outcome
   is durable across source-host restarts and independent of the operation history's
   24-hour expiry; expiring a failed ticket never permits tests on the old generation.
   Both STORE and ADT record validation refusals, build failures and completed publications.

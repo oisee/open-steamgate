@@ -61,6 +61,7 @@ export class ActivationJournal {
       outcome.attempt_seq ??= this.entries[outcome.op_id]?.attempt_seq ?? 0;
       const counter = this.attempts[key] ??= {sequence: 0};
       counter.sequence = Math.max(counter.sequence, outcome.attempt_seq);
+      if ((counter.deleted_through ?? -1) >= outcome.attempt_seq) delete this.outcomes[key];
     }
     this.saveAttempts();
     for (const entry of Object.values(this.entries)) {
@@ -95,6 +96,7 @@ export class ActivationJournal {
   }
   rememberOutcome(entry) {
     const key = `${entry.type} ${entry.name}`;
+    if ((this.attempts[key]?.deleted_through ?? -1) >= entry.attempt_seq) return;
     if ((this.outcomes[key]?.attempt_seq ?? -1) > entry.attempt_seq) return;
     this.outcomes[key] = {
       op_id: entry.op_id, attempt_seq: entry.attempt_seq, outcome: entry.state, generation: entry.generation_id,
@@ -117,8 +119,20 @@ export class ActivationJournal {
   lastOutcome(type, name) { return this.outcomes[`${type} ${String(name).toUpperCase()}`]; }
   forgetObject(type, name) {
     const key = `${type} ${String(name).toUpperCase()}`;
+    const counter = this.attempts[key] ??= {sequence: 0};
+    counter.deleted_through = ++counter.sequence;
+    // Persist the fence first: a restart cannot recover an old pending ticket
+    // into an outcome for the removed object.
+    this.saveAttempts();
     delete this.outcomes[key];
     this.saveOutcomes();
+  }
+  forgetMissingObjects(exists) {
+    for (const [key, counter] of Object.entries(this.attempts)) {
+      const [type, name] = key.split(" ");
+      if (counter.deleted_through === counter.sequence && !this.outcomes[key]) continue;
+      if (!exists(type, name)) this.forgetObject(type, name);
+    }
   }
   save() {
     for (const [id, entry] of Object.entries(this.entries)) {
@@ -208,4 +222,25 @@ export function activationJournal(store) {
     journals.set(key, new ActivationJournal(root, {host}));
   }
   return journals.get(key);
+}
+
+// Removal by Git/editor has no delete() call. Reconcile existing journals
+// when the source host reloads its inactive set, without creating a journal
+// for every transient generator or source-only store.
+export function forgetMissingObjectOutcomes(store) {
+  const host = `http-${process.env.STG_PORT ?? `process-${process.pid}`}`;
+  const directory = join(store.root, ".local", "activation", host);
+  if (store.activationJournal === undefined) {
+    if (!existsSync(join(directory, "attempt-sequences.json")) && !existsSync(join(directory, "last-outcomes.json"))) return;
+    // Detached runners and serving children read the source host's tree. They
+    // must not claim its journal just because they construct a read-only store.
+    try {
+      const owner = Number(readFileSync(join(directory, "owner.pid"), "utf8"));
+      if (owner > 0 && owner !== process.pid) {
+        try {process.kill(owner, 0); return;}
+        catch (error) {if (error.code !== "ESRCH") return;}
+      }
+    } catch (error) {if (error.code !== "ENOENT") throw error;}
+  }
+  activationJournal(store).forgetMissingObjects((type, name) => store.exists(type, name));
 }

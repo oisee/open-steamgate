@@ -893,6 +893,64 @@ describe('STORE activation operation tracking', function () {
     expect(new ActivationJournal(root).lastOutcome('CLAS', 'ZCL_DELETE_OUTCOME')).to.equal(undefined);
     expect(journal.lookup(ticket.op_id).state).to.equal('failed');
   });
+  it('fences pending completions and restart recovery on deletion, allowing a recreated object', async () => {
+    const {ActivationJournal} = await import('../tools/osd-activation-journal.mjs');
+    const journal = new ActivationJournal(root);
+    const store = new ObjectStore({root, libs: []});
+    store.activationJournal = journal;
+    const name = 'ZCL_DELETE_PENDING';
+    store.write('CLAS', name, CLEAN.replaceAll('zcl_store_dest_probe', name.toLowerCase()));
+    const a = journal.create('CLAS', name), b = journal.create('CLAS', name);
+    journal.update(a.op_id, {state: 'pending'});
+    journal.update(b.op_id, {state: 'pending'});
+    store.delete('CLAS', name);
+    journal.update(a.op_id, {state: 'published', generation_id: 'late-publication'});
+    expect(journal.lastOutcome('CLAS', name)).to.equal(undefined);
+    const restarted = new ActivationJournal(root);
+    expect(restarted.lastOutcome('CLAS', name)).to.equal(undefined);
+    expect(restarted.lookup(b.op_id).failure_stage).to.equal('recovery');
+    store.activationJournal = restarted;
+    store.write('CLAS', name, CLEAN.replaceAll('zcl_store_dest_probe', name.toLowerCase()));
+    const c = restarted.create('CLAS', name);
+    restarted.update(c.op_id, {state: 'failed', failure_stage: 'validation'});
+    expect(restarted.lastOutcome('CLAS', name).op_id).to.equal(c.op_id);
+  });
+  it('lets a detached read-only store open a tree owned by the live source journal', async () => {
+    const {spawn} = await import('node:child_process');
+    const store = new ObjectStore({root, libs: []});
+    store.write('CLAS', 'ZCL_READER_JOURNAL', CLEAN.replaceAll('zcl_store_dest_probe', 'zcl_reader_journal'));
+    const journal = activationJournal(store);
+    const failed = journal.create('CLAS', 'ZCL_READER_JOURNAL');
+    journal.update(failed.op_id, {state: 'failed', failure_stage: 'validation'});
+    const child = spawn(process.execPath, ['--input-type=module', '-e',
+      'const {ObjectStore}=await import(process.argv[1]); const store=new ObjectStore({root:process.argv[2],libs:[]}); if(!store.exists("CLAS","ZCL_READER_JOURNAL")) process.exit(2);',
+      new URL('../tools/osd-store.mjs', import.meta.url).href, root],
+      {stdio: ['ignore', 'ignore', 'pipe']});
+    let stderr = '';
+    child.stderr.on('data', data => {stderr += data;});
+    const code = await new Promise((resolve, reject) => {child.on('error', reject); child.on('close', resolve);});
+    expect(code, stderr).to.equal(0);
+    expect(journal.lastOutcome('CLAS', 'ZCL_READER_JOURNAL').op_id).to.equal(failed.op_id);
+  });
+  for (const rename of [false, true]) it(`clears outcomes and fences pending attempts on external ${rename ? 'rename' : 'removal'}`, async () => {
+    const {renameSync} = await import('node:fs');
+    const store = new ObjectStore({root, libs: []});
+    const name = 'ZCL_EXTERNAL_OUTCOME';
+    store.write('CLAS', name, CLEAN.replaceAll('zcl_store_dest_probe', name.toLowerCase()));
+    const journal = activationJournal(store);
+    const failed = journal.create('CLAS', name);
+    journal.update(failed.op_id, {state: 'failed', failure_stage: 'validation'});
+    const pending = journal.create('CLAS', name);
+    const file = join(root, store.find('CLAS', name).file);
+    if (rename) renameSync(file, file.replace('zcl_external_outcome', 'zcl_renamed_outcome'));
+    else rmSync(file);
+    const reloaded = new ObjectStore({root, libs: []});
+    expect(reloaded.exists('CLAS', name)).to.equal(false);
+    expect(activationJournal(reloaded).lastOutcome('CLAS', name)).to.equal(undefined);
+    journal.update(pending.op_id, {state: 'failed', failure_stage: 'build'});
+    expect(journal.lastOutcome('CLAS', name)).to.equal(undefined);
+    expect(journal.lookup(failed.op_id).state).to.equal('failed');
+  });
   it('isolates journals for different instance ports', async () => {
     const {ActivationJournal} = await import('../tools/osd-activation-journal.mjs');
     const first = new ActivationJournal(root, {host: 'http-8090'});
