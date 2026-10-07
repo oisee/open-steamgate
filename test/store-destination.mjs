@@ -22,6 +22,7 @@ import {StoreDestination, withSystem} from "../tools/osd-store-destination.mjs";
 import {box, rows, answerOf} from "./helpers/destination.mjs";
 import {runtimeRootFixture} from "./helpers/runtime-root.mjs";
 import {activationJournal} from "../tools/osd-activation-journal.mjs";
+import {closeWarm} from "../tools/osd-store-warm.mjs";
 
 const runtimeFixture = runtimeRootFixture();
 const probePath = file => join(runtimeFixture.root, file);
@@ -97,6 +98,68 @@ async function call(destination, importing = {}) {
   await destination.call("ZOSD_STORE", signature);
   return answerOf(signature);
 }
+
+describe("STORE ACTIVATE after cold generated-source changes", function () {
+  this.timeout(60000);
+  for (const warm of [false, true]) for (const added of [true, false]) it(`${added ? "accepts an added" : "refuses a removed"} generated structure field on the next synchronous activation (warm ${warm})`, async () => {
+    const root = mkdtempSync(join(tmpdir(), "store-generated-validation-"));
+    const generated = join(root, "gen/zcl_generated.clas.abap");
+    const shape = extra => `CLASS zcl_generated DEFINITION PUBLIC.
+PUBLIC SECTION. TYPES: BEGIN OF ty_row, kept TYPE i, ${extra ? "extra TYPE i," : ""} END OF ty_row.
+ENDCLASS. CLASS zcl_generated IMPLEMENTATION. ENDCLASS.\n`;
+    const caller = field => `CLASS zcl_caller DEFINITION PUBLIC. PUBLIC SECTION. CLASS-METHODS run. ENDCLASS.
+CLASS zcl_caller IMPLEMENTATION. METHOD run.
+DATA row TYPE zcl_generated=>ty_row. row-${field} = 1. ENDMETHOD. ENDCLASS.\n`;
+    let store, extra = !added, builds = 0;
+    try {
+      mkdirSync(join(root, "src")); mkdirSync(join(root, "gen"));
+      writeFileSync(generated, shape(extra));
+      writeFileSync(join(root, "src/zcl_caller.clas.abap"), caller("kept"));
+      writeFileSync(join(root, "src/zcl_trigger.clas.abap"), CLEAN.replaceAll("zcl_store_dest_probe", "zcl_trigger"));
+      writeFileSync(join(root, "abaplint.jsonc"), JSON.stringify({syntax: {version: "OpenABAP"}}));
+      writeFileSync(join(root, "abap_transpile.json"), JSON.stringify({input_folder: ["src", "gen"], output_folder: "output", libs: [],
+        options: {ignoreSyntaxCheck: false, addCommonJS: true, unknownTypes: "compileError"}}));
+      writeFileSync(join(root, "package.json"), "{}");
+      symlinkSync(resolve("node_modules"), join(root, "node_modules"));
+      store = new ObjectStore({root, libs: [], build: {generators: false, onStep: step => {
+        // A deterministic generator output, written inside the real cold
+        // build after its input capture and before transpilation.
+        if (step === "generated") {builds++; writeFileSync(generated, shape(extra));}
+      }}});
+      expect((await store.publish()).ok).to.equal(true);
+      store.warmState = {on: warm};
+      if (warm) expect(await store.warmUp()).to.not.equal(undefined, store.warmState.reason);
+      const registry = store.registry();
+      expect(store.check("CLAS", "ZCL_CALLER").issues).to.deep.equal([]);
+      const untouched = registry.getFileByName("/src/zcl_caller.clas.abap");
+      extra = added;
+      await store.write("CLAS", "ZCL_TRIGGER", CLEAN.replaceAll("zcl_store_dest_probe", "zcl_trigger").replace("42", "43"));
+      const cold = await store.publish({force: true, activate: [{type: "CLAS", name: "ZCL_TRIGGER"}]});
+      expect(cold.ok, JSON.stringify(cold)).to.equal(true);
+      expect(cold.transpile.warm).to.not.equal(true);
+      expect(registry.getFileByName("/src/zcl_caller.clas.abap"), "unmodified source is retained").to.equal(untouched);
+      const destination = new StoreDestination({store});
+      await call(destination, {IV_COMMAND: "WRITE", IV_TYPE: "CLAS", IV_NAME: "ZCL_CALLER", IV_SOURCE: caller("extra")});
+      const count = builds;
+      let publications = 0;
+      const publish = store.publish.bind(store);
+      store.publish = options => {publications++; return publish(options);};
+      const result = await call(destination, {IV_COMMAND: "ACTIVATE", IV_TYPE: "CLAS", IV_NAME: "ZCL_CALLER"});
+      expect(result.EV_ACTIVE, JSON.stringify(result.ET_ISSUE)).to.equal(added ? "X" : "");
+      if (added) expect(result.ET_ISSUE).to.deep.equal([]);
+      else {
+        expect(result.ET_ISSUE.some(issue => /extra/i.test(issue.MESSAGE))).to.equal(true);
+        expect(publications, "the synchronous refusal never schedules publication").to.equal(0);
+        expect(builds, "the synchronous refusal never schedules a build").to.equal(count);
+      }
+      expect(store.registry(), "validation retains its registry").to.equal(registry);
+      expect(registry.getFileByName("/gen/zcl_generated.clas.abap").getRaw()).to.equal(shape(extra));
+    } finally {
+      if (store) await closeWarm(store);
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
+});
 
 describe("store LIST: live generation input digests without a source snapshot", function () {
   this.timeout(60000);
