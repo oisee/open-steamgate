@@ -3,16 +3,13 @@ import {warmOverlay} from "./osd-warm-overlay.mjs";
 import {existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync} from "node:fs";
 import {createHash} from "node:crypto";
 import {dirname, join, relative, resolve} from "node:path";
-import {createRequire} from "node:module";
-import {hostModules} from "./osd-host.mjs";
-const require = createRequire(import.meta.url);
-const compilerPackage = "@abaplint/core";
 import {hashOf, inputsOf, liveHash, normalPath} from "./osd-build.mjs";
 import {entityTag} from "./adt-entity.mjs";
 import {NotFound} from "./osd-store.mjs";
 import {writeSourceSnapshot, sourceSnapshotPath, sourceOriginalPath} from "./osd-source-snapshot.mjs";
 import {copyDurable, mkdirDurable, removeDurable, renameDurable, writeDurable} from "./osd-durable.mjs";
 import {TYPES, INCLUDES} from "./osd-store-types.mjs";
+import {forgetMissingObjectOutcomes} from "./osd-activation-journal.mjs";
 
 // Owned privately by ObjectStore. The callback reads its private index without
 // adding an index accessor to the store's public API.
@@ -47,6 +44,7 @@ export class StoreVersions {
   // active copy, until somebody activates it; nothing claims an activation
   // that did not happen. An object whose files are all gone is gone.
   loadInactive() {
+    forgetMissingObjectOutcomes(this.#store);
     const file = join(this.#store.root, this.#store.inactiveDir, "inactive.json");
     let saved;
     try {
@@ -321,8 +319,7 @@ export class StoreVersions {
   // (#withSource's borrowing, for several files).
   withOverlay(activating, fn) {
     const registry = this.#store.registry();
-    const abaplint = hostModules()?.core ?? require(compilerPackage);
-    const swapped = [];
+    const replacements = [], restore = [];
     for (const key of this.#store.inactive) {
       if (activating.has(key)) continue;
       const [type, ...rest] = key.split(" ");
@@ -331,30 +328,20 @@ export class StoreVersions {
       for (const file of this.#filesOfEntry(entry)) {
         if (!/\.(abap|xml|asddls)$/.test(file)) continue;
         const name = "/" + file;
-        const before = registry.getFileByName(name);
+        const before = registry.getFileByName(name)?.getRaw();
         const copy = join(this.#store.root, this.#snapshotOf(file));
-        if (existsSync(copy)) {
-          const replacement = new abaplint.MemoryFile(name, readFileSync(copy, "utf8"));
-          if (before === undefined) registry.addFile(replacement);
-          else registry.updateFile(replacement);
-          swapped.push({name, before, replacement});
-        } else if (before !== undefined) {
-          registry.removeFile(before);
-          swapped.push({name, before, replacement: undefined});
-        }
+        const source = existsSync(copy) ? readFileSync(copy, "utf8") : undefined;
+        if (before === source) continue;
+        replacements.push([name, source]);
+        restore.push([name, before]);
       }
     }
-    if (swapped.length === 0) return fn(registry);
+    if (replacements.length === 0) return fn(registry);
     try {
-      registry.parse();
+      this.#store.updateRegistryFiles(registry, replacements);
       return fn(registry);
     } finally {
-      for (const {before, replacement} of swapped.reverse()) {
-        if (before === undefined) registry.removeFile(replacement);
-        else if (replacement === undefined) registry.addFile(before);
-        else registry.updateFile(before);
-      }
-      registry.parse();
+      this.#store.updateRegistryFiles(registry, restore);
     }
   }
 

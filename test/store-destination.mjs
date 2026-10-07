@@ -22,6 +22,7 @@ import {StoreDestination, withSystem} from "../tools/osd-store-destination.mjs";
 import {box, rows, answerOf} from "./helpers/destination.mjs";
 import {runtimeRootFixture} from "./helpers/runtime-root.mjs";
 import {activationJournal} from "../tools/osd-activation-journal.mjs";
+import {closeWarm} from "../tools/osd-store-warm.mjs";
 
 const runtimeFixture = runtimeRootFixture();
 const probePath = file => join(runtimeFixture.root, file);
@@ -97,6 +98,68 @@ async function call(destination, importing = {}) {
   await destination.call("ZOSD_STORE", signature);
   return answerOf(signature);
 }
+
+describe("STORE ACTIVATE after cold generated-source changes", function () {
+  this.timeout(60000);
+  for (const warm of [false, true]) for (const added of [true, false]) it(`${added ? "accepts an added" : "refuses a removed"} generated structure field on the next synchronous activation (warm ${warm})`, async () => {
+    const root = mkdtempSync(join(tmpdir(), "store-generated-validation-"));
+    const generated = join(root, "gen/zcl_generated.clas.abap");
+    const shape = extra => `CLASS zcl_generated DEFINITION PUBLIC.
+PUBLIC SECTION. TYPES: BEGIN OF ty_row, kept TYPE i, ${extra ? "extra TYPE i," : ""} END OF ty_row.
+ENDCLASS. CLASS zcl_generated IMPLEMENTATION. ENDCLASS.\n`;
+    const caller = field => `CLASS zcl_caller DEFINITION PUBLIC. PUBLIC SECTION. CLASS-METHODS run. ENDCLASS.
+CLASS zcl_caller IMPLEMENTATION. METHOD run.
+DATA row TYPE zcl_generated=>ty_row. row-${field} = 1. ENDMETHOD. ENDCLASS.\n`;
+    let store, extra = !added, builds = 0;
+    try {
+      mkdirSync(join(root, "src")); mkdirSync(join(root, "gen"));
+      writeFileSync(generated, shape(extra));
+      writeFileSync(join(root, "src/zcl_caller.clas.abap"), caller("kept"));
+      writeFileSync(join(root, "src/zcl_trigger.clas.abap"), CLEAN.replaceAll("zcl_store_dest_probe", "zcl_trigger"));
+      writeFileSync(join(root, "abaplint.jsonc"), JSON.stringify({syntax: {version: "OpenABAP"}}));
+      writeFileSync(join(root, "abap_transpile.json"), JSON.stringify({input_folder: ["src", "gen"], output_folder: "output", libs: [],
+        options: {ignoreSyntaxCheck: false, addCommonJS: true, unknownTypes: "compileError"}}));
+      writeFileSync(join(root, "package.json"), "{}");
+      symlinkSync(resolve("node_modules"), join(root, "node_modules"));
+      store = new ObjectStore({root, libs: [], build: {generators: false, onStep: step => {
+        // A deterministic generator output, written inside the real cold
+        // build after its input capture and before transpilation.
+        if (step === "generated") {builds++; writeFileSync(generated, shape(extra));}
+      }}});
+      expect((await store.publish()).ok).to.equal(true);
+      store.warmState = {on: warm};
+      if (warm) expect(await store.warmUp()).to.not.equal(undefined, store.warmState.reason);
+      const registry = store.registry();
+      expect(store.check("CLAS", "ZCL_CALLER").issues).to.deep.equal([]);
+      const untouched = registry.getFileByName("/src/zcl_caller.clas.abap");
+      extra = added;
+      await store.write("CLAS", "ZCL_TRIGGER", CLEAN.replaceAll("zcl_store_dest_probe", "zcl_trigger").replace("42", "43"));
+      const cold = await store.publish({force: true, activate: [{type: "CLAS", name: "ZCL_TRIGGER"}]});
+      expect(cold.ok, JSON.stringify(cold)).to.equal(true);
+      expect(cold.transpile.warm).to.not.equal(true);
+      expect(registry.getFileByName("/src/zcl_caller.clas.abap"), "unmodified source is retained").to.equal(untouched);
+      const destination = new StoreDestination({store});
+      await call(destination, {IV_COMMAND: "WRITE", IV_TYPE: "CLAS", IV_NAME: "ZCL_CALLER", IV_SOURCE: caller("extra")});
+      const count = builds;
+      let publications = 0;
+      const publish = store.publish.bind(store);
+      store.publish = options => {publications++; return publish(options);};
+      const result = await call(destination, {IV_COMMAND: "ACTIVATE", IV_TYPE: "CLAS", IV_NAME: "ZCL_CALLER"});
+      expect(result.EV_ACTIVE, JSON.stringify(result.ET_ISSUE)).to.equal(added ? "X" : "");
+      if (added) expect(result.ET_ISSUE).to.deep.equal([]);
+      else {
+        expect(result.ET_ISSUE.some(issue => /extra/i.test(issue.MESSAGE))).to.equal(true);
+        expect(publications, "the synchronous refusal never schedules publication").to.equal(0);
+        expect(builds, "the synchronous refusal never schedules a build").to.equal(count);
+      }
+      expect(store.registry(), "validation retains its registry").to.equal(registry);
+      expect(registry.getFileByName("/gen/zcl_generated.clas.abap").getRaw()).to.equal(shape(extra));
+    } finally {
+      if (store) await closeWarm(store);
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
+});
 
 describe("store LIST: live generation input digests without a source snapshot", function () {
   this.timeout(60000);
@@ -714,6 +777,9 @@ describe('STORE CREATE/DELETE repository lifecycle', function () {
 });
 
 describe('STORE activation operation tracking', function () {
+  // Several durable journal writes/reloads per case exceed mocha's 2s default
+  // on a contended filesystem; keep a finite budget for the complete operation.
+  this.timeout(30000);
   let root;
   beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'activation-operation-')); });
   afterEach(() => { rmSync(root, {recursive: true, force: true}); });
@@ -754,6 +820,32 @@ describe('STORE activation operation tracking', function () {
     const failed = JSON.parse((await destination.execute({IV_COMMAND: 'ACTIVATION_STATUS', IV_JSON: JSON.stringify({op_id: pending.op_id})})).EV_JSON);
     expect(failed.state).to.equal('failed');
     expect(failed.failure_stage).to.equal('step');
+  });
+  it('orders outcomes by attempt start across completion, restart and ticket expiry', async () => {
+    const {ActivationJournal} = await import('../tools/osd-activation-journal.mjs');
+    let time = Date.now();
+    const journal = new ActivationJournal(root, {now: () => time});
+    const a = journal.create('CLAS', 'ZOP');
+    journal.update(a.op_id, {state: 'pending'});
+    const b = journal.create('CLAS', 'ZOP');
+    journal.update(b.op_id, {state: 'failed', failure_stage: 'validation'});
+    journal.update(a.op_id, {state: 'published', generation_id: 'older-publication'});
+    expect(journal.lastOutcome('CLAS', 'ZOP')).to.include({op_id: b.op_id, outcome: 'failed', attempt_seq: b.attempt_seq});
+    expect(journal.lookup(a.op_id).state).to.equal('published');
+    time += 25 * 60 * 60 * 1000;
+    journal.save();
+    const restarted = new ActivationJournal(root, {now: () => time});
+    expect(restarted.lastOutcome('CLAS', 'ZOP').op_id).to.equal(b.op_id);
+    const c = restarted.create('CLAS', 'ZOP');
+    expect(c.attempt_seq).to.be.greaterThan(b.attempt_seq);
+    restarted.update(c.op_id, {state: 'published', generation_id: 'recovery'});
+    expect(restarted.lastOutcome('CLAS', 'ZOP')).to.include({op_id: c.op_id, outcome: 'published'});
+    const d = restarted.create('CLAS', 'ZOP');
+    const e = restarted.create('CLAS', 'ZOP');
+    restarted.update(e.op_id, {state: 'failed', failure_stage: 'validation'});
+    const recovered = new ActivationJournal(root, {now: () => time});
+    expect(recovered.lookup(d.op_id).failure_stage).to.equal('recovery');
+    expect(recovered.lastOutcome('CLAS', 'ZOP').op_id).to.equal(e.op_id);
   });
   it('recovers unfinished operations conservatively and expires terminal entries after 24h', async () => {
     const {ActivationJournal} = await import('../tools/osd-activation-journal.mjs');
@@ -853,6 +945,77 @@ describe('STORE activation operation tracking', function () {
     expect(result.sendError).to.equal('EPIPE');
     expect(result.status).to.include({state: 'failed', failure_stage: 'step', active: false});
     expect(result.status.completed_at).to.not.equal('');
+  });
+  it('deletion clears durable failure while retaining operation history', async () => {
+    const {ActivationJournal} = await import('../tools/osd-activation-journal.mjs');
+    const journal = new ActivationJournal(root);
+    const store = new ObjectStore({root, libs: []});
+    store.activationJournal = journal;
+    store.write('CLAS', 'ZCL_DELETE_OUTCOME', CLEAN.replaceAll('zcl_store_dest_probe', 'zcl_delete_outcome'));
+    const ticket = journal.create('CLAS', 'ZCL_DELETE_OUTCOME');
+    journal.update(ticket.op_id, {state: 'failed', failure_stage: 'validation'});
+    store.delete('CLAS', 'ZCL_DELETE_OUTCOME');
+    expect(journal.lastOutcome('CLAS', 'ZCL_DELETE_OUTCOME')).to.equal(undefined);
+    expect(new ActivationJournal(root).lastOutcome('CLAS', 'ZCL_DELETE_OUTCOME')).to.equal(undefined);
+    expect(journal.lookup(ticket.op_id).state).to.equal('failed');
+  });
+  it('fences pending completions and restart recovery on deletion, allowing a recreated object', async () => {
+    const {ActivationJournal} = await import('../tools/osd-activation-journal.mjs');
+    const journal = new ActivationJournal(root);
+    const store = new ObjectStore({root, libs: []});
+    store.activationJournal = journal;
+    const name = 'ZCL_DELETE_PENDING';
+    store.write('CLAS', name, CLEAN.replaceAll('zcl_store_dest_probe', name.toLowerCase()));
+    const a = journal.create('CLAS', name), b = journal.create('CLAS', name);
+    journal.update(a.op_id, {state: 'pending'});
+    journal.update(b.op_id, {state: 'pending'});
+    store.delete('CLAS', name);
+    journal.update(a.op_id, {state: 'published', generation_id: 'late-publication'});
+    expect(journal.lastOutcome('CLAS', name)).to.equal(undefined);
+    const restarted = new ActivationJournal(root);
+    expect(restarted.lastOutcome('CLAS', name)).to.equal(undefined);
+    expect(restarted.lookup(b.op_id).failure_stage).to.equal('recovery');
+    store.activationJournal = restarted;
+    store.write('CLAS', name, CLEAN.replaceAll('zcl_store_dest_probe', name.toLowerCase()));
+    const c = restarted.create('CLAS', name);
+    restarted.update(c.op_id, {state: 'failed', failure_stage: 'validation'});
+    expect(restarted.lastOutcome('CLAS', name).op_id).to.equal(c.op_id);
+  });
+  it('lets a detached read-only store open a tree owned by the live source journal', async () => {
+    const {spawn} = await import('node:child_process');
+    const store = new ObjectStore({root, libs: []});
+    store.write('CLAS', 'ZCL_READER_JOURNAL', CLEAN.replaceAll('zcl_store_dest_probe', 'zcl_reader_journal'));
+    const journal = activationJournal(store);
+    const failed = journal.create('CLAS', 'ZCL_READER_JOURNAL');
+    journal.update(failed.op_id, {state: 'failed', failure_stage: 'validation'});
+    const child = spawn(process.execPath, ['--input-type=module', '-e',
+      'const {ObjectStore}=await import(process.argv[2]); const store=new ObjectStore({root:process.argv[3],libs:[]}); if(!store.exists("CLAS","ZCL_READER_JOURNAL")) process.exit(2);',
+      'journal-reader', new URL('../tools/osd-store.mjs', import.meta.url).href, root],
+      {stdio: ['ignore', 'ignore', 'pipe']});
+    let stderr = '';
+    child.stderr.on('data', data => {stderr += data;});
+    const code = await new Promise((resolve, reject) => {child.on('error', reject); child.on('close', resolve);});
+    expect(code, stderr).to.equal(0);
+    expect(journal.lastOutcome('CLAS', 'ZCL_READER_JOURNAL').op_id).to.equal(failed.op_id);
+  });
+  for (const rename of [false, true]) it(`clears outcomes and fences pending attempts on external ${rename ? 'rename' : 'removal'}`, async () => {
+    const {renameSync} = await import('node:fs');
+    const store = new ObjectStore({root, libs: []});
+    const name = 'ZCL_EXTERNAL_OUTCOME';
+    store.write('CLAS', name, CLEAN.replaceAll('zcl_store_dest_probe', name.toLowerCase()));
+    const journal = activationJournal(store);
+    const failed = journal.create('CLAS', name);
+    journal.update(failed.op_id, {state: 'failed', failure_stage: 'validation'});
+    const pending = journal.create('CLAS', name);
+    const file = join(root, store.find('CLAS', name).file);
+    if (rename) renameSync(file, file.replace('zcl_external_outcome', 'zcl_renamed_outcome'));
+    else rmSync(file);
+    const reloaded = new ObjectStore({root, libs: []});
+    expect(reloaded.exists('CLAS', name)).to.equal(false);
+    expect(activationJournal(reloaded).lastOutcome('CLAS', name)).to.equal(undefined);
+    journal.update(pending.op_id, {state: 'failed', failure_stage: 'build'});
+    expect(journal.lastOutcome('CLAS', name)).to.equal(undefined);
+    expect(journal.lookup(failed.op_id).state).to.equal('failed');
   });
   it('isolates journals for different instance ports', async () => {
     const {ActivationJournal} = await import('../tools/osd-activation-journal.mjs');
@@ -964,6 +1127,7 @@ export async function setup(abap, schemas, insert) {
       writeFileSync(join(root, `src/${name.toLowerCase()}.clas.abap`), main(name));
       writeFileSync(join(root, `src/${name.toLowerCase()}.clas.testclasses.abap`), tests(name, exp, hook));
     }
+    writeFileSync(join(root, 'src/zcl_store_unit_empty.clas.abap'), main('ZCL_STORE_UNIT_EMPTY'));
     // Separate setup and loop subjects exercise stage mapping and watchdogs.
     for (const name of ['ZCL_STORE_UNIT_SETUP', 'ZCL_STORE_UNIT_SETUP_ASSERT', 'ZCL_STORE_UNIT_LOOP', 'ZCL_STORE_UNIT_BOOT']) {
       writeFileSync(join(root, `src/${name.toLowerCase()}.clas.abap`), main(name));
@@ -1048,6 +1212,32 @@ CLASS ltcl_loop IMPLEMENTATION. METHOD loop. DO. ENDDO. ENDMETHOD. METHOD later.
       expect(result.classes[0]).to.include({name: 'LTCL_PROBE', state: 'ok'});
       expect(result.counts.pass).to.equal(1);
     } finally {await store.write('CLAS', green, original, 'testclasses');}
+  });
+  it('refuses zero discovered classes when saved source has a new testclasses include', async () => {
+    const subject = 'ZCL_STORE_UNIT_EMPTY';
+    await store.write('CLAS', subject, tests(subject, 42), 'testclasses');
+    const result = await run([subject]);
+    expect(result.state).to.equal('not_run');
+    expect(result.error.code).to.equal('TEST_CLASSES_MISMATCH');
+    expect(result.counts.methods).to.equal(0); expect(result.classes).to.deep.equal([]);
+  });
+  it('latest failed activation refuses old green tests and survives journal reload; a new published activation clears it', async () => {
+    const {ActivationJournal} = await import('../tools/osd-activation-journal.mjs');
+    const journal = activationJournal(store), ticket = journal.create('CLAS', green);
+    journal.update(ticket.op_id, {state: 'failed', failure_stage: 'build', note: 'build syntax error',
+      issues: [{FILE: 'new.clas.testclasses.abap', LINE: 10, MESSAGE: 'method too long'}]});
+    const reloaded = new ActivationJournal(root, {host: journal.directory.split('/').at(-1)});
+    store.activationJournal = reloaded;
+    try {
+      const result = await run([green]);
+      expect(result.state).to.equal('not_run');
+      expect(result.error).to.include({code: 'PUBLICATION_FAILED', op_id: ticket.op_id, text: 'build syntax error'});
+      expect(result.error.issues[0]).to.include({LINE: 10});
+      expect(result.classes).to.deep.equal([]);
+      const next = reloaded.create('CLAS', green);
+      reloaded.update(next.op_id, {state: 'published', generation_id: generation});
+      expect((await run([green])).counts.pass).to.equal(1);
+    } finally {delete store.activationJournal; journal.forgetObject(ticket.type, ticket.name); delete journal.entries[ticket.op_id]; journal.save();}
   });
   it('unknown target is a class not_found error and leaves the other target runnable', async () => {
     const result = await run(['ZCL_STORE_UNIT_UNKNOWN', green]);
@@ -1210,7 +1400,7 @@ CLASS ltcl_loop IMPLEMENTATION. METHOD loop. DO. ENDDO. ENDMETHOD. METHOD later.
       expect(result.state).to.equal('not_run');
       expect(result.error.code).to.equal('PUBLICATION_PENDING');
       expect(result.counts.methods).to.equal(0);
-    } finally {journal.update(pending.op_id, {state: 'failed', failure_stage: 'step'});}
+    } finally {journal.update(pending.op_id, {state: 'failed', failure_stage: 'step'}); journal.forgetObject("CLAS", green); delete journal.entries[pending.op_id]; journal.save();}
   });
   it('refuses an unconfirmed build after failed promotion, including after journal reload', async () => {
     const {ActivationJournal, activationJournal} = await import('../tools/osd-activation-journal.mjs');
@@ -1225,7 +1415,7 @@ CLASS ltcl_loop IMPLEMENTATION. METHOD loop. DO. ENDDO. ENDMETHOD. METHOD later.
       expect(result.state).to.equal('not_run');
       expect(result.error.code).to.equal('GENERATION_UNAVAILABLE');
       expect(result.counts.methods).to.equal(0);
-    } finally {journal.recordGeneration(generation);}
+    } finally {journal.recordGeneration(generation); journal.forgetObject(ticket.type, ticket.name); delete journal.entries[ticket.op_id]; journal.save();}
   });
   it('pins discovery and execution when the live generation changes during a run', async () => {
     const {UnitRun} = await import('../tools/osd-unit.mjs');
@@ -1302,12 +1492,27 @@ CLASS ltcl_loop IMPLEMENTATION. METHOD loop. DO. ENDDO. ENDMETHOD. METHOD later.
     expect(result.EV_ERROR).to.equal('');
     expect(JSON.parse(result.EV_JSON)).to.deep.equal({state: 'not_found', code: 'NOT_FOUND', op_id: 'no-such-operation'});
     expect(JSON.parse((await lookup('__proto__')).EV_JSON)).to.deep.equal({state: 'not_found', code: 'NOT_FOUND', op_id: '__proto__'});
-    const journal = activationJournal(store), ticket = journal.create('CLAS', green);
-    journal.update(ticket.op_id, {state: 'failed', failure_stage: 'validation'});
+    await store.write('CLAS', green, main(green).replace('rv_answer = 42', 'undefined_variable = 42'));
+    const rejected = await call(destination, {IV_COMMAND: 'ACTIVATE', IV_TYPE: 'CLAS', IV_NAME: green});
+    const ticket = JSON.parse(rejected.EV_JSON), journal = activationJournal(store);
+    expect(ticket).to.include({state: 'failed', failure_stage: 'validation'});
     journal.entries[ticket.op_id].completed_at = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
     result = await lookup(ticket.op_id);
     expect(result.EV_ERROR).to.equal('');
     expect(JSON.parse(result.EV_JSON)).to.deep.equal({state: 'not_found', code: 'NOT_FOUND', op_id: ticket.op_id});
+    const refused = await run([green]);
+    expect(refused).to.include({state: 'not_run'});
+    expect(refused.error).to.include({code: 'PUBLICATION_FAILED', op_id: ticket.op_id});
+    const {ActivationJournal} = await import('../tools/osd-activation-journal.mjs');
+    const reloaded = new ActivationJournal(root, {host: journal.directory.split('/').at(-1)});
+    expect(reloaded.lastOutcome('CLAS', green)).to.deep.equal(journal.lastOutcome('CLAS', green));
+    store.activationJournal = reloaded;
+    try {expect((await run([green])).error.code).to.equal('PUBLICATION_FAILED');}
+    finally {store.activationJournal = journal;}
+    await store.write('CLAS', green, main(green));
+    const activated = await call(destination, {IV_COMMAND: 'ACTIVATE', IV_TYPE: 'CLAS', IV_NAME: green});
+    expect(JSON.parse(activated.EV_JSON).state).to.equal('published');
+    expect((await run([green])).state).to.equal('ran');
     result = await lookup('');
     expect(JSON.parse(result.EV_JSON).error.code).to.equal('INVALID_NAME');
     expect(result.EV_ERROR).not.to.equal('');
@@ -1321,15 +1526,16 @@ CLASS ltcl_loop IMPLEMENTATION. METHOD loop. DO. ENDDO. ENDMETHOD. METHOD later.
     channel.send = message => queueMicrotask(() => parent.emit('message', message));
     attachStoreIPC(parent, {storeDestination: destination});
     const client = new StoreIPCClient(channel);
+    const currentGeneration = activationJournal(store).currentGeneration();
     const signature = {exporting: {IV_COMMAND: box('RUN_TESTS'), IV_JSON: box(JSON.stringify({
-      targets: [{type: 'CLAS', name: green}], expected_generation: generation}))}, importing: {EV_JSON: box(''), EV_ERROR: box('')}};
+      targets: [{type: 'CLAS', name: green}], expected_generation: currentGeneration}))}, importing: {EV_JSON: box(''), EV_ERROR: box('')}};
     try {
       const pending = client.call('ZOSD_STORE', signature);
       expect([...client.pending.values()][0].timer).to.equal(undefined);
       await pending;
       const response = answerOf(signature);
       expect(response.EV_ERROR).to.equal('');
-      expect(JSON.parse(response.EV_JSON)).to.include({state: 'ran', generation_id: generation});
+      expect(JSON.parse(response.EV_JSON)).to.include({state: 'ran', generation_id: currentGeneration});
       expect(JSON.parse(response.EV_JSON).counts.pass).to.equal(1);
     } finally {client.close(); parent.connected = false; parent.emit('disconnect');}
   });
@@ -1388,6 +1594,25 @@ CLASS ltcl_loop IMPLEMENTATION. METHOD loop. DO. ENDDO. ENDMETHOD. METHOD later.
       expect(mismatch.error).to.include({code: 'GENERATION_MISMATCH', expected_generation: x, current_generation: y});
       const absent = await step(() => abapCall('ACTIVATION_STATUS', {iv_json: '{"op_id":"unknown-pia-operation"}'}));
       expect(absent).to.deep.equal({state: 'not_found', code: 'NOT_FOUND', op_id: 'unknown-pia-operation'});
+      // A new include must fail inside STORE's calling step, even though
+      // publication normally happens afterwards. The ABAP host keeps JSON
+      // refusals visible without turning them into a transport exception.
+      await step(() => abapCall('WRITE', {iv_type: 'CLAS', iv_name: subject, iv_include: 'testclasses',
+        iv_source: tests(subject, 42).replaceAll('check', 'responses_two_calls_brace_in_string')}));
+      const rejected = await step(() => abapCall('ACTIVATE', {iv_type: 'CLAS', iv_name: subject}));
+      expect(rejected).to.include({state: 'failed', failure_stage: 'validation', active: false});
+      expect(rejected.issues.some(i => i.FILE.endsWith('.clas.testclasses.abap') && i.LINE > 0 &&
+        i.MESSAGE.includes('maximum length is 30 characters'))).to.equal(true);
+      const status = await step(() => abapCall('ACTIVATION_STATUS', {iv_json: JSON.stringify({op_id: rejected.op_id})}));
+      expect(status).to.deep.equal(rejected);
+      const refused = await step(() => abapCall('RUN_TESTS', {iv_json: JSON.stringify({targets: [{type: 'CLAS', name: subject}]})}));
+      expect(refused.state).to.equal('not_run');
+      expect(refused.error).to.include({code: 'PUBLICATION_FAILED', op_id: rejected.op_id});
+      await step(() => abapCall('WRITE', {iv_type: 'CLAS', iv_name: subject, iv_include: 'testclasses', iv_source: tests(subject, 42)}));
+      const fixed = await activate(subject);
+      const pickedUp = await step(() => abapCall('RUN_TESTS', {iv_json: JSON.stringify({targets: [{type: 'CLAS', name: subject}], expected_generation: fixed})}));
+      expect(pickedUp.counts).to.include({classes: 1, methods: 1, pass: 1});
+
     } finally {
       try {
         for (const name of [carrier, subject]) if (store.find('CLAS', name)) {
@@ -1397,6 +1622,61 @@ CLASS ltcl_loop IMPLEMENTATION. METHOD loop. DO. ENDDO. ENDMETHOD. METHOD later.
       } finally {abap.context.RFCDestinations.STORE = previous; endEnqSession(owner);}
     }
   });
+  for (const stage of ['validation', 'build']) {
+    it(`tracks STORE to ADT recovery and ADT to STORE failure across ${stage} (${process.env.OSD_ADT_ONE_RUNTIME === '1' ? 'ABAP front' : 'Node entry'})`, async () => {
+      const {default: express} = await import('express');
+      const {adtRouter} = await import('../tools/adt-facade.mjs');
+      const app = express();
+      app.use(express.raw({type: '*/*'}));
+      const {adtAbap} = await import('./helpers/adt-abap.mjs');
+      const frontEntries = [];
+      app.use(adtRouter({store, watch: false, abap: process.env.OSD_ADT_ONE_RUNTIME === '1' ? await adtAbap() : undefined,
+        abapServed: (by, req) => frontEntries.push({by, path: req.path})}).router);
+      const server = await new Promise(resolve => {const listener = app.listen(0, () => resolve(listener));});
+      const base = `http://localhost:${server.address().port}/sap/bc/adt`;
+      const csrf = await fetch(`${base}/core/discovery`, {method: 'HEAD', headers: {'x-csrf-token': 'fetch'}});
+      const headers = {'content-type': 'application/xml', 'x-csrf-token': csrf.headers.get('x-csrf-token'),
+        cookie: csrf.headers.getSetCookie().map(c => c.split(';')[0]).join('; ')};
+      const adt = async () => {
+        const response = await fetch(`${base}/activation?method=activate`, {method: 'POST', headers,
+          body: `<adtcore:objectReferences xmlns:adtcore="http://www.sap.com/adt/core"><adtcore:objectReference adtcore:uri="/sap/bc/adt/oo/classes/${green.toLowerCase()}" adtcore:name="${green}"/></adtcore:objectReferences>`});
+        expect(response.status).to.equal(200);
+        if (process.env.OSD_ADT_ONE_RUNTIME === '1') {
+          expect(response.headers.get('x-osd-served-by')).to.equal('HOST');
+          expect(frontEntries.some(entry => entry.path.endsWith('/activation'))).to.equal(true);
+        }
+        return response.text();
+      };
+      const activateStore = async () => JSON.parse((await call(destination,
+        {IV_COMMAND: 'ACTIVATE', IV_TYPE: 'CLAS', IV_NAME: green})).EV_JSON);
+      const publish = store.publish;
+      const breakActivation = async () => {
+        if (stage === 'validation') await store.write('CLAS', green, main(green).replace('rv_answer = 42', 'undefined_variable = 42'));
+        else store.publish = async () => {throw new Error('injected publication failure');};
+      };
+      const fix = async () => {store.publish = publish; await store.write('CLAS', green, main(green));};
+      try {
+        await breakActivation();
+        const failedStore = await activateStore();
+        expect(failedStore).to.include({state: 'failed', failure_stage: stage});
+        expect((await run([green])).error).to.include({code: 'PUBLICATION_FAILED', op_id: failedStore.op_id});
+        await fix();
+        expect(await adt()).to.contain('activationExecuted="true"');
+        expect((await run([green])).state).to.equal('ran');
+        await breakActivation();
+        expect(await adt()).to.contain('activationExecuted="false"');
+        const failedADT = Object.values(activationJournal(store).entries).at(-1);
+        expect(failedADT).to.include({state: 'failed', failure_stage: stage});
+        expect((await run([green])).error).to.include({code: 'PUBLICATION_FAILED', op_id: failedADT.op_id});
+        await fix();
+        expect((await activateStore()).state).to.equal('published');
+        expect((await run([green])).state).to.equal('ran');
+      } finally {
+        await fix();
+        await new Promise(resolve => server.close(resolve));
+      }
+    });
+  }
   it('follows publication and promotion through the shared ObjectStore path used by ADT', async () => {
     await store.write('CLAS', green, tests(green, 41), 'testclasses');
     const checked = store.activate('CLAS', green);

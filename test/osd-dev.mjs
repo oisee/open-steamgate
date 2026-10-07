@@ -57,11 +57,12 @@ describe("tools/osd-dev: a save is a check, a build and a recycle", function () 
   it("a change that breaks a dependent is reported and nothing is built", async () => {
     // a renames the method its caller uses; a itself is fine, b is not
     writeFileSync(join(root, "src/osd/zcl_dev_a.clas.abap"), CLEAN("zcl_dev_a").replace(/run/g, "walk"));
-    store.index = undefined;
-    store.parsed = undefined; // not watching, so the store is told the disk moved
+    const registry = store.registry();
+    store.index = undefined; // touch() carries the files that changed without a watcher
     const before = published.length;
     const r = await loop.touch("src/osd/zcl_dev_a.clas.abap");
     expect(r.ok).to.equal(false);
+    expect(store.registry(), "the dev loop must keep its registry").to.equal(registry);
     expect(r.stage).to.equal("check");
     expect(published.length, "no build after a failed check").to.equal(before);
     expect(r.broken.map((b) => b.name)).to.include("ZCL_DEV_B");
