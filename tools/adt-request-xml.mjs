@@ -15,7 +15,7 @@ export const namespaces = {
   class:"http://www.sap.com/adt/oo/classes", intf:"http://www.sap.com/adt/oo/interfaces",
   program:"http://www.sap.com/adt/programs/programs", include:"http://www.sap.com/adt/programs/includes",
   pack:"http://www.sap.com/adt/packages", aunit:"http://www.sap.com/adt/aunit",
-  ddl:"http://www.sap.com/adt/ddic/ddlsources", srvd:"http://www.sap.com/adt/ddic/srvd",
+  ddl:"http://www.sap.com/adt/ddic/ddlsources", srvd:"http://www.sap.com/adt/ddic/srvdsources",
   atom:"http://www.w3.org/2005/Atom", xml:"http://www.w3.org/XML/1998/namespace",
 };
 const knownElements = {
@@ -24,7 +24,7 @@ const knownElements = {
   checkObjectList:"chkrun", checkObject:"chkrun", content:"chkrun", artifact:"chkrun",
   abap:"asx", values:"asx", virtualFoldersRequest:"vfs", preselection:"vfs", value:"vfs", facetorder:"vfs", facet:"vfs",
   abapClass:"class", abapClassInclude:"class", abapInterface:"intf", abapProgram:"program", abapInclude:"include",
-  package:"pack", superPackage:"pack", runConfiguration:"aunit", ddlSource:"ddl", serviceDefinition:"srvd",
+  package:"pack", superPackage:"pack", runConfiguration:"aunit", ddlSource:"ddl", srvdSource:"srvd",
 };
 const createNamespaces = {
   "oo/classes":"class", "oo/interfaces":"intf", "programs/programs":"program", "programs/includes":"include",
@@ -44,6 +44,23 @@ export function requestXMLProfile(method, path) {
   if (/^(?:oo\/(?:classes|interfaces)|programs\/(?:programs|includes)|ddic\/(?:ddl|srvd)\/sources|packages)\/[^/]+$/.test(path)) return [];
   return undefined;
 }
+// Expanded roots audited against vsp crud.go and its SDK objectcreator.ts.
+export const objectXMLRoots = {
+  CLAS: [namespaces.class, "abapClass"], INTF: [namespaces.intf, "abapInterface"],
+  PROG: [namespaces.program, "abapProgram"], INCL: [namespaces.include, "abapInclude"],
+  DDLS: [namespaces.ddl, "ddlSource"], SRVD: [namespaces.srvd, "srvdSource"],
+};
+export function invalidObjectXML(type, body) {
+  const expected = objectXMLRoots[type];
+  if (!expected) return undefined;
+  const root = requestElements(body).find(e => e.parent === 0);
+  if (root?.uri === expected[0] && root.local === expected[1]) return undefined;
+  const message = `System expected the element '{${expected[0]}}${expected[1]}'`;
+  return {message, properties: [["XML_PATH", root ? `${root.local}(1)` : ""],
+    ["XML_OFFSET", `${body.length} `], ["T100KEY-ID", "00"], ["T100KEY-NO", "001"],
+    ["T100KEY-V1", message.slice(0, 48)], ["T100KEY-V2", message.slice(48)]]};
+}
+
 // XML 1.0 fifth-edition NameStartChar/NameChar, with colon excluded
 // for namespace NCNames. PI targets also use NCName (Namespaces 1.0).
 const startChar = cp => cp === 95 || cp >= 65 && cp <= 90 || cp >= 97 && cp <= 122 ||

@@ -13,6 +13,7 @@ import {HotLoader} from "../tools/osd-hot.mjs";
 import {WarmCompiler} from "../tools/osd-warm.mjs";
 import {adtRouter} from "../tools/adt-facade.mjs";
 import {adtAbap} from "./helpers/adt-abap.mjs";
+import {classIncludeTemplates} from "../tools/adt-documents.mjs";
 
 const REPO = resolve(".");
 const main = `CLASS zcl_t05 DEFINITION PUBLIC. PUBLIC SECTION.
@@ -100,7 +101,11 @@ CLASS zcl_empty_live IMPLEMENTATION. METHOD run. rv = lcl_value=>get( ). ENDMETH
           const path = object.path + (include === "main" ? "" : `/includes/${include}`) + "/source/main";
           const active = await fetch(base + path + "?version=active");
           expect(active.status).to.equal(200);
-          expect(await active.text()).to.equal(source);
+          // Missing active provenance is distinct from a proven empty file.
+          // Standard includes synthesize their template only in that version.
+          const template = object.type === "CLAS" && scenario !== "built tree" ? classIncludeTemplates[include] : undefined;
+          expect(await active.text()).to.equal(template ?? source);
+          if (template !== undefined) expect(reader.read(object.type, object.name, include, "active").empty).to.equal(true);
           expect(reader.read(object.type, object.name, include).source).to.equal(scenario === "built tree" ? source : "");
         }
         const doc = await fetch(base + object.path);
