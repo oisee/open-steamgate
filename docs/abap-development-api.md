@@ -40,7 +40,7 @@ transpiler still emits `throw new Error("GenerateSubroutine, not supported, tran
 - **WAIT.** `WAIT` commits, rolls out (snapshots the ICF shim's static server), releases the FIFO lock and
   takes it back afterwards (`tools/osd-dialog-step.mjs:239-345`, #438). Session memory stays where it is.
 - **ZOSD_STORE ACTIVATE.** `tools/osd-store-destination.mjs` checks activation and publishes directly
-  unless the calling context supplies `deferActivate`. With that binding it schedules publication after
+  outside a step. A `dialogStep` or an explicit `deferActivate` binding schedules publication after
   the step and returns `EV_ACTIVE = X`, `EV_LIVE` initial, and the note "live after the step".
   That verdict is not confirmation that a subsequent test sees the new generation.
 - **The ABAP ADT façade.** It lives in `src/adt/`: `ZCL_OSD_ADT_HANDLER`, `_ROUTER`, `_HOST` (the one host
@@ -51,8 +51,8 @@ transpiler still emits `throw new Error("GenerateSubroutine, not supported, tran
 - **Slice 3, option B** (`docs/adt-abap-port/slice-3-front.md`). The continuation registry exists in
   `tools/adt-abap-front.mjs`: a HOST verdict carries kind and JSON payload, host work runs outside the
   work-process lock, and `resume()` enters a fresh ABAP step. P3 can reuse this mechanism. A generic,
-  queryable activation completion contract for ABAP callers and an after-step path for every entry
-  (including jobs, APC and OData) still need implementation.
+  queryable activation completion contract for ABAP callers is implemented below. Every entry
+  through `dialogStep` (including jobs, APC and OData) uses the shared after-step path.
 - **The kernel oracle** (PR #467, `test/fixtures/kernel-oracle`, P7). A good pool returns subrc 0, NAME
   `%_T002O3` (generated, different on every run), and `PERFORM f IN PROGRAM (name)` works. A semantic error
   returns subrc 4 with MESSAGE `Field "UNDEFINED_X" is unknown.`, LINE 3 and WORD `UNDEFINED_X`. A syntax
@@ -93,6 +93,19 @@ lock( type name ) / unlock( type name )              -> through ZCL_OSD_ADT_LOCK
 
 A publish transpiles, then swaps or recycles. It cannot finish inside the step that asked for it: a
 recycle ends the process the step runs in, and a swap needs the lock the step holds.
+
+Every APC event (`on_start`, `on_message`, `on_close`) is a separate dialog step,
+even when the same WebSocket and handler object stay alive. Like an HTTP request,
+the event commits on return or rolls back on a dump, releases the work process,
+then finishes its after-step work through `tools/osd-dialog-step.mjs`.
+`STORE ACTIVATE` inside an APC handler returns `pending` with an `op_id`; its
+publication runs at the end of that event, without waiting for the socket to close.
+The next queued `on_message` can query `ACTIVATION_STATUS` and run
+`RUN_TESTS(expected_generation)` on the published generation. A publication failure
+ends the journal entry as `failed`; a dumping event rolls back its database LUW,
+fails its pending activation and never publishes it. Repository writes remain
+outside the database LUW. Cold publication or a warm fallback may recycle the
+serving child and close the socket, so callers must reconnect in that case.
 
 - **(a) Roll-out, like WAIT.** The step commits, rolls out and releases the lock. The host builds, and the
   step rolls back in. What survives: the session's memory, its stack frames and its references, because the
