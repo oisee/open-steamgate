@@ -3868,3 +3868,16 @@ Not an anomaly, recorded for porting: on 7.58, `FIND ... REGEX` (POSIX) raises a
 - Regression: `test/osd-unit.mjs` "a test method or class written in mixed case is looked up the way the transpiler keys it".
 - Upstream: needs an issue/PR in abaplint/transpiler (`unit_test.ts` lower-cases the method name as it already does the class), after our critic pass.
 - Upstream version containing a fix: unknown.
+
+### ANOMALY-2026-10-07-sections-nonfinal - a non-final global class with only a PUBLIC SECTION is accepted
+
+- Status: `open`
+- Discovery: abapiti's translated abaplint lexer on A4H: none of its 113 generated classes activated, 105 of them reported this error (the rest only follow-up errors); osgo and OSG-JS ran the same classes green.
+- Affected path: osgo, the JS runtime (OSG-JS) and the abaplint syntax check (@abaplint/core 2.120.56, v750, check_syntax: no issue on the reproducer or the controls).
+- Reproducer: `CLASS zcl_x DEFINITION PUBLIC CREATE PUBLIC. PUBLIC SECTION. METHODS m RETURNING VALUE(rv) TYPE i. ENDCLASS.` with any implementation. Controls: the same class with `FINAL`, or with empty `PROTECTED SECTION.` and `PRIVATE SECTION.`, activates; a class with no section statement at all also activates.
+- Expected SAP behaviour (7.58, measured 2026-10-07 in a throwaway package): the class does not activate, "For technical reasons, the statement "PROTECTED SECTION" or "PRIVATE SECTION" must exist in non-final global classes."; subclasses and users then fail with follow-up errors (type unknown, superclass CREATE PRIVATE).
+- Actual local behaviour: osgo 3/3 and OSG-JS 3/3 pass the reproducer and both controls; abaplint reports nothing.
+- Workaround: generators always write all three sections (abapiti does since this finding).
+- Regression: none yet.
+- Upstream: https://github.com/abaplint/abaplint/issues/4393 (abaplint check_syntax accepts it; filed 2026-10-07).
+- Upstream version containing a fix: unknown.
