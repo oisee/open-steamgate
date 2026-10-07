@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SYNTHETIC: measured ABAP Unit result shape; no system capture. -->
+<aunit:runResult xmlns:aunit="http://www.sap.com/adt/aunit">
+  <program xmlns:adtcore="http://www.sap.com/adt/core" adtcore:uri="/sap/bc/adt/oo/classes/zcl_osd_x2_demo" adtcore:type="CLAS/OC" adtcore:name="ZCL_OSD_X2_DEMO" uriType="semantic">
+    <testClasses>
+      <testClass adtcore:uri="/sap/bc/adt/oo/classes/zcl_osd_x2_demo#testclass=LTCL_ADD" adtcore:type="CLAS/OL" adtcore:name="LTCL_ADD" uriType="semantic" navigationUri="/sap/bc/adt/oo/classes/zcl_osd_x2_demo/includes/testclasses#type=CLAS%2FOCL;name=LTCL_ADD" durationCategory="short" riskLevel="harmless">
+        <testMethods>
+          <testMethod adtcore:uri="/sap/bc/adt/oo/classes/zcl_osd_x2_demo#testclass=LTCL_ADD;testmethod=ADD_2_3" adtcore:type="CLAS/OLI" adtcore:name="ADD_2_3" executionTime="0" uriType="semantic" navigationUri="/sap/bc/adt/oo/classes/zcl_osd_x2_demo/includes/testclasses#type=CLAS%2FOLD;name=LTCL_ADD%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20ADD_2_3" unit="s"/>
+        </testMethods>
+      </testClass>
+    </testClasses>
+  </program>
+</aunit:runResult>

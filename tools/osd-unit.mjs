@@ -32,6 +32,7 @@ import {runsAs} from "./osd-main.mjs";
 import {UnitRisk, scheduledRisk} from "./osd-unit-risk.mjs";
 import {hookDatabase} from "./osd-dialog-step.mjs";
 import {sendIPC} from "./osd-ipc.mjs";
+import {installUnitAssert} from "./osd-unit-assert.mjs";
 
 // ADT's own words for what a class declares
 const RISK = {HARMLESS: "harmless", DANGEROUS: "dangerous", CRITICAL: "critical"};
@@ -255,6 +256,7 @@ export class UnitRun {
     // caller already booted, which is why the façade runs a test in a
     // child rather than over its own live data (see runDetached)
     await this.store.data().boot();
+    installUnitAssert(globalThis.abap);
 
     const testClasses = [];
     for (const declared of classes.filter(wanted)) {
@@ -589,8 +591,8 @@ export function alertOf(error, where, stack = []) {
 
   const className = error?.constructor?.name;
   if (className === "kernel_cx_assert") {
-    const expected = text(error.expected);
-    const actual = text(error.actual);
+    const expected = typeof error.expected?.get?.() === "string" ? error.expected.get() : undefined;
+    const actual = typeof error.actual?.get?.() === "string" ? error.actual.get() : undefined;
     if (expected !== undefined && expected !== "") {
       details.push(`Expected [${expected}]`);
     }
@@ -600,6 +602,7 @@ export function alertOf(error, where, stack = []) {
     details.push(`Raised in ${where}`);
     return {kind: "failedAssertion", severity: "critical", stage: where,
       title: text(error.msg) ?? "Unit test assertion failed", details, stack,
+      ...(error.assertion ? {assertion: error.assertion} : {}),
       ...(expected !== undefined ? {expected} : {}), ...(actual !== undefined ? {actual} : {})};
   }
 

@@ -333,8 +333,30 @@ EV_JSON (optional diagnostic fields shown):
   execution failures make both that method and class error; failed assertions always
   keep method verdict `fail`, including in setup/teardown. Only a runner failure uses run-level
   `failed`, with `failure_stage: runner|timeout` and `error {code,text}`.
-- **Assertions:** expected/actual are optional strings from the existing ADT Unit alert
-  data, including known empty strings. Stack entries use the existing source map
+- **Assertions (X2):** expected/actual are optional strings, including known empty
+  strings. ASSERT_EQUALS failures carry each scalar operand's type kind and decimals
+  from the assertion into the Unit result. ADT XML and STORE JSON share one
+  per-type formatter, measured on SAP 7.58:
+  `i`/`int8` use a trailing minus without padding (`"1-"`, `"7-"`, zero `"0"`);
+  `p` keeps decimals and its leading blank and final sign position
+  (`" 2.25 "`, `" 1.50-"` for LENGTH 8 DECIMALS 2);
+  `f` uses scientific notation with 17 significant digits and a leading minus
+  (`"2.0000000000000000E+00"`, `"-1.5000000000000000E+00"`);
+  `decfloat34` uses the shortest runtime scalar form with a leading minus
+  (`"2"`, `"-1.5"`); `c` trims trailing blanks (`"-1"`), while `string` stays
+  verbatim, including trailing spaces (`"-1  "`); `n` preserves leading zeros
+  (`"0012"`). Unknown types retain the runtime's text verbatim, without numeric
+  inference. The formatter preserves
+  the runtime's available precision; it cannot recover digits already lost there.
+  Packed thousands separators and other magnitudes remain unmeasured.
+  In CLAS ADT XML, comparisons are nested under `Different values`, followed
+  by `Test 'CLASS->METHOD' in Main Program '<POOL>CP'`. Float Expected and Actual
+  are separate sibling details; other measured types use one combined detail.
+  ASSERT_EQUALS default titles use `Critical Assertion Error: 'I_Zero: ASSERT_EQUALS'`, with
+  uppercase at the start and after each underscore; custom messages retain their
+  text (X2's `add`). Methods sort by byte order of their uppercase names
+  (`INT8` before `I_NEG`). STORE expected/actual strings use the same value canon.
+  Stack entries use the existing source map
   resolution; unavailable locations are omitted. Counts sum method verdicts;
   class errors without methods increase `classes`, not method `error`.
 - **Generation guard:** a supplied expected_generation different from the generation
@@ -380,6 +402,37 @@ Known limitations retained for this slice:
 - P3-2: STORE plans do not apply the ADT runner's HARMLESS-write risk guard.
 - P3-3: On Windows, early child rejection may leave its cwd busy and disposable-directory removal can fail.
 - P3-4: Source locks are per process; external build replacement or GC can race the module copy without a modules digest.
+
+#### X2: ABAP Unit conformance pair
+
+`test/adt-aunit-conformance-x2.mjs` publishes the test-only `ZCL_OSD_X2_DEMO`
+first with subtraction (red), then addition (green). STORE `RUN_TESTS`, the real
+OSG ADT XML route, and explicitly SYNTHETIC SAP result XML all map to the same
+expectations in `test/fixtures/aunit-x2/expected.json`: run state, counts, class
+name/state, method name/verdict and assertion kind/expected/actual/line. Red pins
+SAP's verbatim trailing-minus text `actual: "1-"`, `expected: "5"`, and numeric
+line `7` from the testclasses stack frame, counted from 1 in the unchanged
+include. Green pins one pass and no alerts. STORE's documented field names stay
+the same; the conformance adapter takes `line` from `alerts[].stack[]`.
+
+Known X2 limits: type provenance is captured only for measured scalar operands
+of `assert_equals`, by reading runtime objects without calling RTTI or allocating
+ABAP descriptors. Structure components (including packed decimals), structures
+inside tables or references, and CASTING field symbols keep the runtime's
+verbatim comparison text. Recursive scalar table/reference comparisons retain
+the inner `assert_equals` provenance, but the outer custom message is lost.
+`assert_true`, `assert_initial`, `fail` and other assertion methods carry no
+call provenance; their values stay verbatim and titles retain the runtime's
+message. Only identified `assert_equals` failures use the `ASSERT_EQUALS`
+default title. Component provenance, other assertion hooks and recursive outer
+messages remain deferred.
+
+To add the next pair, place disposable ABAP, measured synthetic XML shapes and
+agreed expectations under `test/fixtures/`, register its suite in
+`test/suites.d/*.json`, and compare both published states through the same three
+paths. Preserve include bytes when pinning a line. Publish protocol shapes and
+fixture identities only, never captures or live identifiers; these fixtures are
+excluded from normal builds, packs and shipped seeds.
 
 ### Joint acceptance and interim path
 

@@ -1,6 +1,8 @@
 // ABAP Unit result documents and navigation, shared by the facade callers.
 import {xmlEscape, uriOf} from "./adt-documents.mjs";
 import {requestElements, elementsNamed, attributeValue, namespaces} from "./adt-request-xml.mjs";
+import {unitValueText} from "./osd-unit-value.mjs";
+export {unitValueText} from "./osd-unit-value.mjs";
 
 // The result of a test run: a program, its test classes, their methods, and
 // the alerts on whichever of them failed. No alert on a method is what
@@ -114,23 +116,27 @@ function classUnitResultDocument(run, base, withNavigationUri) {
     return `            <stackEntry adtcore:uri="${xmlEscape(frameUri(entry.uri, entry.line, 0))}" adtcore:type="CLAS/OCN/${frame.include}" adtcore:name="${xmlEscape(frame.name)}" adtcore:description="${xmlEscape(description)}"/>`;
   };
   const detail = text => `            <detail text="${xmlEscape(text)}"/>`;
-  // The runner retains comparison values as text. Change only an entire
-  // negative numeric value; a string containing a hyphen stays unchanged.
-  const valueText = value => /^-\d+(?:\.\d+)?$/.test(value) ? `${value.slice(1)}-` : value;
   const alert = (a, c, m) => {
     const items = a.details ?? [];
     const comparison = items.filter(d => /^(Expected|Actual) \[[\s\S]*\]$/.test(d));
+    if (a.assertion) {
+      for (const [kind, value] of [["Expected", a.expected], ["Actual", a.actual]]) {
+        if (value !== undefined && !comparison.some(d => d.startsWith(`${kind} [`))) comparison.push(`${kind} [${value}]`);
+      }
+    }
     const failedAssertion = (a.kind ?? "failedAssertion") === "failedAssertion";
     const raised = items.find(d => /^Raised in \w+$/.test(d))?.slice("Raised in ".length);
     const methodName = m?.name ?? raised?.toUpperCase();
     const title = a.title || "Unit test assertion failed";
-    const message = title === "Unit test assertion failed" && comparison.length > 0 ? "ASSERT_EQUALS" : title;
+    const message = a.assertion ? a.assertion.message || a.assertion.method : title;
     const renderedTitle = failedAssertion && methodName && !title.startsWith("Critical Assertion Error:")
-      ? `Critical Assertion Error: '${methodName[0].toUpperCase()}${methodName.slice(1).toLowerCase()}: ${message}'` : title;
+      ? `Critical Assertion Error: '${a.assertion?.message || `${methodName.toLowerCase().replace(/(^|_)([a-z])/g, (_, prefix, letter) => prefix + letter.toUpperCase())}: ${message}`}'` : title;
     const details = [];
     if (failedAssertion && comparison.length > 0) {
-      const text = comparison.map(d => d.replace(/^(Expected|Actual) \[([\s\S]*)\]$/, (_, kind, value) => `${kind} [${valueText(value)}]`)).join(" ");
-      details.push(`            <detail text="Different values"><details><detail text="${xmlEscape(text)}"/></details></detail>`);
+      const values = comparison.map(d => d.replace(/^(Expected|Actual) \[([\s\S]*)\]$/, (_, kind, value) =>
+        `${kind} [${unitValueText(value, a.assertion?.[kind.toLowerCase()])}]`));
+      const split = [a.assertion?.expected, a.assertion?.actual].some(t => t?.typeKind === "F");
+      details.push(`            <detail text="Different values"><details>${(split ? values : [values.join(" ")]).map(text => `<detail text="${xmlEscape(text)}"/>`).join("")}</details></detail>`);
     }
     details.push(...items.filter(d => !(failedAssertion && comparison.includes(d)) &&
       !(methodName && d.toLowerCase() === `raised in ${methodName.toLowerCase()}`)).map(detail));
@@ -156,7 +162,7 @@ ${(a.stack ?? []).map(e => stackEntry(e, methodName)).join("\n")}
   };
   const testClass = c => `    <testClass adtcore:name="${xmlEscape(c.name)}" adtcore:uri="${xmlEscape(`${base}#testclass=${encodeURIComponent(c.name)}`)}" durationCategory="${xmlEscape(c.durationCategory ?? "short")}" riskLevel="${xmlEscape(c.riskLevel ?? "harmless")}" uriType="semantic"${navigation("CLAS/OL", `${includeUri(c.include)}#type=CLAS%2FOCL;name=${encodeURIComponent(c.name)}`)}>
 ${(c.alerts ?? []).length === 0 ? "" : alerts(c.alerts, "      ", c) + "\n"}      <testMethods>
-${[...(c.testMethods ?? [])].sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0).map(m => method(m, c)).join("\n")}
+${[...(c.testMethods ?? [])].sort((a, b) => a.name.toUpperCase() < b.name.toUpperCase() ? -1 : a.name.toUpperCase() > b.name.toUpperCase() ? 1 : 0).map(m => method(m, c)).join("\n")}
       </testMethods>
     </testClass>`;
   return `<?xml version="1.0" encoding="utf-8"?>

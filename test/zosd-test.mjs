@@ -553,7 +553,7 @@ ${objects.map(([uri, name]) => `  <adtcore:objectReference adtcore:uri="${uri}" 
       expect(method).to.contain('<alert kind="failedAssertion"');
       expect(method).to.contain('severity="critical"');
       expect(method).to.contain("ZOSD_TEST: this assertion fails on purpose");
-      expect(method).to.contain("<title>Critical Assertion Error: 'Deliberate_failure: ZOSD_TEST: this assertion fails on purpose'</title>");
+      expect(method).to.contain("<title>Critical Assertion Error: 'ZOSD_TEST: this assertion fails on purpose'</title>");
       expect(method).to.contain('<detail text="Different values"><details><detail text="Expected [Open] Actual [Closed]"/></details></detail>');
       expect(method).to.contain("Test 'LTCL_ZOSD_TEST_DEMO-&gt;DELIBERATE_FAILURE' in Main Program 'ZCL_ZOSD_TEST_DEMO============CP'");
       expect(method).to.match(/navigationUri="[^"]*\/includes\/testclasses#type=CLAS%2FOLD;name=LTCL_ZOSD_TEST_DEMO(?:%20)+DELIBERATE_FAILURE"/);
