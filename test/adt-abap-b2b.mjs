@@ -14,11 +14,42 @@ import {box,answerOf} from "./helpers/destination.mjs";
 const base="/sap/bc/adt/";
 const fixtures={
   "zi_outline.intf.abap":"INTERFACE zi_outline PUBLIC. METHODS run. ENDINTERFACE.",
+  "zif_edge.intf.abap":"INTERFACE zif_edge PUBLIC. ENDINTERFACE.",
   "zcl_outline.clas.abap":`CLASS zcl_outline DEFINITION PUBLIC. PUBLIC SECTION. CLASS-METHODS execute. METHODS run. DATA value TYPE i. ENDCLASS.
 CLASS zcl_outline IMPLEMENTATION. METHOD execute. ENDMETHOD. METHOD run. value = 1. ENDMETHOD. ENDCLASS.`,
   "zcl_outline.clas.testclasses.abap":"CLASS ltcl_test DEFINITION FOR TESTING. PRIVATE SECTION. METHODS check FOR TESTING. ENDCLASS. CLASS ltcl_test IMPLEMENTATION. METHOD check. ENDMETHOD. ENDCLASS.",
   "zcl_interface.clas.abap":"CLASS zcl_interface DEFINITION PUBLIC. PUBLIC SECTION. INTERFACES zi_outline. ENDCLASS. CLASS zcl_interface IMPLEMENTATION. METHOD zi_outline~run. ENDMETHOD. ENDCLASS.",
   "zcl_empty.clas.abap":"CLASS zcl_empty DEFINITION PUBLIC. ENDCLASS. CLASS zcl_empty IMPLEMENTATION. ENDCLASS.",
+  "zcl_structures.clas.abap":`CLASS zcl_structures DEFINITION PUBLIC.
+PUBLIC SECTION.
+DATA: BEGIN OF row,
+        field TYPE i,
+        BEGIN OF nested,
+          item TYPE i,
+        END OF nested,
+      END OF row,
+      tail TYPE i.
+PROTECTED SECTION.
+CONSTANTS: answer TYPE i VALUE 42,
+           BEGIN OF settings,
+             enabled TYPE i VALUE 1,
+             BEGIN OF nested,
+               flag TYPE i VALUE 2,
+             END OF nested,
+           END OF settings.
+PRIVATE SECTION.
+CLASS-DATA: BEGIN OF shared,
+              field TYPE i,
+              BEGIN OF nested,
+                item TYPE i,
+              END OF nested,
+            END OF shared.
+ENDCLASS.
+CLASS zcl_structures IMPLEMENTATION. ENDCLASS.`,
+  "zcl_structures.clas.locals_def.abap":`CLASS lcl_structures DEFINITION.
+PUBLIC SECTION.
+DATA: BEGIN OF row, field TYPE i, END OF row.
+ENDCLASS.`,
   "zoutline.prog.abap":`REPORT zoutline.
 CLASS lcl_local DEFINITION. PUBLIC SECTION. METHODS run. ENDCLASS.
 CLASS lcl_local IMPLEMENTATION. METHOD run. ENDMETHOD. ENDCLASS.
@@ -30,6 +61,7 @@ START-OF-SELECTION. PERFORM do_it.`,
   "zsrv.srvd.srvdsrv":"define service ZSrv { expose ZEntity; }",
 };
 const routes=[["CLAS","oo/classes","zcl_outline"],["INTF","oo/interfaces","zi_outline"],
+  ["INTF","oo/interfaces","zif_edge"],["CLAS","oo/classes","zcl_empty"],["CLAS","oo/classes","zcl_structures"],
   ["PROG","programs/programs","zoutline"],["DDLS","ddic/ddl/sources","zddl"],
   ["SRVD","ddic/srvd/sources","zsrv"],["INCL","programs/includes","zinclude"]];
 const clean=(s) => s.replace(/\?$/,"");
@@ -84,7 +116,32 @@ describe("B2b objectstructure live Node byte diff",function () {
         const key=`object GET ${p}`;expect(ported.facade.missed.get(key)?.count).to.equal(node.facade.missed.get(key)?.count);expect(ported.facade.missed.get(key)).to.be.an("object");});
     }
   }
-  for(const name of ["zcl_interface","zcl_empty"]) it(name,async () => {expect((await diff(base+"oo/classes/"+name+"/objectstructure")).status).to.equal(200);});
+  it("zcl_interface",async () => {expect((await diff(base+"oo/classes/zcl_interface/objectstructure")).status).to.equal(200);});
+  it("structured attributes own their entire blocks in both fronts and STORE OUTLINE",async () => {
+    const attribute=(name,visibility,level,identifier,block) => ({name,type:"CLAS/OA",visibility,level,links:[
+      {rel:"definitionIdentifier",href:"./source/main#"+identifier},
+      {rel:"definitionBlock",href:"./source/main#"+block},
+    ]});
+    const members=[
+      attribute("ROW","public","instance","start=3,15;end=3,18","start=3,0;end=8,16"),
+      attribute("TAIL","public","instance","start=9,6;end=9,10","start=3,0;end=9,17"),
+      attribute("ANSWER","protected","static","start=11,11;end=11,17","start=11,0;end=11,33"),
+      attribute("SETTINGS","protected","static","start=12,20;end=12,28","start=11,0;end=17,26"),
+      attribute("SHARED","private","static","start=19,21;end=19,27","start=19,0;end=24,25"),
+    ];
+    const outline=structureOf(store,"CLAS","zcl_structures");
+    expect(outline.children.slice(0,5)).to.deep.equal(members);
+    const local=outline.children[5];
+    expect(local.name).to.equal("LCL_STRUCTURES");
+    expect(local.children).to.deep.equal([attribute("ROW","public","instance","start=3,15;end=3,18","start=3,0;end=3,44")
+      ].map(e => ({...e,links:e.links.map(l => ({...l,href:l.href.replace("./source/main","./includes/definitions")}))})));
+    const answer=await new StoreDestination({store}).execute({iv_command:"PARSE",iv_json:JSON.stringify({kind:"OUTLINE",type:"CLAS",name:"zcl_structures"})});
+    expect(answer.EV_ERROR).to.equal("");
+    const ordered=e => ({...e,extra:Object.entries(e.extra ?? {}).map(([name,value]) => ({name,value})),links:e.links ?? [],children:(e.children ?? []).map(ordered)});
+    expect(JSON.parse(answer.EV_JSON)).to.deep.equal({found:true,...ordered(outline)});
+    const actual=await diff(base+"oo/classes/zcl_structures/objectstructure");
+    expect(actual.body.toString()).to.equal(objectStructureDocument(outline,{base:base+"oo/classes/zcl_structures/objectstructure"}));
+  });
   it("DDLS has no entity fallback",async () => {expect((await diff(base+"ddic/ddl/sources/ZEntity/objectstructure")).status).to.equal(404);});
   it("PARSE refusal has Node's 500 document",async () => {
     const original=store.registry;store.registry=() => {throw new Error('outline <failure> & "message"');};
@@ -135,5 +192,5 @@ describe("B2b objectstructure live Node byte diff",function () {
   });
 });
 describe("B2b focused ABAP Unit",() => {
-  for(const method of ["empty","nested"]) it(method,async () => {const {ltcl_structure}=await import("../output/zcl_osd_adt_structure.clas.testclasses.mjs");const o=new ltcl_structure();await o.constructor_();await o.FRIENDS_ACCESS_INSTANCE[method]();});
+  for(const method of ["empty","root_links","nested"]) it(method,async () => {const {ltcl_structure}=await import("../output/zcl_osd_adt_structure.clas.testclasses.mjs");const o=new ltcl_structure();await o.constructor_();await o.FRIENDS_ACCESS_INSTANCE[method]();});
 });

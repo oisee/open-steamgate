@@ -1,6 +1,7 @@
 CLASS ltcl_structure DEFINITION FINAL FOR TESTING DURATION SHORT RISK LEVEL HARMLESS.
   PRIVATE SECTION.
     METHODS empty FOR TESTING RAISING zcx_ajson_error.
+    METHODS root_links FOR TESTING RAISING zcx_ajson_error.
     METHODS nested FOR TESTING RAISING zcx_ajson_error.
 ENDCLASS.
 CLASS ltcl_structure IMPLEMENTATION.
@@ -12,6 +13,16 @@ CLASS ltcl_structure IMPLEMENTATION.
     cl_abap_unit_assert=>assert_char_cp( act = lv_xml exp = `*xml:base="/a?x=1&amp;y=2"*` ).
     cl_abap_unit_assert=>assert_char_cp( act = lv_xml exp = `*adtcore:type="DDLS/DF">` && cl_abap_char_utilities=>newline
       && cl_abap_char_utilities=>newline && `</abapsource:*` ).
+  ENDMETHOD.
+  METHOD root_links.
+    DATA lo_json TYPE REF TO zcl_ajson.
+    DATA lv_xml TYPE string.
+    DATA lv_nl TYPE string.
+    lv_nl = cl_abap_char_utilities=>newline.
+    lo_json = zcl_ajson=>parse( `{"name":"Z","type":"INTF/OI","links":[{"rel":"definitionIdentifier","href":"source/main"}],"children":[]}` ).
+    lv_xml = zcl_osd_adt_structure=>document( io_json = lo_json iv_base = `/a` ).
+    cl_abap_unit_assert=>assert_char_cp( act = lv_xml exp = `*href="source/main"/>` && lv_nl
+      && `</abapsource:objectStructureElement>` && lv_nl ).
   ENDMETHOD.
   METHOD nested.
     DATA lo_json TYPE REF TO zcl_ajson.

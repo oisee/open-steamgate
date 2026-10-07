@@ -957,3 +957,12 @@ include's line numbers. Main links use `./source/main`. Attributes such as
 `visibility`, `level` and `clif_name` are plain XML attributes; class outlines
 have no `sourceUri` or synthetic `CLAS/I` entries. Explicit v1 or XML Accept
 selects the v1 content type; the document body is the same as v2.
+
+Structured DATA, CLASS-DATA and CONSTANTS retain one `CLAS/OA` entry for
+the outer structure name, with a block through its matching END OF and an
+identifier at the name token. Components, including nested structures, have
+no separate outline entries. This preserves the previous outline ownership;
+these declaration shapes were not measured against A4H. Events, TYPES,
+FRIENDS, macros and local interfaces also remain **not measured**: events,
+types, friends and macros have no entries, and local interfaces retain the
+existing `CLAS/OCL` label.

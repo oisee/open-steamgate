@@ -97,13 +97,14 @@ ${inner.join("\n")}
 }
 
 // Every node of the given structure or statement kinds, in source order.
-function findNodes(node, kinds, out = []) {
+function findNodes(node, kinds, out = [], stopAtMatch = false) {
   const kind = node?.get?.()?.constructor?.name;
   if (kinds.includes(kind)) {
     out.push(node);
+    if (stopAtMatch) return out;
   }
   for (const child of node?.getChildren?.() ?? []) {
-    findNodes(child, kinds, out);
+    findNodes(child, kinds, out, stopAtMatch);
   }
   return out;
 }
@@ -182,11 +183,13 @@ function classParts(object, globalName, type) {
       } else {
         owner.definition = part;
         let visibility = "public";
-        for (const statement of findNodes(node, ["Public", "Protected", "Private", "MethodDef", "InterfaceDef", "Aliases", "Data", "ClassData", "Constant"])) {
-          if (statement.constructor.name !== "StatementNode") continue;
+        // Data/ClassData/Constants structures own all nested components.
+        // Collect the outer block once and do not descend into its members.
+        for (const declaration of findNodes(node, ["Public", "Protected", "Private", "MethodDef", "InterfaceDef", "Aliases", "Data", "ClassData", "Constant", "Constants"], [], true)) {
+          const statement = declaration.getFirstStatement?.() ?? declaration;
           const kind = statement.get().constructor.name;
           if (["Public", "Protected", "Private"].includes(kind)) {visibility = kind.toLowerCase(); continue;}
-          owner.declarations.push({statement, kind, visibility, source});
+          owner.declarations.push({node: declaration, statement, kind, visibility, source});
         }
       }
     }
@@ -202,12 +205,14 @@ function classParts(object, globalName, type) {
     const methodType = local ? "CLAS/OLD" : METHOD;
     const links = partLinks(owner.definition, owner.implementation);
     const children = [], listed = new Set(), interfaces = new Map();
-    for (const {statement, kind, visibility, source} of owner.declarations) {
+    for (const {node, statement, kind, visibility, source} of owner.declarations) {
       const tokens = statement.getTokens();
+      const structured = ["DataBegin", "ClassDataBegin", "ConstantBegin"].includes(kind);
       const keyword = kind === "MethodDef" ? "METHODS" : kind === "ClassData" ? "DATA" : undefined;
-      const token = keyword === undefined ? tokens[1] : tokens[tokens.findIndex((t) => t.getStr().toUpperCase() === keyword) + 1];
+      const token = structured ? tokens[tokens.findIndex((t) => t.getStr().toUpperCase() === "OF") + 1]
+        : keyword === undefined ? tokens[1] : tokens[tokens.findIndex((t) => t.getStr().toUpperCase() === keyword) + 1];
       const name = token.getStr().toUpperCase();
-      const declared = {node: statement, token, source};
+      const declared = {node, token, source};
       if (kind === "InterfaceDef") {
         interfaces.set(name, declared);
         const bodies = [...owner.bodies].filter(([n]) => n.startsWith(name + "~")).map(([, b]) => b);
@@ -225,7 +230,7 @@ function classParts(object, globalName, type) {
       } else {
         const alias = kind === "Aliases";
         children.push({name, type: alias ? "CLAS/OB" : "CLAS/OA", visibility,
-          ...(alias ? {} : {level: ["ClassData", "Constant"].includes(kind) ? "static" : "instance"}),
+          ...(alias ? {} : {level: ["ClassData", "Constant", "ClassDataBegin", "ConstantBegin"].includes(kind) ? "static" : "instance"}),
           links: partLinks(declared)});
       }
     }

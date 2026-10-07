@@ -65,7 +65,8 @@ CLASS zcl_osd_adt_structure IMPLEMENTATION.
     DATA lv_nl TYPE string.
     DATA lv_pad TYPE string.
     DATA lv_version TYPE string.
-    DATA lv_links TYPE string.
+    DATA lv_inner TYPE string.
+    DATA lv_children TYPE string.
     lv_version = io_json->get_string( `/version` ).
     IF lv_version IS NOT INITIAL.
       lv_version = ` adtcore:version="` && zcl_osd_adt_xml=>esc( lv_version ) && `"`.
@@ -78,11 +79,12 @@ CLASS zcl_osd_adt_structure IMPLEMENTATION.
       && lv_pad && `xmlns:atom="http://www.w3.org/2005/Atom"` && lv_nl
       && lv_pad && `xml:base="` && zcl_osd_adt_xml=>esc( iv_base ) && `"` && lv_nl
       && lv_pad && attributes( io_json = io_json iv_path = `` ) && lv_version && `>` && lv_nl.
-    lv_links = links( io_json = io_json iv_path = `/links` iv_pad = `  ` ).
-    IF lv_links IS NOT INITIAL.
-      rv_xml = rv_xml && lv_links && lv_nl.
+    lv_inner = links( io_json = io_json iv_path = `/links` iv_pad = `  ` ).
+    lv_children = children( io_json = io_json iv_path = `/children` iv_pad = `  ` ).
+    IF lv_inner IS NOT INITIAL AND lv_children IS NOT INITIAL.
+      lv_inner = lv_inner && lv_nl.
     ENDIF.
-    rv_xml = rv_xml && children( io_json = io_json iv_path = `/children` iv_pad = `  ` ) && lv_nl
+    rv_xml = rv_xml && lv_inner && lv_children && lv_nl
       && `</abapsource:objectStructureElement>` && lv_nl.
   ENDMETHOD.
   METHOD children.
