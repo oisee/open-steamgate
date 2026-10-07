@@ -248,6 +248,10 @@ This prevents a silent verifier from blocking later cold publications.
   next swap. With several work processes each one's heap growth counts. The
   heap limit does not wait: it is the safety limit. PIA's terminal dropped
   in 1-2 turns of 15 while a turn waited on its model (2026-10-06).
+  A save or an activation restarts a pending quiet period, and a quiet
+  timer that fires while an activation is running or queued waits another
+  period: otherwise the recycle can land on that activation and turn its
+  warm swap into a cold load (adt-lifecycle on #625, 2026-10-07).
 - **One activation per save, answered once it is live.** `publish()` runs
   one at a time per store, and a caller whose tree is the one already
   queued, or the one a build in flight named its generation after, takes
