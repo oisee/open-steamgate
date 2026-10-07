@@ -229,6 +229,10 @@ export async function serveChannel(options) {
   };
   socket.on("error", () => shut(1011, "socket error"));
   socket.on("close", () => shut(1000, "socket closed"));
+  // A client FIN half-closes an upgraded socket: "end" comes without "close"
+  // (half-open connections are allowed), and queued messages must not run
+  // for a peer that has left. An already committed event still publishes.
+  socket.on("end", () => shut(1000, "socket ended"));
 
   // The handler runs before the upgrade, not after.
   //

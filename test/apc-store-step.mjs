@@ -198,6 +198,24 @@ cl_abap_unit_assert=>assert_equals( act = zcl_apc_store_target=>answer( ) exp = 
       expect(publishes).to.equal(1); expect(dump).to.deep.equal([]);
     } finally { gate.release(); }
   });
+  it('drops queued messages when the client half-closes (end without close) during publication', async () => {
+    const gate = gatePublication();
+    socket.send('activate'); socket.send('tests');
+    try {
+      await gate.entered;
+      expect(handled).to.deep.equal(['activate']);
+      const pending = JSON.parse((await socket.until(2))[1]);
+      socket.emit('end'); // FIN from the client: no 'close' on a half-open socket
+      gate.release();
+      const deadline = Date.now() + 20000;
+      while (store.activationJournal.lookup(pending.op_id).state === 'pending' && Date.now() < deadline) await sleep(5);
+      await exclusive(async () => {});
+      await sleep(30);
+      expect(store.activationJournal.lookup(pending.op_id)).to.include({state: 'published', active: true});
+      expect(handled).to.deep.equal(['activate']);
+      expect(publishes).to.equal(1);
+    } finally { gate.release(); }
+  });
   it('publishes before the next on_message on the same socket and runs tests on that generation', async () => {
     socket.send('activate'); socket.send('tests');
     const messages = await socket.until(4);
