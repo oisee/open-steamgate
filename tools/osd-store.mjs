@@ -442,6 +442,7 @@ export class ObjectStore {
   // a write lands a file; a new object goes to the first writable root unless
   // a caller with a specific layer (the notebook scratch pack) names one
   write(type, name, source, include = "main", options = {}) {
+    this.#stillActive();
     const queued = deferSourceMutation(this, "write", [...arguments]);
     if (queued) return queued;
     const meta = TYPES[type];
@@ -884,6 +885,7 @@ export class ObjectStore {
   // the same set over the same tree: two activations of different objects
   // are two builds, so one's broken save never enters the other's.
   async publish(options = {}) {
+    this.#stillActive();
     const activating = new Set([...(options.activate ?? [])].map((o) => `${o.type} ${String(o.name).toUpperCase()}`));
     const set = [...activating].sort().join("\n");
     const forced = options.force === true || options.replace === true;
@@ -1216,10 +1218,18 @@ export class ObjectStore {
         (w.next ??= new Set()).add(live);
         this.#verifyNext();
       }
-      if (this.#channelsOpen("quiet")) this.#armQuiet();
-      else this.#catchUp("quiet");
+      if (this.#channelsOpen("quiet") || this.#running !== undefined || this.#queued !== undefined) this.#armQuiet();
+      else { w.quietArmed = false; this.#catchUp("quiet"); }
     }, this.warmQuietMs);
     w.timer.unref?.();
+    w.quietArmed = true;
+  }
+
+  // a save or an activation is not quiet: a pending quiet recycle starts its
+  // period again, so it never lands on the activation it would have to wait
+  // for and turn that warm swap into a cold load (adt-lifecycle, 2026-10-07)
+  #stillActive() {
+    if (this.warmState?.quietArmed === true) this.#armQuiet();
   }
 
   // the APC sockets the serving process holds (counted by upgradeProxy,

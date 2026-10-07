@@ -674,6 +674,34 @@ describe("tools/osd-warm: an activation answers once its source is live", () => 
     }
   });
 
+  it("a save restarts the quiet period, and a quiet recycle waits for an activation in flight", async () => {
+    const {store, src, compiler, events, done} = setup();
+    try {
+      store.warmQuietMs = 100;
+      src.text = "rv = 2.";
+      await activate(store);
+      // a save re-arms the pending quiet timer rather than leaving it to fire
+      const armed = store.warmState.timer;
+      store.write("CLAS", "ZCL_A", "CLASS zcl_a DEFINITION PUBLIC. ENDCLASS.\nCLASS zcl_a IMPLEMENTATION. ENDCLASS.\n* saved\n");
+      expect(store.warmState.timer, "a save left the quiet timer as it was").to.not.equal(armed);
+      // an activation whose build outlasts the quiet period: the timer fires
+      // while it is in flight and must not recycle under it
+      let release;
+      const gate = new Promise((ok) => { release = ok; });
+      const build = compiler.build;
+      compiler.build = async function () { await gate; return build.call(this); };
+      src.text = "rv = 3.";
+      const second = activate(store);
+      await sleep(400);
+      expect(events.map((e) => e.what), "a quiet recycle under an activation in flight").to.deep.equal(["swap g1->g2"]);
+      release();
+      await second;
+      expect(events.map((e) => e.what), "the activation is a warm swap").to.deep.equal(["swap g1->g2", "swap g2->g3"]);
+    } finally {
+      done();
+    }
+  });
+
   it("a pool's swap reports the heap of every work process", async () => {
     const pool = new RuntimePool({size: 2});
     pool.runtimes[0].hot = async () => ({ms: 1, swaps: 1, heap: 100});
