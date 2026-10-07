@@ -3866,5 +3866,5 @@ Not an anomaly, recorded for porting: on 7.58, `FIND ... REGEX` (POSIX) raises a
 - Actual local behaviour: osgo 3/3 and OSG-JS 3/3 pass the reproducer and both controls; abaplint reports nothing.
 - Workaround: generators always write all three sections (abapiti does since this finding).
 - Regression: none yet.
-- Upstream: not filed.
+- Upstream: https://github.com/abaplint/abaplint/issues/4393 (abaplint check_syntax accepts it; filed 2026-10-07).
 - Upstream version containing a fix: unknown.
