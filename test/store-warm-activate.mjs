@@ -1,4 +1,6 @@
 import {expect} from "chai";
+import {zipInProcess} from "../tools/osd-abapgit-zip.mjs";
+import {userLayersOf} from "../tools/osd-source-layers.mjs";
 import {fork} from "node:child_process";
 import {once} from "node:events";
 import {mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
@@ -26,7 +28,7 @@ ENDMETHOD. ENDCLASS.\n`;
 
 describe("STORE ACTIVATE shares ADT warm publication", function () {
   this.timeout(120000);
-  let root, store, destination, child, runtime, publications, failSwap, failRecycle;
+  let root, store, destination, child, runtime, publications, failSwap, failRecycle, priorLayers;
   const request = async message => {
     const response = once(child, "message");
     child.send(message);
@@ -51,7 +53,9 @@ describe("STORE ACTIVATE shares ADT warm publication", function () {
   };
   const edit = value => execute("WRITE", {IV_SOURCE: source(target.name.toLowerCase(), value)});
   const activate = async () => JSON.parse((await execute("ACTIVATE")).EV_JSON);
-  beforeEach(async () => {
+  beforeEach(async function () {
+    priorLayers = process.env.OSD_LAYERS;
+    delete process.env.OSD_LAYERS;
     root = mkdtempSync(join(tmpdir(), "osd-store-warm-"));
     mkdirSync(join(root, "src")); mkdirSync(join(root, "test")); mkdirSync(join(root, ".local/lars"), {recursive: true});
     symlinkSync(join(repo, "node_modules"), join(root, "node_modules"));
@@ -83,6 +87,18 @@ process.on('message', async message => {
  } catch (error) {process.send({error: error.message});}
 });
 process.send({ready: true});`);
+    if (this.currentTest.title.includes('first ZIP')) {
+      const repoFolder = join(root, 'archive'); mkdirSync(join(repoFolder, 'src'), {recursive: true});
+      writeFileSync(join(repoFolder, '.abapgit.xml'), '<STARTING_FOLDER>/src/</STARTING_FOLDER><FOLDER_LOGIC>FULL</FOLDER_LOGIC>');
+      writeFileSync(join(repoFolder, 'src/package.devc.xml'), '<DEVC><DEVCLASS>$ZWARM</DEVCLASS><CTEXT>fixture</CTEXT></DEVC>');
+      for (const ext of ['abap', 'testclasses.abap']) {
+        const filename = 'zcl_warm_store.clas.' + ext;
+        writeFileSync(join(repoFolder, 'src', filename), readFileSync(join(root, 'src', filename)));
+        rmSync(join(root, 'src', filename));
+      }
+      const archive = join(root, 'fixture.zip'); writeFileSync(archive, zipInProcess(repoFolder));
+      process.env.OSD_LAYERS = archive;
+    }
     store = new ObjectStore({root, libs: [".local/lars/open-abap-core/src"], build: {generators: false}});
     ensureTmp(root);
     writeFileSync(join(root, "local/tmp/tadir.json"), "{}");
@@ -113,7 +129,25 @@ process.send({ready: true});`);
     const publish = store.publish.bind(store);
     store.publish = async options => {const result = await publish(options); publications.push(result); return result;};
   });
-  afterEach(async () => {await closeWarm(store); await store.warmState?.verifying; await stop(); if (root) rmSync(root, {recursive: true, force: true});});
+  afterEach(async () => {await closeWarm(store); await store.warmState?.verifying; await stop(); if (root) rmSync(root, {recursive: true, force: true});
+    if (priorLayers === undefined) delete process.env.OSD_LAYERS; else process.env.OSD_LAYERS = priorLayers;});
+
+  it("first ZIP STORE WRITE + ACTIVATE stays warm without recycling the serving process", async () => {
+    const layers = userLayersOf(root);
+    expect(readFileSync(join(root, layers[1].path, 'package.devc.xml'), 'utf8')).to.include('$ZWARM');
+    const pid = child.pid;
+    await edit(2);
+    const operation = await activate();
+    expect(operation).to.include({state: 'published', active: true, live: true});
+    expect(publications[0]).to.include({ok: true, hot: true, recycled: false});
+    expect(publications[0].transpile.warm).to.equal(true);
+    expect(child.pid).to.equal(pid); expect(runtime.epoch).to.equal(1);
+    expect((await request({method: 'run'})).value).to.equal(2);
+    await store.warmState.verifying;
+    expect(store.activationJournal.lookup(operation.op_id).verified).to.equal(true);
+    expect(child.pid).to.equal(pid); expect(runtime.epoch).to.equal(1);
+    expect(readFileSync(join(root, layers[0].path, 'zcl_warm_store.clas.abap'), 'utf8')).to.include('rv = 1.');
+  });
 
   it("publishes an existing edit with warm swap, new serving code, and one status/test generation", async () => {
     await edit(2);

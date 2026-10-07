@@ -17,7 +17,7 @@ CLASS ltcl_typestructure IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( act = ls_response-content_type
       exp = `application/vnd.sap.as+xml; charset=utf-8; dataname=com.sap.adt.RepositoryTypeList` ).
     lt_blocks = zcl_osd_adt_scan=>blocks( iv_xml = ls_response-body iv_element = `SEU_ADT_OBJECT_TYPE_DESCRIPTOR` ).
-    cl_abap_unit_assert=>assert_equals( act = lines( lt_blocks ) exp = 15 ).
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_blocks ) exp = 18 ).
     READ TABLE lt_blocks INTO ls_block INDEX 1.
     cl_abap_unit_assert=>assert_subrc( ).
     cl_abap_unit_assert=>assert_equals( act = ls_block-content

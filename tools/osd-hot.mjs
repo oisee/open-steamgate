@@ -67,8 +67,8 @@ export function rewrite(text, {from, name, urlOf, hotUrlOf}) {
 export function warmVerdict(generationDir) {
   try {
     return JSON.parse(readFileSync(`${generationDir}.warm.json`, "utf8")).verified === true;
-  } catch {
-    return undefined;
+  } catch (error) {
+    return error.code === "ENOENT" ? undefined : false;
   }
 }
 

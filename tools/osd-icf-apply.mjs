@@ -136,12 +136,10 @@ export function report(actions) {
   for (const a of orphan) {
     lines.push(`ICF ${a.url}: edited here and no object explains it; kept`);
   }
-  // **A removal was the one action nobody was told about.** It is the only
-  // one that takes a path away, which makes it the one most worth saying:
-  // a node that stops answering after a build should not have to be
-  // discovered by a 404.
-  for (const a of actions.filter((x) => x.action === "REMOVE")) {
-    lines.push(`ICF ${a.url}: its object is gone and nothing had edited the row; removed`);
+  const stale = actions.filter(a => a.action === 'REMOVE');
+  if (stale.length) {
+    const paths = [...new Set(stale.map(a => a.url))].sort();
+    lines.push(`ICF registry: reconciled ${stale.length} stale rows from a previous layer/import; removed: ${paths.join(', ')}`);
   }
   return lines;
 }
@@ -321,7 +319,7 @@ export async function applyAtStartup(client, options = {}) {
     await client.beginTransaction?.();
     let result;
     try {
-      result = await applyTo(client, objects, options);
+      result = await applyTo(client, objects, {...options, say: undefined});
       await client.commit?.();
     } catch (e) {
       await client.rollback?.();

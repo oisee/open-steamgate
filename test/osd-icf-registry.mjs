@@ -1,6 +1,6 @@
 // The registry as rows in a real database, applied by the rule.
 import {expect} from "chai";
-import {EDITED, applyTo, contentHash, currentOrigins, currentRows, keyOf, markEdited} from "../tools/osd-icf-apply.mjs";
+import {EDITED, applyAtStartup, applyTo, contentHash, currentOrigins, currentRows, keyOf, markEdited} from "../tools/osd-icf-apply.mjs";
 import {icfRows} from "../tools/osd-icf-rows.mjs";
 import {FileSqliteClient} from "../tools/sqlite-file-client.mjs";
 import {readFileSync} from "node:fs";
@@ -212,6 +212,22 @@ describe("the ICF registry, applied to a database", function () {
     expect(out, "it refuses rather than applying").to.equal(undefined);
     expect(said.join(" ")).to.contain("refusing to apply an empty registry");
     expect((await currentRows(client())).ICFSERVICE.length, "and the rows are still there").to.equal(before);
+  });
+
+  it("startup reports stale rows from a previous layer once with count and paths", async () => {
+    const initial = objects(), target = initial.ICFSERVICE[0];
+    const old = {...initial, ICFSERVICE: [...initial.ICFSERVICE,
+      {...target, ICF_NAME: 'OLD_A', ICFPARGUID: 'OLD', URL: '/previous/a/'},
+      {...target, ICF_NAME: 'OLD_B', ICFPARGUID: 'OLD', URL: '/previous/b/'}]};
+    await applyTo(client(), old);
+    const said = [];
+    await applyAtStartup(client(), {say: line => said.push(line)});
+    const reconciled = said.filter(line => line.includes('stale rows'));
+    expect(reconciled).to.deep.equal(['ICF registry: reconciled 2 stale rows from a previous layer/import; removed: /previous/a/, /previous/b/']);
+    expect(said.join(' ')).not.to.include('its object is gone');
+    const again = [];
+    await applyAtStartup(client(), {say: line => again.push(line)});
+    expect(again.filter(line => line.includes('stale rows'))).to.deep.equal([]);
   });
 
   it("a node whose object is gone is removed if nobody touched it, kept if somebody did", async () => {

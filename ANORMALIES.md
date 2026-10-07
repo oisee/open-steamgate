@@ -3534,7 +3534,7 @@ point approximation and is format-checked before masking in wire tests.
 
 ### ANOMALY-2026-10-02-get-run-time-units — GET RUN TIME FIELD returns milliseconds since the previous call, not microseconds since the first
 
-- Status: `open` (osgo measures in monotonic microseconds since #473; the JS runtime does not)
+- Status: `fixed upstream: abaplint/transpiler#1956 (merged 2026-10-03), pinned 2026-10-07` (`libs.lock.json` transpiler oisee/transpiler `local/osd-build-2026-10-07` 2ff0e801 = the previous pin plus a cherry-pick of #1956; microseconds since the first call, monotonic, per ABAP instance; a host resets the origin with `context.runTime = undefined`)
 - Discovery date: `2026-10-02`
 - Affected versions: OSD `vscode-v0.6.1511` (JS runtime)
 - Affected ABAP statement, runtime API or adapter: `GET RUN TIME FIELD lv_t0. … GET RUN TIME FIELD lv_t1. lv_d = lv_t1 - lv_t0.`
@@ -3770,7 +3770,7 @@ SNAPSHOT_MISMATCH and the doctor retry.
 
 ### ANOMALY-2026-10-06-http-client-send-synchronous - cl_http_client send( ) blocks, receive( ) does nothing
 
-- Status: `open`
+- Status: `fixed in the pin, upstream PR pending` (oisee/open-abap-core `fix/http-client-async-send-upstream` on upstream main; the byte-identical patch is in the `osd-build-2026-10-07` pin b1f43c31 since 2026-10-07, on top of cherry-picks of upstream #1253, #1271, #1268, #1270, #1269 and #1289; `send( )` starts the request, `receive( )` awaits it, construction errors fail in send, request errors and timeouts in receive)
 - Discovery: PIA's fan-out probe (ZCL_PIA_PROBE_FAN), measured on A4H (SAP 7.58, background job) and on an OSG instance. It was reported by the PIA session on 2026-10-06; dell confirmed the source.
 - Affected path: open-abap-core `src/http/cl_http_client.clas.abap` (pin 8b397be). `if_http_client~send` awaits the whole request (`await postData(...)`, around line 195) and fills the response there. `if_http_client~receive` is empty ("handled in send()").
 - Reproducer: create three clients for `http://httpbin.org/delay/2`. Call `send( )` on each, then `receive( )` on each.
@@ -3784,7 +3784,7 @@ SNAPSHOT_MISMATCH and the doctor retry.
 
 ### ANOMALY-2026-10-06-get-run-time-delta - GET RUN TIME returns ms since the previous call
 
-- Status: `open`
+- Status: `duplicate` of ANOMALY-2026-10-02-get-run-time-units: fixed upstream in abaplint/transpiler#1956, pinned 2026-10-07 (2ff0e801)
 - Discovery: the same probe printed "A sequential: 6525 ms" on A4H and "7 ms" on OSG, while the OSG wall clock was 13.6 s for six 2-second requests. dell confirmed the source.
 - Affected path: `@abaplint/runtime` `build/src/statements/get_run_time.js`. It keeps a module-level `prev`. The first call sets 0; every later call sets `Date.now() - prev` and moves `prev`.
 - Expected SAP behaviour: the first `GET RUN TIME FIELD` returns 0 and fixes the origin. Every later call returns the microseconds elapsed since that origin, so the value only grows. After `WAIT UP TO 1 SECONDS` twice, the three calls give 0, about 1000000 and about 2000000.
@@ -3826,7 +3826,7 @@ Not an anomaly, recorded for porting: on 7.58, `FIND ... REGEX` (POSIX) raises a
 
 ### ANOMALY-2026-10-06-uccp-lone-surrogate - uccp drops a surrogate code unit
 
-- Status: `open`
+- Status: `fixed in the pin, upstream PR pending` (oisee/open-abap-core `fix/uccp-lone-surrogate`, carried by the `osd-build-2026-10-07` pin b1f43c31 since 2026-10-07; `uccp` builds the UTF-16 code unit directly, so a lone surrogate survives and the pair concatenates to U+1F60A)
 - Discovery: PIA's test escape_emoji_pair passes 30/30 on A4H 7.58 and fails only in OSG. It was triggered by an emoji in a model answer and reported by the PIA session on 2026-10-06. dell confirmed the path in source.
 - Affected path: open-abap-core `src/conv/cl_abap_conv_in_ce.clas.abap`. `uccp` turns the hex into an integer and calls `uccpi`, which decodes the two bytes through a UTF-16LE (4103) converter. A lone surrogate does not survive that decode, and `uccp` swallows `cx_sy_conversion_codepage` (`* todo, hmm`), which leaves the result empty.
 - Reproducer: `cl_abap_conv_in_ce=>uccp( 'D83D' ) && cl_abap_conv_in_ce=>uccp( 'DE0A' )`.
@@ -3837,6 +3837,24 @@ Not an anomaly, recorded for porting: on 7.58, `FIND ... REGEX` (POSIX) raises a
 - Regression: none yet.
 - Upstream: needs an issue in open-abap-core (code-unit level `uccp`, without a decode round trip), after our critic pass; no upstream filing requested.
 - Upstream version containing a fix: unknown.
+
+### ANOMALY-2026-10-07-daemon-api-types -- PIA measured typed START and INFO order
+
+- Status: fixed locally (round 1 of ZIP parity).
+- Measurement: PIA DD04L/DD03L on A4H 7.58, 2026-10-07.
+- Expected contract: IF_ABAP_DAEMON_TYPES instance ID uses ABAP_DAEMON_INSTANCE_ID
+  (SSTRING 255), name uses ABAP_DAEMON_NAME (CHAR60), priority uses
+  ABAP_DAEMON_PRIORITY (INT4). START priority is VALUE with normal default.
+- ABAP_DAEMON_INFO field order: NAME, INSTANCE_ID, CREATOR_CLIENT (CLNT3),
+  CREATOR_USER (CHAR12), USED_DEST (ABAP_DAEMON_DESTINATION, CHAR40),
+  CREATION_TIME (TIMESTAMP, DEC15), APPLICATION_SERVER (MSNAME2, CHAR40).
+  PIA did not name data elements for CREATOR_CLIENT/CREATOR_USER; those remain
+  direct types. No additional daemon API signatures were inferred.
+- Previously: generic START name/priority and INFO destination after creation
+  time, with missing element identities. The merged main had already corrected
+  the instance ID's builtin type to SSTRING; it still lacked the measured element.
+- Regression: test/daemon-api.mjs, measured DDIC/order/START parameter check;
+  test/unit/zcl_osd_daemon_api.clas.abap compiles calls using the interface types.
 
 ### ANOMALY-2026-10-07-unit-method-case - a test method not written in lower case is "not a function"
 

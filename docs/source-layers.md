@@ -1,33 +1,98 @@
-# Source layers: current behavior and design map
+# Source layers
 
-This page connects the current source-layer implementation to plans for archives and immutable dependencies. It is a map of existing behavior and open decisions, not a new runtime contract.
+The build, object store, generators and route readers use the same ordered
+layers. Later layers replace a complete object, including all of its files.
+Libraries fill names absent from source and remain read-only.
 
-## Current behavior
-
-| Input | Discovery and storage | Write behavior |
+| Input | Discovery | Writes |
 | --- | --- | --- |
-| Project source (`input_folder`) | Listed in `abap_transpile.json`; later folders win on an object name. | `ObjectStore` marks ordinary roots writable, except `gen`. An existing object is written in the root that owns it; a new one goes to the first writable root unless a caller names a root. |
-| VS Code workspace folder | `detectWorkspaceLayers()` accepts a folder with `osd-pack.json`, `.abapgit.xml`, or class/program ABAP under `src/`. `ensureWorkspacePacks()` links the folder into extension storage as a pack. | The pack root is writable. The link points to the opened folder, so source edits change that folder. |
-| VSIX bundled system | The package carries a seed tree; the launcher copies it into extension storage on first use. | The copied home is writable. Updating the extension does not make the installed package directory a workspace. |
-| ABAP libraries | Configured in `abap_transpile.json`; ObjectStore loads them as library roots. | Read-only (`writable: false`). |
-| abapGit ZIP | Export exists; automatic ZIP import as a source layer does not. | Undecided. |
+| Project `input_folder` | `abap_transpile.json`, later folders win | Existing objects stay in their owning root; new objects use the requested package or first writable root. `gen` is read-only. |
+| Workspace / content pack | `osd-pack.json`, including linked VS Code workspaces | Writable source roots; changes reach the workspace. |
+| ABAP library | Configured libraries and pinned files/exclusions | Read-only. |
+| Explicit abapGit folder | `--layer` / `OSD_LAYERS`, repository `.abapgit.xml` | Writable, using the repository's starting folder and package layout. |
+| abapGit ZIP | `--layer` / `OSD_LAYERS`, verified and extracted inside the instance | Immutable base; writes copy the entire winning object into its writable overlay first. |
 
-The effective build order and collision rules are described in [Track E of the backlog](backlog/gogen-osgo.md#track-e--content-packs-and-layers-what-the-tree-is-made-of) and [Generations](generations.md). The write rules live in [`tools/osd-store.mjs`](../tools/osd-store.mjs) (`rootsOf`, `ObjectStore.write`), and VS Code discovery/projection in [`editors/vscode/launcher.js`](../editors/vscode/launcher.js) (`detectWorkspaceLayers`, `ensureWorkspacePacks`).
+## Archive layers (implemented)
 
-## ZIP layer proposal (not implemented)
+Treat an abapGit archive as a content-named, immutable extracted source layer.
+`tools/osd-source-zip.mjs` checks the complete ZIP directory and local headers
+before extraction: no absolute paths, drive paths, `..`, backslashes, symlinks
+or other special files, duplicate paths or file/directory collisions. Stored
+and deflated entries are supported, with CRC/size verification and a 512 MiB
+expanded size limit, 128 MiB compressed archive limit, 64 MiB per-entry limit,
+20,000-entry limit and 1000:1 expansion ratio limit (entries under 1 MiB
+expanded are exempt from the ratio limit). Encrypted, multi-disk and ZIP64 archives are refused.
+An archive needs `.abapgit.xml` at its root; wrapper directories are refused.
 
-Treat an abapGit archive as a content-named, immutable extracted source layer. Verify archive paths and contents before publication to the cache. Reusing the same archive should reuse the same extracted bytes; replacing it should create a new cache entry. Send edits to an explicit writable workspace/overlay rather than modifying the extracted cache. Record both the archive identity and overlay order in the effective input manifest, so the generation hash changes when effective source changes.
+The SHA-256 of the exact archive bytes names `build/source-layers/<sha256>`.
+Extraction stages beside the cache and publishes by rename; files are read-only.
+The source root is read-only in ObjectStore. Reusing bytes reuses this cache;
+changing even the ZIP comment creates a different archive identity. The build
+manifest records the source layers, archive identity, package rules and order.
+With all other effective inputs fixed, the generation changes iff ZIP bytes
+change. Effective overlay edits also change the generation, as ordinary source
+edits do. Archive hashes are input identities, not ADT version identifiers;
+ADT active source continues to use generation snapshots (#638).
 
-This needs a write policy for an object whose winning definition comes from the archive: either refuse a direct edit until the user chooses a writable target, or create an explicit copy in the overlay and show where it lives. Do not silently write through a cache path. Decide whether an override replaces a complete ABAP object or individual files; the backlog identifies `.clas.abap` without `.clas.xml` as the deciding case.
+Every archive revision has an overlay at `local/overlays/<sha256>`, immediately
+above its base in layer order. The first write copies the **whole object**:
+main source, XML header, local definitions/implementations, macros and tests,
+with package headers established at mount time before the first build. A `.clas.abap` edit therefore retains its `.clas.xml`.
+Creation in an archive package uses the mounted overlay package header.
+The active-source provenance of a copied object is retained before its saved
+bytes change; failed activation keeps serving the old active source.
 
-The current `writable` flag distinguishes store roots that can receive writes; it does not encode source provenance, cache lifetime, or an overlay target. Those are design inputs for ZIP support, not current behavior.
+An identical archive shares/reuses its overlay even when supplied at a different
+path. A byte change starts a clean overlay; previous cache and overlay revisions
+are retained. Inactive records and pre-save active copies stay owned by the
+revision that wrote them. Unmounted drafts remain durable in `inactive.json`
+without suppressing same-named objects in a replacement ZIP; remounting their
+original archive restores the draft and its active source. The stable "same layer" key is the resolved abapGit root package
+(explicit DEVCLASS, one-prefix inference, or OSD_LAYER_PACKAGE); archive paths
+and versioned basenames may change. Repositories using the same root package
+share this key. At startup, a replaced revision with changed objects produces
+one WARNING with its old SHA-256, overlay path, object count and recovery steps.
+`osd doctor` lists edited orphan overlays from both replaced and removed layers.
+The mount list represents the complete current configuration, including simultaneous
+revisions of the same package, and drops historical mounts. This includes pre-metadata revisions whose
+package can be recovered from the retained archive cache. Counts compare overlay
+files with their old base and deduplicate class includes; unchanged package
+headers do not count. Resume by mounting the original ZIP, or open the overlay
+directory and manually diff/reapply the edits against the retained old archive
+sources under build/source-layers/<old-sha>. No export or automatic
+carry-over/rebase command is implemented. There is no implicit migration, cache eviction or delete tombstone:
+a base object cannot be deleted, and deleting an overlay override reveals the
+base. These policies keep dependency updates and source deletion explicit.
 
-## Related decisions and plans
+## abapGit packages and node identity
 
-- [ADR 0001: git-native version and data model](adr/0001-osd-version-and-data-model.md) makes Git the source history and branch model and recommends isolated worktrees for edits.
-- [Generations](generations.md) describes immutable built artifacts and content-derived build identities. Source ZIPs would be inputs to a generation, not generations themselves.
-- [Workbench object tools](workbench-object-tools.md#follow-up-remove-ambient-mutable-dependencies) plans content-addressed immutable library dependencies shared across worktrees.
-- [VS Code extension](vscode-extension.md) describes workspace packs and the writable copy of the VSIX seed.
-- [Backlog, binary layers 1.5](backlog/gogen-osgo.md) records ZIP-as-layer and the unresolved object-vs-file override rule.
+`STARTING_FOLDER` selects the source root and must stay inside the repository.
+`FOLDER_LOGIC FULL` uses each subfolder's full package name; `PREFIX` appends the
+subfolder to its parent with `_`. A `DEVCLASS`/`PACKAGE` declaration in
+`package.devc.xml` wins over that mapping; named `*.devc.xml` also supplies a root
+package name. Ordinary abapGit root headers contain only a description: SAP asks
+the importing user for the name. For a standalone archive with one shared custom
+object prefix, OSG derives its local package (`ZCL_DEMO_*`, `ZIF_DEMO_*`,
+`ZDEMO_*` → `$ZDEMO`). `OSD_LAYER_PACKAGE` supplies the fallback for ambiguous
+archives. An explicit declared package wins. Ordinary folders retain their
+folder-derived fallback. Objects and package descriptions come from these rules,
+not a synthetic pack package or `$TMP`.
 
-ADR 0001's per-process liveness counter and the later Generations document's content identity serve different purposes, but their wording about hashes differs. Clarify that relationship before making an archive hash visible as an ADT version identifier.
+SICF object identity is the full abapGit filename stem: node name padded to 15
+characters plus the 25 hex parent hash. Spaces are preserved through store,
+import, input selection/exclusion and export. The node label remains separate;
+ICF rows use the filename parent hash for this shape. Bare `*.sicf.xml` names
+retain their existing identity and URL-derived rows. A handler-less generated
+APC SICF node coexists with its SAPC object: SAPC owns the WebSocket implementation
+and links to the SICF row by URL. SAMC and SAPC are indexed repository objects,
+while their runtime readers remain the existing channel readers.
+
+## Related implementation
+
+- `tools/osd-source-layers.mjs`: archive cache, overlays and explicit roots.
+- `tools/osd-packs.mjs`: layer order, shared by build and generators.
+- `tools/osd-store.mjs`: package mapping and whole-object copy before writes.
+- `tools/osd-store-versions.mjs`: retained active source after relocation.
+- [Generations](generations.md): immutable build artifacts and source snapshots.
+- [ADR 0001](adr/0001-osd-version-and-data-model.md): Git source history and the
+  separate per-process liveness counter.

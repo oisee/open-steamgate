@@ -118,6 +118,10 @@ const GENERATORS = {
 
 switch (mode) {
   case "up": {
+    const {userLayersOf} = await import('../tools/osd-source-layers.mjs');
+    const {reportOrphanedOverlays} = await import('../tools/osd-orphan-overlays.mjs');
+    const layerRoot = process.env.OSD_ROOT ?? process.cwd();
+    userLayersOf(layerRoot); reportOrphanedOverlays(layerRoot);
     process.argv = [process.argv[0], "osd-host", ...rest];
     const {main} = await import("../tools/osd-build.mjs");
     const status = await main([]);
@@ -145,8 +149,11 @@ switch (mode) {
       process.exit(2);
     }
     // the generator's own guard sees its name and runs its main
-    process.argv = [process.argv[0], name, ...args];
-    await GENERATORS[name]();
+    // Store diagnostics can import CDS parsing before generator dispatch.
+    // Invoke its entry explicitly even when the module is already cached.
+    process.argv = [process.argv[0], name === "cds2ddic.mjs" ? "osd-host" : name, ...args];
+    const generator = await GENERATORS[name]();
+    if (name === "cds2ddic.mjs") generator.main();
     break;
   }
   case "fetch": {
@@ -190,6 +197,11 @@ switch (mode) {
     break;
   }
   case "doctor": {
+    const {orphanedOverlays, overlayWarning} = await import('../tools/osd-orphan-overlays.mjs');
+    const orphanHomes = [process.env.OSD_ROOT ?? process.cwd(), ...homesIn(dataDirOf())];
+    for (const home of [...new Set(orphanHomes)]) {
+      for (const overlay of orphanedOverlays(home)) console.log(`orphaned overlay (${home}): ${overlayWarning(overlay)}`);
+    }
     console.log(`binary mode: ${embeddedSeed ? "seeded (embedded system seed)" : "checkout (no embedded system seed)"}`);
     // where a seeded binary keeps the system it works on, and whether one
     // has been materialized there yet (the first `osd up` does it)
