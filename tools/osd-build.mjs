@@ -844,6 +844,7 @@ export async function build(options = {}) {
     if (changed.length > 0) throw changedError(root, changed);
     keepSourceInputs(root, tmp, digests, undefined, options.overlay);
     keepGeneratedSources(root, tmp, generatedDigests);
+    materializeSourceSnapshot(root, tmp); // Include compiler-only inputs such as $TMP's tadir.json on every build.
     completeSourceSnapshot(tmp);
     const objects = made.objects;
 

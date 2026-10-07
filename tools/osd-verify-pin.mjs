@@ -37,7 +37,12 @@ export async function pinVerification(root, hash, scratch, options = {}) {
       } finally { rmSync(tmp, {force: true}); }
     };
     renew();
-    const timer = setInterval(renew, options.renewMs ?? 60000);
+    const timer = setInterval(() => {
+      try { renew(); } catch (error) {
+        clearInterval(timer);
+        console.error(`warm: verification pin renewal stopped: ${error.message}`);
+      }
+    }, options.renewMs ?? 60000);
     timer.unref();
     return () => { clearInterval(timer); rmSync(file, {force: true}); };
   } finally { unlock(); }

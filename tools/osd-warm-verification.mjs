@@ -12,10 +12,10 @@ import {toolCommand} from "./osd-host.mjs";
 export function generationIdentity(generation) {
   try {
     const stat = statSync(join(generation, "manifest.json"));
-    let side;
-    try { side = readFileSync(`${generation}.warm.json`, "utf8"); }
+    let side, sideStat;
+    try { sideStat = statSync(`${generation}.warm.json`); side = readFileSync(`${generation}.warm.json`, "utf8"); }
     catch (error) { if (error.code !== "ENOENT") throw error; }
-    return JSON.stringify([stat.dev, stat.ino, stat.birthtimeMs, side]);
+    return JSON.stringify([stat.dev, stat.ino, stat.birthtimeMs, sideStat?.dev, sideStat?.ino, side]);
   } catch (error) { if (error.code === "ENOENT") return undefined; throw error; }
 }
 
@@ -55,7 +55,7 @@ export async function settleVerification(compiler, hash, identity, result) {
   const generation = join(layout(compiler.root).byInput, hash), side = `${generation}.warm.json`;
   let unlock, tmp;
   try {
-    unlock = await verificationLock(compiler.root);
+    unlock = await verificationLock(compiler.root, compiler.settleDeadlineMs);
     if (identity === undefined || generationIdentity(generation) !== identity) {
       return {verdict: "superseded", why: "generation or verification sidecar replaced"};
     }
@@ -70,6 +70,9 @@ export async function settleVerification(compiler, hash, identity, result) {
     compiler.unverified.delete(hash);
     return result;
   } catch (error) {
+    // A comparison already proved a mismatch. Settlement trouble must not
+    // turn that evidence into a generic failure and bypass cold recovery.
+    if (result.verdict === "differs") return {...result, settlementError: error.message};
     return {verdict: error.code === "ENOENT" ? "superseded" : "failed", why: error.message};
   } finally { if (tmp) rmSync(tmp, {force: true}); unlock?.(); }
 }

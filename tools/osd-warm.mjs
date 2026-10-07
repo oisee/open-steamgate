@@ -43,6 +43,7 @@ import {lowerNarrowSubmit} from "./osd-narrow-submit.mjs";
 import {orderRegistry} from "./osd-warm-order.mjs";
 import {updateRegistry} from "./osd-warm-update.mjs";
 import {warmVerdict} from "./osd-hot.mjs";
+import {interfacesOf} from "./osd-warm-interfaces.mjs";
 
 import {checkView, checkRead} from "./osd-store-compile-view.mjs";
 import {rowsFromRegistry} from "./osd-xref-seed.mjs";
@@ -90,9 +91,6 @@ export const GENERATORS_READ = [
 
 const SOURCE = /\.(clas(\.(locals_imp|locals_def|testclasses|macros))?\.abap|intf\.abap|prog\.abap)$/i;
 const AMDP = /BY\s+DATABASE\s+(PROCEDURE|FUNCTION)/i;
-// Preserve statement spelling: generators do not recognise every ABAP form.
-const interfacesOf = text => [...text.matchAll(/(?:^|(?<=\.))\s*(INTERFACES\b[^.]*\.)/gim)]
-  .map(m => m[1]).join("\n");
 
 /** why a content edit may not be built warm, or undefined when it may */
 export function warmRule({path, before, after, amdpText = ""}) {

@@ -81,7 +81,7 @@ describe("ABAP-FS local bridge", () => {
       "osd-runtime.mjs", // Serving supervisor's runtime children.
       "osd-unit.mjs", // Unit/debug children launched by the serving runtime.
       "osd-warm-process.mjs", // Compiler child through osd-host; scrub the HTTP/ABAP-FS credential.
-      "osd-warm.mjs", // Warm verification children launched by the serving runtime.
+      "osd-warm-verification.mjs", // Bounded verifier child through osd-host; scrub serving-runtime credentials.
     ];
     const users = [];
     function scan(dir, prefix = "") {

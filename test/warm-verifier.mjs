@@ -6,7 +6,7 @@ import {generationIdentity, settleVerification, startVerification, VERIFY_HISTOR
 import {verifyNext} from "../tools/osd-store-verify.mjs";
 import {warmVerdict} from "../tools/osd-hot.mjs";
 import {spawn} from "node:child_process";
-import {existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
+import {existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join, resolve} from "node:path";
 import {build, gc, layout, lock} from "../tools/osd-build.mjs";
@@ -91,6 +91,77 @@ describe("warm verifier settlement, lifetime and retained history (#625 round 7)
     expect(coldAfter).to.not.equal(coldBefore);
     expect(warmRule({path: input(), before, after})).to.match(/INTERFACES/);
     expect(warmRule({path: input(), before: after, after: before})).to.match(/INTERFACES/);
+  });
+
+  it("guards the full INTERFACES statement across comment periods and literal periods", () => {
+    writeFileSync(join(root, "src", "zguard.tran.xml"), `<abapGit><TSTC><TCODE>ZGUARD</TCODE></TSTC><TSTCP><PARAM>\\CLASS=ZCL_GUARD\\METHOD=GET</PARAM></TSTCP></abapGit>`);
+    for (const comment of ['" comment with period. note', '\n* full-line comment with period. note']) {
+      const before = source(1).replace("PUBLIC SECTION.", `PUBLIC SECTION. INTERFACES: zif_marker, ${comment}\n zif_one.`);
+      const after = before.replace("zif_one.", "zif_one. INTERFACES zif_osd_transaction.");
+      writeFileSync(input(), before); const first = registryClass(transactions([join(root, "src")]));
+      writeFileSync(input(), after); const second = registryClass(transactions([join(root, "src")]));
+      expect(second).to.not.equal(first);
+      expect(warmRule({path: input(), before, after})).to.match(/INTERFACES/);
+      expect(warmRule({path: input(), before, after: before.replace("zif_one", "zif_two")})).to.match(/INTERFACES/);
+      expect(warmRule({path: input(), before, after: before.replace("period. note", "period. changed")})).to.match(/INTERFACES/);
+    }
+    for (const literal of ["'escaped '' period. INTERFACES zif_fake.'", "`escaped `` period. INTERFACES zif_fake.`", "|period. INTERFACES zif_fake.| "]) {
+      const before = source(1).replace("PUBLIC SECTION.", `PUBLIC SECTION. CONSTANTS c TYPE string VALUE ${literal}.\n" leading comment.\n INTERFACES zif_one.`);
+      expect(warmRule({path: input(), before, after: before.replace("zif_one", "zif_two")})).to.match(/INTERFACES/);
+      expect(warmRule({path: input(), before, after: before.replace("zif_fake", "zif_changed")})).to.equal(undefined);
+    }
+  });
+
+  it("retains a known mismatch past the settlement lock deadline and recovers cold", async () => {
+    compiler = new WarmCompiler({root}); await compiler.prime();
+    writeFileSync(input(), source(2)); const {hash} = await compiler.build();
+    const generation = join(root, "build", "by-input", hash), side = `${generation}.warm.json`;
+    writeFileSync(join(generation, "output", "zcl_guard.clas.mjs"), "// deliberately wrong");
+    const {verifyGeneration} = await import("../tools/osd-warm-verify.mjs");
+    const mismatch = await verifyGeneration(hash, root);
+    expect(mismatch.verdict).to.equal("differs");
+    const identity = generationIdentity(generation), unlock = lock(layout(root));
+    compiler.settleDeadlineMs = 60;
+    compiler.verify = async () => settleVerification(compiler, hash, identity, mismatch);
+    const w = {on: true, compiler, next: new Set([hash])};
+    let recovered = false;
+    const host = {root, warm: () => w, publish: async options => {
+      // Recovery must reach the publication path while the original lock is
+      // still held. Release it here so the real cold build can take its turn.
+      expect(existsSync(layout(root).lock)).to.equal(true);
+      expect(JSON.parse(readFileSync(side, "utf8")).verified).to.equal(false);
+      unlock(); recovered = true;
+      return build({root, generators: false, ...options});
+    }, warmUp: async () => compiler.prime()};
+    try {
+      verifyNext(host); await bounded(w.verifying);
+      expect(w.last.verdict).to.equal("differs");
+      expect(w.last.settlementError).to.match(/lock deadline/);
+      expect(recovered).to.equal(true);
+      expect(readFileSync(join(generation, "output", "zcl_guard.clas.mjs"), "utf8")).to.include("IntegerFactory.get(2)");
+      expect(existsSync(side)).to.equal(false); // A cold publication needs no warm certification sidecar.
+    } finally { if (!recovered) unlock(); }
+  });
+
+  it("stops pin renewal after an I/O error without losing the verifier", async () => {
+    const hash = JSON.parse(readFileSync(join(root, "build", "live", "manifest.json"))).hash;
+    const release = await pinVerification(root, hash, "scratch", {renewMs: 20});
+    const pin = verificationPins(root)[0], original = fs.renameSync;
+    let attempts = 0;
+    fs.renameSync = function(from, to) {
+      if (String(to).includes("verify-pins")) {
+        attempts++; throw Object.assign(Error("injected renewal EIO"), {code: "EIO"});
+      }
+      return original.call(this, from, to);
+    };
+    syncBuiltinESMExports();
+    try {
+      await sleep(90);
+      expect(attempts).to.equal(1);
+      expect(verificationPins(root)).to.deep.equal([pin]);
+      expect(fs.readdirSync(join(root, "build", "verify-pins"))).to.have.length(1);
+    } finally { fs.renameSync = original; syncBuiltinESMExports(); release(); }
+    expect(verificationPins(root)).to.deep.equal([]);
   });
 
   it("observes the worker verified IPC acknowledgement with disk pruning unavailable", async () => {
@@ -206,6 +277,17 @@ main();`);
   });
 
   for (const verdict of ["same", "differs"]) {
+    it(`supersedes ${verdict} when the sidecar is replaced with identical bytes`, async () => {
+      compiler = new WarmCompiler({root}); await compiler.prime();
+      writeFileSync(input(), source(2)); const {hash} = await compiler.build();
+      const generation = join(root, "build", "by-input", hash), side = `${generation}.warm.json`;
+      const identity = generationIdentity(generation), bytes = readFileSync(side), inode = statSync(side).ino;
+      writeFileSync(`${side}.replacement`, bytes); renameSync(`${side}.replacement`, side);
+      expect(statSync(side).ino).to.not.equal(inode);
+      expect((await settleVerification(compiler, hash, identity, {verdict, differing: ["wrong.mjs"]})).verdict).to.equal("superseded");
+      expect(readFileSync(side).equals(bytes)).to.equal(true);
+      expect(compiler.unverified.has(hash)).to.equal(true);
+    });
     it(`settles ${verdict} with the build lock held and an atomic sidecar rename`, async () => {
       compiler = new WarmCompiler({root}); await compiler.prime();
       writeFileSync(input(), source(2)); const {hash} = await compiler.build();
