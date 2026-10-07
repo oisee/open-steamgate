@@ -645,43 +645,56 @@ jobs:
         run: |
           mkdir -p .local/adt-lifecycle/report
           OSD_HEAVY_RANGE=90-99 OSD_HEAVY_SLOTS=4 tools/osd-heavy.sh node tools/adt-lifecycle.mjs --start 2>&1 | tee .local/adt-lifecycle/report/server.log
-      - name: Find compatible successful main timing evidence
+      - name: Collect up to five compatible green main timing runs
         if: success()
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('node:fs');
             const cp = require('node:child_process');
+            const {pathToFileURL} = require('node:url');
+            const {baselineIssue, TIMING_RULE} = await import(pathToFileURL(process.cwd() + '/tools/adt-lifecycle-report.mjs'));
             const current = JSON.parse(fs.readFileSync('.local/adt-lifecycle/report/report.json', 'utf8'));
             const {owner, repo} = context.repo;
-            const runs = await github.rest.actions.listWorkflowRuns({owner, repo, workflow_id:'tests.yml', event:'push', branch:'main', status:'success', per_page:20});
-            for (const run of runs.data.workflow_runs) {
-              if (run.id === context.runId) continue;
-              const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {owner, repo, run_id:run.id});
-              const artifact = artifacts.filter(a => /^adt-lifecycle-attempt-\d+$/.test(a.name) && !a.expired)
-                .sort((a,b) => Number(b.name.split('-').at(-1)) - Number(a.name.split('-').at(-1)))[0];
-              if (!artifact) continue;
-              const zip = await github.rest.actions.downloadArtifact({owner, repo, artifact_id:artifact.id, archive_format:'zip'});
-              fs.writeFileSync(process.env.RUNNER_TEMP + '/lifecycle-baseline.zip', Buffer.from(zip.data));
-              const unpack = cp.spawnSync('unzip', ['-p', process.env.RUNNER_TEMP + '/lifecycle-baseline.zip', 'report.json'], {encoding:'utf8'});
-              if (unpack.status !== 0) throw Error('Unreadable main lifecycle artifact');
-              const base = JSON.parse(unpack.stdout);
-              const keys = ['recipe','sdk','vsp','runtime','node','platform','arch'];
-              if (!keys.every(k => current.identity[k] === base.identity[k])) continue;
-              fs.writeFileSync('.local/adt-lifecycle/baseline.json', unpack.stdout);
-              core.info('Using main baseline ' + run.head_sha);
-              break;
-            }
-      - name: Compare medians with main
+            const history = {reports: [], notes: []};
+            const skipped = message => { history.notes.push(message); core.info(message); };
+            try {
+              // Bound API work to the latest 100 green main push runs; expired
+              // or unavailable artifacts do not consume the five usable slots.
+              const runs = await github.rest.actions.listWorkflowRuns({owner, repo, workflow_id:'tests.yml', event:'push', branch:'main', status:'success', per_page:100});
+              for (const run of runs.data.workflow_runs) {
+                if (run.id === context.runId) continue;
+                try {
+                  const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {owner, repo, run_id:run.id});
+                  const candidates = artifacts.filter(a => /^adt-lifecycle-attempt-\d+$/.test(a.name) && !a.expired)
+                    .sort((a,b) => Number(b.name.split('-').at(-1)) - Number(a.name.split('-').at(-1)));
+                  for (const artifact of candidates) {
+                    try {
+                      const zip = await github.rest.actions.downloadArtifact({owner, repo, artifact_id:artifact.id, archive_format:'zip'});
+                      const archive = process.env.RUNNER_TEMP + '/lifecycle-baseline.zip';
+                      fs.writeFileSync(archive, Buffer.from(zip.data));
+                      const unpack = cp.spawnSync('unzip', ['-p', archive, 'report.json'], {encoding:'utf8'});
+                      if (unpack.status !== 0) throw Error('Unreadable main lifecycle artifact');
+                      const base = JSON.parse(unpack.stdout);
+                      const issue = baselineIssue(current, base);
+                      if (issue) { skipped(`Main run ${run.id}: ${issue}`); continue; }
+                      history.reports.push(base);
+                      core.info('Using main timing run ' + run.id + ' at ' + run.head_sha);
+                      break; // One report per run, even after workflow reruns.
+                    } catch (error) {
+                      skipped(`Main run ${run.id}, artifact ${artifact.name}: ${error.message}`);
+                    }
+                  }
+                } catch (error) { skipped(`Main run ${run.id}: ${error.message}`); }
+                if (history.reports.length === TIMING_RULE.baselines) break;
+              }
+            } catch (error) { skipped('Main timing history unavailable: ' + error.message); }
+            fs.writeFileSync('.local/adt-lifecycle/baselines.json', JSON.stringify(history));
+            core.info(`Timing history: ${history.reports.length}/${TIMING_RULE.baselines} compatible green main runs`);
+      - name: Report normalized timing advisory and functional result
         if: success()
         run: |
-          args=(.local/adt-lifecycle/report/report.json)
-          if [[ -f .local/adt-lifecycle/baseline.json ]]; then
-            args+=(.local/adt-lifecycle/baseline.json)
-            node tools/adt-lifecycle-report.mjs "${args[@]}" .local/adt-lifecycle/report/summary.md
-          else
-            node tools/adt-lifecycle-report.mjs "${args[@]}"
-          fi
+          node tools/adt-lifecycle-report.mjs .local/adt-lifecycle/report/report.json .local/adt-lifecycle/baselines.json .local/adt-lifecycle/report/summary.md
       - name: Publish measurements even on failure
         if: always()
         run: |
@@ -867,7 +880,7 @@ jobs:
               '',
               lifecycle,
               '',
-              'Required merge checks: test + scan. Docker, gogen, preview, size and queue are advisory on PRs (Alice, 2026-10-03).',
+              'Required merge checks: test + scan. ADT lifecycle timing, Docker, gogen, preview, size and queue are advisory on PRs; lifecycle functional checks remain required (Alice, 2026-10-07).',
             ].join('\n');
             const issue_number = context.issue.number;
             const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number });
