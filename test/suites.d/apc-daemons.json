@@ -1,5 +1,8 @@
 {
   "files": [
+    "test/apc-preview-mailbox.mjs",
+    "test/apc-serving-step.mjs",
+    "test/apc-store-step.mjs",
     "test/apc-timers.mjs",
     "test/amc.mjs",
     "test/dialog-step.mjs",

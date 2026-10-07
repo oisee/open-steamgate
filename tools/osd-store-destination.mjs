@@ -611,7 +611,11 @@ export class StoreDestination {
       }
     };
     journal.update(operation.op_id, {state: "pending", active: true, note: "publication pending"});
-    const defer = systemCalls?.getStore()?.deferActivate;
+    const {currentStepToken, holderToken, stepContextTracked, onAfterStep} = await import("./osd-dialog-step.mjs");
+    const token = stepContextTracked() ? currentStepToken() : holderToken();
+    const defer = systemCalls?.getStore()?.deferActivate ?? (token?.afterStep === undefined ? undefined
+      : continuation => onAfterStep(({dumped}) => dumped
+        ? continuation.fail("activation step dumped") : continuation()));
     if (defer !== undefined) {
       const continuation = async () => ({...await publish(), type, name, failureEntries});
       continuation.fail = note => journal.update(operation.op_id, {state: "failed", active: false, failure_stage: "step", note});
@@ -619,8 +623,7 @@ export class StoreDestination {
       catch (error) { return failedAnswer(error, "step"); }
       return {EV_JSON: JSON.stringify(journal.lookup(operation.op_id)), EV_ACTIVE: "X", EV_LIVE: "", EV_NOTE: "live after the step", EV_COUNT: "0", EV_MS: String(Date.now() - started)};
     }
-    const {currentStepToken} = await import("./osd-dialog-step.mjs");
-    if (currentStepToken() !== undefined) {
+    if (token !== undefined) {
       const note = "ACTIVATE inside a step needs an after-step publication binding";
       return failedAnswer(Object.assign(new Error(note), {code: "NOT_SUPPORTED"}), "step");
     }

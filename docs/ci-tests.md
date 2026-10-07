@@ -530,15 +530,19 @@ were not run locally.
 
 ## ADT lifecycle performance job
 
-`adt-lifecycle` runs separately beside the suite shards using their shared
-build artifact. It drives six creation types through both ABAP-FS's pinned
-SDK and VSP, checks active source readbacks and confirmed cleanup, and
-publishes every operation's time in the overall PR report. It is part of
-the required `test` gate. Three edit samples produce medians; compatible
-successful main evidence supplies the comparison. Sustained +50% and
-+1000 ms regressions fail, as do unexpected cold publications for warm
-CLAS/INTF/INCL edits. Missing main baselines are reported as pending rather
-than fabricated. Known PROG/INCL/DDLS validation gaps remain MISSING.
-See [ADT lifecycle](adt-lifecycle.md) for scope, pins and local execution.
-The new job has not yet been measured on GitHub Actions; its cost includes
-cold tool downloads, initial activations and repeated cold REPORT/DDLS builds.
+`adt-lifecycle` runs separately beside the suite shards using their shared built
+artifact and public pinned ABAP-FS/VSP clients. Functional operations, active readbacks,
+confirmed cleanup, known PROG/INCL/DDLS MISSING validation allowances and warm-swap
+correctness remain required by `test` and determine the PR report row. Timing is
+advisory: divide every sampled operation median by the same-run median of four untouched
+ABAP-FS CLAS/INTF `edit` and `readback-active` medians, then compare with the median of
+normalized values from up to five compatible green main push runs (newest first,
+scanning the latest 30 successful `tests.yml` runs with a 170-second elapsed budget
+and a three-minute step timeout; fewer when artifacts are missing,
+expired, unreadable, invalid or incompatible). Warn with a GitHub annotation and summary
+numbers when at least two operations are strictly above 1.3x or one reaches 2.0x;
+warnings never fail the job or PR row. No usable history or a zero/unavailable reference
+leaves timing explicitly pending. The required functional report saves the verdict
+before optional collection; collector and optional report failures cannot fail the
+job or suppress that report. See [ADT lifecycle](adt-lifecycle.md) for the exact
+controls, identity pins, evidence fixtures and local execution.
