@@ -220,7 +220,7 @@ describe("tools/osd-warm: a refused swap is not answered as warm", () => {
     const express = (await import("express")).default;
     const {adtRouter} = await import("../tools/adt-facade.mjs");
     const store = {
-      roots: [], find: () => undefined, root,
+      roots: [], find: (type, name) => ({type, name}), root,
       warm: () => ({on: true, compiler: {primed: true}}),
       warmActivation: (type, name) => ({type, name, active: true, revision: "r1"}),
       completeActivations: () => true,
@@ -240,6 +240,7 @@ describe("tools/osd-warm: a refused swap is not answered as warm", () => {
 </adtcore:objectReferences>`,
       });
       expect(res.status).to.equal(200);
+      expect(await res.text()).to.include('activationExecuted="true"');
       return {build: res.headers.get("x-osd-build"), swap: res.headers.get("x-osd-swap-ms")};
     } finally {
       await new Promise((done) => server.close(done));
