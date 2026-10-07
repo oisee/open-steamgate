@@ -17,10 +17,15 @@ CLASS zcl_osd_daemon_api IMPLEMENTATION.
     DATA lt_info TYPE cl_abap_daemon_client_manager=>tt_info.
     DATA ls_new LIKE LINE OF lt_info.
     DATA lv_setup TYPE i.
+    DATA lv_name TYPE if_abap_daemon_types=>ty_abap_daemon_name.
+    DATA lv_priority TYPE if_abap_daemon_types=>ty_abap_daemon_priority.
+    DATA lv_instance TYPE if_abap_daemon_types=>ty_abap_daemon_instance_id.
+    lv_name = `low`.
+    lv_priority = cl_abap_daemon_client_manager=>co_session_priority_low.
     cl_abap_daemon_client_manager=>start(
       EXPORTING i_daemon_id = 'ZOSD_API' i_class_name = 'ZCL_OSD_DAEMON_API'
-                i_destination = 'NONE' i_name = 'low'
-                i_priority = cl_abap_daemon_client_manager=>co_session_priority_low
+                i_destination = 'NONE' i_name = lv_name
+                i_priority = lv_priority
       IMPORTING e_setup_mode = lv_setup e_instance_id = ls_new-instance_id ).
     ASSERT lv_setup = if_abap_daemon_extension=>co_setup_mode-accept.
     lt_info = cl_abap_daemon_client_manager=>get_daemon_info( i_daemon_id = 'ZOSD_API' ).

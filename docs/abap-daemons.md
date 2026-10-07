@@ -1159,8 +1159,13 @@ deployed to a system is decided by the deploy manifest, not by the name.
 ### OSG client-manager compatibility
 
 OSG exposes the P0 constants and START/GET_DAEMON_INFO call shapes above,
-including a STRING-compatible `ABAP_DAEMON_INFO-INSTANCE_ID` (SSTRING 255),
-`USED_DEST` and `APPLICATION_SERVER` (CHAR 40). START records daemon ID,
+including `IF_ABAP_DAEMON_TYPES` aliases for instance ID (the data element
+`ABAP_DAEMON_INSTANCE_ID`, SSTRING 255), name (`ABAP_DAEMON_NAME`, CHAR60)
+and priority (`ABAP_DAEMON_PRIORITY`, INT4). START priority is passed by VALUE.
+The measured INFO field order is NAME, INSTANCE_ID, CREATOR_CLIENT,
+CREATOR_USER, USED_DEST, CREATION_TIME, APPLICATION_SERVER. USED_DEST uses
+ABAP_DAEMON_DESTINATION (CHAR40), CREATION_TIME uses TIMESTAMP (DEC15), and
+APPLICATION_SERVER uses MSNAME2 (CHAR40). START records daemon ID,
 destination and priority; priorities 0/1/2 are accepted and recorded without
 scheduling effect. The local host reports `OSG` as its application server and
 runs locally; a destination does not select another server. GET_DAEMON_INFO
