@@ -133,6 +133,15 @@ describe("warm verifier settlement, lifetime and retained history (#625 round 7)
     // compiled class does)
     const chained = source(1).replace("PUBLIC SECTION.", "PUBLIC SECTION. CONSTANTS c TYPE i VALUE 1 ##NEEDED[`]. INTERFACES: zif_marker,\n zif_one.");
     expect(warmRule({path: input(), before: chained, after: chained.replace("zif_one", "zif_two")})).to.match(/INTERFACES/);
+    // the generator's match may span lines: a comment naming INTERFACES
+    // above a data object renamed to the contract
+    const spanning = source(1).replace("PUBLIC SECTION.", "PUBLIC SECTION. DATA zif_one TYPE i.\n DATA zif_osd_transaction TYPE i.\n METHODS m.")
+      .replace(/(CLASS zcl_guard IMPLEMENTATION\.)/i, "$1\n METHOD m.\n \" INTERFACES\n zif_one = 1.\n ENDMETHOD.");
+    const spanAfter = spanning.replace(" zif_one = 1.", " zif_osd_transaction = 1.");
+    writeFileSync(input(), spanning); const spanFirst = registryClass(transactions([join(root, "src")]));
+    writeFileSync(input(), spanAfter); const spanSecond = registryClass(transactions([join(root, "src")]));
+    expect(spanSecond, "the generator reads the spanning match").to.not.equal(spanFirst);
+    expect(warmRule({path: input(), before: spanning, after: spanAfter})).to.match(/INTERFACES/);
     // a method-body edit that touches no INTERFACES text stays warm
     const plain = source(1).replace("PUBLIC SECTION.", "PUBLIC SECTION. CONSTANTS c TYPE i VALUE 1 ##NEEDED[`].\n INTERFACES zif_one.");
     expect(warmRule({path: input(), before: plain, after: plain.replace("VALUE 1", "VALUE 2")})).to.equal(undefined);

@@ -44,6 +44,7 @@ import {orderRegistry} from "./osd-warm-order.mjs";
 import {updateRegistry} from "./osd-warm-update.mjs";
 import {warmVerdict} from "./osd-hot.mjs";
 import {interfacesLines, interfacesOf} from "./osd-warm-interfaces.mjs";
+import {implementsContract} from "./osd-tran-registry.mjs";
 
 import {checkView, checkRead} from "./osd-store-compile-view.mjs";
 import {rowsFromRegistry} from "./osd-xref-seed.mjs";
@@ -110,7 +111,8 @@ export function warmRule({path, before, after, amdpText = ""}) {
   if (AMDP.test(before) || AMDP.test(after)) {
     return `${name}: an AMDP body (amdp-gen reads it)`;
   }
-  if (interfacesOf(before) !== interfacesOf(after) || interfacesLines(before) !== interfacesLines(after)) {
+  if (interfacesOf(before) !== interfacesOf(after) || interfacesLines(before) !== interfacesLines(after)
+    || implementsContract(before) !== implementsContract(after)) {
     return `${name}: its INTERFACES lines changed (osd-tran-registry reads them)`;
   }
   if (/\.intf\.abap$/i.test(name)) {
