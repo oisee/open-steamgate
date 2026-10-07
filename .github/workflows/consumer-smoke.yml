@@ -8,9 +8,11 @@ on:
 permissions:
   contents: read
 
+# A newer push to a pull request supersedes its run; a push to main is
+# never cancelled (the same rule as tests.yml, #602).
 concurrency:
-  group: consumer-smoke-${{ github.ref }}
-  cancel-in-progress: true
+  group: consumer-smoke-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 defaults:
   run:
