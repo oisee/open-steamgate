@@ -448,8 +448,8 @@ range LOW, and the plain comparison and the `SET` are not measured yet
 - `d`, `t` and `n` are declared, copied and compared with initial (`p`:
   see "Packed numbers"); no `decfloat`. No `RAISE RESUMABLE`, no `RAISE
   EXCEPTION ... MESSAGE`, no T100 or OTR texts in `get_text( )`.
-- Class statics are per process, so a host runs one step at a time (the
-  stand serializes). Statics per session come before any parallelism.
+- Class statics and constructor flags are per internal session. Hosts still
+  serialize access to remaining shared runtime stores, including the database.
 - The handler's `ON_MESSAGE` is still three host lines in the stands; the
   `RETURN` inside its `TRY` that kept it out compiles now.
 - Table values: an assignment, `APPEND`, `MODIFY`, `READ ... INTO`, `LOOP
@@ -619,7 +619,7 @@ generic parameters: UTF-8 both ways, bytes that are not UTF-8 raise
 `CX_SY_CONVERSION_CODEPAGE`, as open-abap-core's fatal TextDecoder does.
 
 Each ICF request is one dialog step (`abap.DialogStep`) with a fresh
-Session, one at a time (statics are per process); a dump is the Node host's
+Session, one at a time around the shared database; a dump is the Node host's
 500 (`STG/RUNTIME` JSON with the ABAP frames for OData, `<class>: <text>`
 for a SICF node), and rolled back. Mounted: `/sap/opu/odata/sap/` with
 `ZCL_STG_HTTP_HANDLER`, every SICF node of the tree whose handler class is
@@ -791,6 +791,12 @@ so `zero()` of a structure now sets those components and attributes and
 results start there too. All measured on A4H (`ZCL_GOGEN_T_BYTECAT`,
 `ZCL_GOGEN_T_B64`, `ZCL_GOGEN_T_XINIT`).
 
+Generated `CLASS-DATA` and `class_constructor` flags live in lazily allocated class
+slots on `abap.Session`, so each internal session has independent values and runs
+its constructors once. Inherited statics use the declaring class's slot; references
+keep a stable address. A zero Session is ready to use and may be used by one
+goroutine at a time. A fresh Session also resets class state for ABAP Unit.
+
 Against OSG on Node (`STG_DB=sqlite node test/run.mjs`), in Chromium and on
 the sockets: the three pages are byte for byte equal; Zork boots from
 `ZORK-MINI.Z3` and ten commands give the same 22 lines, and typed into the
@@ -830,8 +836,8 @@ Ranked with codex gpt-6-sol, 2026-09-23:
 3. A step budget counted at loop back edges (a goroutine cannot be stopped
    from outside; the OOM of 2026-09-23 is the reason).
 4. The DB layer through the shared relational IR and its conformance pairs.
-5. Statics per session, after deciding which statics are session state and
-   which are shared caches.
+5. ~~Statics per session~~ (implemented for all class attributes and
+   constructor flags; shared runtime stores remain separate).
 
 ## The Travels app through the Go binary, 2026-09-23
 
@@ -1719,16 +1725,15 @@ Next gaps in order: generic `CL_ABAP_UNIT_ASSERT` comparisons (45 failed
 methods); Go emitter addresses of fields in temporary values and missing
 inherited `DEFINE` (28 methods in three unbuilt owners); AJSON parsing
 (13 failed methods); and the UUID kernel hook (four DB tests). Parallel
-classes were not timed: `go/abap/db.go` has one process-global DB, and
-generated class constructors and class data are process global without
-goroutine coordination.
+classes were not timed: `go/abap/db.go` still has one process-global DB.
+Generated class constructors and class data now belong to each Session.
 
 ### Static attribute write targets
 
 `class=>attr` resolves to the declaring class's storage for reads and writes,
 including an explicit name of the current class. The target class constructor
 runs before an assignment, CLEAR, a table mutation or a reference actual.
-The owning class uses the bare variable after its constructor has run.
+The owning class uses its session-owned field after its constructor has run.
 External READ-ONLY writes are compilation refusals except for declared friends.
 LOCAL FRIENDS test classes may write private and READ-ONLY static attributes;
 private-access refusals name the declaring class. REPLACE SECTION supports
