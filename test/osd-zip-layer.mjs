@@ -208,6 +208,25 @@ describe('immutable abapGit ZIP source layers', function () {
     rmSync(overlay, {recursive: true}); symlinkSync(base, overlay);
     expect(() => userLayersOf(root)).to.throw(/link/);
   });
+  it('refuses ADT create after a mounted overlay root or parent is redirected to the extracted base', async () => {
+    const layers = zip(), store = new ObjectStore({root, libs: []});
+    store.list('CLAS'); // Keep the index built before the redirect.
+    const overlay = join(root, layers[1].path), baseFolder = join(root, layers[0].path);
+    const app = express(); app.use(adtRouter({store, data: {}, watch: false, logMisses: false}).router);
+    const server = await new Promise(resolve => {const listening = app.listen(0, '127.0.0.1', () => resolve(listening));});
+    const base = `http://127.0.0.1:${server.address().port}/sap/bc/adt`;
+    try {
+      const handshake = await fetch(base + '/core/discovery', {method: 'HEAD', headers: {'x-csrf-token': 'fetch'}});
+      const headers = {cookie: handshake.headers.getSetCookie().map(c => c.split(';')[0]).join('; '), 'x-csrf-token': handshake.headers.get('x-csrf-token')};
+      rmSync(overlay, {recursive: true}); symlinkSync(baseFolder, overlay);
+      const body = '<class:abapClass xmlns:class="http://www.sap.com/adt/oo/classes" xmlns:adtcore="http://www.sap.com/adt/core" adtcore:name="ZCL_ZIP_REDIRECT"><adtcore:packageRef adtcore:name="$ZDEMO"/></class:abapClass>';
+      const created = await fetch(base + '/oo/classes', {method: 'POST', body, headers});
+      expect(created.status, await created.text()).to.equal(400);
+      expect(existsSync(join(baseFolder, 'zcl_zip_redirect.clas.abap'))).to.equal(false);
+      expect(() => store.create('CLAS', 'ZCL_ZIP_REDIRECT', {package: '$ZDEMO'})).to.throw(/link/);
+    } finally {server.closeAllConnections(); await new Promise(resolve => server.close(resolve));}
+  });
+
   it('bounds ZIP bombs and checks CRC and declared sizes before extraction', () => {
     write('src/bomb.bin', Buffer.alloc(2 * 1024 * 1024));
     expect(() => archiveFiles(zipInProcess(repo))).to.throw('compression ratio');

@@ -605,7 +605,7 @@ export class ObjectStore {
     } else if (file === undefined) {
       file = join(folder, fileOf(upper) + meta.ext);
     }
-    const safe = writeCheck(this.root, root, `${type} ${upper}`); // inside its root, no link
+    const safe = writeCheck(this.root, root?.overlayOf ? {...root, tmp: true} : root, `${type} ${upper}`); // inside its root, no link
     safe(file);
     if (existsSync(join(this.root, file))) {
       throw new Conflict(type, upper);
