@@ -1,10 +1,10 @@
 {
   "transpiler": {
     "repo": "oisee/transpiler",
-    "ref": "f36114179f6f39e5abb42d021f2cf5dcc50b45b9"
+    "ref": "2ff0e801430b179edcce71999acb33538fb19371"
   },
   "libraries": [
-    { "folder": "open-abap-core", "repo": "oisee/open-abap-core", "ref": "8b397be863e805182c32e4bbb8bedbd291619f58" },
+    { "folder": "open-abap-core", "repo": "oisee/open-abap-core", "ref": "b1f43c319a355d0d9c8d1eacfc16efeb7acf6086" },
     { "folder": "express-icf-shim", "repo": "open-abap/express-icf-shim", "ref": "c1fc36026f69eb0ae7d1830d304e1e1923e9a9a3" },
     { "folder": "open-abap-apc", "repo": "oisee/open-abap-apc", "ref": "7def7d600e61c406c45a10e18a6c67dc8abf8e96" },
     { "folder": "abapgit", "repo": "abapGit/abapGit", "ref": "3b6485b5d0b09ef3861006b966e68542446721ce" },
