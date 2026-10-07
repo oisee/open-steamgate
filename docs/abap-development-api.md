@@ -390,7 +390,11 @@ EV_JSON (optional diagnostic fields shown):
   The latest failed activation of any requested object returns `not_run` with
   `PUBLICATION_FAILED`, its `op_id`, `failure_stage`, `text` and `issues`, even when
   the old generation is still available. A later published activation of that
-  object clears this refusal. Failure of an unrelated object's activation does
+  object clears this refusal, as does deleting the object. This per-object outcome
+  is durable across source-host restarts and independent of the operation history's
+  24-hour expiry; expiring a failed ticket never permits tests on the old generation.
+  Both STORE and ADT record validation refusals, build failures and completed publications.
+  Failure of an unrelated object's activation does
   not block its tests. Zero discovered classes when the requested class has a
   saved/active testclasses include returns `not_run`/`TEST_CLASSES_MISMATCH`,
   never a green empty run. Inactive source is used only for this presence guard.

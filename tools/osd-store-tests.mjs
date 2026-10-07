@@ -149,14 +149,12 @@ export async function runStoreTests(store, json, options = {}) {
       const journal = activationJournal(store);
       const checkpoint = journal.currentGeneration();
       generation = checkpoint || (store.served?.running === true ? store.served.generation : live) || "";
-      // A failed latest activation is not permission to test the old live
-      // revision. Object order also breaks timestamp ties without guessing.
-      const latest = new Map();
-      for (const entry of Object.values(journal.entries)) latest.set(`${entry.type} ${entry.name}`, entry);
-      const failed = targets.map(t => latest.get(`${t.type} ${t.name}`)).find(e => e?.state === "failed");
+      // Terminal object outcomes outlive the expiring operation history.
+      const failed = targets.map(t => journal.lastOutcome(t.type, t.name)).find(e => e?.outcome === "failed");
       if (failed) return answer("not_run", {error: {code: "PUBLICATION_FAILED", op_id: failed.op_id,
-        text: failed.note || "latest activation failed", failure_stage: failed.failure_stage, issues: failed.issues,
-        ...(failed.error ? {cause: failed.error} : {})}});
+        text: failed.diagnostics.note || "latest activation failed", failure_stage: failed.diagnostics.failure_stage,
+        issues: failed.diagnostics.issues,
+        ...(failed.diagnostics.error ? {cause: failed.diagnostics.error} : {})}});
       if (expected !== null && expected !== generation) {
         return answer("not_run", {error: {code: "GENERATION_MISMATCH", text: "expected generation is not the current published generation",
           expected_generation: expected, current_generation: generation}});

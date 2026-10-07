@@ -854,6 +854,19 @@ describe('STORE activation operation tracking', function () {
     expect(result.status).to.include({state: 'failed', failure_stage: 'step', active: false});
     expect(result.status.completed_at).to.not.equal('');
   });
+  it('deletion clears durable failure while retaining operation history', async () => {
+    const {ActivationJournal} = await import('../tools/osd-activation-journal.mjs');
+    const journal = new ActivationJournal(root);
+    const store = new ObjectStore({root, libs: []});
+    store.activationJournal = journal;
+    store.write('CLAS', 'ZCL_DELETE_OUTCOME', CLEAN.replaceAll('zcl_store_dest_probe', 'zcl_delete_outcome'));
+    const ticket = journal.create('CLAS', 'ZCL_DELETE_OUTCOME');
+    journal.update(ticket.op_id, {state: 'failed', failure_stage: 'validation'});
+    store.delete('CLAS', 'ZCL_DELETE_OUTCOME');
+    expect(journal.lastOutcome('CLAS', 'ZCL_DELETE_OUTCOME')).to.equal(undefined);
+    expect(new ActivationJournal(root).lastOutcome('CLAS', 'ZCL_DELETE_OUTCOME')).to.equal(undefined);
+    expect(journal.lookup(ticket.op_id).state).to.equal('failed');
+  });
   it('isolates journals for different instance ports', async () => {
     const {ActivationJournal} = await import('../tools/osd-activation-journal.mjs');
     const first = new ActivationJournal(root, {host: 'http-8090'});
@@ -1074,7 +1087,7 @@ CLASS ltcl_loop IMPLEMENTATION. METHOD loop. DO. ENDDO. ENDMETHOD. METHOD later.
       const next = reloaded.create('CLAS', green);
       reloaded.update(next.op_id, {state: 'published', generation_id: generation});
       expect((await run([green])).counts.pass).to.equal(1);
-    } finally {delete store.activationJournal; delete journal.entries[ticket.op_id]; journal.save();}
+    } finally {delete store.activationJournal; journal.forgetObject(ticket.type, ticket.name); delete journal.entries[ticket.op_id]; journal.save();}
   });
   it('unknown target is a class not_found error and leaves the other target runnable', async () => {
     const result = await run(['ZCL_STORE_UNIT_UNKNOWN', green]);
@@ -1237,7 +1250,7 @@ CLASS ltcl_loop IMPLEMENTATION. METHOD loop. DO. ENDDO. ENDMETHOD. METHOD later.
       expect(result.state).to.equal('not_run');
       expect(result.error.code).to.equal('PUBLICATION_PENDING');
       expect(result.counts.methods).to.equal(0);
-    } finally {journal.update(pending.op_id, {state: 'failed', failure_stage: 'step'}); delete journal.entries[pending.op_id]; journal.save();}
+    } finally {journal.update(pending.op_id, {state: 'failed', failure_stage: 'step'}); journal.forgetObject("CLAS", green); delete journal.entries[pending.op_id]; journal.save();}
   });
   it('refuses an unconfirmed build after failed promotion, including after journal reload', async () => {
     const {ActivationJournal, activationJournal} = await import('../tools/osd-activation-journal.mjs');
@@ -1252,7 +1265,7 @@ CLASS ltcl_loop IMPLEMENTATION. METHOD loop. DO. ENDDO. ENDMETHOD. METHOD later.
       expect(result.state).to.equal('not_run');
       expect(result.error.code).to.equal('GENERATION_UNAVAILABLE');
       expect(result.counts.methods).to.equal(0);
-    } finally {journal.recordGeneration(generation); delete journal.entries[ticket.op_id]; journal.save();}
+    } finally {journal.recordGeneration(generation); journal.forgetObject(ticket.type, ticket.name); delete journal.entries[ticket.op_id]; journal.save();}
   });
   it('pins discovery and execution when the live generation changes during a run', async () => {
     const {UnitRun} = await import('../tools/osd-unit.mjs');
@@ -1329,12 +1342,27 @@ CLASS ltcl_loop IMPLEMENTATION. METHOD loop. DO. ENDDO. ENDMETHOD. METHOD later.
     expect(result.EV_ERROR).to.equal('');
     expect(JSON.parse(result.EV_JSON)).to.deep.equal({state: 'not_found', code: 'NOT_FOUND', op_id: 'no-such-operation'});
     expect(JSON.parse((await lookup('__proto__')).EV_JSON)).to.deep.equal({state: 'not_found', code: 'NOT_FOUND', op_id: '__proto__'});
-    const journal = activationJournal(store), ticket = journal.create('CLAS', green);
-    journal.update(ticket.op_id, {state: 'failed', failure_stage: 'validation'});
+    await store.write('CLAS', green, main(green).replace('rv_answer = 42', 'undefined_variable = 42'));
+    const rejected = await call(destination, {IV_COMMAND: 'ACTIVATE', IV_TYPE: 'CLAS', IV_NAME: green});
+    const ticket = JSON.parse(rejected.EV_JSON), journal = activationJournal(store);
+    expect(ticket).to.include({state: 'failed', failure_stage: 'validation'});
     journal.entries[ticket.op_id].completed_at = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
     result = await lookup(ticket.op_id);
     expect(result.EV_ERROR).to.equal('');
     expect(JSON.parse(result.EV_JSON)).to.deep.equal({state: 'not_found', code: 'NOT_FOUND', op_id: ticket.op_id});
+    const refused = await run([green]);
+    expect(refused).to.include({state: 'not_run'});
+    expect(refused.error).to.include({code: 'PUBLICATION_FAILED', op_id: ticket.op_id});
+    const {ActivationJournal} = await import('../tools/osd-activation-journal.mjs');
+    const reloaded = new ActivationJournal(root, {host: journal.directory.split('/').at(-1)});
+    expect(reloaded.lastOutcome('CLAS', green)).to.deep.equal(journal.lastOutcome('CLAS', green));
+    store.activationJournal = reloaded;
+    try {expect((await run([green])).error.code).to.equal('PUBLICATION_FAILED');}
+    finally {store.activationJournal = journal;}
+    await store.write('CLAS', green, main(green));
+    const activated = await call(destination, {IV_COMMAND: 'ACTIVATE', IV_TYPE: 'CLAS', IV_NAME: green});
+    expect(JSON.parse(activated.EV_JSON).state).to.equal('published');
+    expect((await run([green])).state).to.equal('ran');
     result = await lookup('');
     expect(JSON.parse(result.EV_JSON).error.code).to.equal('INVALID_NAME');
     expect(result.EV_ERROR).not.to.equal('');

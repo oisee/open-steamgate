@@ -2,6 +2,7 @@
 import {existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync, rmdirSync} from "node:fs";
 import {join, resolve} from "node:path";
 import {randomUUID} from "node:crypto";
+import {mkdirDurable, writeDurable, renameDurable} from "./osd-durable.mjs";
 import {warmVerdict} from "./osd-hot.mjs";
 
 const journals = new Map();
@@ -39,15 +40,23 @@ export class ActivationJournal {
     this.now = now;
     this.directory = join(root, ".local", "activation", host);
     this.file = join(this.directory, "operations.json");
+    this.outcomeFile = join(this.directory, "last-outcomes.json");
     this.generationFile = join(this.directory, "published-generation.json");
     try { this.entries = JSON.parse(readFileSync(this.file, "utf8")); }
     catch (e) { if (e.code !== "ENOENT") throw e; this.entries = {}; }
+    let migrate = false;
+    try { this.outcomes = JSON.parse(readFileSync(this.outcomeFile, "utf8")); }
+    catch (e) { if (e.code !== "ENOENT") throw e; this.outcomes = {}; migrate = true; }
+    const latest = new Map(Object.values(this.entries).map(entry => [`${entry.type} ${entry.name}`, entry]));
     for (const entry of Object.values(this.entries)) {
       if (!["published", "failed"].includes(entry.state)) {
         Object.assign(entry, {state: "failed", active: false, live: false, failure_stage: "recovery",
           note: "source host restarted before completion", updated_at: this.time(), completed_at: this.time()});
-      }
+        if (latest.get(`${entry.type} ${entry.name}`) === entry) this.rememberOutcome(entry);
+      } else if (migrate) this.rememberOutcome(entry);
     }
+    // Migrate before pruning expired history, including a failed old ticket.
+    this.saveOutcomes();
     this.save();
   }
   time() { return new Date(this.now()).toISOString(); }
@@ -68,6 +77,25 @@ export class ActivationJournal {
       this.recordGeneration(generation);
       this.generationRecordingFailed = false;
     } catch (error) { checkpointFailure(this, error); }
+  }
+  rememberOutcome(entry) {
+    this.outcomes[`${entry.type} ${entry.name}`] = {
+      op_id: entry.op_id, outcome: entry.state, generation: entry.generation_id,
+      diagnostics: {failure_stage: entry.failure_stage, note: entry.note, issues: entry.issues,
+        ...(entry.error ? {error: entry.error} : {})},
+    };
+  }
+  saveOutcomes() {
+    mkdirDurable(this.directory);
+    const temporary = `${this.outcomeFile}.${process.pid}.tmp`;
+    writeDurable(temporary, JSON.stringify(this.outcomes));
+    renameDurable(temporary, this.outcomeFile);
+  }
+  lastOutcome(type, name) { return this.outcomes[`${type} ${String(name).toUpperCase()}`]; }
+  forgetObject(type, name) {
+    const key = `${type} ${String(name).toUpperCase()}`;
+    delete this.outcomes[key];
+    this.saveOutcomes();
   }
   save() {
     for (const [id, entry] of Object.entries(this.entries)) {
@@ -91,7 +119,11 @@ export class ActivationJournal {
     if (!entry) throw error("NOT_FOUND", "activation operation not found");
     if (entry.completed_at) return {...entry};
     Object.assign(entry, fields, {updated_at: this.time()});
-    if (["published", "failed"].includes(entry.state)) entry.completed_at = entry.updated_at;
+    if (["published", "failed"].includes(entry.state)) {
+      entry.completed_at = entry.updated_at;
+      this.rememberOutcome(entry);
+      this.saveOutcomes();
+    }
     this.save();
     if (entry.state === "published") this.recordGenerationBestEffort(entry.generation_id);
     return {...entry};

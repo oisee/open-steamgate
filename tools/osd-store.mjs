@@ -2,7 +2,7 @@ import {packageChildName} from "./osd-object-name.mjs";
 import {transpileStore} from "./osd-store-build.mjs";
 import {deferSourceMutation} from "./osd-store-source-lock.mjs";
 import {warmUp} from "./osd-store-warm.mjs";
-import {recordBaselineGeneration, recordStoreGeneration} from "./osd-activation-journal.mjs";
+import {activationJournal, recordBaselineGeneration, recordStoreGeneration} from "./osd-activation-journal.mjs";
 // The object store of OSD, the off-stack doppelgänger: what sits behind
 // the ADT façade. A client asks for an object by type and name; this finds
 // the file, reads it, writes it, checks it and activates it. The façade
@@ -659,6 +659,7 @@ export class ObjectStore {
     if (this.inactive.delete(`${entry.type} ${entry.name}`)) this.#versions.saveInactive();
     this.#versions.dropActiveCopy(entry);
     tmpDelete(this.root, entry, false);
+    activationJournal(this).forgetObject(entry.type, entry.name);
     this.#forget();
     return {type: entry.type, name: entry.name, deleted: true};
   }
