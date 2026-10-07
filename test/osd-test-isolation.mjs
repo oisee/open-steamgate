@@ -42,8 +42,10 @@ const warmAllowancePatch = `allowances[${JSON.stringify(warmProofFile)}]=${JSON.
     }
   }
 })};`;
-function run(files, options = [], allowancePatch, preload, hook = true) {
-  const root = mkdtempSync(join(tmpdir(), 'isolation-proof-'));
+function run(files, options = [], allowancePatch, preload, hook = true, nested = false) {
+  const scratch = mkdtempSync(join(tmpdir(), 'isolation-proof-'));
+  const root = nested ? join(scratch, 'system') : scratch;
+  if (nested) mkdirSync(root);
   try {
     // Generation fixtures start with their config; import/execution changes
     // then measure the behavior under test, rather than fixture construction.
@@ -68,7 +70,7 @@ function run(files, options = [], allowancePatch, preload, hook = true) {
     }
     const result = spawnSync(process.execPath, [mocha, ...requires, ...(hook ? ['--require', plugin] : []), '--reporter', 'spec', ...options, ...paths], {cwd: root, encoding: 'utf8', timeout: 15000});
     return {status: result.status, output: result.stdout + result.stderr, filesAfterExit: listTree(root)};
-  } finally { rmSync(root, {recursive: true, force: true}); }
+  } finally { rmSync(scratch, {recursive: true, force: true}); }
 }
 // Like readdirSync(root, {recursive: true}), but a symlinked directory is
 // listed and never entered: a probe may link a pack outside the checkout.
@@ -668,7 +670,7 @@ describe('per-file process isolation detector', function () {
       expect(result.output).not.to.include('lost proof');
     });
   }
-  for (const mutation of ['known', 'fresh-live', 'other-content', 'other-input', 'inactive-view', 'inactive-drift', 'inactive-before']) {
+  for (const mutation of ['known', 'fresh-live', 'other-content', 'other-input', 'inactive-view', 'inactive-external', 'inactive-drift', 'inactive-before']) {
     it(`enforces the originating warm input proof: ${mutation}`, () => {
       const builder = new URL('../tools/osd-build.mjs', import.meta.url).href;
       const original = '* The hand-written part a developer owns on a real system. Reads the\n';
@@ -676,7 +678,12 @@ describe('per-file process isolation detector', function () {
       const edited = `* The hand-written part a developer owns on a real system (T7 warm test ${randomUUID()}). Reads the\n`;
       const extra = mutation === 'other-input' ? "fs.writeFileSync('src/unrelated.clas.abap','unrelated');" : '';
       const inactive = mutation.startsWith('inactive-');
-      const inactiveSetup = inactive ? "fs.writeFileSync('src/other.clas.abap','saved');fs.mkdirSync('build/inactive/active/src',{recursive:true});fs.writeFileSync('build/inactive/active/src/other.clas.abap','active');fs.writeFileSync('build/inactive/inactive.json',JSON.stringify({inactive:{OTHER:{files:['src/other.clas.abap']}}}));" : '';
+      const external = mutation === 'inactive-external';
+      const inactiveFile = external ? '../external/src/other.clas.abap' : 'src/other.clas.abap';
+      const inactiveSetup = inactive ? `fs.mkdirSync(${JSON.stringify(external ? '../external/src' : 'src')},{recursive:true});fs.writeFileSync(${JSON.stringify(inactiveFile)},'saved');
+        const {sourceSnapshotPath}=await import(${JSON.stringify(new URL('../tools/osd-source-snapshot.mjs', import.meta.url).href)});
+        const copy='build/inactive/active/'+sourceSnapshotPath(${JSON.stringify(inactiveFile)});fs.mkdirSync(copy.slice(0,copy.lastIndexOf('/')),{recursive:true});fs.writeFileSync(copy,'active');
+        fs.writeFileSync('build/inactive/inactive.json',JSON.stringify({inactive:{OTHER:{files:[${JSON.stringify(inactiveFile)}]}}}));` : '';
       const beforeProof = mutation === 'inactive-before' ? "fs.writeFileSync('build/inactive/active/src/other.clas.abap','unrelated active edit');" : '';
       const afterProof = mutation === 'fresh-live' ? "fs.unlinkSync('build/live');fs.symlinkSync('by-input/fresh-corruption','build/live');" : mutation === 'inactive-drift' ? "fs.writeFileSync('build/inactive/active/src/other.clas.abap','unrelated active edit');" : '';
       const proofRejected = ['other-content', 'other-input', 'inactive-before'].includes(mutation);
@@ -684,7 +691,7 @@ describe('per-file process isolation detector', function () {
       const checkMutation = mutation === 'other-input' ? "assert.equal(fs.readFileSync('src/unrelated.clas.abap','utf8'),'unrelated');"
         : mutation === 'fresh-live' ? "assert.equal(fs.readlinkSync('build/live'),'by-input/fresh-corruption');"
         : ['inactive-before', 'inactive-drift'].includes(mutation) ? "assert.equal(fs.readFileSync('build/inactive/active/src/other.clas.abap','utf8'),'unrelated active edit');" : '';
-      const viewOptions = inactive ? ",undefined,{overlay:{exclude:[process.cwd()+'/src/other.clas.abap'],folder:'build/inactive/active'}}" : '';
+      const viewOptions = inactive ? `,undefined,{overlay:{exclude:[${external ? "process.cwd()+'/../external/src/other.clas.abap'" : "process.cwd()+'/src/other.clas.abap'"}],folder:'build/inactive/active'}}` : '';
       // The proof loads real warm/store modules asynchronously. Give this
       // child its own timeout; the outer mocha timeout does not reach it.
       const result = run({[warmProofFile]: `import fs from 'node:fs';import assert from 'node:assert/strict';import {hashOf} from ${JSON.stringify(builder)};import isolation from ${JSON.stringify(plugin)};
@@ -695,9 +702,10 @@ describe('per-file process isolation detector', function () {
           fs.unlinkSync('build/live');const activated='by-input/'+hashOf(process.cwd()${viewOptions});fs.symlinkSync(activated,'build/live');assert.equal(fs.readlinkSync('build/live'),activated);
           ${proofRejected ? checkMutation + reached : ''}
           try{await isolation.observeGenerationDrift()}finally{fs.writeFileSync(file,original)}
-          assert.equal(fs.readFileSync(file,'utf8'),original);${afterProof}${proofRejected ? '' : checkMutation + reached}});`}, ['--timeout', '10000'], warmAllowancePatch, `const fs=require('node:fs');fs.mkdirSync('src/demo',{recursive:true});fs.writeFileSync('src/demo/zcl_zstg_demo_dpc_ext.clas.abap',${JSON.stringify(original)});${inactive ? "fs.writeFileSync('src/other.clas.abap','saved');" : ''}`);
+          assert.equal(fs.readFileSync(file,'utf8'),original);${afterProof}${proofRejected ? '' : checkMutation + reached}});`}, ['--timeout', '10000'], warmAllowancePatch, `const fs=require('node:fs');
+          fs.mkdirSync('src/demo',{recursive:true});fs.writeFileSync('src/demo/zcl_zstg_demo_dpc_ext.clas.abap',${JSON.stringify(original)});${inactive ? "fs.writeFileSync('src/other.clas.abap','saved');" : ''}`, true, external);
       expect(result.output).to.include(`mutation reached: warm ${mutation}`);
-      if (mutation === 'known' || mutation === 'inactive-view') {
+      if (mutation === 'known' || mutation === 'inactive-view' || external) {
         expect(result.status, result.output).to.equal(0);
         expect(result.output).to.include('TEMPORARY ALLOW');
       } else {

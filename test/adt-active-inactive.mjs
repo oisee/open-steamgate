@@ -100,11 +100,13 @@ CLASS zcl_empty_live IMPLEMENTATION. METHOD run. rv = lcl_value=>get( ). ENDMETH
         for (const [include, source] of Object.entries(expected)) {
           const path = object.path + (include === "main" ? "" : `/includes/${include}`) + "/source/main";
           const active = await fetch(base + path + "?version=active");
-          expect(active.status).to.equal(200);
-          // Missing active provenance is distinct from a proven empty file.
-          // Standard includes synthesize their template only in that version.
+          // Unknown main source is a 404; absent standard includes generate
+          // their measured template from READ's per-version absence flag.
           const template = object.type === "CLAS" && scenario !== "built tree" ? classIncludeTemplates[include] : undefined;
-          expect(await active.text()).to.equal(template ?? source);
+          expect(active.status).to.equal(scenario === "built tree" || template !== undefined ? 200 : 404);
+          const body = await active.text();
+          if (scenario === "built tree" || template !== undefined) expect(body).to.equal(template ?? source);
+          else expect(body).to.include("ExceptionResourceNotFound");
           if (template !== undefined) expect(reader.read(object.type, object.name, include, "active").empty).to.equal(true);
           expect(reader.read(object.type, object.name, include).source).to.equal(scenario === "built tree" ? source : "");
         }
@@ -180,8 +182,9 @@ describe("generation source provenance", function () {
   });
   it("normalizes Windows overlay paths in the real snapshot helper", () => {
     const module = readFileSync(join(REPO, "tools/osd-source-snapshot.mjs"), "utf8");
-    const code = module.slice(module.indexOf("export function keepSourceInputs"), module.indexOf("// gen/"))
-      .replace("export function", "function");
+    const code = module.slice(module.indexOf("export function sourceSnapshotPath"), module.indexOf("// gen/"))
+      .replaceAll("export function", "function")
+      .replace(/function writeSourceSnapshot[\s\S]*?\n}\n/, "");
     const bytes = Buffer.from("REPORT ztest. WRITE 'P1'.\n");
     const written = [];
     const keep = new Function("createHash", "existsSync", "mkdirSync", "readFileSync", "writeSourceSnapshot", "writeFileSync", "linkSync", "copyFileSync",
@@ -217,9 +220,9 @@ describe("generation source provenance", function () {
       if (server) await new Promise(resolve => server.close(resolve));
       rmSync(root, {recursive: true, force: true});
     });
-    const active = async () => {
+    const active = async (status = 200) => {
       const response = await fetch(base + "/source/main?version=active");
-      expect(response.status).to.equal(200);
+      expect(response.status).to.equal(status);
       return response.text();
     };
     it("a pre-snapshot generation with matching working bytes still answers active", async () => {
@@ -240,19 +243,19 @@ describe("generation source provenance", function () {
       rmSync(join(root, "build/source-by-digest"), {recursive: true, force: true});
       writeFileSync(join(root, "src/zcl_provenance.clas.abap"), source("P2"));
       expect((await abap.Classes.ZCL_PROVENANCE.run()).get()).to.equal("P1");
-      expect(await active()).to.equal("");
+      expect(await active(404)).to.include("ExceptionResourceNotFound");
       expect(await (await fetch(base)).text()).to.include('adtcore:version="inactive"');
       expect(existsSync(join(root, "build/by-input", hash, "source/src/zcl_provenance.clas.abap"))).to.equal(false);
     });
-    it("cleaned build/ keeps P1 execution but returns the defined empty active source", async () => {
+    it("cleaned build/ keeps P1 execution but reports absent active source", async () => {
       rmSync(join(root, "build"), {recursive: true});
       expect((await abap.Classes.ZCL_PROVENANCE.run()).get()).to.equal("P1");
-      expect(await active()).to.equal("");
+      expect(await active(404)).to.include("ExceptionResourceNotFound");
       expect(await (await fetch(base)).text()).to.include('adtcore:version="inactive"');
     });
     it("an empty unbuilt working source is also inactive", async () => {
       writeFileSync(join(root, "src/zcl_provenance.clas.abap"), "");
-      expect(await active()).to.equal("");
+      expect(await active(404)).to.include("ExceptionResourceNotFound");
       expect(await (await fetch(base)).text()).to.include('adtcore:version="inactive"');
     });
   });

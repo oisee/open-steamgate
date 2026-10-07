@@ -3,6 +3,46 @@ import {createHash, randomUUID} from "node:crypto";
 import {existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, linkSync, copyFileSync, rmSync, renameSync} from "node:fs";
 import {dirname, join, relative, resolve} from "node:path";
 
+// Provenance keeps the original root-relative key. Storage encodes external
+// parent segments so neither snapshots nor pre-save copies escape build/.
+export function sourceSnapshotPath(file) {
+  const key = file.replaceAll("\\", "/");
+  if (key.startsWith(".external/")) return ".external/inside/" + key;
+  const absolute = /^(?:[A-Za-z]:\/|\/)/.test(key);
+  if (!key.startsWith("../") && !absolute) return key;
+  const parts = key.split("/");
+  const name = parts.pop(); // Preserve the abapGit basename for overlay inputs.
+  return (absolute ? ".external/absolute/" : ".external/outside/") + parts.map(p => p === ".." ? "%2E%2E" : p === "" ? "%00" : encodeURIComponent(p)).join("/") + "/" + name;
+}
+
+export function sourceOriginalPath(file) {
+  const key = file.replaceAll("\\", "/");
+  if (key.startsWith(".external/inside/")) return key.slice(".external/inside/".length);
+  const prefix = key.startsWith(".external/absolute/") ? ".external/absolute/" : ".external/outside/";
+  if (!key.startsWith(prefix)) return key;
+  const parts = key.slice(prefix.length).split("/");
+  const name = parts.pop();
+  return parts.map(p => p === "%00" ? "" : decodeURIComponent(p)).join("/") + "/" + name;
+}
+
+export function logicalSourcePath(root, file, overlay) {
+  const copies = resolve(root, overlay?.folder ?? "build/inactive/active").replaceAll("\\", "/") + "/";
+  const path = resolve(file).replaceAll("\\", "/");
+  return path.startsWith(copies) ? resolve(root, sourceOriginalPath(path.slice(copies.length))) : path;
+}
+
+// An aggregate cache hit proves these inputs too, even when an older builder
+// omitted external sources from a snapshot marked complete.
+export function missingSourceInputs(root, generation, digests, overlay) {
+  let inputs;
+  try {inputs = JSON.parse(readFileSync(join(generation, "source-inputs.json"), "utf8"));} catch {return digests;}
+  if (!inputs || typeof inputs !== "object") return digests;
+  return new Map([...digests].filter(([file, digest]) => {
+    const key = relative(root, logicalSourcePath(root, file, overlay)).replaceAll("\\", "/");
+    return /\.(abap|asddls|as[A-Za-z]+|srvdsrv|xml)$/.test(key) && inputs[key] !== digest;
+  }));
+}
+
 // Snapshot paths may share an inode with other generations and the digest
 // cache. Publish complete bytes by rename, replacing only this path's link.
 export function writeSourceSnapshot(target, bytes) {
@@ -16,7 +56,6 @@ export function writeSourceSnapshot(target, bytes) {
 }
 
 export function keepSourceInputs(root, generation, digests, actual = undefined, overlay = undefined, previous = undefined) {
-  const copies = resolve(root, overlay?.folder ?? "build/inactive/active").replaceAll("\\", "/") + "/";
   const rootPrefix = resolve(root).replaceAll("\\", "/") + "/";
   const inputs = {};
   const shared = join(root, "build", "source-by-digest");
@@ -32,14 +71,13 @@ export function keepSourceInputs(root, generation, digests, actual = undefined, 
   };
   for (const [file, digest] of digests) {
     const input = actual?.get(file) ?? file;
-    const normalized = resolve(file).replaceAll("\\", "/");
-    const logical = normalized.startsWith(copies) ? resolve(root, normalized.slice(copies.length)) : normalized;
+    const logical = logicalSourcePath(root, file, overlay).replaceAll("\\", "/");
     const path = logical.startsWith(rootPrefix) ? logical.slice(rootPrefix.length) : relative(root, logical);
-    if (path.startsWith("..") || !/\.(abap|asddls|as[A-Za-z]+|srvdsrv|xml)$/.test(path)) continue;
+    if (!/\.(abap|asddls|as[A-Za-z]+|srvdsrv|xml)$/.test(path)) continue;
     inputs[path.replaceAll("\\", "/")] = digest;
-    if (reuse && previous.digests.get(file) === digest) continue;
-    const target = join(generation, "source", path);
-    const prior = previous && join(previous.generation, "source", path);
+    if (reuse && previous.digests.get(file) === digest && existsSync(join(shared, digest))) continue;
+    const target = join(generation, "source", sourceSnapshotPath(path));
+    const prior = previous && join(previous.generation, "source", sourceSnapshotPath(path));
     if (prior && previous.digests.get(file) === digest && existsSync(prior)) {
       ensureDirectory(target);
       try {linkSync(prior, target);} catch {copyFileSync(prior, target);}
@@ -135,7 +173,7 @@ export function materializeSourceSnapshot(root, generation) {
   const inputs = JSON.parse(readFileSync(join(generation, "source-inputs.json"), "utf8"));
   const directories = new Set();
   for (const [path, digest] of Object.entries(inputs)) {
-    const target = join(generation, "source", path);
+    const target = join(generation, "source", sourceSnapshotPath(path));
     if (existsSync(target)) continue;
     const shared = join(root, "build", "source-by-digest", digest);
     if (!existsSync(shared)) continue;

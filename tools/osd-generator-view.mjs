@@ -3,6 +3,7 @@
 import fs from "node:fs";
 import {syncBuiltinESMExports} from "node:module";
 import {dirname, join, relative, resolve} from "node:path";
+import {logicalSourcePath} from "./osd-source-snapshot.mjs";
 
 export function installGeneratorView(env = process.env) {
   if (!env.OSD_ACTIVE_BUILD_OVERLAY) return;
@@ -23,7 +24,7 @@ export function installGeneratorView(env = process.env) {
       const copy = join(dir, entry.name);
       if (entry.isDirectory()) walk(copy);
       else if (!replaced.has(copy)) {
-        const file = resolve(root, relative(folder, copy));
+        const file = logicalSourcePath(root, copy, overlay);
         replaced.set(file, copy);
         const parent = dirname(file);
         if (!additions.has(parent)) additions.set(parent, []);

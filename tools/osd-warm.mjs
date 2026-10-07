@@ -25,7 +25,7 @@
 // What is warm is decided file by file, and anything else is cold -- the
 // generators read the tree too, and a change they would see has to reach
 // them (see warmRule below).
-import {keepSourceInputs, linkGeneratedSources, completeSourceSnapshot} from "./osd-source-snapshot.mjs";
+import {keepSourceInputs, linkGeneratedSources, completeSourceSnapshot, logicalSourcePath} from "./osd-source-snapshot.mjs";
 import {spawn} from "./osd-child-process.mjs";
 import {createHash} from "node:crypto";
 import {copyFileSync, existsSync, linkSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, watch, writeFileSync} from "node:fs";
@@ -250,8 +250,7 @@ export class WarmCompiler {
   // build/inactive/active/<file> and its promoted source at <file> are one
   // file whose contents changed, which is what makes a promotion warm.
   #logical(path, overlay) {
-    const folder = resolve(this.root, overlay?.folder ?? join("build", "inactive", "active")) + sep;
-    return path.startsWith(folder) ? resolve(this.root, path.slice(folder.length)) : path;
+    return logicalSourcePath(this.root, path, overlay);
   }
 
   // the view's files by their logical path: {actual: logical -> path, digests}
