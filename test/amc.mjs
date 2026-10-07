@@ -68,6 +68,29 @@ describe("AMC in one Node process", function () {
     expect(sub("R")).to.throw(/receive is not authorised/);
   });
 
+  it("matches a channel extension without its CHAR 60 trailing blanks", () => {
+    const channels = parseSamc(readFileSync("src/amc/zstg_amc_test.samc.xml", "utf8"), "zstg_amc_test.samc.xml");
+    const broker = new AmcBroker(channels);
+    const sender = "ZCL_OSD_AMC_TEST==============CP";
+    const socket = "ZCL_OSD_AMC_SOCKET============CP";
+    const received = [];
+    // An APC binding keeps the extension in a STRING (trimmed); a producer
+    // passes the CHAR 60 parameter, padded with blanks.
+    for (const extension of ["ABC", "ABD", "".padEnd(60), " ABC", "ABC\t", "XYZ".padEnd(60)]) {
+      broker.subscribe({app: "ZOSD_AMC_TEST", path: "/text", program: socket, activity: "C",
+        extension, receive: (publication) => received.push([extension, publication.message])});
+    }
+    broker.send({app: "ZOSD_AMC_TEST", path: "/text", program: sender, type: "TEXT", message: "hi",
+      extension: "ABC".padEnd(60)});
+    broker.send({app: "ZOSD_AMC_TEST", path: "/text", program: sender, type: "TEXT", message: "none",
+      extension: ""});
+    broker.send({app: "ZOSD_AMC_TEST", path: "/text", program: sender, type: "TEXT", message: "xyz",
+      extension: "XYZ"});
+    // Only U+0020 is padding: leading blanks and a trailing tab stay significant.
+    expect(received.map(([extension, message]) => [extension.trimEnd(), message]))
+      .to.deep.equal([["ABC", "hi"], ["", "none"], ["XYZ", "xyz"]]);
+  });
+
   it("delivers client and user scopes only to matching subscriptions, system to all", () => {
     const program = "ZCL_OSD_AMC_TEST==============CP";
     const channels = ["C", "U", "S"].map((scope) => ({
