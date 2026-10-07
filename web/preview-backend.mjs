@@ -8,6 +8,7 @@
 // database file. The pattern is larshp/hithub's web/preview-backend.mjs (MIT).
 import {previewAdtAnswer} from "./preview-continuations.mjs";
 import {dialogStep, exclusive} from "../tools/osd-dialog-step.mjs";
+import {apcMailbox} from "../tools/osd-apc-mailbox.mjs";
 import {ensureDemoData} from "../tools/osd-demo-data.mjs";
 import {realNow} from "./preview-runtime.mjs";
 import {Buffer} from "buffer";
@@ -212,34 +213,45 @@ const hosts = new Map();
 // Each APC event is a dialog step (tools/osd-dialog-step.mjs): it waits for
 // the one work process, commits when done, rolls back when it dumps.
 export async function openChannel(id, channel, send) {
-  const {zcl_apc_host} = await import("../output/zcl_apc_host.clas.mjs");
-  const host = new zcl_apc_host();
-  const drain = async () => {
-    const pushed = await host.drain();
-    for (const row of pushed.array()) {
-      send({apc: "message", text: row.get()});
-    }
-  };
-  const accepted = await dialogStep(async () => {
-    await host.constructor_({
-      iv_handler: new abap.types.String().set(channel.handler),
-      it_fields: zcl_apc_host.METHODS.CONSTRUCTOR.parameters.IT_FIELDS.type(),
+  const mailbox = apcMailbox();
+  const entry = {mailbox};
+  hosts.set(id, entry);
+  return mailbox.enqueue(async () => {
+    const {zcl_apc_host} = await import("../output/zcl_apc_host.clas.mjs");
+    const host = new zcl_apc_host();
+    entry.host = host;
+    const drain = async () => {
+      const pushed = await host.drain();
+      for (const row of pushed.array()) {
+        if (mailbox.closed) return;
+        send({apc: "message", text: row.get()});
+      }
+    };
+    const accepted = await dialogStep(async () => {
+      await host.constructor_({
+        iv_handler: new abap.types.String().set(channel.handler),
+        it_fields: zcl_apc_host.METHODS.CONSTRUCTOR.parameters.IT_FIELDS.type(),
+      });
+      return host.open();
     });
-    return host.open();
+    if (accepted.get() !== "X") {
+      throw new Error("the handler refused the connection");
+    }
+    entry.drain = drain;
+    if (mailbox.closed) return;
+    // open first, then whatever on_start pushed.
+    //
+    // The other order looks harmless and is not: a handler that speaks first —
+    // and a stateful one usually does — delivers a message while the page's
+    // socket is still CONNECTING, so the page's onmessage runs before its
+    // onopen and any send( ) from it is refused as "the socket is not open".
+    // The page is right and the ordering was wrong.
+    send({apc: "open"});
+    await dialogStep(drain);
+  }).catch(error => {
+    hosts.delete(id);
+    throw error;
   });
-  if (accepted.get() !== "X") {
-    throw new Error("the handler refused the connection");
-  }
-  hosts.set(id, {host, drain});
-  // open first, then whatever on_start pushed.
-  //
-  // The other order looks harmless and is not: a handler that speaks first —
-  // and a stateful one usually does — delivers a message while the page's
-  // socket is still CONNECTING, so the page's onmessage runs before its
-  // onopen and any send( ) from it is refused as "the socket is not open".
-  // The page is right and the ordering was wrong.
-  send({apc: "open"});
-  await dialogStep(drain);
 }
 
 export async function channelMessage(id, text, send) {
@@ -247,10 +259,11 @@ export async function channelMessage(id, text, send) {
   if (entry === undefined) {
     throw new Error(`no channel ${id}`);
   }
-  await dialogStep(async () => {
+  await entry.mailbox.enqueue(() => dialogStep(async () => {
+    if (entry.mailbox.closed) return;
     await entry.host.message({iv_text: new abap.types.String().set(text)});
     await entry.drain();
-  });
+  }));
   void send;
 }
 
@@ -258,10 +271,10 @@ export async function closeChannel(id) {
   const entry = hosts.get(id);
   hosts.delete(id);
   if (entry !== undefined) {
-    await dialogStep(() => entry.host.close({
+    await entry.mailbox.closeTurn(() => dialogStep(() => entry.host?.close({
       iv_reason: new abap.types.String().set("closed by the page"),
       iv_code: new abap.types.Integer().set(1000),
-    }));
+    })));
   }
 }
 

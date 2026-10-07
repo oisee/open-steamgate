@@ -18,9 +18,17 @@ export class StoreIPCClient {
     this.seq = 0;
     this.steps = 0;
     this.pending = new Map();
+    this.finishing = new Map();
     this.repositorySessions = new Map();
     this.unhookRepository = undefined;
     this.receive = (message) => {
+      if (message?.type === "store-step-completed") {
+        const waiting = this.finishing.get(message.step);
+        this.finishing.delete(message.step);
+        if (message.error) waiting?.reject(new Error(message.error));
+        else waiting?.resolve();
+        return;
+      }
       if (message?.type !== "store-response") return;
       const waiting = this.pending.get(message.id);
       if (waiting === undefined) return;
@@ -37,11 +45,29 @@ export class StoreIPCClient {
       }
       this.pending.clear();
       this.repositorySessions.clear();
+      for (const waiting of this.finishing.values()) waiting.reject(new Error("STORE process channel disconnected"));
+      this.finishing.clear();
     };
     channel.on("message", this.receive);
     this.unhookChannel = onIPCFailure(channel, this.disconnected);
     this.unhook = onEveryStep({onEnd: (token, {dumped}) => {
+      if (token.storeIPCClient !== this) return;
+      if (token.afterStep !== undefined && token.storePublication && token.storeContext === undefined) return;
       if (token.storeIPC !== undefined) sendIPC(channel, {type: "store-step-ended", step: token.storeIPC, ok: !dumped});
+    }, afterStep: (token, {dumped}) => {
+      // ADT's parent context owns publicationRecord() and must receive the
+      // response before a cold publication can replace this child. Other
+      // entries (APC, ICF, jobs) await completion here before their next turn.
+      if (token.storeIPCClient !== this || !token.storePublication || token.storeContext !== undefined) return;
+      return new Promise((resolve, reject) => {
+        const step = token.storeIPC;
+        this.finishing.set(step, {resolve, reject});
+        sendIPC(channel, {type: "store-step-ended", step, ok: !dumped, acknowledge: true}, error => {
+          if (!error) return;
+          this.finishing.delete(step);
+          reject(error);
+        });
+      });
     }});
   }
   close() {
@@ -56,9 +82,14 @@ export class StoreIPCClient {
     const id = ++this.seq;
     const contextID = calls.getStore();
     const token = currentStepToken();
-    if (token !== undefined) token.storeIPC ??= ++this.steps;
+    if (token !== undefined) {
+      token.storeIPC ??= ++this.steps;
+      token.storeIPCClient = this;
+      token.storeContext = contextID;
+    }
     return new Promise((resolve, reject) => {
       const command = String(parameters.IV_COMMAND ?? "").toUpperCase();
+      if (token !== undefined && command === "ACTIVATE") token.storePublication = true;
       const long = command === "CREATE" || command === "DELETE" || command === "ACTIVATE" || command === "RUN_TESTS" || (command === "SYSTEM" && String(parameters.IV_TYPE).toUpperCase() === "BUILD");
       const timer = long ? undefined : setTimeout(() => {
         this.pending.delete(id);
@@ -160,9 +191,18 @@ export function attachStoreIPC(child, runtime) {
     if (message?.type === "store-step-ended") {
       const work = deferred.get(message.step) ?? [];
       deferred.delete(message.step);
-      for (const {continuation, resolve, type, name} of work) {
-        try { if (!message.ok) continuation.fail?.("activation step dumped"); resolve(message.ok ? await continuation() : {EV_ACTIVE: "", EV_NOTE: "activation step dumped", type, name}); }
-        catch (error) { resolve({EV_ACTIVE: "", EV_NOTE: String(error.message ?? error), type, name}); }
+      try {
+        for (const {continuation, resolve, type, name} of work) {
+          try {
+            if (!message.ok) continuation.fail?.("activation step dumped");
+            resolve(message.ok ? await continuation() : {EV_ACTIVE: "", EV_NOTE: "activation step dumped", type, name});
+          } catch (error) {
+            continuation.fail?.(String(error.message ?? error));
+            resolve({EV_ACTIVE: "", EV_NOTE: String(error.message ?? error), type, name});
+          }
+        }
+      } finally {
+        if (message.acknowledge) sendIPC(child, {type: "store-step-completed", step: message.step});
       }
       return;
     }

@@ -22,7 +22,7 @@ export function installTimerManager(abap) {
   };
 }
 
-export function apcTimerSession(abap, deliver, failure) {
+export function apcTimerSession(abap, deliver, failure, drain) {
   installTimerManager(abap);
   const session = {closed: false, armed: new Map(), manager: new abap.Classes.CL_ABAP_TIMER_MANAGER()};
   active.add(session);
@@ -52,6 +52,9 @@ export function apcTimerSession(abap, deliver, failure) {
         if (session.closed || session.armed.get(handler) !== entry) return;
         session.armed.delete(handler);
         await handler.if_abap_timer_handler$on_timeout();
+        // Outbound delivery belongs to the timer's event, before commit
+        // and after-step publication, just as it does for on_message.
+        await drain?.();
       })).catch(failure);
     }), timeout);
   };

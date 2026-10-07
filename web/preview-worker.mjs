@@ -70,21 +70,27 @@ self.addEventListener("message", (event) => {
     return;
   }
   const send = (payload) => port.postMessage(payload);
+  // Register startup first. Once the backend is ready, openChannel installs
+  // the mailbox synchronously; later port events join it even during startup.
+  const ready = backendOf();
+  void run(async () => {
+    const backend = await ready;
+    await backend.openChannel(message.id, channel, send);
+  });
   port.onmessage = (inner) => {
     const body = inner.data;
     if (body?.apc === "message") {
-      void run(() => backendOf().then((b) => b.channelMessage(message.id, body.text, send)));
+      void run(async () => {
+        const backend = await ready;
+        await backend.channelMessage(message.id, body.text, send);
+      });
     } else if (body?.apc === "close") {
-      void run(() => backendOf().then((b) => b.closeChannel(message.id)));
+      void run(async () => {
+        const backend = await ready;
+        await backend.closeChannel(message.id);
+      });
     }
   };
-  // openChannel signals the open itself, before it drains what on_start
-  // pushed, because the page must be OPEN before its onmessage can fire
-  void run(async () => {
-    const backend = await backendOf();
-    await backend.openChannel(message.id, channel, send);
-  });
-
   // a failure here is the handler's, and the page can only be told by the
   // socket closing; saying why in the reason is the whole of what we can do
   //
@@ -95,6 +101,8 @@ self.addEventListener("message", (event) => {
     try {
       await work();
     } catch (error) {
+      const backend = await backendOf().catch(() => undefined);
+      await backend?.closeChannel(message.id).catch(() => {});
       send({apc: "close", code: 1011, reason: describe(error)});
     }
   }
