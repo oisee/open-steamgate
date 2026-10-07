@@ -3855,3 +3855,16 @@ Not an anomaly, recorded for porting: on 7.58, `FIND ... REGEX` (POSIX) raises a
   the instance ID's builtin type to SSTRING; it still lacked the measured element.
 - Regression: test/daemon-api.mjs, measured DDIC/order/START parameter check;
   test/unit/zcl_osd_daemon_api.clas.abap compiles calls using the interface types.
+
+### ANOMALY-2026-10-07-sections-nonfinal - a non-final global class with only a PUBLIC SECTION is accepted
+
+- Status: `open`
+- Discovery: abapiti's translated abaplint lexer on A4H: none of its 113 generated classes activated, 105 of them reported this error (the rest only follow-up errors); osgo and OSG-JS ran the same classes green.
+- Affected path: osgo, the JS runtime (OSG-JS) and the abaplint syntax check (@abaplint/core 2.120.56, v750, check_syntax: no issue on the reproducer or the controls).
+- Reproducer: `CLASS zcl_x DEFINITION PUBLIC CREATE PUBLIC. PUBLIC SECTION. METHODS m RETURNING VALUE(rv) TYPE i. ENDCLASS.` with any implementation. Controls: the same class with `FINAL`, or with empty `PROTECTED SECTION.` and `PRIVATE SECTION.`, activates; a class with no section statement at all also activates.
+- Expected SAP behaviour (7.58, measured 2026-10-07 in a throwaway package): the class does not activate, "For technical reasons, the statement "PROTECTED SECTION" or "PRIVATE SECTION" must exist in non-final global classes."; subclasses and users then fail with follow-up errors (type unknown, superclass CREATE PRIVATE).
+- Actual local behaviour: osgo 3/3 and OSG-JS 3/3 pass the reproducer and both controls; abaplint reports nothing.
+- Workaround: generators always write all three sections (abapiti does since this finding).
+- Regression: none yet.
+- Upstream: not filed.
+- Upstream version containing a fix: unknown.
