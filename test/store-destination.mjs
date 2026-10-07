@@ -1443,6 +1443,54 @@ CLASS ltcl_loop IMPLEMENTATION. METHOD loop. DO. ENDDO. ENDMETHOD. METHOD later.
       } finally {abap.context.RFCDestinations.STORE = previous; endEnqSession(owner);}
     }
   });
+  for (const stage of ['validation', 'build']) {
+    it(`tracks STORE to ADT recovery and ADT to STORE failure across ${stage}`, async () => {
+      const {default: express} = await import('express');
+      const {adtRouter} = await import('../tools/adt-facade.mjs');
+      const app = express();
+      app.use(express.raw({type: '*/*'}));
+      app.use(adtRouter({store, watch: false}).router);
+      const server = await new Promise(resolve => {const listener = app.listen(0, () => resolve(listener));});
+      const base = `http://localhost:${server.address().port}/sap/bc/adt`;
+      const csrf = await fetch(`${base}/core/discovery`, {method: 'HEAD', headers: {'x-csrf-token': 'fetch'}});
+      const headers = {'content-type': 'application/xml', 'x-csrf-token': csrf.headers.get('x-csrf-token'),
+        cookie: csrf.headers.getSetCookie().map(c => c.split(';')[0]).join('; ')};
+      const adt = async () => {
+        const response = await fetch(`${base}/activation?method=activate`, {method: 'POST', headers,
+          body: `<adtcore:objectReferences xmlns:adtcore="http://www.sap.com/adt/core"><adtcore:objectReference adtcore:uri="/sap/bc/adt/oo/classes/${green.toLowerCase()}" adtcore:name="${green}"/></adtcore:objectReferences>`});
+        expect(response.status).to.equal(200);
+        return response.text();
+      };
+      const activateStore = async () => JSON.parse((await call(destination,
+        {IV_COMMAND: 'ACTIVATE', IV_TYPE: 'CLAS', IV_NAME: green})).EV_JSON);
+      const publish = store.publish;
+      const breakActivation = async () => {
+        if (stage === 'validation') await store.write('CLAS', green, main(green).replace('rv_answer = 42', 'undefined_variable = 42'));
+        else store.publish = async () => {throw new Error('injected publication failure');};
+      };
+      const fix = async () => {store.publish = publish; await store.write('CLAS', green, main(green));};
+      try {
+        await breakActivation();
+        const failedStore = await activateStore();
+        expect(failedStore).to.include({state: 'failed', failure_stage: stage});
+        expect((await run([green])).error).to.include({code: 'PUBLICATION_FAILED', op_id: failedStore.op_id});
+        await fix();
+        expect(await adt()).to.contain('activationExecuted="true"');
+        expect((await run([green])).state).to.equal('ran');
+        await breakActivation();
+        expect(await adt()).to.contain('activationExecuted="false"');
+        const failedADT = Object.values(activationJournal(store).entries).at(-1);
+        expect(failedADT).to.include({state: 'failed', failure_stage: stage});
+        expect((await run([green])).error).to.include({code: 'PUBLICATION_FAILED', op_id: failedADT.op_id});
+        await fix();
+        expect((await activateStore()).state).to.equal('published');
+        expect((await run([green])).state).to.equal('ran');
+      } finally {
+        await fix();
+        await new Promise(resolve => server.close(resolve));
+      }
+    });
+  }
   it('follows publication and promotion through the shared ObjectStore path used by ADT', async () => {
     await store.write('CLAS', green, tests(green, 41), 'testclasses');
     const checked = store.activate('CLAS', green);

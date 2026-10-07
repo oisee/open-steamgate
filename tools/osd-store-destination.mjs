@@ -500,17 +500,14 @@ export class StoreDestination {
   }
 
   async #activate(type, name, started, store) {
-    const {prepareActivation, publishActivation} = await import("./osd-publish-activation.mjs");
-    const {activationJournal, recordBaselineGeneration} = await import("./osd-activation-journal.mjs");
-    const journal = activationJournal(store);
-    const {liveHash} = await import("./osd-build.mjs");
-    recordBaselineGeneration(store, () => store.served?.generation ?? liveHash(store.root));
-    const operation = journal.create(type, name);
+    const {prepareActivation, publishActivation, beginActivation} = await import("./osd-publish-activation.mjs");
+    const attempt = beginActivation(store, [{type, name}]);
+    const [operation] = attempt.operations;
     const failedAnswer = (error, stage) => {
       const rejected = refusal(error);
       const envelope = JSON.parse(rejected.EV_JSON).error;
-      const failed = journal.update(operation.op_id, {state: "failed", active: false, live: false,
-        failure_stage: stage, note: String(error.message ?? error), error: envelope});
+      const failed = attempt.update({state: "failed", active: false, live: false,
+        failure_stage: stage, note: String(error.message ?? error), error: envelope})[0];
       return {...rejected, EV_JSON: JSON.stringify(failed)};
     };
     let result;
@@ -529,7 +526,7 @@ export class StoreDestination {
     ];
     if (result.active !== true) {
       return {
-        EV_JSON: JSON.stringify(journal.update(operation.op_id, {state: "failed", failure_stage: "validation", issues})),
+        EV_JSON: JSON.stringify(attempt.fail("validation", {issues})[0]),
         EV_ACTIVE: "",
         EV_COUNT: String(issues.length),
         EV_MS: String(Date.now() - started),
@@ -584,15 +581,8 @@ export class StoreDestination {
         ...regenerated.removed.map((path) => generatedRow(path, "removed")),
       ];
       return {
-        EV_JSON: JSON.stringify(journal.update(operation.op_id, {
-          state: committed && published?.generation ? "published" : "failed",
-          generation_id: committed && published?.generation ? published.generation : "",
-          active: committed, live: published.live, verified: published.verified,
-          failure_stage: published.failureStage,
-          note: !committed ? published.error ?? published.transpile?.error ?? "publication failed or checked source changed"
-            : published.verified ? "published" : "published; warm-unverified",
-          issues: failureEntries?.flatMap(entry => (entry.issues ?? []).map(issue => issueRow(issue, entry))) ?? [],
-        })),
+        EV_JSON: JSON.stringify(attempt.finish(published,
+          failureEntries?.flatMap(entry => (entry.issues ?? []).map(issue => issueRow(issue, entry))) ?? [])[0]),
         EV_ACTIVE: committed ? "X" : "",
         EV_LIVE: published.live ? "X" : "",
         EV_NOTE: published?.ok === false
@@ -611,7 +601,7 @@ export class StoreDestination {
         return failedAnswer(error, "build");
       }
     };
-    journal.update(operation.op_id, {state: "pending", active: true, note: "publication pending"});
+    attempt.update({state: "pending", active: true, note: "publication pending"});
     const {currentStepToken, holderToken, stepContextTracked, onAfterStep} = await import("./osd-dialog-step.mjs");
     const token = stepContextTracked() ? currentStepToken() : holderToken();
     const defer = systemCalls?.getStore()?.deferActivate ?? (token?.afterStep === undefined ? undefined
@@ -619,10 +609,10 @@ export class StoreDestination {
         ? continuation.fail("activation step dumped") : continuation()));
     if (defer !== undefined) {
       const continuation = async () => ({...await publish(), type, name, failureEntries});
-      continuation.fail = note => journal.update(operation.op_id, {state: "failed", active: false, failure_stage: "step", note});
+      continuation.fail = note => attempt.fail("step", {note})[0];
       try { defer(continuation); }
       catch (error) { return failedAnswer(error, "step"); }
-      return {EV_JSON: JSON.stringify(journal.lookup(operation.op_id)), EV_ACTIVE: "X", EV_LIVE: "", EV_NOTE: "live after the step", EV_COUNT: "0", EV_MS: String(Date.now() - started)};
+      return {EV_JSON: JSON.stringify(attempt.lookup()[0]), EV_ACTIVE: "X", EV_LIVE: "", EV_NOTE: "live after the step", EV_COUNT: "0", EV_MS: String(Date.now() - started)};
     }
     if (token !== undefined) {
       const note = "ACTIVATE inside a step needs an after-step publication binding";
