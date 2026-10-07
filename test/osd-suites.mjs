@@ -529,7 +529,9 @@ describe("required PR retry reports", () => {
         return current;
       },
       readFileSync: (file) => {
-        if (file.startsWith("adt-lifecycle-results/")) return mode === "missing-lifecycle-report" ? "" : "### ADT lifecycle: PASS";
+        if (file.startsWith("adt-lifecycle-results/")) return mode === "missing-lifecycle-report" ? "" :
+          mode === "lifecycle-warning" ? "### ADT lifecycle: PASS\n\n#### Timing advisory: ⚠️ WARN\nABAP-FS/CLAS/activate-edit: 4000 ms, main 2000 ms, normalized 2.000x" :
+          mode === "lifecycle-failed" ? "### ADT lifecycle: FAIL\nActive readback mismatch" : "### ADT lifecycle: PASS";
         if (mode === "unreadable") throw Error("unreadable report");
         return mode === "retained" && file.includes("suite-results-1-attempt-1") ? "flaky: earlier isolation recovery" : "";
       },
@@ -546,7 +548,7 @@ describe("required PR retry reports", () => {
         }
         return [{name: "suites (1)", conclusion: "success"},
           {name: "kernel-conformance", conclusion: mode === "kernel-failed" ? "failure" : "success"},
-          {name: "adt-lifecycle", conclusion: mode === "lifecycle-skipped" ? "skipped" : "success"}];
+          {name: "adt-lifecycle", conclusion: mode === "lifecycle-skipped" ? "skipped" : mode === "lifecycle-failed" ? "failure" : "success"}];
       },
       rest: {actions: {listJobsForWorkflowRunAttempt() {}}, issues: {
         listComments() {}, createComment(args) { body = args.body; }, updateComment(args) { body = args.body; },
@@ -556,6 +558,7 @@ describe("required PR retry reports", () => {
     const results = structuredClone(requiredResults);
     if (mode === "kernel-failed") results["kernel-conformance"].result = "failure";
     if (mode === "lifecycle-skipped") results["adt-lifecycle"].result = "skipped";
+    if (mode === "lifecycle-failed") results["adt-lifecycle"].result = "failure";
     if (mode.startsWith("missing-job:")) delete results[mode.slice("missing-job:".length)];
     try {
       await new (Object.getPrototypeOf(async function () {}).constructor)("require", "github", "context", "process", "console", script)(
@@ -584,6 +587,16 @@ describe("required PR retry reports", () => {
     const {body} = await execute("lifecycle-skipped");
     expect(body).to.contain("| adt-lifecycle | ⚪ skipped |");
     expect(body).not.to.contain("🔴 fail");
+  });
+  it("keeps lifecycle timing warnings visible with a green functional row and PR gate", async () => {
+    const {body} = await execute("lifecycle-warning");
+    expect(body).to.contain("### PR tests: 🟢 pass").and.contain("| adt-lifecycle | 🟢 pass |");
+    expect(body).to.contain("Timing advisory: ⚠️ WARN").and.contain("normalized 2.000x");
+  });
+  it("shows functional lifecycle failures as red in the PR row and gate", async () => {
+    const {body} = await execute("lifecycle-failed");
+    expect(body).to.contain("### PR tests: 🔴 fail").and.contain("| adt-lifecycle | 🔴 fail |");
+    expect(body).to.contain("Active readback mismatch");
   });
   it("reports a failed required kernel job as red", async () => {
     const {body} = await execute("kernel-failed");
