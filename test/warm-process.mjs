@@ -36,6 +36,7 @@ describe("warm compiler process: source isolation and bounded cold fallback", fu
   };
   beforeEach(async () => {
     root = mkdtempSync(join(tmpdir(), "osd-warm-ipc-"));
+    writeFileSync(join(root, "abaplint.jsonc"), JSON.stringify({syntax: {version: "OpenABAP"}}));
     mkdirSync(join(root, "src"));
     for (const name of ["zcl_a", "zcl_b"]) writeFileSync(join(root, "src", `${name}.clas.abap`), source(name, 1));
     writeFileSync(join(root, "abap_transpile.json"), JSON.stringify({

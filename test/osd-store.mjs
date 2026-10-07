@@ -420,6 +420,7 @@ ENDCLASS.
 PUBLIC SECTION. CLASS-METHODS run. ENDCLASS.
 CLASS zcl_osd_probe_caller IMPLEMENTATION.
 METHOD run. DATA probe TYPE REF TO zcl_osd_probe. CREATE OBJECT probe. probe->run( ). ENDMETHOD. ENDCLASS.`);
+    expect(store.completeActivation(store.activate("CLAS", "ZCL_OSD_PROBE_CALLER", {activating: ["CLAS ZCL_OSD_PROBE"]}))).to.equal(true);
     const registry = store.registry();
     expect(store.check("CLAS", "ZCL_OSD_PROBE_CALLER").issues).to.deep.equal([]);
     store.write("CLAS", "ZCL_OSD_PROBE", CLASS.replaceAll("run", "renamed"));

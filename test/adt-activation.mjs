@@ -48,7 +48,8 @@ describe("tools/adt-facade: a failed activation stays inactive", function () {
     store = new ObjectStore({root, libs: [], build: {generators: false}});
     const app = express();
     app.use(express.raw({type: "*/*", limit: "16mb"}));
-    app.use(adtRouter({store, watch: false}).router);
+    const {adtAbap} = await import('./helpers/adt-abap.mjs');
+    app.use(adtRouter({store, watch: false, abap: process.env.OSD_ADT_ONE_RUNTIME === '1' ? await adtAbap() : undefined}).router);
     await new Promise((done) => {
       server = app.listen(0, done);
     });

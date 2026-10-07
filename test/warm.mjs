@@ -1125,6 +1125,7 @@ describe("tools/osd-warm: the build view, with other objects inactive", function
       this.skip();
     }
     root = realpathSync(mkdtempSync(join(tmpdir(), "osd-warm-view-")));
+    writeFileSync(join(root, "abaplint.jsonc"), JSON.stringify({syntax: {version: "OpenABAP"}}));
     mkdirSync(join(root, "src"));
     writeFileSync(join(root, "src", "zcl_wv_a.clas.abap"), src(A, 1));
     writeFileSync(join(root, "src", "zcl_wv_b.clas.abap"), src(B, 1));
@@ -1350,6 +1351,7 @@ describe("tools/osd-warm: an inactive generator input keeps its active view", fu
       this.skip();
     }
     root = realpathSync(mkdtempSync(join(tmpdir(), "osd-warm-gen-")));
+    writeFileSync(join(root, "abaplint.jsonc"), JSON.stringify({syntax: {version: "OpenABAP"}}));
     mkdirSync(join(root, "src"));
     writeFileSync(join(root, "src", "zcl_wg_a.clas.abap"), src("ZCL_WG_A", 1));
     writeFileSync(join(root, "src", "zwg_v.ddls.asddls"), view("mandt"));

@@ -3,7 +3,7 @@
 import {expect} from "chai";
 import {spawn} from "node:child_process";
 import {once} from "node:events";
-import {cpSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
+import {cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {createRequire} from "node:module";
 import {tmpdir} from "node:os";
 import {join, resolve} from "node:path";
@@ -26,7 +26,11 @@ describe("warm startup: ready means the front answers during priming", function 
       // Own the cold baseline: earlier suites may leave checkout live/gen
       // on another tree. Neither readiness nor cleanup should depend on that.
       for (const folder of ["src", "gen", "packs", "data", "webapp"]) cpSync(resolve(folder), join(dir, folder), {recursive: true});
-      for (const folder of ["tools", "test", "node_modules", ".local"]) symlinkSync(resolve(folder), join(dir, folder));
+      for (const folder of ["tools", "test", "node_modules"]) symlinkSync(resolve(folder), join(dir, folder));
+      // Libraries are shared read-only; journals and runtime state belong to
+      // this source host rather than the test runner's source tree.
+      mkdirSync(join(dir, ".local"));
+      symlinkSync(resolve(".local/lars"), join(dir, ".local/lars"));
       for (const file of ["abap_transpile.json", "abaplint.jsonc", "libs.lock.json", "package.json"]) cpSync(resolve(file), join(dir, file));
       await build({root: dir});
       child = spawn(process.execPath, [join(dir, "test", "run.mjs")], {

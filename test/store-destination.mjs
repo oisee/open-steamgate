@@ -714,6 +714,9 @@ describe('STORE CREATE/DELETE repository lifecycle', function () {
 });
 
 describe('STORE activation operation tracking', function () {
+  // Several durable journal writes/reloads per case exceed mocha's 2s default
+  // on a contended filesystem; keep a finite budget for the complete operation.
+  this.timeout(30000);
   let root;
   beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'activation-operation-')); });
   afterEach(() => { rmSync(root, {recursive: true, force: true}); });
@@ -923,8 +926,8 @@ describe('STORE activation operation tracking', function () {
     const failed = journal.create('CLAS', 'ZCL_READER_JOURNAL');
     journal.update(failed.op_id, {state: 'failed', failure_stage: 'validation'});
     const child = spawn(process.execPath, ['--input-type=module', '-e',
-      'const {ObjectStore}=await import(process.argv[1]); const store=new ObjectStore({root:process.argv[2],libs:[]}); if(!store.exists("CLAS","ZCL_READER_JOURNAL")) process.exit(2);',
-      new URL('../tools/osd-store.mjs', import.meta.url).href, root],
+      'const {ObjectStore}=await import(process.argv[2]); const store=new ObjectStore({root:process.argv[3],libs:[]}); if(!store.exists("CLAS","ZCL_READER_JOURNAL")) process.exit(2);',
+      'journal-reader', new URL('../tools/osd-store.mjs', import.meta.url).href, root],
       {stdio: ['ignore', 'ignore', 'pipe']});
     let stderr = '';
     child.stderr.on('data', data => {stderr += data;});
@@ -1460,15 +1463,16 @@ CLASS ltcl_loop IMPLEMENTATION. METHOD loop. DO. ENDDO. ENDMETHOD. METHOD later.
     channel.send = message => queueMicrotask(() => parent.emit('message', message));
     attachStoreIPC(parent, {storeDestination: destination});
     const client = new StoreIPCClient(channel);
+    const currentGeneration = activationJournal(store).currentGeneration();
     const signature = {exporting: {IV_COMMAND: box('RUN_TESTS'), IV_JSON: box(JSON.stringify({
-      targets: [{type: 'CLAS', name: green}], expected_generation: generation}))}, importing: {EV_JSON: box(''), EV_ERROR: box('')}};
+      targets: [{type: 'CLAS', name: green}], expected_generation: currentGeneration}))}, importing: {EV_JSON: box(''), EV_ERROR: box('')}};
     try {
       const pending = client.call('ZOSD_STORE', signature);
       expect([...client.pending.values()][0].timer).to.equal(undefined);
       await pending;
       const response = answerOf(signature);
       expect(response.EV_ERROR).to.equal('');
-      expect(JSON.parse(response.EV_JSON)).to.include({state: 'ran', generation_id: generation});
+      expect(JSON.parse(response.EV_JSON)).to.include({state: 'ran', generation_id: currentGeneration});
       expect(JSON.parse(response.EV_JSON).counts.pass).to.equal(1);
     } finally {client.close(); parent.connected = false; parent.emit('disconnect');}
   });
@@ -1556,12 +1560,15 @@ CLASS ltcl_loop IMPLEMENTATION. METHOD loop. DO. ENDDO. ENDMETHOD. METHOD later.
     }
   });
   for (const stage of ['validation', 'build']) {
-    it(`tracks STORE to ADT recovery and ADT to STORE failure across ${stage}`, async () => {
+    it(`tracks STORE to ADT recovery and ADT to STORE failure across ${stage} (${process.env.OSD_ADT_ONE_RUNTIME === '1' ? 'ABAP front' : 'Node entry'})`, async () => {
       const {default: express} = await import('express');
       const {adtRouter} = await import('../tools/adt-facade.mjs');
       const app = express();
       app.use(express.raw({type: '*/*'}));
-      app.use(adtRouter({store, watch: false}).router);
+      const {adtAbap} = await import('./helpers/adt-abap.mjs');
+      const frontEntries = [];
+      app.use(adtRouter({store, watch: false, abap: process.env.OSD_ADT_ONE_RUNTIME === '1' ? await adtAbap() : undefined,
+        abapServed: (by, req) => frontEntries.push({by, path: req.path})}).router);
       const server = await new Promise(resolve => {const listener = app.listen(0, () => resolve(listener));});
       const base = `http://localhost:${server.address().port}/sap/bc/adt`;
       const csrf = await fetch(`${base}/core/discovery`, {method: 'HEAD', headers: {'x-csrf-token': 'fetch'}});
@@ -1571,6 +1578,10 @@ CLASS ltcl_loop IMPLEMENTATION. METHOD loop. DO. ENDDO. ENDMETHOD. METHOD later.
         const response = await fetch(`${base}/activation?method=activate`, {method: 'POST', headers,
           body: `<adtcore:objectReferences xmlns:adtcore="http://www.sap.com/adt/core"><adtcore:objectReference adtcore:uri="/sap/bc/adt/oo/classes/${green.toLowerCase()}" adtcore:name="${green}"/></adtcore:objectReferences>`});
         expect(response.status).to.equal(200);
+        if (process.env.OSD_ADT_ONE_RUNTIME === '1') {
+          expect(response.headers.get('x-osd-served-by')).to.equal('HOST');
+          expect(frontEntries.some(entry => entry.path.endsWith('/activation'))).to.equal(true);
+        }
         return response.text();
       };
       const activateStore = async () => JSON.parse((await call(destination,

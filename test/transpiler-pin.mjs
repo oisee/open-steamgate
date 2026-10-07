@@ -9,8 +9,11 @@ import {hashOf, inputsOf} from "../tools/osd-build.mjs";
 import {warmUp} from "../tools/osd-store-warm.mjs";
 
 function fixture() {
-  mkdirSync(".local", {recursive: true});
-  const root = mkdtempSync(resolve(".local/pin-test-"));
+  // Checkouts used for shard validation may themselves be temporary. The
+  // fixture's explicit pins must still live outside temporary storage.
+  const base = resolve(process.env.OSD_PIN_TEST_ROOT ?? ".local");
+  mkdirSync(base, {recursive: true});
+  const root = mkdtempSync(join(base, "pin-test-"));
   const clone = join(root, "persistent");
   mkdirSync(clone);
   const put = (file, text) => { mkdirSync(join(clone, file, ".."), {recursive: true}); writeFileSync(join(clone, file), text); };
