@@ -5,6 +5,7 @@ import * as abaplint from "@abaplint/core";
 import {ddlsIssues} from "./osd-store-ddls.mjs";
 import {config as publicationValidation} from "@abaplint/transpiler/build/src/validation.js";
 import {TYPES} from "./osd-store-types.mjs";
+import {OBJECT_NAME_PATTERN} from "./osd-object-name.mjs";
 
 // The parse is shared per root. Known source mutations queue only their files;
 // configuration/root changes invalidate the whole registry.
@@ -33,7 +34,7 @@ function indexObject(index, object) {
     if (!readers?.size) index.readers.delete(word);
   }
   const words = new Set(object.getFiles().flatMap(file =>
-    file.getRaw().toUpperCase().match(/(?:\/[A-Z0-9_]+\/)?[A-Z_][A-Z0-9_]*/g) ?? []));
+    file.getRaw().toUpperCase().match(new RegExp(OBJECT_NAME_PATTERN, "g")) ?? []));
   index.words.set(object, words);
   for (const word of words) {
     if (!index.readers.has(word)) index.readers.set(word, new Set());

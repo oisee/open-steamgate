@@ -602,3 +602,31 @@ describe("the libraries the store reads are the ones the build reads", function 
     expect(held.length).to.be.lessThan(592);
   });
 });
+
+// A valid numeric include must participate in the same retained dependency index.
+describe('ObjectStore numeric include invalidation', function () {
+  let root, store;
+  before(() => {
+    root = mkdtempSync(join(tmpdir(), 'numeric-include-'));
+    mkdirSync(join(root, 'src'));
+    writeFileSync(join(root, 'abap_transpile.json'), JSON.stringify({input_folder: 'src', libs: []}));
+    writeFileSync(join(root, 'abaplint.jsonc'), JSON.stringify({syntax: {version: 'v702'}}));
+    writeFileSync(join(root, 'src/123.prog.abap'), 'DATA gv_old TYPE i.\n');
+    writeFileSync(join(root, 'src/zreader.prog.abap'), 'REPORT zreader.\nINCLUDE 123.\nSTART-OF-SELECTION.\ngv_old = 1.\n');
+    activeFixture(root);
+    store = new ObjectStore({root, libs: []});
+  });
+  after(() => rmSync(root, {recursive: true, force: true}));
+  it('refuses a variable rename used by an active cached reader, then recovers', () => {
+    expect(store.check('PROG', 'ZREADER').issues).to.deep.equal([]);
+    const registry = store.registry();
+    store.write('INCL', '123', 'DATA gv_new TYPE i.\n');
+    const result = store.activate('INCL', '123');
+    expect(store.registry()).to.equal(registry);
+    expect(result.active).to.equal(false);
+    expect(result.dependents.map(d => d.name)).to.include('ZREADER');
+    expect(result.dependents.flatMap(d => d.issues).some(i => /gv_old/i.test(i.message))).to.equal(true);
+    store.write('INCL', '123', 'DATA gv_old TYPE i.\n');
+    expect(store.activate('INCL', '123').active).to.equal(true);
+  });
+});
