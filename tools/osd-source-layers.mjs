@@ -58,7 +58,7 @@ function materialize(root, archive) {
   return {dir: target, id};
 }
 export function userLayersOf(root, env = process.env) {
-  const layers = [];
+  const layers = [], mounts = {};
   for (const input of (env.OSD_LAYERS ?? '').split(delimiter).filter(Boolean)) {
     const archive = resolve(root, input);
     if (!existsSync(archive)) {
@@ -108,20 +108,21 @@ export function userLayersOf(root, env = process.env) {
       }
     };
     headers(source);
-    const mountsFile = join(root, 'local/overlays/.osd-mounts.txt');
-    let mounts = {};
-    if (existsSync(mountsFile)) mounts = JSON.parse(readFileSync(mountsFile, 'utf8'));
-    // Same layer = resolved abapGit root package; versions may have different
-    // archive paths. Different repositories sharing a package share this key.
-    if (mounts[pkg] !== id) {
-      mounts[pkg] = id;
-      const temp = mountsFile + `.${process.pid}.tmp`;
-      writeFileSync(temp, JSON.stringify(mounts)); renameSync(temp, mountsFile);
-    }
+    // Keep every configured revision, including simultaneous ZIPs of one package.
+    (mounts[pkg] ??= []).push(id);
     const metadata = join(root, 'local/overlays', id + '.meta.txt');
     if (!existsSync(metadata)) writeFileSync(metadata, JSON.stringify({key: pkg, archiveId: id}));
     layers.push({path, writable: false, library: false, ...meta, archiveId: id, overlay});
     layers.push({path: overlay, writable: true, library: false, ...meta, overlayOf: path});
+  }
+  // Reconcile the complete configuration, dropping historical mounts.
+  const mountsFile = join(root, 'local/overlays/.osd-mounts.txt');
+  if (env.OSD_LAYER_DISCOVERY_ONLY !== "1" && existsSync(dirname(mountsFile))) {
+    const content = JSON.stringify(mounts);
+    if (!existsSync(mountsFile) || readFileSync(mountsFile, 'utf8') !== content) {
+      const temp = mountsFile + `.${process.pid}.tmp`;
+      writeFileSync(temp, content); renameSync(temp, mountsFile);
+    }
   }
   return layers;
 }

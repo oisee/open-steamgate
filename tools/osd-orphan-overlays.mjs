@@ -16,7 +16,7 @@ const filesOf = (folder, files = []) => {
 export function orphanedOverlays(root) {
   const home = join(root, 'local/overlays'), mounted = readJSON(join(home, '.osd-mounts.txt'));
   if (!existsSync(home)) return [];
-  const current = new Set(Object.values(mounted));
+  const current = new Set(Object.values(mounted).flat());
   const result = [];
   for (const e of readdirSync(home, {withFileTypes: true})) {
     if (!e.isDirectory() || !/^[a-f0-9]{64}$/.test(e.name) || current.has(e.name)) continue;

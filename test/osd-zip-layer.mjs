@@ -174,6 +174,27 @@ describe('immutable abapGit ZIP source layers', function () {
     expect(orphanedOverlays(root)).to.deep.equal([]);
   });
 
+  it('doctor reports removed-package overlays and recognizes simultaneous revisions of one package', () => {
+    const first = zip(), firstArchive = archive;
+    new ObjectStore({root, libs: []}).write('CLAS', 'ZCL_ZIP_DEMO', source('A edited'));
+    write('src/zcl_zip_demo.clas.abap', source('B base'));
+    archive = join(scratch, 'fixture-v2.zip'); const second = zip(), secondArchive = archive;
+    process.env.OSD_LAYERS = firstArchive + ':' + secondArchive; userLayersOf(root);
+    expect(orphanedOverlays(root)).to.deep.equal([]);
+    new ObjectStore({root, libs: []}).registry(); // A projected registry view is not a new mount configuration.
+    expect(orphanedOverlays(root)).to.deep.equal([]);
+    // An entirely different package replaces the configured layer set.
+    write('src/package.devc.xml', xml.replace('$ZDEMO', '$ZOTHER'));
+    archive = join(scratch, 'other.zip'); zip();
+    expect(orphanedOverlays(root)).to.have.length(1);
+    expect(orphanedOverlays(root)[0]).to.include({sha256: first[0].archiveId, sameLayer: false});
+    const doctor = execFileSync(process.execPath, ['bin/osd.mjs', 'doctor'], {env: {...process.env, OSD_ROOT: root}, encoding: 'utf8'});
+    expect(doctor).to.include(first[0].archiveId).and.include('orphaned overlay');
+    process.env.OSD_LAYERS = ''; userLayersOf(root);
+    expect(JSON.parse(readFileSync(join(root, 'local/overlays/.osd-mounts.txt'), 'utf8'))).to.deep.equal({});
+    expect(orphanedOverlays(root)).to.have.length(1);
+  });
+
   it('reuses identical bytes and changes identity for different ZIP bytes, even just a comment', () => {
     const first=zip(), hash=hashOf(root,inputsOf(root));
     writeFileSync(join(root,'local/overlays',first[0].archiveId+'.meta.txt'), JSON.stringify({key:'$ZDEMO',checked:true}));
