@@ -128,8 +128,7 @@ function classUnitResultDocument(run, base, withNavigationUri) {
     const raised = items.find(d => /^Raised in \w+$/.test(d))?.slice("Raised in ".length);
     const methodName = m?.name ?? raised?.toUpperCase();
     const title = a.title || "Unit test assertion failed";
-    const message = a.assertion ? a.assertion.message || a.assertion.method
-      : title === "Unit test assertion failed" && comparison.length > 0 ? "ASSERT_EQUALS" : title;
+    const message = a.assertion ? a.assertion.message || a.assertion.method : title;
     const renderedTitle = failedAssertion && methodName && !title.startsWith("Critical Assertion Error:")
       ? `Critical Assertion Error: '${a.assertion?.message || `${methodName.toLowerCase().replace(/(^|_)([a-z])/g, (_, prefix, letter) => prefix + letter.toUpperCase())}: ${message}`}'` : title;
     const details = [];

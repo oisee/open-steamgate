@@ -1,6 +1,30 @@
-// Keep the operands' RTTI alongside open-abap-core's string-only exception
+// Keep scalar type provenance alongside open-abap-core's string-only exception
 // fields. This hook changes no comparisons or exception text.
 const installed = new WeakSet();
+const scalarKinds = {Integer: "I", Integer8: "8", Packed: "P", Float: "F",
+  DecFloat34: "e", Character: "C", String: "g", Numc: "N"};
+
+function describeScalar(abap, value) {
+  try {
+    // Generic ANY retains its concrete runtime object. CASTING can allocate
+    // temporary values in getPointer(), so leave it on the verbatim fallback.
+    while (value instanceof abap.types.FieldSymbol) {
+      if (value.casting) return undefined;
+      value = value.getPointer();
+    }
+    const kind = Object.entries(scalarKinds).find(([name]) => value?.constructor === abap.types[name])?.[1];
+    if (kind === undefined) return undefined;
+    // These scalar readers only read storage; no ABAP objects, RTTI descriptors,
+    // caches, anonymous type counters or system fields are created or changed.
+    const decimals = kind === "P" ? value.getDecimals() : 0;
+    const scalar = kind === "F" || kind === "e" ? value.getRaw()
+      : kind === "P" ? value.toFixed(decimals) : value.get();
+    return {typeKind: kind, decimals, value: String(scalar)};
+  } catch {
+    // Unavailable provenance must never cause a numeric guess from text.
+    return undefined;
+  }
+}
 
 export function installUnitAssert(abap) {
   const assertion = abap?.Classes?.CL_ABAP_UNIT_ASSERT;
@@ -13,26 +37,8 @@ export function installUnitAssert(abap) {
     } catch (error) {
       if (error?.constructor?.name === "kernel_cx_assert" && !error.assertion &&
           (error.expected?.get?.() !== "" || error.actual?.get?.() !== "")) {
-        const system = abap.builtin.sy.clone();
-        const describe = async value => {
-          try {
-            // Generic ANY and field symbols retain the concrete operand type.
-            while (value instanceof abap.types.FieldSymbol) value = value.getPointer();
-            const type = (await abap.Classes.CL_ABAP_TYPEDESCR.describe_by_data({p_data: value})).get();
-            const kind = type.type_kind.get();
-            const scalar = ["F", "e"].includes(kind) ? value.getRaw()
-              : kind === "P" && value.toFixed ? value.toFixed(type.decimals.get()) : value.get();
-            return {typeKind: type.type_kind.get(), decimals: type.decimals.get(),
-              ...(typeof scalar === "string" || typeof scalar === "number" || typeof scalar === "bigint"
-                ? {value: String(scalar)} : {})};
-          } catch {
-            // Unavailable RTTI must never cause a numeric guess from text.
-            return undefined;
-          }
-        };
         error.assertion = {method: "ASSERT_EQUALS", message: input?.msg?.get?.()?.trimEnd() ?? "",
-          expected: await describe(input?.exp), actual: await describe(input?.act)};
-        abap.builtin.sy.set(system);
+          expected: describeScalar(abap, input?.exp), actual: describeScalar(abap, input?.act)};
       }
       throw error;
     }

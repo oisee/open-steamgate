@@ -1,5 +1,7 @@
 import {expect} from "chai";
 import express from "express";
+import {execFile} from "node:child_process";
+import {promisify} from "node:util";
 import {cpSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join, resolve} from "node:path";
@@ -10,7 +12,7 @@ import {StoreDestination} from "../tools/osd-store-destination.mjs";
 import {activationJournal} from "../tools/osd-activation-journal.mjs";
 import {adtRouter} from "../tools/adt-facade.mjs";
 import {requestElements, descendantsOf, attributeValue, namespaces} from "../tools/adt-request-xml.mjs";
-import {unitValueText} from "../tools/osd-unit-value.mjs";
+import {unitValueText, unitResultDocument} from "../tools/adt-unit-result.mjs";
 import {shipsTestPath} from "../scripts/build-vsix.mjs";
 import {UnitRun} from "../tools/osd-unit.mjs";
 
@@ -75,6 +77,8 @@ export async function setup(abap, schemas, insert) {
     }
     expect(unitValueText("-1", {typeKind: "C"})).to.equal("-1");
     expect(unitValueText("-0", {typeKind: "g"})).to.equal("-0");
+    expect(unitValueText("-1  ", {typeKind: "g", value: "-1"})).to.equal("-1  ");
+    expect(unitValueText("-1  ", {typeKind: "C"})).to.equal("-1");
     expect(unitValueText("-9007199254740993", {typeKind: "8"})).to.equal("9007199254740993-");
     expect(unitValueText("-1.5", {typeKind: "P", decimals: 2})).to.equal(" 1.50-");
     expect(unitValueText("2.25", {typeKind: "P", decimals: 2})).to.equal(" 2.25 ");
@@ -86,7 +90,78 @@ export async function setup(abap, schemas, insert) {
     }
   });
 
-  it("the detached runner retains each operand's RTTI and packed decimals before projection", async () => {
+  it("a caught assertion leaves the next anonymous float name, RTTI cache and counter unchanged", async () => {
+    // Fresh processes start from identical RTTI state. Exercise the generated
+    // assertion and describe_by_data, including the caught-failure reproducer.
+    const script = `
+      import {pathToFileURL} from 'node:url';
+      import {join} from 'node:path';
+      const [root, hook, fail, hookPath] = process.argv.slice(1);
+      await import(pathToFileURL(join(root, 'output/_init.mjs')));
+      const {abap} = globalThis;
+      const rtti = abap.Classes.CL_ABAP_TYPEDESCR;
+      if (hook === 'true') (await import(pathToFileURL(hookPath))).installUnitAssert(abap);
+      let caught = false, assertion;
+      if (fail === 'true') {
+        try {
+          await abap.Classes.CL_ABAP_UNIT_ASSERT.assert_equals({
+            act: new abap.types.Integer().set(-1), exp: new abap.types.Integer().set(5)});
+        } catch (error) {
+          if (error.constructor.name !== 'kernel_cx_assert') throw error;
+          caught = true; assertion = error.assertion;
+        }
+      }
+      const counter = rtti.gv_counter.get(), cacheRows = rtti.gt_cache.array().length;
+      const type = (await rtti.describe_by_data({p_data: new abap.types.Float()})).get();
+      console.log(JSON.stringify({caught, assertion, counter, cacheRows,
+        name: type.absolute_name.get().trimEnd()}));
+    `;
+    const probe = async (hook, fail) => {
+      const {stdout} = await promisify(execFile)(process.execPath, ["--input-type=module", "-e", script,
+        root, String(hook), String(fail), resolve("tools/osd-unit-assert.mjs")]);
+      return JSON.parse(stdout.trim());
+    };
+    const baseline = await probe(false, false);
+    for (const [hook, fail] of [[false, true], [true, false], [true, true]]) {
+      const result = await probe(hook, fail);
+      expect(result.caught).to.equal(fail);
+      expect(result.name).to.equal(baseline.name);
+      expect(result.name).to.match(/0001$/);
+      expect(result.counter).to.equal(baseline.counter);
+      expect(result.cacheRows).to.equal(baseline.cacheRows);
+      if (hook && fail) expect(result.assertion).to.include({method: "ASSERT_EQUALS"});
+    }
+  });
+
+  it("STRING spaces stay verbatim and c blanks trim in STORE and ADT; other assertion titles retain the runtime message", async () => {
+    const run = await new UnitRun(store).runDetached("CLAS", "ZCL_UNIT_BOUNDARY");
+    const methods = run.testClasses[0].testMethods;
+    for (const name of ["CHAR_CP", "TRUE_DEFAULT"]) {
+      expect(methods.find(m => m.name === name).alerts[0].assertion, name).to.equal(undefined);
+    }
+    const signature = {exporting: {IV_COMMAND: box("RUN_TESTS"), IV_JSON: box(JSON.stringify({
+      targets: [{type: "CLAS", name: "ZCL_UNIT_BOUNDARY"}], expected_generation: generation,
+    }))}, importing: {EV_JSON: outputBox(), EV_ERROR: outputBox()}};
+    await new StoreDestination({store}).call("ZOSD_STORE", signature);
+    expect(signature.importing.EV_ERROR.get()).to.equal("");
+    const result = JSON.parse(signature.importing.EV_JSON.get());
+    const xml = requestElements(unitResultDocument(run)).map((e, index) => ({...e, id: index + 1}));
+    for (const [name, expected, actual] of [["STRING_SPACES", "-2  ", "-1  "], ["C_SPACES", "-2", "-1"]]) {
+      const alert = result.classes[0].methods.find(m => m.name === name).alerts[0];
+      expect(alert, name).to.include({expected, actual});
+      expect(alert.details.slice(0, 2), name).to.deep.equal([`Expected [${expected}]`, `Actual [${actual}]`]);
+      const method = xml.find(e => e.local === "testMethod" && attributeValue(e, namespaces.adtcore, "name") === name);
+      expect(descendantsOf(xml, method.id).filter(e => e.local === "detail").map(e => attributeValue(e, "", "text")), name)
+        .to.include(`Expected [${expected}] Actual [${actual}]`);
+    }
+    const titles = xml.filter(e => e.local === "title").map(e => e.text);
+    expect(titles).to.include("Critical Assertion Error: 'Char_Cp: Unit test assertion failed'");
+    expect(titles).to.include("Critical Assertion Error: 'True_Default: Expected abap_true'");
+    expect(result.classes[0].methods.find(m => m.name === "CHAR_CP").alerts[0].title).to.equal("Unit test assertion failed");
+    expect(result.classes[0].methods.find(m => m.name === "TRUE_DEFAULT").alerts[0].title).to.equal("Expected abap_true");
+  });
+
+  it("the detached runner retains each operand's scalar kind and packed decimals before projection", async () => {
     const run = await new UnitRun(store).runDetached("CLAS", NAME);
     const kinds = {I_NEG: "I", I_ZERO: "I", I_POS: "I", P_DEC: "P", F_FLT: "F",
       DECF: "e", C_TXT: "C", S_TXT: "g", N_NUM: "N", INT8: "8"};

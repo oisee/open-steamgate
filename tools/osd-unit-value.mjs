@@ -24,8 +24,8 @@ export function unitValueText(text, type) {
       // The runtime's decimal float scalar already has its shortest form.
       return value;
     case "C":
-    case "g":
       return text.replace(/ +$/, "");
+    case "g":
     case "N":
       return text;
     default:

@@ -334,7 +334,7 @@ EV_JSON (optional diagnostic fields shown):
   keep method verdict `fail`, including in setup/teardown. Only a runner failure uses run-level
   `failed`, with `failure_stage: runner|timeout` and `error {code,text}`.
 - **Assertions (X2):** expected/actual are optional strings, including known empty
-  strings. ASSERT_EQUALS failures carry each operand's RTTI type kind and decimals
+  strings. ASSERT_EQUALS failures carry each scalar operand's type kind and decimals
   from the assertion into the Unit result. ADT XML and STORE JSON share one
   per-type formatter, measured on SAP 7.58:
   `i`/`int8` use a trailing minus without padding (`"1-"`, `"7-"`, zero `"0"`);
@@ -343,15 +343,16 @@ EV_JSON (optional diagnostic fields shown):
   `f` uses scientific notation with 17 significant digits and a leading minus
   (`"2.0000000000000000E+00"`, `"-1.5000000000000000E+00"`);
   `decfloat34` uses the shortest runtime scalar form with a leading minus
-  (`"2"`, `"-1.5"`); `c`/`string` trim trailing blanks and preserve text
-  (`"-1"`); `n` preserves leading zeros (`"0012"`). Unknown types retain the
-  runtime's text verbatim, without numeric inference. The formatter preserves
+  (`"2"`, `"-1.5"`); `c` trims trailing blanks (`"-1"`), while `string` stays
+  verbatim, including trailing spaces (`"-1  "`); `n` preserves leading zeros
+  (`"0012"`). Unknown types retain the runtime's text verbatim, without numeric
+  inference. The formatter preserves
   the runtime's available precision; it cannot recover digits already lost there.
   Packed thousands separators and other magnitudes remain unmeasured.
   In CLAS ADT XML, comparisons are nested under `Different values`, followed
   by `Test 'CLASS->METHOD' in Main Program '<POOL>CP'`. Float Expected and Actual
   are separate sibling details; other measured types use one combined detail.
-  Default titles use `Critical Assertion Error: 'I_Zero: ASSERT_EQUALS'`, with
+  ASSERT_EQUALS default titles use `Critical Assertion Error: 'I_Zero: ASSERT_EQUALS'`, with
   uppercase at the start and after each underscore; custom messages retain their
   text (X2's `add`). Methods sort by byte order of their uppercase names
   (`INT8` before `I_NEG`). STORE expected/actual strings use the same value canon.
@@ -413,6 +414,18 @@ SAP's verbatim trailing-minus text `actual: "1-"`, `expected: "5"`, and numeric
 line `7` from the testclasses stack frame, counted from 1 in the unchanged
 include. Green pins one pass and no alerts. STORE's documented field names stay
 the same; the conformance adapter takes `line` from `alerts[].stack[]`.
+
+Known X2 limits: type provenance is captured only for measured scalar operands
+of `assert_equals`, by reading runtime objects without calling RTTI or allocating
+ABAP descriptors. Structure components (including packed decimals), structures
+inside tables or references, and CASTING field symbols keep the runtime's
+verbatim comparison text. Recursive scalar table/reference comparisons retain
+the inner `assert_equals` provenance, but the outer custom message is lost.
+`assert_true`, `assert_initial`, `fail` and other assertion methods carry no
+call provenance; their values stay verbatim and titles retain the runtime's
+message. Only identified `assert_equals` failures use the `ASSERT_EQUALS`
+default title. Component provenance, other assertion hooks and recursive outer
+messages remain deferred.
 
 To add the next pair, place disposable ABAP, measured synthetic XML shapes and
 agreed expectations under `test/fixtures/`, register its suite in
