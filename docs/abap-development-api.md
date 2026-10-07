@@ -40,7 +40,7 @@ transpiler still emits `throw new Error("GenerateSubroutine, not supported, tran
 - **WAIT.** `WAIT` commits, rolls out (snapshots the ICF shim's static server), releases the FIFO lock and
   takes it back afterwards (`tools/osd-dialog-step.mjs:239-345`, #438). Session memory stays where it is.
 - **ZOSD_STORE ACTIVATE.** `tools/osd-store-destination.mjs` checks activation and publishes directly
-  unless the calling context supplies `deferActivate`. With that binding it schedules publication after
+  outside a step. A `dialogStep` or an explicit `deferActivate` binding schedules publication after
   the step and returns `EV_ACTIVE = X`, `EV_LIVE` initial, and the note "live after the step".
   That verdict is not confirmation that a subsequent test sees the new generation.
 - **The ABAP ADT façade.** It lives in `src/adt/`: `ZCL_OSD_ADT_HANDLER`, `_ROUTER`, `_HOST` (the one host
@@ -51,8 +51,8 @@ transpiler still emits `throw new Error("GenerateSubroutine, not supported, tran
 - **Slice 3, option B** (`docs/adt-abap-port/slice-3-front.md`). The continuation registry exists in
   `tools/adt-abap-front.mjs`: a HOST verdict carries kind and JSON payload, host work runs outside the
   work-process lock, and `resume()` enters a fresh ABAP step. P3 can reuse this mechanism. A generic,
-  queryable activation completion contract for ABAP callers and an after-step path for every entry
-  (including jobs, APC and OData) still need implementation.
+  queryable activation completion contract for ABAP callers is implemented below. Every entry
+  through `dialogStep` (including jobs, APC and OData) uses the shared after-step path.
 - **The kernel oracle** (PR #467, `test/fixtures/kernel-oracle`, P7). A good pool returns subrc 0, NAME
   `%_T002O3` (generated, different on every run), and `PERFORM f IN PROGRAM (name)` works. A semantic error
   returns subrc 4 with MESSAGE `Field "UNDEFINED_X" is unknown.`, LINE 3 and WORD `UNDEFINED_X`. A syntax
@@ -93,6 +93,19 @@ lock( type name ) / unlock( type name )              -> through ZCL_OSD_ADT_LOCK
 
 A publish transpiles, then swaps or recycles. It cannot finish inside the step that asked for it: a
 recycle ends the process the step runs in, and a swap needs the lock the step holds.
+
+Every APC event (`on_start`, `on_message`, `on_close`) is a separate dialog step,
+even when the same WebSocket and handler object stay alive. Like an HTTP request,
+the event commits on return or rolls back on a dump, releases the work process,
+then finishes its after-step work through `tools/osd-dialog-step.mjs`.
+`STORE ACTIVATE` inside an APC handler returns `pending` with an `op_id`; its
+publication runs at the end of that event, without waiting for the socket to close.
+The next queued `on_message` can query `ACTIVATION_STATUS` and run
+`RUN_TESTS(expected_generation)` on the published generation. A publication failure
+ends the journal entry as `failed`; a dumping event rolls back its database LUW,
+fails its pending activation and never publishes it. Repository writes remain
+outside the database LUW. Cold publication or a warm fallback may recycle the
+serving child and close the socket, so callers must reconnect in that case.
 
 - **(a) Roll-out, like WAIT.** The step commits, rolls out and releases the lock. The host builds, and the
   step rolls back in. What survives: the session's memory, its stack frames and its references, because the
@@ -320,8 +333,30 @@ EV_JSON (optional diagnostic fields shown):
   execution failures make both that method and class error; failed assertions always
   keep method verdict `fail`, including in setup/teardown. Only a runner failure uses run-level
   `failed`, with `failure_stage: runner|timeout` and `error {code,text}`.
-- **Assertions:** expected/actual are optional strings from the existing ADT Unit alert
-  data, including known empty strings. Stack entries use the existing source map
+- **Assertions (X2):** expected/actual are optional strings, including known empty
+  strings. ASSERT_EQUALS failures carry each scalar operand's type kind and decimals
+  from the assertion into the Unit result. ADT XML and STORE JSON share one
+  per-type formatter, measured on SAP 7.58:
+  `i`/`int8` use a trailing minus without padding (`"1-"`, `"7-"`, zero `"0"`);
+  `p` keeps decimals and its leading blank and final sign position
+  (`" 2.25 "`, `" 1.50-"` for LENGTH 8 DECIMALS 2);
+  `f` uses scientific notation with 17 significant digits and a leading minus
+  (`"2.0000000000000000E+00"`, `"-1.5000000000000000E+00"`);
+  `decfloat34` uses the shortest runtime scalar form with a leading minus
+  (`"2"`, `"-1.5"`); `c` trims trailing blanks (`"-1"`), while `string` stays
+  verbatim, including trailing spaces (`"-1  "`); `n` preserves leading zeros
+  (`"0012"`). Unknown types retain the runtime's text verbatim, without numeric
+  inference. The formatter preserves
+  the runtime's available precision; it cannot recover digits already lost there.
+  Packed thousands separators and other magnitudes remain unmeasured.
+  In CLAS ADT XML, comparisons are nested under `Different values`, followed
+  by `Test 'CLASS->METHOD' in Main Program '<POOL>CP'`. Float Expected and Actual
+  are separate sibling details; other measured types use one combined detail.
+  ASSERT_EQUALS default titles use `Critical Assertion Error: 'I_Zero: ASSERT_EQUALS'`, with
+  uppercase at the start and after each underscore; custom messages retain their
+  text (X2's `add`). Methods sort by byte order of their uppercase names
+  (`INT8` before `I_NEG`). STORE expected/actual strings use the same value canon.
+  Stack entries use the existing source map
   resolution; unavailable locations are omitted. Counts sum method verdicts;
   class errors without methods increase `classes`, not method `error`.
 - **Generation guard:** a supplied expected_generation different from the generation
@@ -367,6 +402,37 @@ Known limitations retained for this slice:
 - P3-2: STORE plans do not apply the ADT runner's HARMLESS-write risk guard.
 - P3-3: On Windows, early child rejection may leave its cwd busy and disposable-directory removal can fail.
 - P3-4: Source locks are per process; external build replacement or GC can race the module copy without a modules digest.
+
+#### X2: ABAP Unit conformance pair
+
+`test/adt-aunit-conformance-x2.mjs` publishes the test-only `ZCL_OSD_X2_DEMO`
+first with subtraction (red), then addition (green). STORE `RUN_TESTS`, the real
+OSG ADT XML route, and explicitly SYNTHETIC SAP result XML all map to the same
+expectations in `test/fixtures/aunit-x2/expected.json`: run state, counts, class
+name/state, method name/verdict and assertion kind/expected/actual/line. Red pins
+SAP's verbatim trailing-minus text `actual: "1-"`, `expected: "5"`, and numeric
+line `7` from the testclasses stack frame, counted from 1 in the unchanged
+include. Green pins one pass and no alerts. STORE's documented field names stay
+the same; the conformance adapter takes `line` from `alerts[].stack[]`.
+
+Known X2 limits: type provenance is captured only for measured scalar operands
+of `assert_equals`, by reading runtime objects without calling RTTI or allocating
+ABAP descriptors. Structure components (including packed decimals), structures
+inside tables or references, and CASTING field symbols keep the runtime's
+verbatim comparison text. Recursive scalar table/reference comparisons retain
+the inner `assert_equals` provenance, but the outer custom message is lost.
+`assert_true`, `assert_initial`, `fail` and other assertion methods carry no
+call provenance; their values stay verbatim and titles retain the runtime's
+message. Only identified `assert_equals` failures use the `ASSERT_EQUALS`
+default title. Component provenance, other assertion hooks and recursive outer
+messages remain deferred.
+
+To add the next pair, place disposable ABAP, measured synthetic XML shapes and
+agreed expectations under `test/fixtures/`, register its suite in
+`test/suites.d/*.json`, and compare both published states through the same three
+paths. Preserve include bytes when pinning a line. Publish protocol shapes and
+fixture identities only, never captures or live identifiers; these fixtures are
+excluded from normal builds, packs and shipped seeds.
 
 ### Joint acceptance and interim path
 

@@ -131,7 +131,7 @@ describe("store LIST: live generation input digests without a source snapshot", 
     const answer = await call(destination, {IV_COMMAND: "LIST", IV_FILTER: NAME});
     expect(answer.EV_ERROR).to.equal("");
     expect(answer.ET_OBJECT.find(row => row.NAME === NAME).VERSION).to.equal("inactive");
-    expect(store.read("CLAS", NAME, "main", "active").source).to.equal("");
+    expect(() => store.read("CLAS", NAME, "main", "active")).to.throw("active version (main) does not exist");
     expect(existsSync(join(generation, "source", FILE))).to.equal(false);
   });
 });

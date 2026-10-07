@@ -38,7 +38,7 @@ export function answered(res, body, record) {
       // a client asked for and did not get, so both are worth recording, and
       // telling them apart is the whole value of recording them
       record?.(res.req, "object", e.message);
-      refuse(res, 404, "ExceptionResourceNotFound", e.message);
+      refuse(res, 404, "ExceptionResourceNotFound", e.message, {properties: e.properties});
     } else if (e instanceof ReadOnly) {
       refuse(res, 405, "ExceptionResourceNoAccess", e.message);
     } else if (e instanceof InvalidName) {

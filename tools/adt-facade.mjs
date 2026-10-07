@@ -1734,8 +1734,8 @@ export function adtRouter(options = {}) {
       sendEntity(req, res, Buffer.from(versionsFeedDocument(part.name, type, base, feed)));
     });
     const versionContent = (req, res, include) => answer(res, () => {
-      const part = store.read(type, req.params.name, include, "active");
       const working = store.read(type, req.params.name, include);
+      const part = req.params.version === "00000" ? store.read(type, req.params.name, include, "active") : working;
       let source;
       try {
         source = versionSource(store.root, working.empty ? undefined : working.file, req.params.version, part.source);

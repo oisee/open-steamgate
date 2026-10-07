@@ -109,6 +109,7 @@ CLASS zcl_osd_adt_versions IMPLEMENTATION.
     DATA ls_revision TYPE zosd_revision_s.
     DATA lt_object TYPE STANDARD TABLE OF zosd_object_s WITH DEFAULT KEY.
     DATA ls_object TYPE zosd_object_s.
+    DATA ls_active TYPE zcl_osd_adt_host=>ty_read.
     DATA lx_error TYPE REF TO zcx_osd_adt.
 
     lt_types = zcl_osd_adt_types=>sources( ).
@@ -135,10 +136,14 @@ CLASS zcl_osd_adt_versions IMPLEMENTATION.
       RAISE EXCEPTION lx_error.
     ENDIF.
 
-*   READ validates the object and provides the active source, including an
-*   empty class include. HISTORY uses the same include and resolved file.
+*   History listing and git revisions do not require active source proof.
+    IF lv_content = abap_true AND lv_version = `00000`.
+      ls_active = zcl_osd_adt_source=>read( iv_type = lv_type iv_name = lv_name iv_include = lv_include iv_version = `active` ).
+      rs_response = entity( is_request = is_request iv_body = ls_active-source iv_type = `text/plain` ).
+      RETURN.
+    ENDIF.
     CALL FUNCTION 'ZOSD_STORE' DESTINATION 'STORE'
-      EXPORTING iv_command = `READ` iv_type = lv_type iv_name = lv_name iv_include = lv_include iv_revision = `active`
+      EXPORTING iv_command = `READ` iv_type = lv_type iv_name = lv_name iv_include = lv_include iv_revision = `inactive`
       IMPORTING ev_source = lv_source ev_error = lv_error
       TABLES et_object = lt_object
       EXCEPTIONS system_failure = 1 MESSAGE lv_msg communication_failure = 2 MESSAGE lv_msg OTHERS = 3.
@@ -154,13 +159,6 @@ CLASS zcl_osd_adt_versions IMPLEMENTATION.
       RAISE EXCEPTION lx_error.
     ENDIF.
     READ TABLE lt_object INDEX 1 INTO ls_object.
-*   version 00000 is the active source READ gave: no git work for it, as in
-*   the Node facade's versionSource
-    IF lv_content = abap_true AND lv_version = `00000`.
-      rs_response = entity( is_request = is_request iv_body = lv_source
-                            iv_type = `text/plain` ).
-      RETURN.
-    ENDIF.
     CLEAR lv_error.
     CALL FUNCTION 'ZOSD_STORE' DESTINATION 'STORE'
       EXPORTING iv_command = `HISTORY` iv_type = lv_type iv_name = lv_name

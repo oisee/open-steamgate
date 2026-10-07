@@ -21,6 +21,7 @@ const run = () => ({
       {name: "ADD_OK", executionTime: "0.000", alerts: []},
       {name: METHOD, executionTime: "0.000", line: 15, column: 3, alerts: [{
         kind: "failedAssertion", severity: "critical", title: "ASSERT_EQUALS",
+        assertion: {method: "ASSERT_EQUALS", message: "", expected: {typeKind: "I"}, actual: {typeKind: "I"}},
         details: ["Expected [5]", "Actual [-1]", "Raised in add_2_3"],
         stack: [{uri: "src/zcl_unit_sample.clas.testclasses.abap", name: "testclasses, line 18", line: 18, column: 7}],
       }]},
@@ -74,11 +75,12 @@ describe("ADT ABAP Unit result: SAP class URI contract", () => {
     const input = run();
     const alert = input.testClasses[0].testMethods[1].alerts[0];
     alert.title = "custom <message> & value";
+    alert.assertion.message = alert.title;
     alert.details.unshift("comparison context");
     alert.stack.push({uri: "helper.mjs", name: "unmapped", line: 9});
     input.testClasses[0].alerts.push({kind: "exception", title: "class teardown failed", details: ["original detail"], stack: []});
     const xml = unitResultDocument(input);
-    expect(find(xml, "title").map(e => e.text)).to.include("Critical Assertion Error: 'Add_2_3: custom <message> & value'");
+    expect(find(xml, "title").map(e => e.text)).to.include("Critical Assertion Error: 'custom <message> & value'");
     expect(find(xml, "detail").map(e => attributeValue(e, "", "text"))).to.include.members(["comparison context", "original detail"]);
     expect(find(xml, "title").map(e => e.text)).to.include("class teardown failed");
     expect(attrs(find(xml, "stackEntry").at(-1))).to.include({"adtcore:uri": "helper.mjs", "adtcore:name": "unmapped"});
@@ -89,12 +91,14 @@ describe("ADT ABAP Unit result: SAP class URI contract", () => {
     const method = input.testClasses[0].testMethods[1];
     method.executionTime = "0.125";
     method.alerts[0].title = "Unit test assertion failed";
+    method.alerts[0].assertion.expected = {typeKind: "e"};
+    method.alerts[0].assertion.actual = {typeKind: "g"};
     method.alerts[0].details = ["Expected [-2.5]", "Actual [value-with-hyphens]", "Raised in add_2_3"];
     const xml = unitResultDocument(input);
     expect(find(xml, "title")[0].text).to.equal("Critical Assertion Error: 'Add_2_3: ASSERT_EQUALS'");
     expect(attributeValue(find(xml, "testMethod")[0], "", "executionTime")).to.equal("0.125");
     expect(find(xml, "detail").map(e => attributeValue(e, "", "text")))
-      .to.include("Expected [2.5-] Actual [value-with-hyphens]");
+      .to.include("Expected [-2.5] Actual [value-with-hyphens]");
   });
 
   it("uses only a stack line fragment and describes the test include", () => {

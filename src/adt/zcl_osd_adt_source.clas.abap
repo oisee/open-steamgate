@@ -30,7 +30,9 @@ CLASS zcl_osd_adt_source IMPLEMENTATION.
         rs_read = zcl_osd_adt_host=>read( iv_type = iv_type iv_name = iv_name iv_include = iv_include iv_version = iv_version ).
       CATCH zcx_osd_adt INTO lx_error.
         IF lx_error->status = 404.
-          IF lx_error->message_text CS ` include `.
+          IF lx_error->message_text CS ` active version (`.
+            lx_error = zcx_osd_adt=>not_found( iv_message = lx_error->message_text iv_miss = zcx_osd_adt=>c_miss_object ).
+          ELSEIF lx_error->message_text CS ` include `.
             lx_error = zcx_osd_adt=>not_found( iv_message = |{ iv_type } { iv_name } include { iv_include } does not exist| iv_miss = zcx_osd_adt=>c_miss_object ).
           ELSE.
             lx_error = zcx_osd_adt=>not_found( iv_message = |{ iv_type } { iv_name } does not exist| iv_miss = zcx_osd_adt=>c_miss_object ).

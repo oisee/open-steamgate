@@ -7,10 +7,12 @@ import {createHash} from "node:crypto";
 import * as abaplint from "@abaplint/core";
 import {liveHash, linkRoots, loadConfig} from "./osd-build.mjs";
 import {activationJournal} from "./osd-activation-journal.mjs";
+import {sourceSnapshotPath} from "./osd-source-snapshot.mjs";
 import {withSourceLock} from "./osd-store-source-lock.mjs";
 import {nameProblem} from "./osd-object-name.mjs";
 import {objectOf} from "./osd-inputs.mjs";
 import {UnitRun, unitClasses} from "./osd-unit.mjs";
+import {unitValueText} from "./osd-unit-value.mjs";
 import {withoutHostPaths} from "./osd-build-issues.mjs";
 
 const refusal = (code, text) => Object.assign(new Error(text), {code});
@@ -30,7 +32,7 @@ function plansOf(root, generation, targets) {
   const sources = new Map(targets.map(t => [`${t.type} ${t.name}`, []]));
   for (const [file, digest] of Object.entries(inputs)) {
     if (!wanted.has(objectOf(basename(file)))) continue;
-    const source = join(generation, "source", file);
+    const source = join(generation, "source", sourceSnapshotPath(file));
     const bytes = readFileSync(existsSync(source) ? source : join(root, "build/source-by-digest", digest));
     if (createHash("sha256").update(bytes).digest("hex") !== digest) {
       throw refusal("GENERATION_UNAVAILABLE", "published source snapshot does not match its recorded digest");
@@ -70,11 +72,16 @@ function stackOf(entry) {
 }
 function projectClass(target, result) {
   const methods = result.testMethods.map(method => {
-    const alerts = method.alerts.map(alert => ({kind: alert.kind, title: alert.title,
-      details: alert.details ?? [],
-      ...(alert.expected !== undefined ? {expected: alert.expected} : {}),
-      ...(alert.actual !== undefined ? {actual: alert.actual} : {}),
-      stack: (alert.stack ?? []).map(stackOf).filter(Boolean)}));
+    const alerts = method.alerts.map(alert => {
+      const value = (text, kind) => alert.kind === "failedAssertion"
+        ? unitValueText(text, alert.assertion?.[kind]) : text;
+      return {kind: alert.kind, title: alert.title,
+        details: (alert.details ?? []).map(d => d.replace(/^(Expected|Actual) \[([\s\S]*)\]$/,
+          (_, kind, text) => `${kind} [${value(text, kind.toLowerCase())}]`)),
+        ...(alert.expected !== undefined ? {expected: value(alert.expected, "expected")} : {}),
+        ...(alert.actual !== undefined ? {actual: value(alert.actual, "actual")} : {}),
+        stack: (alert.stack ?? []).map(stackOf).filter(Boolean)};
+    });
     const verdict = method.skipped ? "skipped" : !alerts.length ? "pass"
       : method.alerts.some(a => a.kind !== "failedAssertion") ? "error" : "fail";
     return {name: method.name, verdict, ms: method.ms ?? 0, alerts};

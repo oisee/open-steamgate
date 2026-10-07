@@ -19,7 +19,7 @@
 // Content hashing takes 105 ms here, 170 ms for the largest library;
 // generations are 44 MB. See docs/generations.md for the design.
 import {keepCompileInputs} from "./osd-compile-snapshot.mjs";
-import {keepSourceInputs, keepGeneratedSources, completeSourceSnapshot, materializeSourceSnapshot} from "./osd-source-snapshot.mjs";
+import {keepSourceInputs, keepGeneratedSources, completeSourceSnapshot, materializeSourceSnapshot, missingSourceInputs} from "./osd-source-snapshot.mjs";
 import {gc} from "./osd-build-gc.mjs";
 import {normalPath, stampOf, changedError} from "./osd-build-input-check.mjs";
 export {normalPath};
@@ -777,6 +777,9 @@ export async function build(options = {}) {
       keepSourceInputs(root, target, digests, undefined, options.overlay);
       keepGeneratedSources(root, target);
       completeSourceSnapshot(target);
+    } else {
+      const missing = missingSourceInputs(root, target, digests, options.overlay);
+      if (missing.size) keepSourceInputs(root, target, missing, undefined, options.overlay);
     }
     if (options.switch !== false && liveHash(root) !== hash) {
       switchTo(root, hash, log);
