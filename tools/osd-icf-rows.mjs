@@ -49,7 +49,8 @@ export function rowsOf(node) {
   const parent = parentUrl(url);
   const service = {
     ICF_NAME: name,
-    ICFPARGUID: parent === "" ? "" : guidOf(parent),
+    ICFPARGUID: /^[A-Z0-9_ ]{15}[A-F0-9]{25}$/.test(node.objectName ?? "")
+      ? node.objectName.slice(15) : parent === "" ? "" : guidOf(parent),
     ICFNODGUID: guidOf(url),
     ICFALTNME: "",
     // A node this tree carries is active: abapGit inserts one already

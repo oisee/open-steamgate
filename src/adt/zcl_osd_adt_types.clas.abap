@@ -232,6 +232,36 @@ CLASS zcl_osd_adt_types IMPLEMENTATION.
     ls_type-tree_category_label = `Source Code Library`.
     APPEND ls_type TO ct_types.
     CLEAR ls_type.
+    ls_type-type = `SICF`.
+    ls_type-collection = `sicf`.
+    ls_type-adt_type = `SICF`.
+    ls_type-label = `SICF`.
+    ls_type-plural = `SICF`.
+    ls_type-category = `Others`.
+    ls_type-tree_category = `other`.
+    ls_type-tree_category_label = `Others`.
+    APPEND ls_type TO ct_types.
+    CLEAR ls_type.
+    ls_type-type = `SAPC`.
+    ls_type-collection = `apc`.
+    ls_type-adt_type = `SAPC`.
+    ls_type-label = `SAPC`.
+    ls_type-plural = `SAPC`.
+    ls_type-category = `Others`.
+    ls_type-tree_category = `other`.
+    ls_type-tree_category_label = `Others`.
+    APPEND ls_type TO ct_types.
+    CLEAR ls_type.
+    ls_type-type = `SAMC`.
+    ls_type-collection = `amc`.
+    ls_type-adt_type = `SAMC`.
+    ls_type-label = `SAMC`.
+    ls_type-plural = `SAMC`.
+    ls_type-category = `Others`.
+    ls_type-tree_category = `other`.
+    ls_type-tree_category_label = `Others`.
+    APPEND ls_type TO ct_types.
+    CLEAR ls_type.
     ls_type-type = `DEVC`.
     ls_type-collection = `packages`.
     ls_type-source = ``.

@@ -11,7 +11,7 @@ CLASS ltcl_helper IMPLEMENTATION.
     lt_all = zcl_osd_adt_types=>all( ).
     lt_sources = zcl_osd_adt_types=>sources( ).
     lt_lockable = zcl_osd_adt_types=>lockable( ).
-    cl_abap_unit_assert=>assert_equals( act = lines( lt_all ) exp = 15 ).
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_all ) exp = 18 ).
     cl_abap_unit_assert=>assert_equals( act = lines( lt_sources ) exp = 6 ).
     cl_abap_unit_assert=>assert_equals( act = lines( lt_lockable ) exp = 7 ).
     cl_abap_unit_assert=>assert_equals( act = zcl_osd_adt_types=>adt_type( `STRU` ) exp = `TABL/DS` ).

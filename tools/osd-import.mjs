@@ -24,23 +24,8 @@ import {ObjectStore, TYPES, nameOf} from "./osd-store.mjs";
 import {runsAs} from "./osd-main.mjs";
 import {TMP_FOLDER, TMP_PACKAGE} from "./osd-tmp.mjs";
 
-export const ABAPGIT_XML = ".abapgit.xml";
-
-// what abapGit puts in .abapgit.xml, and what it means when it is missing
-export function repositoryConfig(folder) {
-  const file = join(folder, ABAPGIT_XML);
-  if (existsSync(file) === false) {
-    return {startingFolder: "/src/", folderLogic: "PREFIX", masterLanguage: "E", declared: false};
-  }
-  const text = readFileSync(file, "utf8");
-  const value = (tag) => (new RegExp(`<${tag}>([^<]*)</${tag}>`).exec(text) ?? [])[1];
-  return {
-    startingFolder: value("STARTING_FOLDER") ?? "/src/",
-    folderLogic: (value("FOLDER_LOGIC") ?? "PREFIX").toUpperCase(),
-    masterLanguage: value("MASTER_LANGUAGE") ?? "E",
-    declared: true,
-  };
-}
+import {ABAPGIT_XML, repositoryConfig, sourceFolder} from "./osd-abapgit-config.mjs";
+export {ABAPGIT_XML, repositoryConfig} from "./osd-abapgit-config.mjs";
 
 // every file of the source folder, deepest last so a package is created
 // before what it holds
@@ -88,7 +73,7 @@ export class Import {
   // a folder someone checked out; the repository's own layout is read, not assumed
   fromFolder(folder, options = {}) {
     const config = repositoryConfig(folder);
-    const source = join(folder, config.startingFolder.replace(/^\/|\/$/g, ""));
+    const source = sourceFolder(folder, config);
     if (existsSync(source) === false) {
       throw new NotARepository(folder, config.startingFolder);
     }
@@ -139,6 +124,10 @@ export class Import {
     // the folder joins the layers: listed last in abap_transpile.json, so
     // the build and the index both see it, and as the last layer it wins
     // a name it shares, which the build reports by file
+    // The imported root is already the starting folder. Preserve its folder
+    // logic so the store reads package declarations instead of inventing a pack.
+    writeFileSync(join(this.store.root, target, ABAPGIT_XML),
+      `<STARTING_FOLDER>/</STARTING_FOLDER><FOLDER_LOGIC>${config.folderLogic}</FOLDER_LOGIC>`);
     const listed = this.#enlist(target);
     this.store.reroot();
     this.store.build();

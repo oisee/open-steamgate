@@ -20,6 +20,9 @@ export const TYPES = {
   VIEW: {ext: ".view.xml", adt: "ddic/views", source: false},
   SHLP: {ext: ".shlp.xml", adt: "ddic/searchhelps", source: false},
   MSAG: {ext: ".msag.xml", adt: "messageclass", source: false},
+  SICF: {ext: ".sicf.xml", adt: "sicf", source: false},
+  SAPC: {ext: ".sapc.xml", adt: "apc", source: false},
+  SAMC: {ext: ".samc.xml", adt: "amc", source: false},
   DEVC: {ext: ".devc.xml", adt: "packages", source: false},
   // an include is a program without a header; abapGit gives both the same
   // extension, so the two are told apart by what the source starts with

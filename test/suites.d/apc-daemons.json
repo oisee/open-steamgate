@@ -9,6 +9,7 @@
     "test/dialog-step-icf.mjs",
     "test/osd-apc.mjs",
     "test/osd-icf-apc.mjs",
-    "test/pages-push.mjs"
+    "test/pages-push.mjs",
+    "test/daemon-api.mjs"
   ]
 }

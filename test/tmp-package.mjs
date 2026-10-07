@@ -179,7 +179,7 @@ describe("$TMP, the local package", () => {
     const refusals = admit({files: Object.keys(text), read: (f) => text[f], unit, root});
     const local = refusals.filter((r) => r.rule === "local-object").map((r) => r.key);
     expect(local, "padding normalised").to.include("IWSV ZOSD_SRV 0001");
-    expect(local, "SICF by its URL").to.include("SICF /sap/bc/zosd");
+    expect(local, "SICF selected by URL retains its object identity").to.include("SICF ZCOPY");
     expect(local.some((k) => k.includes("FUNC ZOSD_TMP_FM")), "a module a local group creates").to.equal(true);
   });
 

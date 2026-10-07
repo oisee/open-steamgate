@@ -49,7 +49,8 @@ export function devLoop(options = {}) {
       if (key === undefined) {
         continue;
       }
-      const [type, name] = key.split(" ");
+      const [type, ...parts] = key.split(" ");
+      const name = parts.join(" ");
       if (store.find(type, name) !== undefined) {
         objects.set(key, {type, name});
       }

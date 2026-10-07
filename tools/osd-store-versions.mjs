@@ -241,6 +241,19 @@ export class StoreVersions {
     }
   }
 
+  relocateActive(entry, copied) {
+    this.keepActive(entry);
+    for (const file of this.#filesOfEntry(entry)) {
+      const target = copied.file.slice(0, -TYPES[copied.type].ext.length) + file.slice(entry.file.length - TYPES[entry.type].ext.length);
+      const from = join(this.#store.root, this.#snapshotOf(file));
+      if (existsSync(from)) {
+        const to = join(this.#store.root, this.#snapshotOf(target));
+        mkdirDurable(dirname(to));
+        copyDurable(from, to);
+      }
+    }
+  }
+
   dropActiveCopy(entry) {
     for (const file of this.#filesOfEntry(entry)) {
       const copy = join(this.#store.root, this.#snapshotOf(file));
@@ -400,7 +413,15 @@ export class StoreVersions {
     // Pre-save copies retain proven active input, including genuinely empty
     // bytes. keepActive leaves unavailable input absent, never a placeholder.
     const copy = join(this.#store.root, this.#snapshotOf(file));
-    if (!complete && existsSync(copy)) return copy;
+    const layer = this.#store.roots.find(root => root.path === entry.root);
+    if ((!complete || layer?.overlayOf) && existsSync(copy)) return copy;
+    // A freshly copied overlay still runs the archive's proven active bytes
+    // until it has been published. Never infer activity from the working copy.
+    if (complete && layer?.overlayOf) {
+      const original = join(layer.overlayOf, relative(layer.path, file));
+      const base = join(generation, "source", sourceSnapshotPath(original));
+      if (existsSync(base)) return base;
+    }
     if (!generation || !existsSync(generation)) return undefined;
     let inputs = this.#activeInputs?.generation === generation ? this.#activeInputs.inputs : undefined;
     if (inputs === undefined) {

@@ -573,3 +573,33 @@ prints what it rebuilt and why it refused when a check failed.
 See also: [`generations.md`](generations.md) for what a generation is and how
 the dev loop decides, [`backlog/README.md`](backlog/README.md) for what is not done, and
 [`bun-spike.md`](bun-spike.md) for the packaging measurements.
+
+### Run an abapGit ZIP or folder
+
+```sh
+osd up --layer /path/to/repository.zip
+# From a source checkout:
+node bin/osd.mjs up --layer /path/to/repository.zip
+# The existing environment form accepts folders and ZIPs too:
+OSD_LAYERS=/path/to/repository.zip node bin/osd.mjs up
+```
+
+Repeat `--layer` to add layers in order; later objects win. Quote paths containing
+spaces. `OSD_LAYERS` is separated by the platform path delimiter (`:` on Unix,
+`;` on Windows). A repository folder uses its `.abapgit.xml` starting folder,
+FULL/PREFIX layout and package headers. A ZIP must contain `.abapgit.xml` at
+its root and uses the same rules without modifying the archive.
+
+The instance verifies paths, entry types, CRCs and sizes before extracting to
+`build/source-layers/<SHA-256 of ZIP bytes>`. This source is immutable. Edits
+through STORE or ADT copy the complete object to `local/overlays/<SHA-256>`;
+new objects in its packages also land there. Active source remains available
+from the generation snapshots. Reusing the ZIP reuses its cache and overlay;
+replacing its bytes starts a new cache and clean overlay. Prior revisions remain
+on disk. With other inputs fixed, any byte change produces a new generation.
+
+abapGit usually omits the root package name. A single custom prefix derives the
+local package (`ZCL_DEMO_*` → `$ZDEMO`); set `OSD_LAYER_PACKAGE` for an ambiguous
+archive. Explicit package names in DEVC metadata take precedence. See
+[Source layers](source-layers.md) for the implemented policy and supported ZIP
+formats. The input archive is never rewritten or copied into project source.

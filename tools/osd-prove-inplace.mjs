@@ -67,7 +67,7 @@ export function objectHash(files) {
 }
 
 /** A file name that can sit in an ABAP literal and in a zip entry. */
-export const FILE_NAME = /^[A-Za-z0-9_.#%$+-]{1,120}$/;
+export const FILE_NAME = /^[A-Za-z0-9_.#%$+ -]{1,120}$/;
 const CHUNK_BYTES = 8000;
 const BATCH = 12;
 
@@ -738,7 +738,8 @@ export async function rollbackToSnapshot(mcp, pkg, dir, state, {log = () => {}} 
 
 /** abapGit's file-name prefix of an item: `zcl_x.clas.`, `#ns#x.clas.`. */
 export const filePrefix = (item) => {
-  const [type, name] = item.split(" ");
+  const [type, ...parts] = item.split(" ");
+  const name = parts.join(" ");
   return `${name.toLowerCase().replace(/\//g, "#")}.${type.toLowerCase()}.`;
 };
 

@@ -1548,6 +1548,9 @@ export function adtRouter(options = {}) {
     VIEW: ["View", "Views", "Dictionary"],
     SHLP: ["Search Help", "Search Helps", "Dictionary"],
     MSAG: ["Message Class", "Message Classes", "Source Code Library"],
+    SICF: ["SICF", "SICF", "Others"],
+    SAPC: ["SAPC", "SAPC", "Others"],
+    SAMC: ["SAMC", "SAMC", "Others"],
     DEVC: ["Package", "Packages", "Others"],
   };
 
@@ -2106,7 +2109,7 @@ export function adtRouter(options = {}) {
             ]});
         }
         const contentType = "application/vnd.sap.as+xml; charset=utf-8; dataname=com.sap.adt.lock.Result";
-        if (entry.writable === false) {
+        if (entry.writable === false && !entry.overlay) {
           // A library object is not ours to change, and the way to say so is
           // the lock envelope with no handle in it: that is what a real
           // system returns for an object ADT may not modify, and a client
@@ -2150,7 +2153,7 @@ export function adtRouter(options = {}) {
       const handle = String(req.query.lockHandle ?? "");
       const lock = session.locks.get(handle);
       const entry = store.find(type, req.params.name);
-      if (entry !== undefined && entry.writable === false) {
+      if (entry !== undefined && entry.writable === false && !entry.overlay) {
         res.status(405).type("application/xml").send(exceptionDocument("ExceptionResourceNoAccess", `${entry.type} ${entry.name} is a library object and cannot be changed here`));
         return false;
       }
