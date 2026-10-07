@@ -44,12 +44,17 @@ bytes change; failed activation keeps serving the old active source.
 
 An identical archive shares/reuses its overlay even when supplied at a different
 path. A byte change starts a clean overlay; previous cache and overlay revisions
-are retained. The stable "same layer" key is the resolved abapGit root package
+are retained. Inactive records and pre-save active copies stay owned by the
+revision that wrote them. Unmounted drafts remain durable in `inactive.json`
+without suppressing same-named objects in a replacement ZIP; remounting their
+original archive restores the draft and its active source. The stable "same layer" key is the resolved abapGit root package
 (explicit DEVCLASS, one-prefix inference, or OSD_LAYER_PACKAGE); archive paths
 and versioned basenames may change. Repositories using the same root package
 share this key. At startup, a replaced revision with changed objects produces
 one WARNING with its old SHA-256, overlay path, object count and recovery steps.
-`osd doctor` lists edited orphan overlays, including pre-metadata revisions whose
+`osd doctor` lists edited orphan overlays from both replaced and removed layers.
+The mount list represents the complete current configuration, including simultaneous
+revisions of the same package, and drops historical mounts. This includes pre-metadata revisions whose
 package can be recovered from the retained archive cache. Counts compare overlay
 files with their old base and deduplicate class includes; unchanged package
 headers do not count. Resume by mounting the original ZIP, or open the overlay

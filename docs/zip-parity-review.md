@@ -20,7 +20,8 @@ writes generated output and source snapshots under build, while edited source
 stays in the overlay. The dev watcher publishes that same store view. Ordinary
 objects outside ZIP layers retain their normal writable roots. No write handler
 writes source into build/source-layers. Overlay mount/copy/write paths refuse
-links that redirect to the base; creates already use checked writes.
+links that redirect to the base. ADT create uses the same strict overlay root
+check as STORE WRITE, including a root redirected after indexing.
 
 #638 active source uses generation snapshots. Relocation retains the proven
 archive source until successful activation; failed activation retains it. Cold
