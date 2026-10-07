@@ -124,6 +124,36 @@ describe('immutable abapGit ZIP source layers', function () {
     } finally {server.closeAllConnections(); await new Promise(resolve => server.close(resolve));}
   });
 
+  it('retains inactive drafts and active copies per ZIP revision without suppressing a replacement', async () => {
+    const first = zip(); await build({root, generators: false});
+    const store = new ObjectStore({root, libs: []});
+    store.write('CLAS', 'ZCL_ZIP_DEMO', source('A draft'));
+    const firstArchive = archive;
+    write('src/zcl_zip_demo.clas.abap', source('B base'));
+    archive = join(scratch, 'fixture-v2.zip'); const second = zip();
+    const replacement = new ObjectStore({root, libs: []});
+    expect([...replacement.inactive]).to.deep.equal([]);
+    expect(replacement.overlay()).to.equal(undefined);
+    expect(replacement.read('CLAS', 'ZCL_ZIP_DEMO').source).to.equal(source('B base'));
+    const built = await build({root, generators: false});
+    expect(readFileSync(join(root, 'build/by-input', built.hash, 'output/zcl_zip_demo.clas.mjs'), 'utf8')).to.include('B base');
+    replacement.write('CLAS', 'ZCL_ZIP_DEMO', source('B draft'));
+    const secondArchive = archive;
+    process.env.OSD_LAYERS = firstArchive;
+    const resumed = new ObjectStore({root, libs: []});
+    expect([...resumed.inactive]).to.deep.equal(['CLAS ZCL_ZIP_DEMO']);
+    expect(resumed.read('CLAS', 'ZCL_ZIP_DEMO').source).to.equal(source('A draft'));
+    expect(resumed.read('CLAS', 'ZCL_ZIP_DEMO', 'main', 'active').source).to.equal(source('base'));
+    expect(resumed.overlay().exclude.filter(f => !f.includes("build/inactive/")).every(f => f.includes(first[1].path))).to.equal(true);
+    // Save/activate in A must preserve B's retained draft and proven active copy.
+    resumed.write('CLAS', 'ZCL_ZIP_DEMO', source('A second draft'));
+    process.env.OSD_LAYERS = secondArchive;
+    const back = new ObjectStore({root, libs: []});
+    expect(back.read('CLAS', 'ZCL_ZIP_DEMO').source).to.equal(source('B draft'));
+    expect(back.read('CLAS', 'ZCL_ZIP_DEMO', 'main', 'active').source).to.equal(source('B base'));
+    expect(back.overlay().exclude.filter(f => !f.includes("build/inactive/")).every(f => f.includes(second[1].path))).to.equal(true);
+  });
+
   it('warns once for edited old revisions by root package, lists them for doctor and never carries edits', () => {
     const first = zip(), store = new ObjectStore({root, libs: []});
     store.write('CLAS', 'ZCL_ZIP_DEMO', source('old edit'));
