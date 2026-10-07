@@ -1,6 +1,7 @@
 // Cross-process GC protection for a generation and the verifier's scratch.
+import {processIdentity} from "./osd-process-identity.mjs";
 import {randomUUID} from "node:crypto";
-import {existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync} from "node:fs";
+import {existsSync, mkdirSync, readdirSync, readFileSync, rmSync, renameSync, writeFileSync} from "node:fs";
 import {join} from "node:path";
 import {layout, lock} from "./osd-build.mjs";
 import {MissingCompileInputs} from "./osd-compile-snapshot.mjs";
@@ -27,8 +28,18 @@ export async function pinVerification(root, hash, scratch, options = {}) {
     const dir = join(paths.build, "verify-pins");
     mkdirSync(dir, {recursive: true});
     const file = join(dir, `${process.pid}.${randomUUID()}.json`);
-    writeFileSync(file, JSON.stringify({pid: process.pid, hash, scratch, createdAt: Date.now()}));
-    return () => rmSync(file, {force: true});
+    const pin = {pid: process.pid, identity: processIdentity(process.pid), hash, scratch};
+    const renew = () => {
+      const tmp = `${file}.tmp`;
+      try {
+        writeFileSync(tmp, JSON.stringify({...pin, createdAt: Date.now()}));
+        renameSync(tmp, file);
+      } finally { rmSync(tmp, {force: true}); }
+    };
+    renew();
+    const timer = setInterval(renew, options.renewMs ?? 60000);
+    timer.unref();
+    return () => { clearInterval(timer); rmSync(file, {force: true}); };
   } finally { unlock(); }
 }
 
@@ -37,6 +48,7 @@ export function verificationPins(root) {
   const dir = join(layout(root).build, "verify-pins"), pins = [];
   if (!existsSync(dir)) return pins;
   for (const file of readdirSync(dir)) {
+    if (!file.endsWith(".json")) continue;
     const path = join(dir, file);
     let pin;
     try { pin = JSON.parse(readFileSync(path, "utf8")); } catch (error) {
@@ -44,7 +56,10 @@ export function verificationPins(root) {
       throw error;
     }
     // A lease also bounds PID reuse and legacy pins without a timestamp.
-    if (!Number.isFinite(pin.createdAt) || Date.now() - pin.createdAt > 300000 || pin.createdAt > Date.now()) {
+    const identity = processIdentity(pin.pid);
+    const active = pin.identity !== undefined && pin.identity === identity;
+    if ((pin.identity !== undefined && pin.identity !== identity) || (!active &&
+        (!Number.isFinite(pin.createdAt) || Date.now() - pin.createdAt > 300000 || pin.createdAt > Date.now()))) {
       rmSync(path, {force: true});
       continue;
     }

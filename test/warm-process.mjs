@@ -397,11 +397,24 @@ main({heapLimit: ${512 * 1048576}, beforeCompile: async ({method}) => {
     const worker = join(root, "worker.mjs");
     writeFileSync(worker, readFileSync(worker, "utf8").replace("heapLimit: 536870912", "heapLimit: -1e12"));
     await store.warmUp();
+    let swapVerified, scheduled;
+    store.served = {running: true, generation: compiler.hash, swaps: 0, async hot(options) {
+      swapVerified = options.verified;
+      this.generation = options.generation;
+      return {hot: true, generation: options.generation, ms: 1, heaps: [1]};
+    }};
+    const verify = compiler.verify.bind(compiler);
+    compiler.verify = hash => { scheduled = hash; return verify(hash); };
     await save("zcl_a", 6);
     const checked = store.warmActivation("CLAS", "ZCL_A");
     const result = await activate();
     expect(result.ok).to.equal(true);
     expect(result.transpile.warm).to.equal(true);
+    expect(result.transpile.unverified).to.equal(true);
+    expect(swapVerified, "runtime must be told this generation is unchecked").to.equal(false);
+    expect(scheduled, "comparison must be scheduled after compiler recycling").to.equal(result.transpile.hash);
+    await store.warmState.verifying;
+    expect(store.warmState.last.verdict).to.equal("same");
     expect(compiler.recycleDue).to.equal(true);
     expect(compiler.primed).to.equal(false);
     expect(compiler.memory.rss).to.be.greaterThan(0);

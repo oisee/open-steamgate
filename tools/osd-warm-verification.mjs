@@ -19,12 +19,18 @@ export function generationIdentity(generation) {
   } catch (error) { if (error.code === "ENOENT") return undefined; throw error; }
 }
 
-export function pruneVerification(compiler) {
+// At most three recent hashes plus the running comparison; disk keeps history.
+export const VERIFY_HISTORY_LIMIT = 3;
+export function pruneVerification(compiler, retained) {
   const paths = layout(compiler.root);
   for (const hash of compiler.unverified) {
     const generation = join(paths.byInput, hash);
     if (hash === compiler.verifying?.osdHash) continue;
-    if (!existsSync(join(generation, "manifest.json")) || warmVerdict(generation) !== false) compiler.unverified.delete(hash);
+    if ((retained && !retained.has(hash)) || !existsSync(join(generation, "manifest.json")) || warmVerdict(generation) !== false) compiler.unverified.delete(hash);
+  }
+  const recent = [...compiler.unverified].filter(hash => hash !== compiler.verifying?.osdHash);
+  for (const hash of recent.slice(0, -VERIFY_HISTORY_LIMIT)) {
+    compiler.unverified.delete(hash);
   }
 }
 
@@ -35,7 +41,7 @@ export async function waitVerifier(child, ms) {
   try {
     await Promise.race([exited, new Promise(resolve => {
       timer = setTimeout(() => {
-        child.osdCancelled = `verification exceeded ${ms} ms`;
+        child.osdCancelled = `verification wait exceeded ${ms} ms`;
         child.kill("SIGKILL");
         resolve();
       }, ms);
@@ -45,7 +51,7 @@ export async function waitVerifier(child, ms) {
 }
 
 export async function settleVerification(compiler, hash, identity, result) {
-  if (result.verdict !== "same") return result;
+  if (!["same", "differs"].includes(result.verdict)) return result;
   const generation = join(layout(compiler.root).byInput, hash), side = `${generation}.warm.json`;
   let unlock, tmp;
   try {
@@ -56,7 +62,9 @@ export async function settleVerification(compiler, hash, identity, result) {
     if (existsSync(side)) {
       const note = JSON.parse(readFileSync(side, "utf8"));
       tmp = `${side}.${process.pid}.${randomUUID()}.tmp`;
-      writeFileSync(tmp, JSON.stringify({...note, verified: true, verifiedAt: new Date().toISOString()}, null, 2));
+      writeFileSync(tmp, JSON.stringify({...note, ...(result.verdict === "same"
+        ? {verified: true, verifiedAt: new Date().toISOString()}
+        : {verified: false, differs: result.differing})}, null, 2));
       renameSync(tmp, side);
     }
     compiler.unverified.delete(hash);
@@ -82,12 +90,15 @@ export function startVerification(compiler, hash, script) {
       clearTimeout(timer);
       try { resolve(await settleVerification(compiler, hash, identity, result)); }
       catch (error) { resolve({verdict: "failed", why: error.message}); }
-      finally { if (compiler.verifying === child) compiler.verifying = undefined; }
+      finally {
+        if (compiler.verifying === child) compiler.verifying = undefined;
+        compiler.pruneVerification();
+      }
     };
     const timer = setTimeout(() => {
       child.osdCancelled = "verification deadline exceeded";
       child.kill("SIGKILL");
-    }, compiler.verifyDeadlineMs ?? 30000);
+    }, compiler.verifyDeadlineMs ?? 180000);
     child.stdout.on("data", d => { out += d; });
     child.stderr.on("data", d => { out += d; });
     child.on("error", error => finish({verdict: "failed", output: error.message}));

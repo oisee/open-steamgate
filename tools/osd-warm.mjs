@@ -90,10 +90,9 @@ export const GENERATORS_READ = [
 
 const SOURCE = /\.(clas(\.(locals_imp|locals_def|testclasses|macros))?\.abap|intf\.abap|prog\.abap)$/i;
 const AMDP = /BY\s+DATABASE\s+(PROCEDURE|FUNCTION)/i;
-// every INTERFACES statement, the chained form (`INTERFACES: a, b.`) too,
-// as the words it names; a changed addition counts as a change
-const interfacesOf = (text) => [...text.matchAll(/(?:^|(?<=\.))\s*INTERFACES\b\s*:?([^.]*)\./gim)]
-  .flatMap((m) => m[1].split(/[\s,]+/).filter(Boolean).map((w) => w.toUpperCase())).sort().join(",");
+// Preserve statement spelling: generators do not recognise every ABAP form.
+const interfacesOf = text => [...text.matchAll(/(?:^|(?<=\.))\s*(INTERFACES\b[^.]*\.)/gim)]
+  .map(m => m[1]).join("\n");
 
 /** why a content edit may not be built warm, or undefined when it may */
 export function warmRule({path, before, after, amdpText = ""}) {
@@ -228,6 +227,7 @@ export class WarmCompiler {
     // generations this made that verify() has not yet compared with a cold
     // transpile of the same inputs
     this.unverified = new Set();
+    this.verifyDeadlineMs = options.verifyDeadlineMs ?? Number(process.env.OSD_WARM_VERIFY_LIFETIME_MS ?? 180000);
     // the same, on disk beside the generation (<hash>.warm.json), so a warm
     // generation found again later is still known to be unchecked
     this.swaps = 0;
@@ -727,7 +727,10 @@ export class WarmCompiler {
       if (hash === from && stale.size === 0) {
         commit();
         settled = true;
-        return {ok: true, hash, cached: true, warm: true, live: true, ms: Date.now() - started, modules: [], hostHeld: [], stale: 0, from,
+        const unverified = warmVerdict(join(paths.byInput, hash)) === false;
+        if (unverified) this.unverified.add(hash);
+        this.pruneVerification();
+        return {ok: true, hash, cached: true, warm: true, unverified, live: true, ms: Date.now() - started, modules: [], hostHeld: [], stale: 0, from,
           closure: [], xrefRows: {CROSS: [], WBCROSSGT: [], WBCROSSGTX: [], D010INC: []}};
       }
       const files = new Map([...actual.keys()].map(path => [path, this.files.get(path)]));
@@ -817,7 +820,9 @@ export class WarmCompiler {
         }
       }
       mark("generation");
-      if (warmVerdict(target) === false) this.unverified.add(hash);
+      const unverified = warmVerdict(target) === false;
+      if (unverified) this.unverified.add(hash);
+      this.pruneVerification();
       if (this.switch !== false) switchTo(root, hash, undefined, {wanted});
       mark("switch");
       commit();
@@ -842,7 +847,7 @@ export class WarmCompiler {
         // Program modules execute at import time. Compile their closure warm,
         // but let a fresh runtime load it instead of executing it in a swap.
         modules, hostHeld: modules.filter((m) => HOST_HELD.includes(m) || m.endsWith(".prog.mjs")), stale: stale.size, from, steps,
-        closure, xrefRows};
+        closure, xrefRows, unverified};
     } catch (error) {
       preserve = !mutated && error.code === "NOT_WARM";
       throw error;
@@ -857,6 +862,7 @@ export class WarmCompiler {
   }
 
   pruneVerification() { pruneVerification(this); }
+  retainVerification(hashes) { pruneVerification(this, new Set(hashes)); }
 
   // Explicit shutdown only; cold publications cannot invalidate frozen inputs.
   cancelVerify(keep, why) {

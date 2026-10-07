@@ -30,7 +30,7 @@ export async function transpileStore(store, options, activating, built) {
           return {ok: true, ms: Date.now() - started, objects: r.objects, hash: r.hash, cached: r.cached, warm: true,
             built: built(w.compiler.digests),
             modules: r.modules, hostHeld: r.hostHeld, from: r.from, stale: r.stale, steps: r.steps,
-            closure: r.closure, xrefRows: r.xrefRows, unverified: w.compiler.unverified.has(r.hash), superseded};
+            closure: r.closure, xrefRows: r.xrefRows, unverified: r.unverified ?? w.compiler.unverified.has(r.hash), superseded};
         } catch (error) {
           try { await acceptView(store, view, activating); } catch (changed) { error = changed; }
           if (["CHANGED", "INPUT_CHANGED"].includes(error.code)) {

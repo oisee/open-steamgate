@@ -20,11 +20,12 @@ export function warmUp(store) {
     // primed on the build view: inactive objects as their active copies
     w.compiler ??= new WarmCompilerProcess({root: store.root, log: (m) => console.log(m), overlay: (activating) => store.overlay(activating),
       keyOf: (file) => store.objectKeyOf(file), inactiveSources: (activating) => store.inactiveSources(activating)});
+    w.compiler.verifyDeadlineMs = store.warmVerifyLifetimeMs ?? Number(process.env.OSD_WARM_VERIFY_LIFETIME_MS ?? 180000);
     try {
       // Let an already running frozen comparison finish before the bounded
       // full prime. New comparisons wait below; saves still take their turns.
       const verifier = w.compiler.verifying;
-      await waitVerifier(verifier, store.warmVerifyDeadlineMs ?? store.warmDeadlineMs ?? 30000);
+      await waitVerifier(verifier, store.warmVerifyDeadlineMs ?? store.warmVerifyWaitMs ?? Number(process.env.OSD_WARM_VERIFY_WAIT_MS ?? 30000));
       for (;;) {
         const view = await captureView(store);
         try {

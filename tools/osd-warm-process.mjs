@@ -88,7 +88,7 @@ export class WarmCompilerProcess extends WarmCompiler {
       this.hash = s.hash;
       this.files = new Map(Array.from({length: s.files}, (_, i) => [i, undefined]));
       this.digests = new Map(s.digests);
-      this.unverified = new Set(s.unverified);
+      this.unverified = new Set([...this.unverified, ...s.unverified]);
       this.pruneVerification();
       this.#readers = new Map(s.readers);
       if (message.error) pending.reject(Object.assign(new Error(message.error.message), message.error));
@@ -131,7 +131,10 @@ export class WarmCompilerProcess extends WarmCompiler {
   }
   async build(activating = new Set(), snapshot = undefined) {
     const result = await this.#call("build", activating, snapshot);
+    result.unverified ??= this.unverified.has(result.hash);
     if (this.recycleDue) await this.drop();
+    if (result.unverified) this.unverified.add(result.hash);
+    this.pruneVerification();
     return result;
   }
   async verify(hash) {
@@ -141,6 +144,10 @@ export class WarmCompilerProcess extends WarmCompiler {
     }
     this.pruneVerification();
     return result;
+  }
+  retainVerification(hashes) {
+    super.retainVerification(hashes);
+    if (this.#child) sendIPC(this.#child, {method: "retainVerification", hashes: [...hashes]}, () => {});
   }
   readersOf(type, name) {
     if (!this.primed) return undefined;

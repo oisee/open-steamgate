@@ -528,3 +528,21 @@ Doctor keeps this informational (exit 0): cold compilation remains available.
 The former in-process numbering defect is recorded as
 `ANOMALY-2026-09-25-in-process-numbering`; the current pin includes #1899,
 which gives each object stable temporary names across repeated runs.
+
+Round 7 verification policy (#625): priming/publication waits at most 30 s for
+a running comparison (`OSD_WARM_VERIFY_WAIT_MS`, instance `warmVerifyWaitMs`;
+legacy `warmVerifyDeadlineMs` remains accepted). Cancellation during that wait
+keeps the disk verdict unchecked and requeues the hash after priming. A verifier
+itself has a separate 180 s lifetime (`OSD_WARM_VERIFY_LIFETIME_MS`, instance
+`warmVerifyLifetimeMs`, compiler `verifyDeadlineMs`): about eleven times the
+measured 16.5 s comparison. Both settings are milliseconds. Lifetime expiry
+stays unchecked; another activation or the quiet retry can compare it again.
+
+Verification history retains at most three recent hashes plus one in flight;
+the store additionally prunes to its current/queued/running hashes and informs
+the worker. Discarding history never alters the unchecked on-disk verdict.
+Pins renew every minute; Linux process-start identity keeps a CPU-bound live
+verifier pinned across lease expiry while rejecting reused PIDs. Platforms
+without `/proc` use the renewing five-minute lease. GC also removes unpinned
+sidecars whose generation directory vanished during a crash. Both `same` and
+`differs` settle under the build lock with an identity recheck and atomic rename.

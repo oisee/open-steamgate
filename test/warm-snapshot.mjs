@@ -257,6 +257,23 @@ Transpiler.prototype.run = async function(...args) {
     expect(gc(root, {keep: 0})).to.include(generation);
   });
 
+  it("pins a live long verifier past lease expiry while GC runs", async function () {
+    if (process.platform !== "linux") this.skip();
+    writeFileSync(input, source("zcl_snap", 3)); await compiler.build();
+    const {verifying, resume} = await pauseVerification();
+    const originalNow = Date.now;
+    let removed;
+    try {
+      // Advance GC's lease clock while the real paused verifier stays alive.
+      Date.now = () => originalNow() + 600000;
+      removed = gc(root, {keep: 0});
+      expect(compiler.verifying.exitCode).to.equal(null);
+      expect(removed).to.not.include(generation);
+    } finally { Date.now = originalNow; resume(); }
+    expect((await verifying).verdict).to.equal("same");
+    expect(gc(root, {keep: 0})).to.include(generation);
+  });
+
   it("bounds an activation storm and verifies the latest generation ahead of retained older work", async () => {
     const seen = [], release = [], logs = [];
     const state = {next: new Set(), compiler: {verify: hash => {

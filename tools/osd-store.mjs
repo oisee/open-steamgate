@@ -1234,6 +1234,8 @@ export class ObjectStore {
   warmSwapLimit = WARM_SWAPS;
   // the quiet period after a swap that brings one (OSD_WARM_QUIET_MS); likewise
   warmQuietMs = WARM_QUIET_MS;
+  warmVerifyWaitMs = Number(process.env.OSD_WARM_VERIFY_WAIT_MS ?? 30000);
+  warmVerifyLifetimeMs = Number(process.env.OSD_WARM_VERIFY_LIFETIME_MS ?? 180000);
   // how long a publish waits for a runtime changing hands (OSD_TRANSITION_MS)
   transitionMs = TRANSITION_MS;
 

@@ -1,7 +1,7 @@
 // Bounded frozen comparisons: the live/latest generation takes the next turn.
 import {join} from "node:path";
 import {liveHash} from "./osd-build.mjs";
-import {existsSync, readFileSync, writeFileSync} from "node:fs";
+import {existsSync} from "node:fs";
 
 export const VERIFY_PENDING_LIMIT = 2;
 
@@ -26,6 +26,7 @@ export function verifyNext(store) {
     w.next.delete(older);
     console.log(`warm: ${older} superseded, not verified (verification queue limit ${VERIFY_PENDING_LIMIT})`);
   }
+  w.compiler.retainVerification?.(new Set([w.verifyingHash, ...w.next, w.compiler.hash].filter(Boolean)));
   if (w.verifying !== undefined || w.priming !== undefined || !w.next.size) return;
   w.verifyingHash = hash;
   w.next.delete(hash);
@@ -39,14 +40,6 @@ export function verifyNext(store) {
       // truth, so it replaces the generation and the process, and the
       // registry is primed again from it
       console.log(`warm: ${hash} DIFFERS from a cold transpile in ${result.count} files (${result.differing.slice(0, 5).join(", ")}); rebuilding cold`);
-      // the note beside it keeps the generation from ever being a cache
-      // hit, whatever the tree is by the time the cold build runs
-      try {
-        const side = join(store.root, "build", "by-input", `${hash}.warm.json`);
-        writeFileSync(side, JSON.stringify({...JSON.parse(readFileSync(side, "utf8")), verified: false, differs: result.differing}, null, 2));
-      } catch {
-        // no note: nothing a cold build would take as its own
-      }
       await w.compiler.drop();
       const rebuilt = await store.publish({force: true, replace: true});
       if (rebuilt.ok !== true) throw new Error(rebuilt.error ?? rebuilt.transpile?.error ?? "cold recovery failed");
@@ -54,6 +47,7 @@ export function verifyNext(store) {
       // idle lifecycle client must not need another activation to prime it.
       await store.warmUp();
     } else {
+      if (result.verdict === "cancelled" && result.why?.startsWith("verification wait exceeded")) w.next.add(hash);
       console.log(`warm: ${hash} not verified: ${result.verdict} ${result.why ?? result.output ?? ""}`);
     }
   }).catch(error => {
@@ -61,6 +55,7 @@ export function verifyNext(store) {
   }).finally(() => {
     w.verifying = undefined;
     w.verifyingHash = undefined;
+    w.compiler.retainVerification?.(new Set([...(w.next ?? []), w.compiler.hash].filter(Boolean)));
     verifyNext(store);
   });
 }

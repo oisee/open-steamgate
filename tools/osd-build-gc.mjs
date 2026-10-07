@@ -26,6 +26,16 @@ export function gc(root, options = {}) {
       rmSync(join(paths.byInput, `${g.hash}.warm.json`), {force: true});
       removed.push(g.hash);
     }
+    if (existsSync(paths.byInput)) {
+      for (const file of readdirSync(paths.byInput)) {
+        if (!file.endsWith(".warm.json")) continue;
+        const hash = file.slice(0, -10);
+        if (!pinned.has(hash) && !existsSync(join(paths.byInput, hash))) {
+          rmSync(join(paths.byInput, file), {force: true});
+          removed.push(file);
+        }
+      }
+    }
     if (existsSync(paths.tmp)) {
       for (const e of readdirSync(paths.tmp)) {
         if (scratch.has(e)) continue;

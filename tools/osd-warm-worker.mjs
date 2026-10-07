@@ -32,9 +32,14 @@ export function main({beforeCompile = () => {}, afterCompile = () => {}, heapLim
   };
   let queue = Promise.resolve();
   process.on("message", message => {
-    if (!["prime", "build", "check", "update", "verified"].includes(message.method)) return;
+    if (!["prime", "build", "check", "update", "verified", "retainVerification"].includes(message.method)) return;
     queue = queue.then(async () => {
-      if (message.method === "verified") { compiler.unverified.delete(message.hash); return; }
+      if (message.method === "verified") {
+        compiler.unverified.delete(message.hash);
+        sendIPC(process, {type: "verified", hash: message.hash});
+        return;
+      }
+      if (message.method === "retainVerification") { compiler.retainVerification(message.hashes); return; }
       inactive = message.inactive;
       folder = message.folder;
       try {

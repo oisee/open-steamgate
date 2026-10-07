@@ -747,8 +747,8 @@ export async function build(options = {}) {
   let warmUnchecked = false;
   try {
     warmUnchecked = JSON.parse(readFileSync(warmSide, "utf8")).verified !== true;
-  } catch {
-    warmUnchecked = false;
+  } catch (error) {
+    warmUnchecked = error.code !== "ENOENT";
   }
   if (warmUnchecked) {
     options = {...options, force: true, replace: true};
