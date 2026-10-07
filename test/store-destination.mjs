@@ -964,6 +964,7 @@ export async function setup(abap, schemas, insert) {
       writeFileSync(join(root, `src/${name.toLowerCase()}.clas.abap`), main(name));
       writeFileSync(join(root, `src/${name.toLowerCase()}.clas.testclasses.abap`), tests(name, exp, hook));
     }
+    writeFileSync(join(root, 'src/zcl_store_unit_empty.clas.abap'), main('ZCL_STORE_UNIT_EMPTY'));
     // Separate setup and loop subjects exercise stage mapping and watchdogs.
     for (const name of ['ZCL_STORE_UNIT_SETUP', 'ZCL_STORE_UNIT_SETUP_ASSERT', 'ZCL_STORE_UNIT_LOOP', 'ZCL_STORE_UNIT_BOOT']) {
       writeFileSync(join(root, `src/${name.toLowerCase()}.clas.abap`), main(name));
@@ -1048,6 +1049,32 @@ CLASS ltcl_loop IMPLEMENTATION. METHOD loop. DO. ENDDO. ENDMETHOD. METHOD later.
       expect(result.classes[0]).to.include({name: 'LTCL_PROBE', state: 'ok'});
       expect(result.counts.pass).to.equal(1);
     } finally {await store.write('CLAS', green, original, 'testclasses');}
+  });
+  it('refuses zero discovered classes when saved source has a new testclasses include', async () => {
+    const subject = 'ZCL_STORE_UNIT_EMPTY';
+    await store.write('CLAS', subject, tests(subject, 42), 'testclasses');
+    const result = await run([subject]);
+    expect(result.state).to.equal('not_run');
+    expect(result.error.code).to.equal('TEST_CLASSES_MISMATCH');
+    expect(result.counts.methods).to.equal(0); expect(result.classes).to.deep.equal([]);
+  });
+  it('latest failed activation refuses old green tests and survives journal reload; a new published activation clears it', async () => {
+    const {ActivationJournal} = await import('../tools/osd-activation-journal.mjs');
+    const journal = activationJournal(store), ticket = journal.create('CLAS', green);
+    journal.update(ticket.op_id, {state: 'failed', failure_stage: 'build', note: 'build syntax error',
+      issues: [{FILE: 'new.clas.testclasses.abap', LINE: 10, MESSAGE: 'method too long'}]});
+    const reloaded = new ActivationJournal(root, {host: journal.directory.split('/').at(-1)});
+    store.activationJournal = reloaded;
+    try {
+      const result = await run([green]);
+      expect(result.state).to.equal('not_run');
+      expect(result.error).to.include({code: 'PUBLICATION_FAILED', op_id: ticket.op_id, text: 'build syntax error'});
+      expect(result.error.issues[0]).to.include({LINE: 10});
+      expect(result.classes).to.deep.equal([]);
+      const next = reloaded.create('CLAS', green);
+      reloaded.update(next.op_id, {state: 'published', generation_id: generation});
+      expect((await run([green])).counts.pass).to.equal(1);
+    } finally {delete store.activationJournal; delete journal.entries[ticket.op_id]; journal.save();}
   });
   it('unknown target is a class not_found error and leaves the other target runnable', async () => {
     const result = await run(['ZCL_STORE_UNIT_UNKNOWN', green]);
@@ -1210,7 +1237,7 @@ CLASS ltcl_loop IMPLEMENTATION. METHOD loop. DO. ENDDO. ENDMETHOD. METHOD later.
       expect(result.state).to.equal('not_run');
       expect(result.error.code).to.equal('PUBLICATION_PENDING');
       expect(result.counts.methods).to.equal(0);
-    } finally {journal.update(pending.op_id, {state: 'failed', failure_stage: 'step'});}
+    } finally {journal.update(pending.op_id, {state: 'failed', failure_stage: 'step'}); delete journal.entries[pending.op_id]; journal.save();}
   });
   it('refuses an unconfirmed build after failed promotion, including after journal reload', async () => {
     const {ActivationJournal, activationJournal} = await import('../tools/osd-activation-journal.mjs');
@@ -1225,7 +1252,7 @@ CLASS ltcl_loop IMPLEMENTATION. METHOD loop. DO. ENDDO. ENDMETHOD. METHOD later.
       expect(result.state).to.equal('not_run');
       expect(result.error.code).to.equal('GENERATION_UNAVAILABLE');
       expect(result.counts.methods).to.equal(0);
-    } finally {journal.recordGeneration(generation);}
+    } finally {journal.recordGeneration(generation); delete journal.entries[ticket.op_id]; journal.save();}
   });
   it('pins discovery and execution when the live generation changes during a run', async () => {
     const {UnitRun} = await import('../tools/osd-unit.mjs');
@@ -1388,6 +1415,25 @@ CLASS ltcl_loop IMPLEMENTATION. METHOD loop. DO. ENDDO. ENDMETHOD. METHOD later.
       expect(mismatch.error).to.include({code: 'GENERATION_MISMATCH', expected_generation: x, current_generation: y});
       const absent = await step(() => abapCall('ACTIVATION_STATUS', {iv_json: '{"op_id":"unknown-pia-operation"}'}));
       expect(absent).to.deep.equal({state: 'not_found', code: 'NOT_FOUND', op_id: 'unknown-pia-operation'});
+      // A new include must fail inside STORE's calling step, even though
+      // publication normally happens afterwards. The ABAP host keeps JSON
+      // refusals visible without turning them into a transport exception.
+      await step(() => abapCall('WRITE', {iv_type: 'CLAS', iv_name: subject, iv_include: 'testclasses',
+        iv_source: tests(subject, 42).replaceAll('check', 'responses_two_calls_brace_in_string')}));
+      const rejected = await step(() => abapCall('ACTIVATE', {iv_type: 'CLAS', iv_name: subject}));
+      expect(rejected).to.include({state: 'failed', failure_stage: 'validation', active: false});
+      expect(rejected.issues.some(i => i.FILE.endsWith('.clas.testclasses.abap') && i.LINE > 0 &&
+        i.MESSAGE.includes('maximum length is 30 characters'))).to.equal(true);
+      const status = await step(() => abapCall('ACTIVATION_STATUS', {iv_json: JSON.stringify({op_id: rejected.op_id})}));
+      expect(status).to.deep.equal(rejected);
+      const refused = await step(() => abapCall('RUN_TESTS', {iv_json: JSON.stringify({targets: [{type: 'CLAS', name: subject}]})}));
+      expect(refused.state).to.equal('not_run');
+      expect(refused.error).to.include({code: 'PUBLICATION_FAILED', op_id: rejected.op_id});
+      await step(() => abapCall('WRITE', {iv_type: 'CLAS', iv_name: subject, iv_include: 'testclasses', iv_source: tests(subject, 42)}));
+      const fixed = await activate(subject);
+      const pickedUp = await step(() => abapCall('RUN_TESTS', {iv_json: JSON.stringify({targets: [{type: 'CLAS', name: subject}], expected_generation: fixed})}));
+      expect(pickedUp.counts).to.include({classes: 1, methods: 1, pass: 1});
+
     } finally {
       try {
         for (const name of [carrier, subject]) if (store.find('CLAS', name)) {

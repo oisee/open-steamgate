@@ -1,14 +1,11 @@
 import {join} from "node:path";
 import {warmVerdict} from "./osd-hot.mjs";
 
-// ADT and local STORE take the same revision and let the warm compiler check
-// its affected closure. Eligibility remains the compiler's rule; a refused
-// optimization builds cold, with full validation, before anything is promoted.
+// Validation is synchronous, even when publication is deferred to after the
+// calling step. The store checks every include in the activation's source view;
+// compiler availability must never turn that verdict into a promise.
 export function prepareActivation(store, named, {transpile = true, forced = false} = {}) {
-  const warm = store.warm?.();
-  const compilerCheck = transpile && (forced || warm?.on && !warm.disabled && !warm.closed &&
-    warm.compiler?.primed === true && named.every(o => ["CLAS", "INTF", "PROG", "INCL"].includes(o.type)));
-  return named.map(o => ({...o, ...(compilerCheck ? store.warmActivation(o.type, o.name)
+  return named.map(o => ({...o, ...(transpile && forced ? store.warmActivation(o.type, o.name)
     : store.activate(o.type, o.name, {activating: named}))}));
 }
 

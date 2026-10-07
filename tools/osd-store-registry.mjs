@@ -3,6 +3,7 @@ import {readFileSync, readdirSync, statSync} from "node:fs";
 import {join} from "node:path";
 import * as abaplint from "@abaplint/core";
 import {ddlsIssues} from "./osd-store-ddls.mjs";
+import {config as publicationValidation} from "@abaplint/transpiler/build/src/validation.js";
 import {TYPES} from "./osd-store-types.mjs";
 
 // Parsing the system costs seconds and every store of the same tree parses
@@ -72,10 +73,18 @@ export function buildRegistry(store, configPath = "abaplint.jsonc") {
   }
   const text = readFileSync(join(store.root, configPath), "utf8").split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
   const config = JSON.parse(text);
+  // The publication validator owns these rules. Keep identifier and
+  // structural checks identical for saved includes and compiled includes.
+  const validation = structuredClone(publicationValidation);
+  validation.rules.check_syntax = true;
+  validation.rules.forbidden_identifier.check = ["^unique\\d+$"];
   const registry = new abaplint.Registry(new abaplint.Config(JSON.stringify({
     global: {files: "/**/*.*"},
     syntax: config.syntax,
-    rules: {parser_error: true, check_syntax: true, unknown_types: true, implement_methods: true},
+    // DDLS/SRVD are generator inputs excluded from the transpiler; their
+    // dedicated checks below remain authoritative for those source types.
+    rules: {...validation.rules, allowed_object_types: {...validation.rules.allowed_object_types,
+      allowed: [...validation.rules.allowed_object_types.allowed, "DDLS", "SRVD"]}},
   })));
   // everything, not only what the index calls an object: a class needs its
   // local includes, and a type pool is not an ADT object but the check

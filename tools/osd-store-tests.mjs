@@ -52,7 +52,8 @@ function plansOf(root, generation, targets) {
       }
       const view = {registry: () => registry,
         find: (type, name) => registry.getObject(type, name) ? {type, name} : undefined};
-      return {target, plan: unitClasses(view, target.type, target.name)};
+      return {target, plan: unitClasses(view, target.type, target.name),
+        hasTestInclude: sources.get(`${target.type} ${target.name}`).some(([file]) => /\.clas\.testclasses\.abap$/.test(file))};
     }
     catch (error) {
       return {target, error: {stage: error.code === "NOT_FOUND" ? "not_found" : "discovery",
@@ -148,6 +149,14 @@ export async function runStoreTests(store, json, options = {}) {
       const journal = activationJournal(store);
       const checkpoint = journal.currentGeneration();
       generation = checkpoint || (store.served?.running === true ? store.served.generation : live) || "";
+      // A failed latest activation is not permission to test the old live
+      // revision. Object order also breaks timestamp ties without guessing.
+      const latest = new Map();
+      for (const entry of Object.values(journal.entries)) latest.set(`${entry.type} ${entry.name}`, entry);
+      const failed = targets.map(t => latest.get(`${t.type} ${t.name}`)).find(e => e?.state === "failed");
+      if (failed) return answer("not_run", {error: {code: "PUBLICATION_FAILED", op_id: failed.op_id,
+        text: failed.note || "latest activation failed", failure_stage: failed.failure_stage, issues: failed.issues,
+        ...(failed.error ? {cause: failed.error} : {})}});
       if (expected !== null && expected !== generation) {
         return answer("not_run", {error: {code: "GENERATION_MISMATCH", text: "expected generation is not the current published generation",
           expected_generation: expected, current_generation: generation}});
@@ -166,6 +175,12 @@ export async function runStoreTests(store, json, options = {}) {
         throw refusal("GENERATION_UNAVAILABLE", "published generation modules are unavailable");
       }
       const plans = plansOf(store.root, directory, targets);
+      for (const {target, plan, hasTestInclude} of plans) {
+        if (plan?.classes.length === 0 && (hasTestInclude || store.classIncludes(target.name).includes("testclasses"))) {
+          return answer("not_run", {error: {code: "TEST_CLASSES_MISMATCH", target,
+            text: "saved/active testclasses include has no test classes in the published generation"}});
+        }
+      }
       // Own the modules for the lifetime of the run, even if publication or
       // generation GC happens next. The source lock covers selection + copy,
       // never the tests. Relative host setup imports retain the usual links.

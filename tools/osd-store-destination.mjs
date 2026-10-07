@@ -589,7 +589,8 @@ export class StoreDestination {
           generation_id: committed && published?.generation ? published.generation : "",
           active: committed, live: published.live, verified: published.verified,
           failure_stage: published.failureStage,
-          note: !committed ? "publication failed or checked source changed" : published.verified ? "published" : "published; warm-unverified",
+          note: !committed ? published.error ?? published.transpile?.error ?? "publication failed or checked source changed"
+            : published.verified ? "published" : "published; warm-unverified",
           issues: failureEntries?.flatMap(entry => (entry.issues ?? []).map(issue => issueRow(issue, entry))) ?? [],
         })),
         EV_ACTIVE: committed ? "X" : "",
@@ -601,9 +602,9 @@ export class StoreDestination {
             ? `built and live (generation ${published?.generation ?? "?"})`
             : "built, and the process serving this screen still runs the code it started with -- it is replaced when it is next restarted"}`
             + (objects.length === 0 ? "" : `; ${objects.length} generated object${objects.length === 1 ? "" : "s"} rewritten`),
-        EV_COUNT: "0",
+        EV_COUNT: String(failureEntries?.reduce((n, entry) => n + (entry.issues?.length ?? 0), 0) ?? 0),
         EV_MS: String(Date.now() - started),
-        ET_ISSUE: [],
+        ET_ISSUE: failureEntries?.flatMap(entry => (entry.issues ?? []).map(issue => issueRow(issue, entry))) ?? [],
         ET_OBJECT: objects,
       };
       } catch (error) {
@@ -654,6 +655,7 @@ function issueRow(issue, object) {
   return {
     OBJ_TYPE: String(object?.type ?? ""),
     OBJ_NAME: String(object?.name ?? ""),
+    FILE: String(issue.file ?? ""),
     LINE: Number(issue.line ?? 0),
     // COL, not COLUMN: the field of ZOSD_ISSUE_S is COL, and a key the
     // caller's structure does not have is simply never assigned -- so the

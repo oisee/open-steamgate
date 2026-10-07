@@ -161,7 +161,7 @@ describe("tools/osd-warm: the supervisor and the dev loop", () => {
     expect(pool.swaps).to.equal(5);
   });
 
-  it("takes the warm branch for classes and interfaces only", async () => {
+  it("checks classes synchronously even with a primed warm compiler", async () => {
     const calls = [];
     const store = {
       roots: [],
@@ -175,7 +175,7 @@ describe("tools/osd-warm: the supervisor and the dev loop", () => {
     const loop = devLoop({store, watch: false, log: () => {}, publish: async () => ({ok: true, transpile: {}})});
     await loop.touch("src/zcl_a.clas.abap");
     await loop.touch("src/ztab.tabl.xml");
-    expect(calls).to.deep.equal(["warm CLAS ZCL_A", "check TABL ZTAB"]);
+    expect(calls).to.deep.equal(["check CLAS ZCL_A", "check TABL ZTAB"]);
   });
 });
 
@@ -222,6 +222,7 @@ describe("tools/osd-warm: a refused swap is not answered as warm", () => {
     const store = {
       roots: [], find: () => undefined, root,
       warm: () => ({on: true, compiler: {primed: true}}),
+      activate: (type, name) => ({type, name, active: true, issues: [], revision: "r1"}),
       warmActivation: (type, name) => ({type, name, active: true, revision: "r1"}),
       completeActivations: () => true,
       publish: async () => publishResult,
@@ -444,6 +445,7 @@ describe("tools/osd-warm: an activation answers once its source is live", () => 
   const setup = () => {
     const dir = mkdtempSync(join(tmpdir(), "osd-warm-live-"));
     mkdirSync(join(dir, "src"));
+    writeFileSync(join(dir, "abaplint.jsonc"), JSON.stringify({syntax: {version: "OpenABAP"}}));
     const store = new ObjectStore({root: dir, roots: [{path: "src", writable: true}], libs: []});
     store.write("CLAS", "ZCL_A", "CLASS zcl_a DEFINITION PUBLIC. ENDCLASS.\nCLASS zcl_a IMPLEMENTATION. ENDCLASS.\n");
     // the object is live before the edits below: an inactive one is kept
@@ -1034,7 +1036,7 @@ describe("tools/osd-warm: an activation answers once its source is live", () => 
         this.hash = hash;
         return {ok: true, hash, from, modules: ["zcl_a.clas.mjs"], hostHeld: [], stale: 1};
       };
-      writeFileSync(join(dir, "src", "osd", "zcl_a.clas.abap"), "CLASS zcl_a DEFINITION PUBLIC. ENDCLASS.\n* saved in vim\n");
+      writeFileSync(join(dir, "src", "osd", "zcl_a.clas.abap"), "CLASS zcl_a DEFINITION PUBLIC. ENDCLASS.\nCLASS zcl_a IMPLEMENTATION. ENDCLASS.\n* saved in vim\n");
       const dev = devLoop({store, watch: false, log: () => {}}).touch("src/osd/zcl_a.clas.abap");
       await sleep(5);
       const [d, a] = await Promise.all([dev, activate(store)]);

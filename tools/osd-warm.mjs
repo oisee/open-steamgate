@@ -372,7 +372,14 @@ export class WarmCompiler {
         keys.add(key);
         substitute.set(resolve(logical), createHash("sha256").update(readFileSync(path)).digest("hex"));
       }
-      const back = hashOf(root, inputsOf(root, config), {transpiler, overlay: this.overlayOf(keys), substitute});
+      // Includes created since live have no active copy. Putting a saved
+      // object's existing files back must also remove those new files from
+      // this proof, just as the ordinary inactive view excludes them.
+      const absent = this.inactiveSources(new Set()).filter(entry => keys.has(entry.key)).flatMap(entry => entry.files)
+        .map(file => resolve(root, file.file)).filter(file => !view.actual.has(file));
+      const restored = this.overlayOf(keys);
+      const back = hashOf(root, inputsOf(root, config), {transpiler,
+        overlay: {...restored, exclude: [...(restored?.exclude ?? []), ...absent]}, substitute});
       if (back !== live) {
         throw new NotWarm(`the tree is not the live generation (${hash} on disk, ${live} live, ${back} with the saves since put back); a cold build comes first`);
       }

@@ -56,31 +56,6 @@ export function devLoop(options = {}) {
     }
     log(`${files.length} file${files.length === 1 ? "" : "s"} changed${objects.size > 0 ? `: ${[...objects.keys()].join(", ")}` : ""}`);
 
-    // with a warm registry the check is the build: the transpiler checks what
-    // the change reaches and builds nothing if one of them is broken, in a
-    // fraction of the ~3 s the check below costs
-    // -- for classes and interfaces only: anything else is a cold build, and
-    // a cold build is only as checked as the check below makes it
-    const warmable = objects.size > 0 && [...objects.values()].every(({type}) => type === "CLAS" || type === "INTF");
-    if (warmable && store.warm?.().compiler?.primed === true) {
-      const started = Date.now();
-      const checked = [...objects.values()].map(({type, name}) => store.warmActivation(type, name));
-      const result = await publish([...objects.values()]);
-      const t = result.transpile ?? {};
-      if (result.ok !== true) {
-        log(`${t.check ? "check" : "build"} failed after ${t.ms ?? "?"} ms: ${result.error ?? t.error ?? "see the output below"}; the running system is untouched`);
-        return {ok: false, stage: t.check ? "check" : "build", result};
-      }
-      if (!(await store.completeActivations(checked, result.transpile?.built))) {
-        log("source changed during build; leaving the new edit inactive for the next pass");
-        return {ok: false, stage: "changed", result};
-      }
-      const how = t.warm ? `warm, ${t.stale} object${t.stale === 1 ? "" : "s"}` : t.cached ? "reused" : "built";
-      const live = result.hot ? `, swapped in ${result.ms} ms` : result.recycled ? `, recycled in ${result.ms} ms` : "";
-      log(`${how} ${t.hash ?? ""} in ${t.ms ?? "?"} ms${live}; ${Date.now() - started} ms from the change`);
-      return {ok: true, stage: "live", result};
-    }
-
     // check first, the object and whoever depends on it; the registry sees
     // the system whole, so three changed files that broke against an
     // unchanged fourth are caught here, in seconds, before a build
@@ -119,7 +94,7 @@ export function devLoop(options = {}) {
       log("source changed during build; leaving the new edit inactive for the next pass");
       return {ok: false, stage: "changed", result};
     }
-    const how = t.cached ? "reused" : "built";
+    const how = t.warm ? `warm, ${t.stale} objects` : t.cached ? "reused" : "built";
     // a build the serving process already runs is loaded by nobody
     // (ObjectStore#publish): "already serving", not "nothing serving"
     const live = result.recycled ? `, recycled in ${result.ms} ms`
