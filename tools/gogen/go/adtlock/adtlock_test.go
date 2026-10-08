@@ -2,6 +2,7 @@ package adtlock
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -86,6 +87,64 @@ func TestBoundContextSurvivesStepAndDroppedOnDump(t *testing.T) {
 	}
 }
 
+func TestRebindingUnpinsPreviousContext(t *testing.T) {
+	host, closeServer := newHost(t)
+	defer closeServer()
+	const first, second = "bound-first", "bound-second"
+	defer host.kernel.End(first)
+	defer host.kernel.End(second)
+
+	step := new(struct{ int })
+	host.Begin(step)
+	for _, id := range []string{first, second} {
+		if ok, err := host.bind(step, id, "ALICE"); !ok || err != nil {
+			t.Fatalf("bind %s: %v %v", id, ok, err)
+		}
+	}
+	if _, err := host.Enqueue(step, request("REBOUND"), nil); err != nil {
+		t.Fatal(err)
+	}
+	host.Finish(step, false)
+	rebound := new(struct{ int })
+	host.Begin(rebound)
+	if ok, err := host.bind(rebound, first, "ALICE"); !ok || err != nil {
+		t.Fatalf("rebind first: %v %v", ok, err)
+	}
+	if _, err := host.Enqueue(rebound, request("FIRST"), nil); err != nil {
+		t.Fatal(err)
+	}
+	host.Finish(rebound, true)
+	var firstRows int
+	for _, row := range host.server.Read(enq.Filter{Table: "ZOSD_TEST"}) {
+		if row.Arg == "FIRST" {
+			firstRows++
+		}
+	}
+	if firstRows != 0 {
+		t.Fatal("rebinding left the first context pinned")
+	}
+}
+
+func TestBindEndsHolderSessionTakenEarlierInStep(t *testing.T) {
+	host, closeServer := newHost(t)
+	defer closeServer()
+	const id = "bound-after-holder"
+	defer host.kernel.End(id)
+
+	step := new(struct{ int })
+	host.Begin(step)
+	if _, err := host.Enqueue(step, request("BEFORE-BIND"), nil); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := host.bind(step, id, "ALICE"); !ok || err != nil {
+		t.Fatalf("bind: %v %v", ok, err)
+	}
+	host.Finish(step, false)
+	if rows := host.server.Read(enq.Filter{Table: "ZOSD_TEST"}); len(rows) != 0 {
+		t.Fatalf("the pre-bind holder session survived the step: %+v", rows)
+	}
+}
+
 func TestRetryUsesInjectedSleep(t *testing.T) {
 	host, closeServer := newHost(t)
 	defer closeServer()
@@ -127,6 +186,25 @@ func TestEndedContextDuringSleepReturnsError(t *testing.T) {
 		t.Fatalf("err %v, want ErrSessionEnded", err)
 	}
 	host.Finish(step, true)
+}
+
+func TestNonErrorPanicFromSleepIsRethrown(t *testing.T) {
+	host, closeServer := newHost(t)
+	defer closeServer()
+
+	other := host.server.Open("OTHER")
+	defer host.server.End(other)
+	host.server.Enqueue(other, request("SLEEP-DUMP"), false)
+	step := new(struct{ int })
+	host.Begin(step)
+	defer host.Finish(step, true)
+	defer func() {
+		if recovered := recover(); recovered != "sleep dump" {
+			t.Fatalf("recovered %v (%T), want the original string panic", recovered, recovered)
+		}
+	}()
+	host.EnqueueWithSleep(step, request("SLEEP-DUMP"), true, func(time.Duration) { panic("sleep dump") })
+	t.Fatal("a dump during the sleep became a successful enqueue")
 }
 
 func TestPinnedContextSurvivesAnotherStepsDump(t *testing.T) {
@@ -175,4 +253,27 @@ func TestDequeueAndDequeueAllFollowNode(t *testing.T) {
 		t.Fatalf("after DequeueAll: %+v", rows)
 	}
 	host.Finish(step, false)
+}
+
+func TestEndedKeyLedgerIsBoundedAndRefreshed(t *testing.T) {
+	host, closeServer := newHost(t)
+	defer closeServer()
+
+	host.end("repeat")
+	for i := 0; i < 10000; i++ {
+		host.end(fmt.Sprintf("id-%d", i))
+		if i == 5000 {
+			host.end("repeat")
+		}
+	}
+	if len(host.ended) != 10000 {
+		t.Fatalf("ended ledger has %d keys, want %d", len(host.ended), 10000)
+	}
+	_, ended := host.ended["repeat"]
+	if !ended {
+		t.Fatal("a repeated end did not refresh its position")
+	}
+	if _, ended := host.ended["id-0"]; ended {
+		t.Fatal("the oldest distinct end was not evicted")
+	}
 }

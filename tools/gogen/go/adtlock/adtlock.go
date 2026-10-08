@@ -3,6 +3,7 @@
 package adtlock
 
 import (
+	"container/list"
 	"errors"
 	"sync"
 	"time"
@@ -16,9 +17,12 @@ import (
 // ErrSessionEnded is Node's EnqSessionEnded at the KERNEL_LOCK boundary.
 var ErrSessionEnded = errors.New("the session has ended")
 
+const endedKeep = 10000
+
 type step struct {
-	sid     int64
-	boundID string
+	sid       int64
+	boundID   string
+	holderSID int64
 }
 
 // Host maps calling dialog steps to lock-server sessions and installs both
@@ -32,12 +36,13 @@ type Host struct {
 
 	mu    sync.Mutex
 	steps map[any]*step
-	ended map[string]struct{}
+	ended map[string]*list.Element
+	order *list.List
 }
 
 func New(server *enq.Server, kernel *adtenq.Kernel) *Host {
 	return &Host{server: server, kernel: kernel, steps: make(map[any]*step),
-		ended: make(map[string]struct{})}
+		ended: make(map[string]*list.Element), order: list.New()}
 }
 
 // Install fills the process-wide hostclass hooks.
@@ -82,6 +87,9 @@ func (h *Host) Finish(s any, dumped bool) {
 			h.kernel.DropContext(current.boundID, current.sid)
 		}
 		h.kernel.Unpin(current.sid)
+		if current.holderSID != 0 {
+			h.server.End(current.holderSID)
+		}
 		return
 	}
 	if current.sid != 0 {
@@ -104,16 +112,22 @@ func (h *Host) bind(caller any, id, user string) (bool, error) {
 		return h.kernel.Bind(id, user)
 	}
 	h.mu.Lock()
+	defer h.mu.Unlock()
 	_, ended := h.ended[id]
-	h.mu.Unlock()
 	if ended {
 		return false, nil
 	}
 	if current.boundID == id && current.sid != 0 {
 		return true, nil
 	}
+	if current.boundID != "" && current.sid != 0 {
+		h.kernel.Unpin(current.sid)
+	}
 	sid, ok, err := h.kernel.Pin(id, user)
 	if ok && err == nil {
+		if current.boundID == "" && current.sid != 0 {
+			current.holderSID = current.sid
+		}
 		current.boundID = id
 		current.sid = sid
 	}
@@ -122,14 +136,25 @@ func (h *Host) bind(caller any, id, user string) (bool, error) {
 
 func (h *Host) end(id string) {
 	h.mu.Lock()
-	h.ended[id] = struct{}{}
+	if old := h.ended[id]; old != nil {
+		h.order.Remove(old)
+	}
+	h.ended[id] = h.order.PushBack(id)
+	if h.order.Len() > endedKeep {
+		oldest := h.order.Front()
+		delete(h.ended, oldest.Value.(string))
+		h.order.Remove(oldest)
+	}
 	h.mu.Unlock()
 	h.kernel.End(id)
 }
 
 func (h *Host) revive(id string) {
 	h.mu.Lock()
-	delete(h.ended, id)
+	if old := h.ended[id]; old != nil {
+		h.order.Remove(old)
+		delete(h.ended, id)
+	}
 	h.mu.Unlock()
 	h.kernel.Revive(id)
 }
@@ -194,10 +219,10 @@ func (h *Host) EnqueueWithSleep(caller any, request enq.Request, wait bool, slee
 	if sid == 0 {
 		return enq.Result{Subrc: 2}, nil
 	}
-	result, err := func() (result enq.Result, err error) {
+	result, callErr := func() (result enq.Result, err error) {
 		defer func() {
-			recovered, _ := recover().(error)
-			if errors.Is(recovered, ErrSessionEnded) {
+			recovered := recover()
+			if e, isError := recovered.(error); isError && errors.Is(e, ErrSessionEnded) {
 				err = ErrSessionEnded
 			} else if recovered != nil {
 				panic(recovered)
@@ -214,8 +239,8 @@ func (h *Host) EnqueueWithSleep(caller any, request enq.Request, wait bool, slee
 		})
 		return result, nil
 	}()
-	if err != nil {
-		return enq.Result{}, err
+	if callErr != nil {
+		return enq.Result{}, callErr
 	}
 	return result, nil
 }

@@ -75,8 +75,8 @@
       "reason": "sy-sysid from the one system id (go/sysid, tools/osd-identity.mjs), 2026-10-02; rebased over #453"
     },
     "go:cmd/osgo": {
-      "lines": 1356,
-      "reason": "OSGo STORE adapter keeps the calling Session and projects SYSTEM scalars; generated bindings and session adapters remain outside handwritten host code."
+      "lines": 1366,
+      "reason": "OSGo STORE adapter keeps the calling Session and projects SYSTEM scalars; generated bindings and session adapters remain outside handwritten host code. Locks fix 1 rethrows dialog dumps after cleanup and gives APC entries the same lock lifecycle."
     },
     "go:cmd/storecmp": {
       "lines": 220,
@@ -523,8 +523,8 @@
       "reason": "osgo 026/029 (#658, #659, 2026-10-08): UTF-16 units with the surrogate-half invariant and class statics per Session; carving utf16/statics out of go/abap is queued (stoker QUEUE #33)"
     },
     "go:adtlock": {
-      "lines": 246,
-      "reason": "The ADT host side of stoker's KERNEL_LOCK seam: ENQUEUE/DEQUEUE over the osd lock server keyed by the calling step, holder per step, retry with the yielding sleep, as tools/osd-enq-host.mjs"
+      "lines": 271,
+      "reason": "The ADT host side of stoker's KERNEL_LOCK seam: ENQUEUE/DEQUEUE over the osd lock server keyed by the calling step, holder per step, retry with the yielding sleep, as tools/osd-enq-host.mjs. Locks fix 1 preserves non-error retry panics, cleans up rebinding/pre-bind holders, and bounds ended keys."
     },
     "go:compiler": {
       "lines": 935,

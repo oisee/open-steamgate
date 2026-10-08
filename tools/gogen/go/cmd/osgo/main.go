@@ -120,7 +120,9 @@ func channelRoutes() func(w http.ResponseWriter, r *http.Request) bool {
 		// AnyOrigin: the Node host never looks at Origin, and behind a proxy
 		// that rewrites Host a same-origin rule would refuse every page
 		// (ultra/packs review); Handler names the class in a start dump's 503
-		ch := &apc.Channel{Name: c.Name, Handler: c.Handler, AnyOrigin: true, New: func(s *abap.Session, r *http.Request) apc.Host { return newAPCHost(s, c.Handler, r) }}
+		ch := &apc.Channel{Name: c.Name, Handler: c.Handler, AnyOrigin: true,
+			New:  func(s *abap.Session, r *http.Request) apc.Host { return newAPCHost(s, c.Handler, r) },
+			Step: runAPCStep}
 		byPath[c.Path] = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// the receipt the Node host writes into its 101 (tools/osd-apc.mjs)
 			w.Header().Set("X-OSD-Channel", c.Name)
@@ -245,10 +247,14 @@ func runDialogStep(s *abap.Session, dialog func(), adt bool) {
 	dumped := false
 	func() {
 		defer func() {
-			if recovered := recover(); recovered != nil {
+			recovered := recover()
+			if recovered != nil {
 				dumped = true
 			}
 			adtHost.Finish(s, dumped)
+			if recovered != nil {
+				panic(recovered)
+			}
 		}()
 		if adt {
 			withADTSession(s, dialog)
@@ -256,6 +262,13 @@ func runDialogStep(s *abap.Session, dialog func(), adt bool) {
 		}
 		dialog()
 	}()
+}
+
+func runAPCStep(s *abap.Session, name string, work func()) error {
+	adtHost.Begin(s)
+	err := abap.APCStep(name, work, s)
+	adtHost.Finish(s, err != nil)
+	return err
 }
 
 // icfHandler answers a request with the shim and a handler class, as

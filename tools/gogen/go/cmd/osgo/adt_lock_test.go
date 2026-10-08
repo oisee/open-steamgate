@@ -34,8 +34,9 @@ func TestOsgoFindsStepKeyedEnqSessions(t *testing.T) {
 }
 
 func TestOsgoReleasesHolderSessionOnDump(t *testing.T) {
+	var recovered any
 	func() {
-		defer func() { recover() }()
+		defer func() { recovered = recover() }()
 		step := &abap.Session{}
 		runDialogStep(step, func() {
 			if _, err := hostclass.KERNEL_LOCK.Enqueue(step, lockRequest("DUMP"), nil); err != nil {
@@ -44,8 +45,44 @@ func TestOsgoReleasesHolderSessionOnDump(t *testing.T) {
 			panic("lock step dump")
 		}, false)
 	}()
+	if recovered != "lock step dump" {
+		t.Fatalf("dump recovered %v (%T), want the original panic", recovered, recovered)
+	}
 	if rows := adtLocks.Read(enq.Filter{Table: "ZOSD_CMD"}); len(rows) != 0 {
 		t.Fatalf("dumped holder session survived: %+v", rows)
+	}
+}
+
+func TestOsgoAPCStepsReleaseHolderSessions(t *testing.T) {
+	tests := []struct {
+		name   string
+		dumped bool
+	}{
+		{name: "end"},
+		{name: "dump", dumped: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			step := &abap.Session{Statics: abap.ProcessStatics}
+			err := runAPCStep(step, test.name, func() {
+				if _, err := hostclass.KERNEL_LOCK.Enqueue(step, lockRequest("APC-"+test.name), nil); err != nil {
+					t.Error(err)
+				}
+				if test.dumped {
+					panic("apc step dump")
+				}
+			})
+			var dump *abap.ErrDump
+			if test.dumped && !errors.As(err, &dump) {
+				t.Fatalf("APC dump err %v, want *abap.ErrDump", err)
+			}
+			if !test.dumped && err != nil {
+				t.Fatal(err)
+			}
+			if rows := adtLocks.Read(enq.Filter{Table: "ZOSD_CMD"}); len(rows) != 0 {
+				t.Fatalf("APC holder session survived: %+v", rows)
+			}
+		})
 	}
 }
 
