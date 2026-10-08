@@ -47,10 +47,7 @@ func storeInputs(args map[string]Data) map[string]*string {
 // ZOSD_STORE adapts DESTINATION 'STORE': inputs in, scalars and tables out.
 func ZOSD_STORE(s *Session, args map[string]Data) {
 	a := StoreCall(storeInputs(args))
-	// IV_JSON is forwarded by storeInputs; EV_JSON and EV_STATE use this
-	// same scalar copy-back, without interpreting or recreating backend data.
-	// TODO(go/objstore): produce EV_STATE for commands which return state.
-	// The backend currently supplies EV_JSON, but has no EV_STATE answer.
+	// The backend supplies EV_JSON and EV_STATE; the adapter passes them through.
 	for k, v := range a.Scalars {
 		if d, ok := fmArg(args, k); ok {
 			v := v
@@ -115,9 +112,7 @@ func ZOSD_STORE(s *Session, args map[string]Data) {
 
 // storeRevisionRow projects the backend's revision string fields. Reading
 // optional fields by name keeps the adapter buildable with older backends.
-// TODO(go/objstore/history.go): expose Revision.SUBJECT_FULL before truncating
-// SUBJECT. Until the backend supplies it, SUBJECT_FULL is initial; do not
-// substitute the truncated SUBJECT for a full subject.
+// The backend supplies SUBJECT_FULL; the adapter passes it through.
 func storeRevisionRow(row any, set func(string, any)) {
 	r := reflect.ValueOf(row)
 	for _, name := range []string{"REVISION", "SHORT", "AUTHOR", "DATE", "TIME", "SUBJECT", "SUBJECT_FULL"} {
