@@ -217,6 +217,8 @@ export function registryIssues(registry, type, name) {
     file: issue.getFilename(),
     line: issue.getStart().getRow(),
     column: issue.getStart().getCol(),
+    endLine: issue.getEnd().getRow(),
+    endColumn: issue.getEnd().getCol(),
   }))];
   return {type, name, issues};
 }

@@ -51,6 +51,12 @@ export function unitCommand(script, args) {
   return me !== undefined ? [...me, "unit", ...args] : [process.execPath, script, ...args];
 }
 
+// The compiler protocol child, hosted by the binary or the checkout.
+export function compilerCommand(script, args = ["--stdio"]) {
+  const me = self();
+  return me !== undefined ? [...me, "compiler", ...args] : [process.execPath, script, ...args];
+}
+
 let modules;
 export function setHostModules(m) {
   modules = m;

@@ -9,6 +9,7 @@
 //   osd unit ...      a detached ABAP Unit run, as the façade starts it
 //   osd run <prog>    a report built by osabap, run with its arguments
 //   osd protocols     built-in DIAG 32nn and RFC-to-ADT 33nn listeners
+//   osd compiler --stdio  compiler-provider NDJSON sidecar
 //   osd ready         one-shot readiness check for launchers
 //
 // Two things a binary has to do that a checkout gets for free. First, code
@@ -43,7 +44,7 @@ const [, , mode = "up", ...rawArgs] = process.argv;
 const {folders: userLayers, rest} = mode === "run" ? {folders: [], rest: rawArgs} : layerList(rawArgs);
 if (userLayers.length > 0) process.env.OSD_LAYERS = userLayers.join(process.platform === "win32" ? ";" : ":");
 if (compiled && !isCheckout(process.cwd()) && process.env.OSD_BINARY_HOME !== process.cwd()
-    && mode !== "ready" && mode !== "doctor" && !(mode === "unit" && rest.includes("--go"))) {
+    && mode !== "ready" && mode !== "doctor" && mode !== "compiler" && !(mode === "unit" && rest.includes("--go"))) {
   if (!embeddedSeed) throw new Error("checkout-mode binary requires an open-steamgate checkout; build with --seed for standalone use");
   const home = await ensureBinaryHome(resolve(import.meta.dir, "osd-seed.tar.gz"), dataDirOf());
   process.chdir(home);
@@ -117,6 +118,11 @@ const GENERATORS = {
 };
 
 switch (mode) {
+  case "compiler": {
+    const {main} = await import("../tools/osd-compiler-sidecar.mjs");
+    process.exitCode = await main(rest);
+    break;
+  }
   case "up": {
     const {userLayersOf} = await import('../tools/osd-source-layers.mjs');
     const {reportOrphanedOverlays} = await import('../tools/osd-orphan-overlays.mjs');
@@ -240,6 +246,6 @@ switch (mode) {
     break;
   }
   default:
-    console.error(`osd: unknown mode ${mode}; one of up, serve, build, fetch, gen, unit, run, protocols, ready, doctor`);
+    console.error(`osd: unknown mode ${mode}; one of up, serve, build, fetch, gen, unit, run, protocols, compiler, ready, doctor`);
     process.exit(2);
 }
