@@ -3885,8 +3885,8 @@ Not an anomaly, recorded for porting: on 7.58, `FIND ... REGEX` (POSIX) raises a
 ### ANOMALY-2026-10-08-instance-of-initial - IS INSTANCE OF ignores an initial reference's static type; object as the target throws
 
 - Status: `fixed locally` (pinned transpiler); `open` upstream (abaplint/transpiler#1975)
-- Discovery: abapiti's translated lexer on three runtimes (its case 032), measured on A4H by abapiti and stoker on 2026-10-08 in a throwaway package.
-- Affected path: the transpiler's `IS INSTANCE OF` (`packages/transpiler/src/expressions/compare.ts`, `packages/runtime/src/compare/instance_of.ts`); osgo has its own gap, handled in the osgo batch.
+- Discovery: abapiti's translated lexer on three runtimes (its case 032), measured on A4H 7.58 by abapiti on 2026-10-08 in a throwaway package (removed after).
+- Affected path: the transpiler's `IS INSTANCE OF` (`packages/transpiler/src/expressions/compare.ts`, `packages/runtime/src/compare/instance_of.ts`); osgo: fixed separately in oisee/open-steamgate#655 (same A4H rows).
 - Reproducer: `DATA r TYPE REF TO zcl_a.` (initial) `ASSERT r IS INSTANCE OF zcl_a.`; and a bound `o`: `ASSERT o IS INSTANCE OF object.`
 - Expected SAP behaviour (7.58): an initial reference is decided by its static type: true when the static type is the target or a subtype (initial REF TO zcl_a / zcl_a: true; initial REF TO zif_x / zif_x: true; initial REF TO zcl_a / a subclass: false; initial REF TO object / zcl_a: false; an interface the static type does not implement: false); a bound reference `IS INSTANCE OF object` is true.
 - Actual local behaviour: OSG-JS gave false for every initial reference and threw "Right-hand side of 'instanceof' is not an object" for `object`.
