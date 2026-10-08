@@ -138,8 +138,11 @@ Alice's ratchet as follows:
   `continue-on-error` alone is insufficient: `test` must consume its report
   (and captured exit status) before completing, and fail on those regressions.
   Missing/malformed reports, HTTP infrastructure failures, unsuccessful
-  discovery and zero executed cases must also fail `test` for a mountable
-  target; they cannot provide evidence that expected passes were retained.
+  discovery and zero executed cases fail `test` only while `expected/osgo.json`
+  holds at least one `pass` (then they cannot prove the expected passes were
+  retained). While every osgo expectation is `known-gap` or `n/a`, they stay
+  advisory like the known gaps themselves: known-gap never blocks (Alice,
+  2026-10-07).
 - Preserve the runner's non-zero status for an unexpected known-gap pass and
   surface it in the advisory osgo result until its expectation is updated.
   Upload both target reports even on failure and print the merged square;
