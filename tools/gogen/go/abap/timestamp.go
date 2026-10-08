@@ -51,3 +51,25 @@ func ConvertDateTime(s *Session, date, clock, zone string) (string, bool) {
 	}
 	return date + clock, true
 }
+
+// Host statement adapters use ordinary native IR so both emitters can
+// compile the surrounding class, even when a host lacks this operation.
+func ConvertTimestampInto(s *Session, stamp, zone string, date, clock Data) {
+	d, tm, ok := ConvertTimestamp(s, stamp, zone)
+	if !ok {
+		return
+	}
+	if date.P != nil {
+		MoveData(date, Data{P: &d, T: TString})
+	}
+	if clock.P != nil {
+		MoveData(clock, Data{P: &tm, T: TString})
+	}
+}
+
+func ConvertDateTimeInto(s *Session, date, clock, zone string, stamp Data) {
+	ts, ok := ConvertDateTime(s, date, clock, zone)
+	if ok {
+		MoveData(stamp, Data{P: &ts, T: TString})
+	}
+}

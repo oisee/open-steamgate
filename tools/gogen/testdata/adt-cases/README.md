@@ -31,3 +31,13 @@ results are in `.local/adt/red.txt` and `.local/adt/green.txt`.
   characters. The adapter forwards SUBJECT_FULL when the backend adds it and
   keeps it initial for this older backend. Backend work is explicitly outside
   this task's permitted files.
+
+The final emitter compatibility pass uses existing native statement IR for
+CONVERT and MESSAGE operations. String WHERE predicates use existing boolean
+expression IR, so the second emitter can still compile the same graph.
+
+Final checks: frontend/emission trio 49/49; semantics 369/369; full fixture
+32/32 classes compiled, 112/112 SUCCESS; unit harness 23/23; Go runtime 118
+listed top-level tests, normal and race runs passed. Disposable harness builds
+needed GOFLAGS=-buildvcs=false after Git VCS stamping failed with exit 128;
+no test was disabled. GOCACHE stays in tools/gogen/.out/go-cache.

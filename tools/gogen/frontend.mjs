@@ -2145,7 +2145,7 @@ function whereOf(cc, rowType, ctx, text) {
       const opT = upper(kids[1].concatTokens());
       const op = OPS[opT] ?? opT;
       const sc = ["CP", "NP", "CA", "NA", "CS", "NS", "CO", "CN"].includes(op) ? stringComparison(op, fx, source(kids[2], ctx, rowType)) : null;
-      if (sc) { where.push({cond: sc}); continue; }
+      if (sc) { where.push({fx: {e: "bool", cond: sc, blank: "", type: C(1)}, op: "=", value: {e: "chars", value: "X", type: C(1)}, calc: S}); continue; }
       if (!["=", "<>", "<", "<=", ">", ">="].includes(op)) throw new Unsupported(`WHERE table_line operator ${op}`);
       const v = source(kids[2], ctx, rowType);
       const calc = numeric(rowType) || numeric(v.type) ? (rowType.k === "f" || v.type.k === "f" ? F : I) : S;
@@ -2171,7 +2171,7 @@ function whereOf(cc, rowType, ctx, text) {
     const opT = upper(opN.concatTokens());
     const op = OPS[opT] ?? opT;
     const sc = ["CP", "NP", "CA", "NA", "CS", "NS", "CO", "CN"].includes(op) ? stringComparison(op, fx ?? {e: "field", base: {e: "lrow", type: rowType}, name: f.name, type: f.type}, source(src, ctx, f.type)) : null;
-    if (sc) { where.push({cond: sc}); continue; }
+    if (sc) { where.push({fx: {e: "bool", cond: sc, blank: "", type: C(1)}, op: "=", value: {e: "chars", value: "X", type: C(1)}, calc: S}); continue; }
     if (!["=", "<>", "<", "<=", ">", ">="].includes(op)) throw new Unsupported(`WHERE operator ${op}`);
     const v = source(src, ctx, f.type);
     const calc = numeric(f.type) || numeric(v.type) ? (f.type.k === "f" || v.type.k === "f" ? F : I) : S;
@@ -2817,12 +2817,16 @@ function statement(node, ctx) {
       const date = outputs.has("DATE") ? lvalue(outputs.get("DATE"), ctx) : null;
       const time = outputs.has("TIME") ? lvalue(outputs.get("TIME"), ctx) : null;
       if ((!date && !time) || (date && date.type.k !== "d") || (time && time.type.k !== "t")) throw new Unsupported(`CONVERT targets: ${text}`);
-      return {s: "convert_timestamp", stamp, zone, date, time};
+      return {s: "native", fn: "abap.ConvertTimestampInto", stmt: true, args: [stamp, zone,
+        date ? convert(date, {k: "data"}) : {e: "zero", type: {k: "data"}},
+        time ? convert(time, {k: "data"}) : {e: "zero", type: {k: "data"}}].map((value) => ({value}))};
     }
     if (!inputs.has("DATE") || !inputs.has("TIME") || !outputs.has("STAMP")) throw new Unsupported(`CONVERT form: ${text}`);
     const stamp = lvalue(outputs.get("STAMP"), ctx);
     if (stamp.type.k !== "p") throw new Unsupported(`CONVERT INTO TIME STAMP of a ${stamp.type.k}`);
-    return {s: "convert_date_time", date: convert(source(inputs.get("DATE"), ctx), S), time: convert(source(inputs.get("TIME"), ctx), S), zone, stamp};
+    return {s: "native", fn: "abap.ConvertDateTimeInto", stmt: true, args: [
+      convert(source(inputs.get("DATE"), ctx), S), convert(source(inputs.get("TIME"), ctx), S), zone,
+      convert(stamp, {k: "data"})].map((value) => ({value}))};
   }
   // ultra/events: GET TIME STAMP FIELD ts into a TIMESTAMP p(8,0) or a
   // TIMESTAMPL p(11,7): UTC, as sy-datum and sy-uzeit are here
@@ -2863,7 +2867,9 @@ function statement(node, ctx) {
     }
     const values = node.findDirectExpressions(Expressions.MessageSourceSource).map((x) => convert(source(x, ctx), C(50)));
     if (values.length > 4) throw new Unsupported(`MESSAGE WITH more than four values: ${text}`);
-    return {s: "message_raise", id, ty, no, values, name: upper(raising.concatTokens()), method: ctx.method.includes("~") ? ctx.method.split("~")[1] : ctx.method};
+    const name = {e: "str", value: upper(raising.concatTokens()), type: S};
+    const method = {e: "str", value: ctx.method.includes("~") ? ctx.method.split("~")[1] : ctx.method, type: S};
+    return {s: "native", fn: "abap.MessageRaise", stmt: true, args: [id, ty, no, name, method, ...values].map((value) => ({value}))};
   }
   // RAISE name: a classic exception, for the caller's EXCEPTIONS list
   if (isStmt(node, Statements.Raise) && !/^RAISE\s+(EXCEPTION|RESUMABLE)\b/i.test(text)) {

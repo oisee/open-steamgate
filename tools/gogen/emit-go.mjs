@@ -146,7 +146,6 @@ function whereItem(w, row, ctx) {
   const saved = ctx.lrow;
   ctx.lrow = row;
   try {
-    if (w.cond) return cond(w.cond, ctx);
     if (w.op === "initial" || w.op === "notinitial") {
       const c = cond({c: "initial", x: w.fx}, ctx);
       return w.op === "initial" ? c : `!(${c})`;
@@ -1339,18 +1338,6 @@ function stmtLines(st, ctx, d) {
     // ultra/events: SET HANDLER, one registration per handler (the names
     // Ev* are mixed case, so no ABAP name, all upper or all lower, meets them)
     case "get_runtime": return [`${t}${place(st.target, ctx)} = ${helperFn("runtimeclock.Microseconds")}()`];
-    case "convert_timestamp": {
-      const n = ctx.loop++;
-      return [`${t}{`, `${t}\td${n}, tm${n}, ok${n} := abap.ConvertTimestamp(s, ${expr(st.stamp, ctx)}, ${expr(st.zone, ctx)})`,
-        `${t}\t_, _ = d${n}, tm${n}`, `${t}\tif ok${n} {`,
-        ...(st.date ? [`${t}\t\t${place(st.date, ctx)} = d${n}`] : []),
-        ...(st.time ? [`${t}\t\t${place(st.time, ctx)} = tm${n}`] : []), `${t}\t}`, `${t}}`];
-    }
-    case "convert_date_time": {
-      const n = ctx.loop++;
-      return [`${t}{`, `${t}\tts${n}, ok${n} := abap.ConvertDateTime(s, ${expr(st.date, ctx)}, ${expr(st.time, ctx)}, ${expr(st.zone, ctx)})`,
-        `${t}\tif ok${n} { ${place(st.stamp, ctx)} = abap.PFit(ts${n}, ${st.stamp.type.len}, ${st.stamp.type.dec ?? 0}, false) }`, `${t}}`];
-    }
     case "get_timestamp": return [`${t}${place(st.target, ctx)} = abap.TimeStamp(${st.dec})`];
     // AMC on the Go host (go/amc; the bodies frontend.mjs AMC_HOST gives)
     case "amc": {
@@ -1456,8 +1443,6 @@ function stmtLines(st, ctx, d) {
         ...st.body.flatMap((x) => stmt(x, ctx, d + 1)), `${t}}`];
     case "raise":
       return [`${t}panic(abap.Raise(${expr(st.value, ctx)}, ${JSON.stringify(st.cls ?? "")}))`];
-    case "message_raise":
-      return [`${t}abap.MessageRaise(s, ${expr(st.id, ctx)}, ${expr(st.ty, ctx)}, ${expr(st.no, ctx)}, []string{${st.values.map((v) => expr(v, ctx)).join(", ")}}, ${JSON.stringify(st.name)}, ${JSON.stringify(st.method)})`];
     case "raise_classic":
       return [`${t}panic(abap.ClassicException{Name: ${JSON.stringify(st.name)}, Method: ${JSON.stringify(st.method)}})`];
     case "if": {
