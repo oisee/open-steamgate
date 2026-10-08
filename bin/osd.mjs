@@ -39,6 +39,18 @@ const toolchainIdentity = typeof __OSD_TOOLCHAIN_IDENTITY__ !== "undefined"
   ? __OSD_TOOLCHAIN_IDENTITY__ : buildIdentity(process.cwd());
 const embeddedSeed = typeof __OSD_BINARY_SEEDED__ !== "undefined" && __OSD_BINARY_SEEDED__;
 const [, , mode = "up", ...rawArgs] = process.argv;
+// Usage is not startup: do this before validating/mounting layers or
+// materializing a standalone system home, let alone building/listening.
+if (mode === "up" && rawArgs.includes("--help")) {
+  console.log(`Usage: osd up [--layer <folder|zip>] [--help]
+
+Build and start the local workbench and serving runtime.
+  --layer <folder|zip>  Add an ABAP source layer (repeatable).
+  --help                Print this usage without starting the system.
+
+Environment: OSD_WARM=1 enables warm activation; STG_PORT sets the HTTP port.`);
+  process.exit(0);
+}
 // a report's arguments are its own: --layer there is not osd's
 const {folders: userLayers, rest} = mode === "run" ? {folders: [], rest: rawArgs} : layerList(rawArgs);
 if (userLayers.length > 0) process.env.OSD_LAYERS = userLayers.join(process.platform === "win32" ? ";" : ":");
