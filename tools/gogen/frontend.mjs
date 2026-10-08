@@ -91,6 +91,7 @@ const numeric = (t) => t.k === "i" || t.k === "f" || t.k === "int8";
 const charlike = (t) => t.k === "c" || t.k === "string";
 const byteStatementHelpers = {Nodes, Expressions, upper, isExpr, source, lvalue, convert, charlike, Unsupported, I, S, XS, findResults};
 const cdsViewsByRegistry = new WeakMap();
+const HOST_REPLACED = new Set(["ZCL_OSD_ENQ_KERNEL"]);
 
 /* ------------------------------------------------------------------- program */
 
@@ -1476,7 +1477,17 @@ function classIr(ctx0, obj) {
   // single inheritance: the superclass when it is compiled too (else the
   // class stands alone, as it did before inheritance was compiled)
   const sup = def.getSuperClass() ? upper(def.getSuperClass()) : null;
-  const cls = {name: className, attributes, methods: [], constructor: null, stubs: [],
+  const typed = new Map([...signatures].filter(([, v]) => !v.unsupported));
+  if (HOST_REPLACED.has(className)) {
+    for (const sig of typed.values()) {
+      for (const p of [...sig.params, ...(sig.returning ? [sig.returning] : [])]) {
+        const basic = p.type.k === "string" || p.type.k === "i" || p.type.k === "int8"
+          || (p.type.k === "c" && (p.type.len ?? 1) === 1);
+        if (!basic) throw new Unsupported(`${className}=>${sig.name} ${p.name}: a host-replaced method may use only string, c LENGTH 1, i, or int8`);
+      }
+    }
+  }
+  const cls = {name: className, hostReplaced: HOST_REPLACED.has(className), attributes, methods: [], constructor: null, stubs: [],
     interfaces: def.getImplementing().map((i) => upper(i.name)), super: sup && program.wanted.has(sup) ? sup : null, abstract: def.isAbstract()};
   cls.abstracts = [...signatures.values()].filter((x) => x.abstract && !x.unsupported && !x.name.includes("~"));
   cls.signatures = signatures;
@@ -1490,7 +1501,6 @@ function classIr(ctx0, obj) {
     return d.getImplementing().some((i) => [upper(i.name), ...componentInterfaces(reg, upper(i.name))]
       .some((n) => reg.getObject("INTF", n)?.getDefinition()?.getEvents?.().some((e) => !e.isStatic())));
   });
-  const typed = new Map([...signatures].filter(([, v]) => !v.unsupported));
   // a local class's methods are the ones of its own CLASS ... IMPLEMENTATION
   const methodNodes = obj.local === undefined ? tree.findAllStructures(Structures.Method)
     : tree.findAllStructures(Structures.ClassImplementation).filter((ci) => upper(ci.findFirstExpression(Expressions.ClassName).concatTokens()) === obj.local)
@@ -4583,7 +4593,7 @@ function sqlCompare(p, ctx, tb, acc) {
     const [lowSrc, andTok, highSrc] = kids.slice(between + 1);
     if (!isExpr(lowSrc, Expressions.SQLSource) || !isTok(andTok, "AND") || !isExpr(highSrc, Expressions.SQLSource)
         || kids.length !== between + 4) throw new Unsupported(`WHERE BETWEEN form: ${text}`);
-    if (!["c", "string", "i", "n", "d", "t", "int8"].includes(ct.k)) throw new Unsupported(`WHERE BETWEEN on a ${ct.k} column: ${text}`);
+    if (!["c", "string", "i", "n", "d", "t", "int8", "p"].includes(ct.k)) throw new Unsupported(`WHERE BETWEEN on a ${ct.k} column: ${text}`);
     const colIr = RIR.col(lowName(col), sqlIrType(ct));
     const bound = (node) => sqlValue(sqlHost(node, [], ctx, text), ct, sqlIrType(ct), acc);
     const both = RIR.bin("AND", RIR.bin(">=", colIr, bound(lowSrc), RIR.T.bool),
@@ -4595,7 +4605,7 @@ function sqlCompare(p, ctx, tb, acc) {
   if (!op || !src || kids[1] !== op || kids[2] !== src) throw new Unsupported(`WHERE compare: ${text}`);
   const sqlOp = SQL_OPS[upper(op.concatTokens())];
   if (sqlOp === undefined) throw new Unsupported(`WHERE operator ${op.concatTokens()}`);
-  if (!["c", "string", "i", "n", "d", "t", "int8", "x"].includes(ct.k)) throw new Unsupported(`WHERE on a ${ct.k} column: ${text}`);
+  if (!["c", "string", "i", "n", "d", "t", "int8", "x", "p"].includes(ct.k)) throw new Unsupported(`WHERE on a ${ct.k} column: ${text}`);
   const v = sqlHost(src, kids.slice(3), ctx, text);
   return RIR.bin(sqlOp, RIR.col(lowName(col), sqlIrType(ct)), sqlValue(v, ct, sqlIrType(ct), acc), RIR.T.bool);
 }

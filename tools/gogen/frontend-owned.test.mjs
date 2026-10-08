@@ -1,6 +1,6 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
-import {mkdtempSync, writeFileSync, rmSync, cpSync, mkdirSync, copyFileSync} from "node:fs";
+import {mkdtempSync, writeFileSync, rmSync, cpSync, mkdirSync, copyFileSync, readFileSync} from "node:fs";
 import {join} from "node:path";
 import {execFileSync} from "node:child_process";
 import {compileProgram} from "./frontend.mjs";
@@ -8,6 +8,8 @@ import {analyzeOwnership} from "./frontend-owned.mjs";
 import {emitJs} from "./emit-js.mjs";
 import {emitGo} from "./emit-go.mjs";
 import {libraryPath} from "../osd-lib-path.mjs";
+import {unitInputs} from "./unit-inputs.mjs";
+import {home} from "./home.mjs";
 
 mkdirSync(join(import.meta.dirname, ".out"), {recursive: true});
 
@@ -45,6 +47,14 @@ test("ABAPiti private memory and a local qualify; slices and whole reads are sna
   assert.match(go, /mv_mem\.Replace/);
   assert.match(go, /mv_mem\.Append/);
   assert.match(go, /mem\.Clear/);
+});
+
+test("the ADT session sweep compiles", () => {
+  const config = JSON.parse(readFileSync(join(home, "abap_transpile.json"), "utf8"));
+  const {folders} = unitInputs({home, config});
+  const program = compileProgram({folders, objects: ["ZCL_OSD_ADT_SESSION", "CL_ABAP_TSTMP"], tolerant: true});
+  const generated = emitGo(program);
+  assert.doesNotMatch(generated, /NotCompiled\([^\n]*ZCL_OSD_ADT_SESSION=>SWEEP/);
 });
 
 test("ASSIGN, GET REFERENCE, REF #, and dynamic names disqualify", () => {
