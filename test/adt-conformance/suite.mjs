@@ -108,20 +108,75 @@ describe('shared ADT conformance runner contracts', function () {
       assert.equal((await session.request({path: '/probe'})).body, 'ok'); assert.equal(session.cookies.get('first'), 'new');}
     finally {await new Promise(resolve => server.close(resolve));}
   });
-  it('reports failed login as failure rather than a known gap', async () => {
+  it('observes a failed login answer for an expected osgo gap', async () => {
     const app = express(); app.use((req, res) => res.sendStatus(404));
     const server = await new Promise(resolve => {const s = app.listen(0, '127.0.0.1', () => resolve(s));});
     const output = mkdtempSync(join(tmpdir(), 'adt-report-'));
     try {
       const result = await run({target: 'osgo', base: `http://127.0.0.1:${server.address().port}`,
         expectedFile: new URL('./expected/osgo.json', import.meta.url), only: ['C3-head'], output, say: () => {}});
-      assert.equal(result.exitCode, 1); assert.equal(result.cases[0].status, 'fail');
+      assert.equal(result.exitCode, 0); assert.equal(result.cases[0].status, 'known-gap');
+      assert.equal(result.cases[0].observed, true); assert.equal(result.cases[0].actual.status, 404);
+      assert.equal(result.targetAnswered, true); assert.equal(result.handshakeStatus, 404);
       assert.match(result.cases[0].detail, /login/);
       assert.equal(result.executedCases, 0); assert.equal(result.discoverySucceeded, false);
-      assert.equal(result.cases[0].observed, false);
       const unavailable = await recordUnavailable({expectedFile: new URL('./expected/osgo.json', import.meta.url), output,
         reason: 'osgo: not mountable on this main'});
       assert.ok(unavailable.cases.every(c => c.observed === false && c.status === 'known-gap'));
+    } finally {await new Promise(resolve => server.close(resolve)); rmSync(output, {recursive: true, force: true});}
+  });
+  it('observes an all-known-gap osgo run through a failed CSRF handshake', async () => {
+    const output = mkdtempSync(join(tmpdir(), 'adt-answered-'));
+    const app = express(); app.use((req, res) => res.sendStatus(501));
+    const server = await new Promise(resolve => {const s = app.listen(0, '127.0.0.1', () => resolve(s));});
+    try {
+      const result = await run({target: 'osgo', base: `http://127.0.0.1:${server.address().port}`,
+        expectedFile: new URL('./expected/osgo.json', import.meta.url), output, say: () => {}});
+      assert.equal(result.exitCode, 0, JSON.stringify(result));
+      assert.equal(result.summary['known-gap'], 23); assert.equal(result.summary.fail, 0);
+      assert.equal(result.targetAnswered, true); assert.equal(result.handshakeStatus, 501);
+      assert.equal(result.discoverySucceeded, false); assert.equal(result.executedCases, 0);
+      assert.ok(result.cases.every(c => c.observed && c.actual?.status === 501));
+      assert.ok(result.cases.every(c => /CSRF handshake status/.test(c.detail)));
+    } finally {await new Promise(resolve => server.close(resolve)); rmSync(output, {recursive: true, force: true});}
+  });
+  it('fails an observed failed handshake when an osgo case is expected to pass', async () => {
+    const output = mkdtempSync(join(tmpdir(), 'adt-answered-pass-'));
+    const expected = JSON.parse(readFileSync(new URL('./expected/osgo.json', import.meta.url), 'utf8'));
+    expected['C3-head'] = 'pass';
+    const expectedFile = join(output, 'expected.json'); writeFileSync(expectedFile, JSON.stringify(expected));
+    const app = express(); app.use((req, res) => res.sendStatus(501));
+    const server = await new Promise(resolve => {const s = app.listen(0, '127.0.0.1', () => resolve(s));});
+    try {
+      const result = await run({target: 'osgo', base: `http://127.0.0.1:${server.address().port}`,
+        expectedFile, only: ['C3-head'], output, say: () => {}});
+      assert.equal(result.exitCode, 1); assert.equal(result.summary.fail, 1);
+      assert.equal(result.targetAnswered, true); assert.equal(result.handshakeStatus, 501);
+      assert.equal(result.cases[0].observed, true); assert.equal(result.cases[0].actual.status, 501);
+    } finally {await new Promise(resolve => server.close(resolve)); rmSync(output, {recursive: true, force: true});}
+  });
+  it('keeps connection refusal an infrastructure failure', async () => {
+    const output = mkdtempSync(join(tmpdir(), 'adt-refused-'));
+    try {
+      const result = await run({target: 'osgo', base: 'http://127.0.0.1:1',
+        expectedFile: new URL('./expected/osgo.json', import.meta.url), only: ['C3-head'], output, say: () => {}});
+      assert.equal(result.exitCode, 1); assert.equal(result.summary.fail, 1);
+      assert.equal(result.targetAnswered, false); assert.equal(result.handshakeStatus, undefined);
+      assert.equal(result.cases[0].observed, false); assert.match(result.cases[0].detail, /login/);
+      assert.equal(result.discoverySucceeded, false); assert.equal(result.executedCases, 0);
+    } finally {rmSync(output, {recursive: true, force: true});}
+  });
+  it('requires the full JS handshake and fails a 501 answer', async () => {
+    const output = mkdtempSync(join(tmpdir(), 'adt-js-answered-'));
+    const app = express(); app.use((req, res) => res.sendStatus(501));
+    const server = await new Promise(resolve => {const s = app.listen(0, '127.0.0.1', () => resolve(s));});
+    try {
+      const result = await run({target: 'js', base: `http://127.0.0.1:${server.address().port}`,
+        only: ['C3-head'], output, say: () => {}});
+      assert.equal(result.exitCode, 1); assert.equal(result.summary.fail, 1);
+      assert.equal(result.targetAnswered, true); assert.equal(result.handshakeStatus, 501);
+      assert.equal(result.cases[0].observed, true); assert.equal(result.cases[0].actual.status, 501);
+      assert.equal(result.discoverySucceeded, false); assert.equal(result.executedCases, 0);
     } finally {await new Promise(resolve => server.close(resolve)); rmSync(output, {recursive: true, force: true});}
   });
   it('fails all-n/a runs with zero observations, even without contacting a server', async () => {
@@ -136,7 +191,7 @@ describe('shared ADT conformance runner contracts', function () {
       assert.deepEqual(result.runErrors, ['no executed cases', 'no successful discovery request']);
     } finally {rmSync(output, {recursive: true, force: true});}
   });
-  it('fails an unreachable HTTP target and requires GET discovery after a successful handshake', async () => {
+  it('requires GET discovery after a successful handshake and observes its failure', async () => {
     const output = mkdtempSync(join(tmpdir(), 'adt-discovery-'));
     const app = express();
     app.head('/sap/bc/adt/core/discovery', (req, res) => {
@@ -150,9 +205,12 @@ describe('shared ADT conformance runner contracts', function () {
         only: ['C3-head'], output, say: () => {}};
       for (const base of ['http://127.0.0.1:0', `http://127.0.0.1:${server.address().port}`]) {
         const result = await run({...opts, base});
-        assert.equal(result.exitCode, 1); assert.equal(result.summary.fail, 1);
+        assert.equal(result.exitCode, base.endsWith(':0') ? 1 : 0);
+        assert.equal(result.summary.fail, base.endsWith(':0') ? 1 : 0);
         assert.equal(result.executedCases, 0); assert.equal(result.discoverySucceeded, false);
-        assert.ok(result.cases.every(c => !c.observed));
+        assert.equal(result.targetAnswered, !base.endsWith(':0'));
+        if (base.endsWith(':0')) assert.ok(result.cases.every(c => !c.observed));
+        else assert.ok(result.cases.every(c => c.observed && c.actual.status === 503));
         assert.match(result.cases[0].detail, base.endsWith(':0') ? /login/ : /discovery/);
       }
     } finally {await new Promise(resolve => server.close(resolve)); rmSync(output, {recursive: true, force: true});}
