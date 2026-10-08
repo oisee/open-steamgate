@@ -15,8 +15,8 @@
   ],
   "budgets": {
     "go:abap": {
-      "lines": 11754,
-      "reason": "ADT batch 1 (adt-i5 cases 1-7): Session message fields, classic exception binding, date/time and signed MOVE adapters, object-wrapper identity, STORE answer projection and conservative ADT host answers; timestamp conversion lives in go/timestamp. Includes the merged main baseline and the narrow UTF-16 adapter required to remove charsection dependency on abap."
+      "lines": 11778,
+      "reason": "ADT batch 1 (adt-i5 cases 1-7): Session message fields, classic exception binding, date/time and signed MOVE adapters, object-wrapper identity, STORE answer projection and conservative ADT host answers; timestamp conversion lives in go/timestamp. Includes the merged main baseline and the narrow UTF-16 adapter required to remove charsection dependency on abap. Critic round 1: immediate caller MESSAGE RAISING assignments and scoped restoration, including calls without EXCEPTIONS."
     },
     "go:abaperr": {
       "lines": 13,
@@ -191,8 +191,8 @@
       "reason": "lowered 2026-10-02: the YAML line index went to tools/dsl-yaml-lines.mjs; holds the range: of L3 slice 3a"
     },
     "tools/gogen/emit-go.mjs": {
-      "lines": 2346,
-      "reason": "ADT batch 1 (adt-i5 cases 1-7): Emit t2i through the runtime binding and pass the narrow UTF-16 host adapter to charsection; includes the merged main emitter baseline."
+      "lines": 2349,
+      "reason": "ADT batch 1 (adt-i5 cases 1-7): Emit t2i through the runtime binding and pass the narrow UTF-16 host adapter to charsection; includes the merged main emitter baseline. Critic round 1: immediate caller MESSAGE RAISING assignments and scoped restoration, including calls without EXCEPTIONS."
     },
     "tools/gogen/emit-js.mjs": {
       "lines": 1206,
@@ -203,8 +203,8 @@
       "reason": "ADT batch 1 (adt-i5 cases 1-7): Lower string WHERE predicates through existing logical IR; bind CONVERT, MESSAGE RAISING, sy-msg fields, STORE parameters, date/time calculation types, object re-raise and conservative ADT kernel answers."
     },
     "tools/gogen/go/abap/abap.go": {
-      "lines": 236,
-      "reason": "ADT batch 1 (adt-i5 cases 1-7): Keep sy-msgid/msgno/msgty/msgv1-4 in the session alongside existing system fields."
+      "lines": 237,
+      "reason": "ADT batch 1 (adt-i5 cases 1-7): Keep sy-msgid/msgno/msgty/msgv1-4 in the session alongside existing system fields. Critic round 1: immediate caller MESSAGE RAISING assignments and scoped restoration, including calls without EXCEPTIONS."
     },
     "tools/gogen/go/abap/apc.go": {
       "lines": 39,
@@ -375,8 +375,8 @@
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/go/abap/registry.go": {
-      "lines": 168,
-      "reason": "ADT batch 1 (adt-i5 cases 1-7): Keep MESSAGE RAISING next to ClassicException: assign session message fields and raise the existing classic exception type."
+      "lines": 191,
+      "reason": "ADT batch 1 (adt-i5 cases 1-7): Keep MESSAGE RAISING next to ClassicException: assign session message fields and raise the existing classic exception type. Critic round 1: immediate caller MESSAGE RAISING assignments and scoped restoration, including calls without EXCEPTIONS."
     },
     "tools/gogen/go/abap/row_binding.go": {
       "lines": 175,
