@@ -2227,9 +2227,9 @@ function fn(e, ctx) {
   return emitBuiltinGo(e, e.args.map((a) => expr(a, ctx)), FN_F, HELPER_IMPORTS);
 }
 
-// Keep the current initial-reference predicate policy until A4H measurement.
-// The predicate carries both static types if that policy later needs them.
-const initialReferenceInstanceOf = (_predicate) => "false";
+// an initial reference: the frontend decided it from the static type
+// (frontend.mjs upcastable)
+const initialReferenceInstanceOf = (predicate) => (predicate.initial ? "true" : "false");
 
 function cond(c, ctx) {
   const fast = emitPackedComparison(c, (n) => expr(n, ctx));

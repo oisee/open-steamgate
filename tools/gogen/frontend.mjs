@@ -1797,6 +1797,19 @@ const RUNTIME_CX = ["CX_SY_ZERODIVIDE", "CX_SY_ARITHMETIC_OVERFLOW", "CX_SY_CONV
 // A4H, 2026-09-23)
 const RUNTIME_CX_SUPER = {CX_SY_REPLACE_INFINITE_LOOP: "CX_DYNAMIC_CHECK", CX_SY_OPEN_SQL_DATA_ERROR: "CX_SY_OPEN_SQL_ERROR"};
 
+// IS INSTANCE OF on an initial reference answers by its static type: true
+// when an up cast from it to the target is legal (A4H 7.58, 2026-10-08:
+// REF TO zcl_a -> zcl_a true, -> a subclass false; REF TO object -> zcl_a
+// false; REF TO zif_x -> zif_x true)
+function upcastable(reg, from, to) {
+  if (to.name === "OBJECT" || from.name === to.name) return true;
+  if (from.name === "OBJECT") return false;
+  if (!to.intf) return !from.intf && isSubclass(reg, from.name, to.name);
+  if (from.intf) return componentInterfaces(reg, from.name).includes(to.name);
+  return [from.name, ...ancestors(reg, from.name)].some((c) => (clasDef(reg, c)?.getImplementing() ?? [])
+    .some((i) => upper(i.name) === to.name || componentInterfaces(reg, upper(i.name)).includes(to.name)));
+}
+
 function isSubclass(reg, cls, ancestor) {
   for (let c = cls, guard = 0; c && guard < 20; guard += 1) {
     if (c === ancestor) return true;
@@ -6491,7 +6504,7 @@ function compare(node, ctx) {
     if (value.type.k !== "ref") throw new Unsupported(`IS INSTANCE OF a ${value.type.k}`);
     const target = namedType(instanceClass, ctx);
     if (target.intf) ctx.program.interfaces.add(target.name);
-    const result = {c: "instance_of", x: value, type: target};
+    const result = {c: "instance_of", x: value, type: target, initial: upcastable(ctx.reg, value.type, target)};
     return /\bIS\s+NOT\s+INSTANCE\s+OF\b/.test(text) !== not ? {c: "not", x: result} : result;
   }
   if (/\bIS\s+(NOT\s+)?SUPPLIED\b/.test(text)) {
