@@ -15,8 +15,8 @@
   ],
   "budgets": {
     "go:abap": {
-      "lines": 11293,
-      "reason": "S0b: four binding lines for the tested STORE importing-parameter adapter"
+      "lines": 11649,
+      "reason": "osgo 026/029 (#658, #659, 2026-10-08): UTF-16 units with the surrogate-half invariant and class statics per Session; carving utf16/statics out of go/abap is queued (stoker QUEUE #33)"
     },
     "go:abaperr": {
       "lines": 13,
@@ -39,8 +39,8 @@
       "reason": "byte REPLACE/FIND section spans; independent of go/abap"
     },
     "go:charsearch": {
-      "lines": 58,
-      "reason": "baseline 2026-10-01"
+      "lines": 80,
+      "reason": "osgo 026/029 (#658, #659, 2026-10-08): UTF-16 units with the surrogate-half invariant and class statics per Session; carving utf16/statics out of go/abap is queued (stoker QUEUE #33)"
     },
     "go:classname": {
       "lines": 31,
@@ -71,12 +71,12 @@
       "reason": "sy-sysid from the one system id (go/sysid, tools/osd-identity.mjs), 2026-10-02; rebased over #453"
     },
     "go:cmd/osgo": {
-      "lines": 1197,
-      "reason": "Round 1 compiler status flag plus fix1: JSON construction moved to compiler.StatusJSON; the command keeps only the small flag dispatch."
+      "lines": 1223,
+      "reason": "ADT on osgo slice 1a (/sap/bc/adt mount behind -adt) plus the compiler sidecar status flag (-compiler-status -> compiler.StatusJSON)"
     },
     "go:cmd/storecmp": {
-      "lines": 41,
-      "reason": "baseline 2026-10-01"
+      "lines": 171,
+      "reason": "#653 store parity: RFC-signature adapter mode (typed scalar/table adapters) beside the raw protocol, required by stoker before merge"
     },
     "go:cmd/sxmlbench": {
       "lines": 67,
@@ -123,8 +123,8 @@
       "reason": "recorded by --update"
     },
     "go:objstore": {
-      "lines": 1039,
-      "reason": "S0b: tree-independent COMMANDS discovery and typed NOT_SUPPORTED errors for absent commands"
+      "lines": 1772,
+      "reason": "ADT on osgo slice 1a round 1: Node-parity layer metadata, retained active reads, package ordering/empty descriptions, and deterministic HISTORY semantics; package index extraction remains a later carve-out; round 2: Node's VFS object order; round 3: Node-exact state without a live generation and repository-name refusal"
     },
     "go:reportargs": {
       "lines": 209,
@@ -139,16 +139,16 @@
       "reason": "carved out of go/abap/dataset.go (wave 2, docs/gogen-go-packages.md)"
     },
     "go:session": {
-      "lines": 53,
-      "reason": "baseline 2026-10-01"
+      "lines": 54,
+      "reason": "osgo 026/029 (#658, #659, 2026-10-08): UTF-16 units with the surrogate-half invariant and class statics per Session; carving utf16/statics out of go/abap is queued (stoker QUEUE #33)"
     },
     "go:shiftleft": {
       "lines": 9,
       "reason": "baseline 2026-10-01"
     },
     "go:subwrite": {
-      "lines": 10,
-      "reason": "baseline 2026-10-01"
+      "lines": 28,
+      "reason": "osgo 026/029 (#658, #659, 2026-10-08): UTF-16 units with the surrogate-half invariant and class statics per Session; carving utf16/statics out of go/abap is queued (stoker QUEUE #33)"
     },
     "go:sxmlscan": {
       "lines": 42,
@@ -191,8 +191,8 @@
       "reason": "lowered 2026-10-02: the YAML line index went to tools/dsl-yaml-lines.mjs; holds the range: of L3 slice 3a"
     },
     "tools/gogen/emit-go.mjs": {
-      "lines": 2290,
-      "reason": "baseline 2026-10-01"
+      "lines": 2345,
+      "reason": "osgo 026/029 (#658, #659, 2026-10-08): UTF-16 units with the surrogate-half invariant and class statics per Session; carving utf16/statics out of go/abap is queued (stoker QUEUE #33)"
     },
     "tools/gogen/emit-js.mjs": {
       "lines": 1206,
@@ -203,8 +203,8 @@
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/go/abap/abap.go": {
-      "lines": 228,
-      "reason": "baseline 2026-10-01"
+      "lines": 233,
+      "reason": "osgo 026/029 (#658, #659, 2026-10-08): UTF-16 units with the surrogate-half invariant and class statics per Session; carving utf16/statics out of go/abap is queued (stoker QUEUE #33)"
     },
     "tools/gogen/go/abap/apc.go": {
       "lines": 39,
@@ -215,8 +215,8 @@
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/go/abap/codepage.go": {
-      "lines": 76,
-      "reason": "baseline 2026-10-01"
+      "lines": 113,
+      "reason": "osgo 026/029 (#658, #659, 2026-10-08): UTF-16 units with the surrogate-half invariant and class statics per Session; carving utf16/statics out of go/abap is queued (stoker QUEUE #33)"
     },
     "tools/gogen/go/abap/conv.go": {
       "lines": 1096,
@@ -271,8 +271,8 @@
       "reason": "wave 0 of docs/gogen-go-packages.md (#411): helper moved within go/abap as core glue, per the plan"
     },
     "tools/gogen/go/abap/events.go": {
-      "lines": 238,
-      "reason": "baseline 2026-10-01"
+      "lines": 241,
+      "reason": "osgo 026/029 (#658, #659, 2026-10-08): UTF-16 units with the surrogate-half invariant and class statics per Session; carving utf16/statics out of go/abap is queued (stoker QUEUE #33)"
     },
     "tools/gogen/go/abap/filedialog.go": {
       "lines": 94,
@@ -395,16 +395,16 @@
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/go/abap/shift.go": {
-      "lines": 21,
-      "reason": "baseline 2026-10-01"
+      "lines": 65,
+      "reason": "osgo 026/029 (#658, #659, 2026-10-08): UTF-16 units with the surrogate-half invariant and class statics per Session; carving utf16/statics out of go/abap is queued (stoker QUEUE #33)"
     },
     "tools/gogen/go/abap/store.go": {
       "lines": 113,
       "reason": "S0b: extract the importing-parameter adapter so IV_JSON forwarding is tested"
     },
     "tools/gogen/go/abap/strings.go": {
-      "lines": 544,
-      "reason": "baseline 2026-10-01"
+      "lines": 636,
+      "reason": "osgo 026/029 (#658, #659, 2026-10-08): UTF-16 units with the surrogate-half invariant and class statics per Session; carving utf16/statics out of go/abap is queued (stoker QUEUE #33)"
     },
     "tools/gogen/go/abap/sxmlscan.go": {
       "lines": 12,
@@ -501,6 +501,14 @@
     "tools/osd-build.mjs": {
       "lines": 1006,
       "reason": "#641 zip layers: user source layers (zip cache + overlay) enter the build inputs and the generation hash"
+    },
+    "tools/gogen/go/abap/utf16.go": {
+      "lines": 412,
+      "reason": "osgo 026/029 (#658, #659, 2026-10-08): UTF-16 units with the surrogate-half invariant and class statics per Session; carving utf16/statics out of go/abap is queued (stoker QUEUE #33)"
+    },
+    "tools/gogen/go/abap/statics.go": {
+      "lines": 47,
+      "reason": "osgo 026/029 (#658, #659, 2026-10-08): UTF-16 units with the surrogate-half invariant and class statics per Session; carving utf16/statics out of go/abap is queued (stoker QUEUE #33)"
     },
     "go:compiler": {
       "lines": 885,

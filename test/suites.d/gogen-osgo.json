@@ -65,6 +65,10 @@
       "test/osg-support.mjs",
       "test/osgjs-unit.mjs",
       "test/osgjs-int8.mjs",
+      "test/osgo-store-goldens.mjs",
+      "test/osgo-store-emitter.mjs",
+      "test/osgo-store-hermetic.mjs",
+      "test/osgo-storecmp.mjs",
       "test/xstring-buffer.mjs",
       "test/osgo-compiler.mjs"
     ]
