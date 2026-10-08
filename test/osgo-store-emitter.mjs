@@ -77,7 +77,10 @@ describe("OSGo store emitter", function() {
         process.env.OSD_LAYER_PACKAGE = "$ZIP";
         const store = new ObjectStore({root, libs: []});
         const entry = store.find("CLAS", "ZARCHIVE");
-        assert.equal(entry.writable, false);
+        // #656 seeds every warm-editable object input into the ZIP overlay before
+        // the first generation, so the class is read from a writable overlay copy.
+        assert.equal(entry.writable, true);
+        assert.match(entry.file, /^local\//);
         const files = [entry.file, entry.file.replace(/\.clas\.abap$/, ".clas.locals_def.abap")];
         const generation = join(root, "build/by-input/archive-test");
         mkdirSync(join(generation, "source"), {recursive: true});
