@@ -71,8 +71,8 @@
       "reason": "sy-sysid from the one system id (go/sysid, tools/osd-identity.mjs), 2026-10-02; rebased over #453"
     },
     "go:cmd/osgo": {
-      "lines": 1223,
-      "reason": "ADT on osgo slice 1a (/sap/bc/adt mount behind -adt) plus the compiler sidecar status flag (-compiler-status -> compiler.StatusJSON)"
+      "lines": 1229,
+      "reason": "Sidecar round 2 injects the lazy storecompiler adapter beside the existing compiler status wiring; six lines in cmd/osgo are the only host-lifecycle growth"
     },
     "go:cmd/storecmp": {
       "lines": 171,
@@ -123,8 +123,8 @@
       "reason": "recorded by --update"
     },
     "go:objstore": {
-      "lines": 1772,
-      "reason": "ADT on osgo slice 1a round 1: Node-parity layer metadata, retained active reads, package ordering/empty descriptions, and deterministic HISTORY semantics; package index extraction remains a later carve-out; round 2: Node's VFS object order; round 3: Node-exact state without a live generation and repository-name refusal"
+      "lines": 1936,
+      "reason": "Fix1: diagnostic filtering, Include-to-FILE conversion and legacy columns moved to storecompiler; objstore retains provider availability, version selection, refusals and answer JSON. Ceiling reduced from 1944."
     },
     "go:reportargs": {
       "lines": 209,
@@ -511,8 +511,12 @@
       "reason": "osgo 026/029 (#658, #659, 2026-10-08): UTF-16 units with the surrogate-half invariant and class statics per Session; carving utf16/statics out of go/abap is queued (stoker QUEUE #33)"
     },
     "go:compiler": {
-      "lines": 885,
-      "reason": "Fix3 preserves Fix2 lifecycle, admission, idle backoff and EOF drain; adds suspended Windows startup into a kill-on-close Job Object with owned cleanup, independent configurable response-line budget, and required check verdict field/hash validation. Fix4 adds unreaped Unix group ownership and context-aware bounded regular-file snapshots. Discovery, version checks and status JSON remain; no ABAP bindings."
+      "lines": 935,
+      "reason": "Fix1: optional logicalPath per snapshot file and optional saved CHECK mode preserve contract v1; per-occurrence mappings permit multiple logical includes backed by one shared digest file."
+    },
+    "go:storecompiler": {
+      "lines": 77,
+      "reason": "Fix1: adapter owns availability, saved-registry CHECK mode, explicit per-file logical mappings, active hash proof and all diagnostic-to-Issue conversion outside objstore."
     }
   },
   "readmeMissing": [

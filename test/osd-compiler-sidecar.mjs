@@ -129,6 +129,33 @@ describe("osd compiler --stdio", function () {
         expect(response.virtualFiles).to.deep.equal([]);
       });
     }
+    it("refuses a logical path that names another object's file", async () => {
+      const own = "ZCL_OUTLINE_OWN";
+      const text = `CLASS ${own.toLowerCase()} DEFINITION PUBLIC.\nENDCLASS.\nCLASS ${own.toLowerCase()} IMPLEMENTATION.\nENDCLASS.\n`;
+      const snap = snapshotFor(own, text);
+      const target = {type: "CLAS", name: own, version: "inactive"};
+      for (const logicalPath of ["src/zcl_outline_other.clas.abap", "src/zcl_outline_own.prog.abap", "src/zcl_outline_own"]) {
+        const aliased = {...snap, objects: [{...snap.objects[0], files: [{...snap.objects[0].files[0], logicalPath}]}]};
+        let error;
+        try { await outlineSnapshot(aliased, target); } catch (e) { error = e; }
+        expect(error?.protocolCode, logicalPath).to.equal("BAD_REQUEST");
+      }
+      const own2 = {...snap, objects: [{...snap.objects[0], files: [{...snap.objects[0].files[0], logicalPath: "src/sub/zcl_outline_own.clas.abap"}]}]};
+      expect((await outlineSnapshot(own2, target)).outline.found).to.equal(true);
+      // the store's own type-to-file rules: an include lives in .prog, a
+      // structure in .tabl, a package in package.devc.xml or <name>.devc.xml
+      const {namesObject} = await import("../tools/osd-compiler-sidecar.mjs");
+      for (const [path, object, ok] of [
+        ["src/zosd_inc.prog.abap", {type: "INCL", name: "ZOSD_INC"}, true],
+        ["src/zosd_s.tabl.xml", {type: "STRU", name: "ZOSD_S"}, true],
+        ["src/package.devc.xml", {type: "DEVC", name: "$ZPKG"}, true],
+        ["src/$zpkg.devc.xml", {type: "DEVC", name: "$ZPKG"}, true],
+        ["src/#ns#zcl_x.clas.testclasses.abap", {type: "CLAS", name: "/NS/ZCL_X"}, true],
+        ["src/zosd_inc.prog.abap", {type: "INCL", name: "ZOSD_OTHER"}, false],
+        ["src/zosd_s.tabl.xml", {type: "STRU", name: "ZOSD_T"}, false],
+        ["src/zosd_inc.clas.abap", {type: "INCL", name: "ZOSD_INC"}, false],
+      ]) expect(namesObject(path, object), path).to.equal(ok);
+    });
     it("uses the configured syntax version for a DEFAULT IGNORE declaration", async () => {
       const name = "ZCL_OUTLINE_DEFAULT";
       const text = `CLASS ${name.toLowerCase()} DEFINITION PUBLIC.\n  PUBLIC SECTION.\n    METHODS run DEFAULT IGNORE.\nENDCLASS.\nCLASS ${name.toLowerCase()} IMPLEMENTATION.\n  METHOD run.\n  ENDMETHOD.\nENDCLASS.\n`;
@@ -298,6 +325,64 @@ describe("osd compiler --stdio", function () {
       expect(baseline.registryHash).to.equal(expectedHash);
     });
   }
+  for (const resolver of ["generation", "pre-save", "shared-digest", "overlay-pre-save", "overlay-archive", "legacy-snapshot", "legacy-working"]) {
+    it(`maps the store's ${resolver} physical source to its logical filename`, async () => {
+      const {storeConfig} = await import("../tools/gogen/store.mjs");
+      const fixture = mkdtempSync(join(tmpdir(), "osd-mapping-"));
+      const sha = text => createHash("sha256").update(text).digest("hex");
+      const logical = "src/zcl_mapping.clas.abap", archive = "archive/zcl_mapping.clas.abap";
+      const active = source("ZCL_MAPPING", "original"), working = source("ZCL_MAPPING", "changed");
+      const put = (path, text) => { mkdirSync(join(fixture, path, ".."), {recursive: true}); writeFileSync(join(fixture, path), text); };
+      try {
+        put("abap_transpile.json", JSON.stringify({input_folder:["src"], libs:[]}));
+        put("abaplint.jsonc", JSON.stringify({syntax:{version:"v702"}}));
+        put(logical, working);
+        mkdirSync(join(fixture, "build/by-input/test"), {recursive:true});
+        symlinkSync("by-input/test", join(fixture, "build/live"));
+        const generation = "build/by-input/test/source/";
+        let physical;
+        if (resolver === "generation" || resolver === "overlay-archive" || resolver === "overlay-pre-save") {
+          put(generation + ".complete", "1");
+          physical = resolver === "overlay-pre-save" ? "build/inactive/active/" + logical : generation + (resolver === "overlay-archive" ? archive : logical);
+        } else if (resolver === "pre-save") {
+          physical = "build/inactive/active/" + logical;
+        } else if (resolver === "shared-digest") {
+          put("build/by-input/test/source-shared", "1");
+          physical = "build/source-by-digest/" + sha(active);
+        } else {
+          physical = generation + logical;
+          if (resolver === "legacy-working") put(logical, active);
+        }
+        const inputs = {[logical]:sha(active)};
+        if (resolver === "shared-digest") {
+          for (const include of ["locals_imp", "macros"]) {
+            const path = logical.replace(".clas.abap", `.clas.${include}.abap`);
+            put(path, "");
+            inputs[path] = sha("");
+          }
+          put("build/source-by-digest/"+sha(""), "");
+        }
+        put("build/by-input/test/source-inputs.json", JSON.stringify(inputs));
+        if (resolver !== "legacy-working") put(physical, active);
+        const roots = resolver.startsWith("overlay-") ? [{path:"src", writable:true, overlayOf:"archive"}] : undefined;
+        const store = new ObjectStore({root:fixture, ...(roots ? {roots} : {})});
+        const facts = await storeConfig(fixture, {store, storeModule:resolve("tools/osd-store.mjs")});
+        expect(facts.active[logical]).to.equal(physical);
+        const object = {type:"CLAS", name:"ZCL_MAPPING", version:"active"};
+        const snap = {root:fixture, generation:"test", objects:[{...object,
+          files:Object.entries(facts.active).map(([logicalPath,path]) => ({path,logicalPath,sha256:facts.built[logicalPath]}))}]};
+        const response = await send({id:++nextId, op:"outline", snapshot:snap, object});
+        const expected = await new StoreDestination({store}).execute({IV_COMMAND:"PARSE", IV_JSON:JSON.stringify({kind:"OUTLINE", ...object})});
+        expect(response.error, JSON.stringify(response)).to.equal(undefined);
+        expect(JSON.stringify(response.outline)).to.equal(expected.EV_JSON);
+        expect(response.registryHash).to.equal(sha(JSON.stringify(Object.entries(inputs).map(([path,hash]) => ["/"+path,hash]).sort(([a],[b]) => a < b ? -1 : a > b ? 1 : 0))));
+        const check = await send({id:++nextId, op:"check", snapshot:{...snap, checkMode:"saved"}});
+        expect(check.error, JSON.stringify(check)).to.equal(undefined);
+        expect(check.diagnostics).to.deep.equal([]);
+      } finally { rmSync(fixture, {recursive:true, force:true}); }
+    });
+  }
+
   it("covers library sources in the registry identity and verdict", async () => {
     const fixture = mkdtempSync(join(tmpdir(), "osd-sidecar-library-"));
     try {

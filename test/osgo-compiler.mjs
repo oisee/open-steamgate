@@ -25,7 +25,7 @@ describe("Go compiler client with real osd", function () {
       });
       assert.equal(result.error, undefined);
       assert.equal(result.status, 0, result.stdout + result.stderr);
-      for (const name of ["clean", "syntax", "hash-lie"]) assert.match(result.stdout, new RegExp(`--- PASS: TestRealSidecar/${name}`));
+      for (const name of ["clean", "syntax", "outline", "hash-lie"]) assert.match(result.stdout, new RegExp(`--- PASS: TestRealSidecar/${name}`));
     } finally {
       rmSync(dir, {recursive: true, force: true});
     }

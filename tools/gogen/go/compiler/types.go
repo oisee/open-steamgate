@@ -25,8 +25,9 @@ type AbsentError struct{ Paths []string }
 func (e *AbsentError) Error() string { return fmt.Sprintf("sidecar absent; tried %v", e.Paths) }
 
 type File struct {
-	Path   string `json:"path"`
-	SHA256 string `json:"sha256"`
+	Path        string `json:"path"`
+	LogicalPath string `json:"logicalPath,omitempty"`
+	SHA256      string `json:"sha256"`
 }
 type Object struct {
 	Type    string `json:"type"`
@@ -37,8 +38,10 @@ type Object struct {
 type ObjectFiles struct {
 	Type, Name, Version string
 	Files               []string
+	Logical             []string
 }
 type Snapshot struct {
+	CheckMode  string   `json:"checkMode,omitempty"`
 	Root       string   `json:"root"`
 	Generation string   `json:"generation"`
 	Objects    []Object `json:"objects"`
@@ -50,6 +53,7 @@ type ObjectID struct {
 type Diagnostic struct {
 	Severity string   `json:"severity"`
 	Code     string   `json:"code"`
+	Rule     string   `json:"rule,omitempty"`
 	Text     string   `json:"text"`
 	Object   ObjectID `json:"object"`
 	Include  string   `json:"include"`
@@ -107,5 +111,32 @@ func (result *CheckResult) UnmarshalJSON(raw []byte) error {
 		return fmt.Errorf("check result requires diagnostics array and nonnegative inputCount")
 	}
 	*result = CheckResult(value)
+	return nil
+}
+
+// outlineResult validates before exchange releases ownership of the child.
+type outlineResult struct {
+	Outline json.RawMessage `json:"outline"`
+}
+
+func (r *outlineResult) UnmarshalJSON(raw []byte) error {
+	type wire outlineResult
+	var value wire
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return err
+	}
+	if len(value.Outline) == 0 || value.Outline[0] != '{' {
+		return fmt.Errorf("outline result missing outline object")
+	}
+	var shape struct {
+		Found *bool `json:"found"`
+	}
+	if err := json.Unmarshal(value.Outline, &shape); err != nil {
+		return err
+	}
+	if shape.Found == nil {
+		return fmt.Errorf("outline result missing found")
+	}
+	*r = outlineResult(value)
 	return nil
 }
