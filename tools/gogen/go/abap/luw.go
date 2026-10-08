@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"strings"
 	"time"
+
+	"osg/gogen/hostclass"
 )
 
 // The database LUW of the kernel. A dialog step opens one database
@@ -284,4 +286,28 @@ func RollbackWork(s *Session) {
 		begin()
 	}
 	s.Sy.Subrc = 0
+}
+
+// GeneratedCommitWork is only for an explicit generated COMMIT WORK.
+// YieldSleep and dialog-step completion use the database functions directly.
+func GeneratedCommitWork(s *Session) {
+	CommitWork(s)
+	updated := s.UpdateTask
+	s.UpdateTask = false
+	if hook := hostclass.LUW.Commit; hook != nil {
+		if err := hook(s, updated); err != nil {
+			panic(err)
+		}
+	}
+}
+
+// GeneratedRollbackWork notifies the host after the database rollback.
+func GeneratedRollbackWork(s *Session) {
+	RollbackWork(s)
+	s.UpdateTask = false
+	if hook := hostclass.LUW.Rollback; hook != nil {
+		if err := hook(s); err != nil {
+			panic(err)
+		}
+	}
 }

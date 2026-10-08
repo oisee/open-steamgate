@@ -48,3 +48,10 @@ var KERNEL_LOCK = struct {
 	Dequeue    func(step any, r enq.Request) error
 	DequeueAll func(step any) error
 }{}
+
+// LUW is the host's part of explicit COMMIT WORK and ROLLBACK WORK.
+// step is the calling *abap.Session; nil callbacks preserve database behavior.
+var LUW = struct {
+	Commit   func(step any, updated bool) error
+	Rollback func(step any) error
+}{}

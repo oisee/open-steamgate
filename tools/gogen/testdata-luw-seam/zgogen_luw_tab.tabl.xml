@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<abapGit version="v1.0.0" serializer="LCL_OBJECT_TABL" serializer_version="v1.0.0">
+<asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0"><asx:values>
+<DD02V><TABNAME>ZGOGEN_LUW_TAB</TABNAME><DDLANGUAGE>E</DDLANGUAGE><TABCLASS>TRANSP</TABCLASS><DDTEXT>LUW seam rows</DDTEXT></DD02V>
+<DD03P_TABLE><DD03P><FIELDNAME>ID</FIELDNAME><KEYFLAG>X</KEYFLAG><INTTYPE>I</INTTYPE><INTLEN>000004</INTLEN><DATATYPE>INT4</DATATYPE><LENG>000010</LENG></DD03P></DD03P_TABLE>
+</asx:values></asx:abap></abapGit>
