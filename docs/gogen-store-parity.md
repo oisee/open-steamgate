@@ -30,11 +30,12 @@ sites: `EV_SOURCE`, `EV_FILE`, `EV_STATE`, `EV_CHANGED`, `EV_PACKAGE`,
 `EV_VERSION`, `EV_NOTE`, `EV_JSON`, `EV_ERROR`, `ET_OBJECT`, and
 `ET_REVISION`, field by field.
 
-The gogen host signature does not yet carry `IV_JSON`, `EV_JSON`,
-`EV_STATE`, or `EV_CHANGED` (`core case batch1 #1`). Those fields are an
-explicit per-command expected-gap report, not a silent pass: every other
-signature-visible difference fails, and a gap that the gogen host begins to
-carry also fails until removed from the ratchet list.
+The gogen host signature carries `IV_JSON`, `EV_JSON`, `EV_STATE` and
+`EV_CHANGED`, and the adapter maps `ET_REVISION-SUBJECT_FULL`, since ADT
+batch 1 (#672), so the expected-gap lists are empty and those fields are
+compared like every other. A gap added back to the lists is reported per
+command, never passed silently, and one the gogen host starts to carry fails
+until it is removed again.
 
 `test/osgo-storecmp.mjs` runs the harness over
 `tools/gogen/testdata-store/tree` and requires exit 0 plus equal, nonzero read
