@@ -101,7 +101,7 @@ func ICFResponseAppend(s *Session, res Data, name, value string) {
 			}
 		}
 	}
-	x.RespHeaders = append(x.RespHeaders, [2]string{JoinSurrogates(name), JoinSurrogates(value)})
+	x.RespHeaders = append(x.RespHeaders, [2]string{name, value})
 }
 
 // ICFResponseSend is res.status(code).send(buffer). A second send is an
@@ -112,7 +112,7 @@ func ICFResponseSend(s *Session, res Data, code int32, body string) {
 		panic(HostError{Where: "CL_EXPRESS_ICF_SHIM=>RESPONSE", Text: "the response was sent twice (express: headers already sent)"})
 	}
 	x.Status = code
-	x.RespBody = []byte(JoinSurrogates(body))
+	x.RespBody = []byte(body)
 	x.Sent = true
 }
 

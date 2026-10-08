@@ -16,7 +16,7 @@ import (
 
 // CmpS compares two character values as the other comparisons of this
 // runtime do.
-func CmpS(a, b string) int { return strings.Compare(JoinSurrogates(a), JoinSurrogates(b)) }
+func CmpS(a, b string) int { return strings.Compare(a, b) }
 
 // CmpNum compares two numbers.
 func CmpNum[T int32 | int64 | float64](a, b T) int { return cmp.Compare(a, b) }

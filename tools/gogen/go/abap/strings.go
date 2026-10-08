@@ -539,15 +539,14 @@ func EscapeJSONString(v string) string {
 		for _, r := range v {
 			write(r)
 		}
-		return Canon(b.String())
+		return b.String()
 	}
-	v = Canon(v)
 	for i := 0; i < len(v); {
 		r, width := decode16(v[i:])
 		write(r)
 		i += width
 	}
-	return Canon(b.String())
+	return b.String()
 }
 
 // SubstringBefore / SubstringAfter are substring_before / _after( val sub )

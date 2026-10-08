@@ -18,6 +18,7 @@ METHODS join_template FOR TESTING.
 METHODS join_loop FOR TESTING.
 METHODS join_replace FOR TESTING.
 METHODS egress_pair FOR TESTING.
+METHODS binary_body FOR TESTING.
 ENDCLASS.
 CLASS ltcl_test IMPLEMENTATION.
 METHOD len.
@@ -189,5 +190,11 @@ DATA entity TYPE REF TO if_http_response.
 CREATE OBJECT entity TYPE cl_http_entity.
 entity->set_cdata( r ).
 cl_abap_unit_assert=>assert_equals( act = entity->get_data( ) exp = CONV xstring( 'F09F9880' ) ).
+ENDMETHOD.
+METHOD binary_body.
+DATA entity TYPE REF TO if_http_response.
+CREATE OBJECT entity TYPE cl_http_entity.
+entity->set_data( CONV xstring( 'ED00FF' ) ).
+cl_abap_unit_assert=>assert_equals( act = entity->get_data( ) exp = CONV xstring( 'ED00FF' ) ).
 ENDMETHOD.
 ENDCLASS.

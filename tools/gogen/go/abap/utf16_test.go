@@ -158,12 +158,12 @@ func TestUTF16EscapeJSONSurrogates(t *testing.T) {
 	if got := EscapeJSONString(hi); got != `\uD83D` {
 		t.Fatalf("half: %q", got)
 	}
-	if got := EscapeJSONString(hi + lo); got != "😀" {
+	if got := EscapeJSONString(Concat(hi, lo)); got != "😀" {
 		t.Fatalf("pair: %q", got)
 	}
 }
 
-func TestUTF16ConcatenationEgress(t *testing.T) {
+func TestUTF16CanonicalConcatenation(t *testing.T) {
 	emoji := "😀"
 	hi := SubS(emoji, 0, 1)
 	lo := SubS(emoji, 1, 1)
@@ -171,16 +171,16 @@ func TestUTF16ConcatenationEgress(t *testing.T) {
 	if got != emoji || rc != 0 {
 		t.Fatalf("concat: %x rc=%d", got, rc)
 	}
-	if CmpS(hi+lo, emoji) != 0 {
+	if CmpS(got, emoji) != 0 {
 		t.Fatal("comparison sees adjacent surrogate halves as a different value")
 	}
-	if !CS(hi+lo, emoji) {
+	if !CS(got, emoji) {
 		t.Fatal("CS sees adjacent surrogate halves as a different value")
 	}
-	if bytes := EncodeText("utf8", hi+lo); bytes != emoji {
+	if bytes := EncodeText("utf8", got); bytes != emoji {
 		t.Fatalf("utf8 egress: %x", bytes)
 	}
-	if units := EncodeText("utf16le", hi+lo); units != "\x3d\xd8\x00\xde" {
+	if units := EncodeText("utf16le", got); units != "\x3d\xd8\x00\xde" {
 		t.Fatalf("utf16 egress: %x", units)
 	}
 }
