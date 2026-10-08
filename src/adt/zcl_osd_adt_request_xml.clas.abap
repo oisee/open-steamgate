@@ -607,7 +607,9 @@ CLASS zcl_osd_adt_request_xml IMPLEMENTATION.
             IF to_lower( lv_target ) = `xml`.
               lv_value = until( `?>` ).
               lv_raw = lv_target && lv_value.
-              FIND REGEX `^xml[ \t\r\n]+version[ \t\r\n]*=[ \t\r\n]*(['"])1\.0\1([ \t\r\n]+encoding[ \t\r\n]*=[ \t\r\n]*(['"])[Uu][Tt][Ff]-8\3)?([ \t\r\n]+standalone[ \t\r\n]*=[ \t\r\n]*(['"])(yes|no)\5)?[ \t\r\n]*$` IN lv_raw.
+*             matching quotes by alternation, not by backreference: a
+*             backreference is not portable to every regex engine we run on
+              FIND REGEX `^xml[ \t\r\n]+version[ \t\r\n]*=[ \t\r\n]*('1\.0'|"1\.0")([ \t\r\n]+encoding[ \t\r\n]*=[ \t\r\n]*('[Uu][Tt][Ff]-8'|"[Uu][Tt][Ff]-8"))?([ \t\r\n]+standalone[ \t\r\n]*=[ \t\r\n]*('(yes|no)'|"(yes|no)"))?[ \t\r\n]*$` IN lv_raw.
               IF lv_begin <> 0 OR sy-subrc <> 0.
                 fail( ).
               ENDIF.
