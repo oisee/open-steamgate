@@ -98,4 +98,30 @@ describe("the write boundary: a padded CHAR stores the same on every engine", fu
     const {trimLiterals} = await import("../tools/sql-literals.mjs");
     expect(trimLiterals('SELECT "a b " FROM t WHERE k = 1')).to.equal('SELECT "a b " FROM t WHERE k = 1');
   });
+
+  it("a literal of millions of characters is trimmed without a regular expression", async () => {
+    const {trimLiterals} = await import("../tools/sql-literals.mjs");
+    // the shape that overflowed the pattern (abapiti case 038): a short class
+    // and 150 000 lines of 100 blanks, about 15 million characters
+    const body = "CLASS zcl_x DEFINITION. ENDCLASS. WRITE 'x''y'.\n" + (" ".repeat(100) + "\n").repeat(150000);
+    const q = "'";
+    const sql = "INSERT INTO t VALUES (" + q + body.replace(/'/g, "''") + "   " + q + ", 'b  ')";
+    const out = trimLiterals(sql);
+    expect(out.endsWith("\n', 'b')")).to.equal(true);
+    expect(out.length).to.equal(sql.length - 5);
+  });
+
+  it("trims the same as the quote-aware pattern did, on well-formed statements", async () => {
+    const {trimLiterals} = await import("../tools/sql-literals.mjs");
+    const pattern = (s) => s.replace(/'((?:[^']|'')*)'/g, (m, inner) => "'" + inner.replace(/ +$/, "") + "'");
+    const alphabet = ["'", " ", "a", "\""];
+    let seed = 7;
+    const next = () => (seed = (seed * 1103515245 + 12345) % 2147483648);
+    for (let n = 0; n < 5000; n++) {
+      let s = "";
+      for (let i = next() % 12; i > 0; i--) s += alphabet[next() % alphabet.length];
+      if (s.split("'").length % 2 === 0) continue;
+      expect(trimLiterals(s), JSON.stringify(s)).to.equal(pattern(s));
+    }
+  });
 });
