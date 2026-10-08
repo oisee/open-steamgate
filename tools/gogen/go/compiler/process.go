@@ -13,21 +13,36 @@ import (
 
 // proc owns one child. Closing done publishes readErr; dead means Wait returned.
 type proc struct {
-	kill       func()
-	stdin      io.WriteCloser
-	stdout     *os.File
-	answers    chan json.RawMessage
-	done, dead chan struct{}
-	readErr    error
-	maxLine    atomic.Int64
+	kill     func()
+	wait     func() error
+	stdin    io.WriteCloser
+	stdout   *os.File
+	answers  chan json.RawMessage
+	done     chan struct{}
+	exited   <-chan struct{}
+	dead     chan struct{}
+	readErr  error
+	maxLine  atomic.Int64
+	pidValue int
 }
 
-func newProc(cmd *exec.Cmd, kill func(), stdin io.WriteCloser, stdout *os.File) *proc {
-	p := &proc{kill: kill, stdin: stdin, stdout: stdout, answers: make(chan json.RawMessage, 1), done: make(chan struct{}), dead: make(chan struct{})}
+func newProc(cmd *exec.Cmd, lifecycle processLifecycle, stdin io.WriteCloser, stdout *os.File) *proc {
+	p := &proc{
+		kill: lifecycle.kill, wait: lifecycle.wait, exited: lifecycle.exited,
+		stdin: stdin, stdout: stdout, answers: make(chan json.RawMessage, 1),
+		done: make(chan struct{}), dead: make(chan struct{}), pidValue: cmd.Process.Pid,
+	}
 	p.maxLine.Store(1024 * 1024) // bounded hello before the response budget applies
-	go func() { _ = cmd.Wait(); close(p.dead) }()
 	go p.read()
 	return p
+}
+
+func (p *proc) pid() int { return p.pidValue }
+
+type processLifecycle struct {
+	kill   func()
+	wait   func() error
+	exited <-chan struct{}
 }
 
 func (p *proc) read() {

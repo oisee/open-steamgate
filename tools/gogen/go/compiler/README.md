@@ -1,7 +1,8 @@
 # Compiler client
 
 New creates a lazy v1 NDJSON client; Hello, Check, Status and Close own its lifecycle.
-BuildSnapshot pins raw file hashes and rejects paths or symlinks outside the root.
+BuildSnapshot pins regular-file hashes, rejects paths or symlinks outside the
+root and special files, honors its context between files, and bounds source reads.
 Discovery never uses PATH. Requests serialize; the default 30-second deadline
 covers admission, handshake, pipe writes and response reads. Cancellation while
 waiting for admission or the mutex returns promptly without recording LastError;

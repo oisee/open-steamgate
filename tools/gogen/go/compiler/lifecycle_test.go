@@ -95,7 +95,7 @@ func TestDescendantRetainsStdout(t *testing.T) {
 	defer cancel()
 	result := make(chan error, 1)
 	go func() { _, err := c.Check(ctx, Snapshot{}); result <- err }()
-	await(t, p.dead) // parent has exited; descendant still owns stdout
+	await(t, p.exited) // parent has exited; descendant still owns stdout
 	select {
 	case <-p.done:
 		t.Fatal("descendant did not retain stdout")
@@ -128,7 +128,7 @@ func TestIdleDeathBackoff(t *testing.T) {
 	}
 	p := c.proc
 	p.kill()
-	await(t, p.dead)
+	await(t, p.exited)
 	await(t, p.done)
 	base := time.Unix(100, 0)
 	c.now = func() time.Time { return base }
@@ -195,7 +195,7 @@ func TestBlockedWriteDeadline(t *testing.T) {
 	if time.Since(start) > 500*time.Millisecond || c.proc != nil {
 		t.Fatal("blocked write not bounded")
 	}
-	await(t, p.dead)
+	await(t, p.exited)
 }
 
 func TestHelloInvalidLimits(t *testing.T) {
@@ -227,7 +227,7 @@ func TestIdleClosedStream(t *testing.T) {
 	if err := c.Hello(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	await(t, p.dead)
+	await(t, p.exited)
 	if c.Status().Restarts != 1 {
 		t.Fatal("idle child not replaced")
 	}
@@ -248,7 +248,7 @@ func TestIdleDescendantRecovery(t *testing.T) {
 	if err := json.NewEncoder(p.stdin).Encode(map[string]any{"id": 1, "op": "check"}); err != nil {
 		t.Fatal(err)
 	}
-	await(t, p.dead)
+	await(t, p.exited)
 	select {
 	case <-p.done:
 		t.Fatal("descendant did not retain stdout")
@@ -269,7 +269,11 @@ func TestKillGraceBound(t *testing.T) {
 	}
 	real := c.proc
 	// Model a Wait implementation that never signals completion; cleanup still returns.
-	c.proc = &proc{kill: real.kill, stdin: real.stdin, stdout: real.stdout, dead: make(chan struct{})}
+	c.proc = &proc{
+		kill: real.kill, stdin: real.stdin, stdout: real.stdout,
+		wait: func() error { select {} }, exited: make(chan struct{}),
+		dead: make(chan struct{}),
+	}
 	c.options.KillGrace = 15 * time.Millisecond
 	start := time.Now()
 	c.mu.Lock()
@@ -279,7 +283,8 @@ func TestKillGraceBound(t *testing.T) {
 	if elapsed < 15*time.Millisecond || elapsed > 500*time.Millisecond {
 		t.Fatalf("cleanup grace: %s", elapsed)
 	}
-	await(t, real.dead)
+	await(t, real.exited)
+	_ = real.wait()
 }
 
 func TestResponseLineLimit(t *testing.T) {

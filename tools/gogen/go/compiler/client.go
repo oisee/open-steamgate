@@ -153,7 +153,7 @@ func (c *Client) ensure(ctx context.Context) error {
 	if c.proc != nil {
 		select {
 		case <-c.proc.done:
-		case <-c.proc.dead:
+		case <-c.proc.exited:
 		default:
 			return nil
 		}
@@ -190,7 +190,7 @@ func (c *Client) ensure(ctx context.Context) error {
 	// Tool logs must never be confused with NDJSON responses.
 	cmd.Stderr = nil
 	cmd.Stdout = stdoutWrite
-	kill, err := startProcess(cmd)
+	lifecycle, err := startProcess(cmd)
 	if err != nil {
 		stdin.Close()
 		stdoutRead.Close()
@@ -198,7 +198,7 @@ func (c *Client) ensure(ctx context.Context) error {
 		return c.record(&Refusal{Code: "INTERNAL", Text: err.Error()})
 	}
 	stdoutWrite.Close()
-	c.proc = newProc(cmd, kill, stdin, stdoutRead)
+	c.proc = newProc(cmd, lifecycle, stdin, stdoutRead)
 	if c.starts > 0 {
 		c.status.Restarts++
 	}
@@ -313,6 +313,10 @@ func (c *Client) stop() {
 	c.proc = nil
 	c.retryAt = c.now().Add(c.options.RestartBackoff)
 	p.kill()
+	go func() {
+		defer close(p.dead)
+		_ = p.wait()
+	}()
 	_ = p.stdin.Close()
 	_ = p.stdout.Close()
 	select {

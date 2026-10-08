@@ -35,7 +35,7 @@ func TestRealSidecar(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(root, path), []byte(raw), 0600); err != nil {
 			t.Fatal(err)
 		}
-		snap, err := BuildSnapshot(root, "fixture-generation", []ObjectFiles{{Type: "CLAS", Name: "ZCL_FIXTURE", Version: "inactive", Files: []string{path}}})
+		snap, err := BuildSnapshot(context.Background(), root, "fixture-generation", []ObjectFiles{{Type: "CLAS", Name: "ZCL_FIXTURE", Version: "inactive", Files: []string{path}}}, 16*1024*1024)
 		if err != nil {
 			t.Fatal(err)
 		}

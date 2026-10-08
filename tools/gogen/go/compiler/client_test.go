@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -135,6 +136,10 @@ func TestMain(m *testing.M) {
 				}
 			}
 			_ = json.NewEncoder(os.Stdout).Encode(response)
+			if request.Op == "hello" && mode == "idle-descendant-exit" {
+				startDescendant()
+				os.Exit(0)
+			}
 			if request.Op == "hello" && mode == "idle-close" {
 				_ = os.Stdout.Close()
 				time.Sleep(time.Hour)
@@ -342,6 +347,7 @@ func TestIdleDeathRestart(t *testing.T) {
 		t.Fatal("old child was not reaped")
 	}
 }
+
 func TestRestartBackoffDelay(t *testing.T) {
 	c := fake(t, "timeout")
 	marker := filepath.Join(t.TempDir(), "sent")
@@ -455,7 +461,7 @@ func TestSnapshot(t *testing.T) {
 	_ = os.WriteFile(outside, []byte("outside"), 0600)
 	_ = os.WriteFile(filepath.Join(root, "file"), []byte("abc"), 0600)
 	objects := []ObjectFiles{{Type: "CLAS", Name: "ZCL_FIXTURE", Version: "inactive", Files: []string{"file"}}}
-	snap, err := BuildSnapshot(root, "generation", objects)
+	snap, err := BuildSnapshot(context.Background(), root, "generation", objects, 1024)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -470,7 +476,7 @@ func TestSnapshot(t *testing.T) {
 	}
 	for _, path := range []string{"../escape", outside} {
 		objects[0].Files = []string{path}
-		if _, err = BuildSnapshot(root, "generation", objects); err == nil {
+		if _, err = BuildSnapshot(context.Background(), root, "generation", objects, 1024); err == nil {
 			t.Fatalf("accepted escape %s", path)
 		}
 		var pathErr *SnapshotPathError
@@ -479,12 +485,57 @@ func TestSnapshot(t *testing.T) {
 		}
 	}
 	objects[0].Files = []string{"link"}
-	if _, err = BuildSnapshot(root, "generation", objects); err == nil {
+	if _, err = BuildSnapshot(context.Background(), root, "generation", objects, 1024); err == nil {
 		t.Fatal("accepted symlink escape")
 	}
 	var pathErr *SnapshotPathError
 	if errors.As(err, &pathErr) {
 		t.Fatalf("symlink escape used lexical error: %v", err)
+	}
+}
+
+func TestSnapshotRefusesFifoPromptly(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("FIFO fixture is Unix-specific")
+	}
+	root := t.TempDir()
+	fifo := filepath.Join(root, "fifo")
+	makeSnapshotFifo(t, fifo)
+	start := time.Now()
+	_, err := BuildSnapshot(context.Background(), root, "generation", []ObjectFiles{{Files: []string{"fifo"}}}, 1024)
+	if err == nil {
+		t.Fatal("accepted FIFO")
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("FIFO refusal blocked for %s", elapsed)
+	}
+}
+
+func TestSnapshotByteLimit(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "large"), []byte("abc"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := BuildSnapshot(context.Background(), root, "generation", []ObjectFiles{{Files: []string{"large"}}}, 2)
+	var pathErr *SnapshotPathError
+	if !errors.As(err, &pathErr) || pathErr.Reason != "too-large" {
+		t.Fatalf("single-file limit: %v", err)
+	}
+	if err = os.WriteFile(filepath.Join(root, "second"), []byte("c"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(root, "first"), []byte("ab"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	_, err = BuildSnapshot(context.Background(), root, "generation", []ObjectFiles{{Files: []string{"first", "second"}}}, 2)
+	if !errors.As(err, &pathErr) || pathErr.Reason != "too-large" {
+		t.Fatalf("total limit: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = BuildSnapshot(ctx, root, "generation", []ObjectFiles{{Files: []string{"first", "second"}}}, 2)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled snapshot: %v", err)
 	}
 }
 

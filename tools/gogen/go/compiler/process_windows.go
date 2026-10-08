@@ -16,29 +16,29 @@ func executableFile(info os.FileInfo) bool { return true }
 
 // Start suspended so no descendant can escape before job assignment. The job
 // handle belongs to the client, surviving the direct child's exit.
-func startProcess(cmd *exec.Cmd) (func(), error) {
+func startProcess(cmd *exec.Cmd) (processLifecycle, error) {
 	job, err := windows.CreateJobObject(nil, nil)
 	if err != nil {
-		return nil, err
+		return processLifecycle{}, err
 	}
 	limits := windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION{}
 	limits.BasicLimitInformation.LimitFlags = windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
 	if _, err = windows.SetInformationJobObject(job, windows.JobObjectExtendedLimitInformation, uintptr(unsafe.Pointer(&limits)), uint32(unsafe.Sizeof(limits))); err != nil {
 		windows.CloseHandle(job)
-		return nil, err
+		return processLifecycle{}, err
 	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.CREATE_SUSPENDED}
 	if err = cmd.Start(); err != nil {
 		windows.CloseHandle(job)
-		return nil, err
+		return processLifecycle{}, err
 	}
 	var once sync.Once
 	kill := func() { once.Do(func() { _ = windows.TerminateJobObject(job, 1); _ = windows.CloseHandle(job) }) }
-	fail := func(err error) (func(), error) {
+	fail := func(err error) (processLifecycle, error) {
 		kill()
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
-		return nil, err
+		return processLifecycle{}, err
 	}
 	process, err := windows.OpenProcess(windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE, false, uint32(cmd.Process.Pid))
 	if err != nil {
@@ -52,7 +52,18 @@ func startProcess(cmd *exec.Cmd) (func(), error) {
 	if err = resumeProcess(uint32(cmd.Process.Pid)); err != nil {
 		return fail(err)
 	}
-	return kill, nil
+	var waitOnce sync.Once
+	waitErr := error(nil)
+	wait := func() error {
+		waitOnce.Do(func() { waitErr = cmd.Wait() })
+		return waitErr
+	}
+	exited := make(chan struct{})
+	go func() {
+		defer close(exited)
+		_ = wait()
+	}()
+	return processLifecycle{kill: kill, wait: wait, exited: exited}, nil
 }
 
 func resumeProcess(pid uint32) error {
