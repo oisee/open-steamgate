@@ -126,6 +126,17 @@ func TestUTF16Bounds(t *testing.T) {
 	}
 }
 
+func TestUTF16PlainSearchInsidePair(t *testing.T) {
+	emoji := "😀"
+	low := SubS(emoji, 1, 1)
+	if got, rc := ReplaceStmt(emoji, low, "X", false, false, false, 0, NoLength, -1); got != "\xed\xa0\xbdX" || rc != 0 {
+		t.Fatalf("replace half: %x rc=%d", got, rc)
+	}
+	if got := FindAllCount(emoji, low, false, false); got != 1 {
+		t.Fatalf("match count: %d", got)
+	}
+}
+
 func TestUTF16ConcatenationEgress(t *testing.T) {
 	emoji := "😀"
 	hi := SubS(emoji, 0, 1)

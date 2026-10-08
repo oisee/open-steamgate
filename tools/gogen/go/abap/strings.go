@@ -140,6 +140,9 @@ func plainAll(s, sub string, icase, first bool) [][]int {
 	if icase {
 		return rxAll(s, regexp.QuoteMeta(sub), true, first)
 	}
+	if strings.IndexByte(s, 0xed) >= 0 || strings.IndexByte(sub, 0xed) >= 0 || containsSupplementary(s) {
+		return plainAllWTF(s, sub, first)
+	}
 	var out [][]int
 	for pos := 0; pos <= len(s); {
 		i := strings.Index(s[pos:], sub)
@@ -151,6 +154,29 @@ func plainAll(s, sub string, icase, first bool) [][]int {
 			break
 		}
 		pos += i + len(sub)
+	}
+	return out
+}
+
+func plainAllWTF(s, sub string, first bool) [][]int {
+	s = splitSupplementary(s)
+	hay, bounds := wtf16View(s)
+	needle := UTF16Units(sub)
+	var out [][]int
+	for pos := 0; pos+len(needle) <= len(hay); {
+		i := 0
+		for i < len(needle) && hay[pos+i] == needle[i] {
+			i++
+		}
+		if i == len(needle) {
+			out = append(out, []int{bounds[pos], bounds[pos+len(needle)]})
+			if first {
+				break
+			}
+			pos += len(needle)
+			continue
+		}
+		pos++
 	}
 	return out
 }
@@ -241,6 +267,9 @@ func ReplaceStmt(v, p, with string, regex, all, icase bool, off, ln int32, cLen 
 		if p == "" && all {
 			panic(ArithmeticError{Class: "CX_SY_REPLACE_INFINITE_LOOP", Op: "REPLACE ALL OCCURRENCES OF ''"})
 		}
+		if !icase && (strings.IndexByte(sec, 0xed) >= 0 || strings.IndexByte(p, 0xed) >= 0 || containsSupplementary(sec)) {
+			sec = splitSupplementary(sec)
+		}
 		ms = plainAll(sec, p, icase, !all)
 	}
 	if len(ms) == 0 {
@@ -284,6 +313,9 @@ func ReplaceFn(v, p, with string, regex bool, occ int32) string {
 	if regex {
 		ms = rxAll(v, p, false, occ == 1)
 	} else {
+		if strings.IndexByte(v, 0xed) >= 0 || strings.IndexByte(p, 0xed) >= 0 || containsSupplementary(v) {
+			v = splitSupplementary(v)
+		}
 		ms = plainAll(v, p, false, occ == 1)
 	}
 	switch {

@@ -249,6 +249,50 @@ func JoinSurrogates(v string) string {
 	}
 	return UTF16String(UTF16Units(v))
 }
+
+// wtf16View returns the UTF-16 units and the byte boundary of each unit in
+// v. Supplementary characters contribute two units: the second boundary is
+// inside their four-byte UTF-8 form, where a split half starts.
+func wtf16View(v string) ([]uint16, []int) {
+	units := make([]uint16, 0, len(v))
+	bounds := make([]int, 0, len(v)+1)
+	for b := 0; b < len(v); {
+		r, width := decode16(v[b:])
+		if r > 0xffff {
+			hi, lo := utf16.EncodeRune(r)
+			units = append(units, uint16(hi), uint16(lo))
+			bounds = append(bounds, b, b+2)
+		} else {
+			units = append(units, uint16(r))
+			bounds = append(bounds, b)
+		}
+		b += width
+	}
+	return units, append(bounds, len(v))
+}
+
+func containsSupplementary(v string) bool {
+	return strings.IndexByte(v, 0xf0) >= 0
+}
+
+func splitSupplementary(v string) string {
+	if !containsSupplementary(v) {
+		return v
+	}
+	var b strings.Builder
+	for i := 0; i < len(v); {
+		r, width := decode16(v[i:])
+		if r > 0xffff {
+			hi, lo := utf16.EncodeRune(r)
+			b.WriteString(surrogate16(hi))
+			b.WriteString(surrogate16(lo))
+		} else {
+			b.WriteString(v[i : i+width])
+		}
+		i += width
+	}
+	return b.String()
+}
 func index16(v, sub string) int {
 	if !strings.Contains(sub, "\xed") && !strings.Contains(v, "\xed") {
 		if b := strings.Index(v, sub); b >= 0 {

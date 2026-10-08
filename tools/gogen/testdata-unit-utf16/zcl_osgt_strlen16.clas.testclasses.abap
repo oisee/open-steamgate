@@ -8,6 +8,7 @@ METHODS find_offset FOR TESTING.
 METHODS half_roundtrip FOR TESTING.
 METHODS numofchar_units FOR TESTING.
 METHODS concat_pair FOR TESTING.
+METHODS search_half FOR TESTING.
 ENDCLASS.
 CLASS ltcl_test IMPLEMENTATION.
 METHOD len.
@@ -65,5 +66,15 @@ CONCATENATE hi lo INTO DATA(r).
 cl_abap_unit_assert=>assert_equals( act = strlen( r ) exp = 2 ).
 cl_abap_unit_assert=>assert_equals( act = cl_abap_codepage=>convert_to( r )
   exp = CONV xstring( 'F09F9880' ) ).
+ENDMETHOD.
+METHOD search_half.
+DATA(s) = zcl_osgt_strlen16=>emoji( ).
+DATA(lo) = s+1(1).
+DATA(count) = 0.
+FIND ALL OCCURRENCES OF lo IN s MATCH COUNT count.
+cl_abap_unit_assert=>assert_equals( act = count exp = 1 ).
+REPLACE lo IN s WITH `X`.
+cl_abap_unit_assert=>assert_equals( act = cl_abap_codepage=>convert_to( s )
+  exp = CONV xstring( 'EDA0BD5841' ) ).
 ENDMETHOD.
 ENDCLASS.
