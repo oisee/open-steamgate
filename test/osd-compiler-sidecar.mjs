@@ -6,6 +6,8 @@ import {tmpdir} from "node:os";
 import {join, resolve} from "node:path";
 import {createInterface} from "node:readline";
 import {once} from "node:events";
+import {checkSnapshot} from "../tools/osd-compiler-sidecar.mjs";
+import {hashOf, inputsOf} from "../tools/osd-build.mjs";
 import {compilerCommand} from "../tools/osd-host.mjs";
 
 describe("osd compiler --stdio", function () {
@@ -80,10 +82,24 @@ describe("osd compiler --stdio", function () {
     const response = await send({id: ++nextId, op: "check", snapshot: snapshot("ZCL_SC_CLEAN", source("ZCL_SC_CLEAN"))});
     expect(response.id).to.equal(nextId);
     expect(response.diagnostics).to.deep.equal([]);
-    const paths = response.inputs.map(input => input.path);
-    expect(paths).to.include.members(["abap_transpile.json", "abaplint.jsonc", "src/zcl_sc_clean.clas.abap"]);
-    expect(paths).to.deep.equal([...paths].sort((left, right) => left.localeCompare(right)));
-    for (const input of response.inputs) expect(input.sha256).to.match(/^[0-9a-f]{64}$/);
+    expect(response.inputsHash).to.equal(hashOf(root, inputsOf(root)));
+    expect(response.inputsHash).to.match(/^[0-9a-f]{16}$/);
+    expect(response).not.to.have.property("inputs");
+  });
+  it("refuses a non-listed input that moves during check", async () => {
+    const snap = snapshot("ZCL_SC_FROZEN", source("ZCL_SC_FROZEN"));
+    const other = join(root, "src/zcl_sc_unlisted.clas.abap");
+    writeFileSync(other, source("ZCL_SC_UNLISTED"));
+    let reachedHook = false, error;
+    try {
+      await checkSnapshot(snap, {beforeAnswer() {
+        reachedHook = true;
+        writeFileSync(other, source("ZCL_SC_UNLISTED", "renamed"));
+      }});
+    } catch (caught) { error = caught; }
+    finally { rmSync(other, {force: true}); }
+    expect(reachedHook).to.equal(true);
+    expect(error).to.include({protocolCode: "SNAPSHOT_MISMATCH", message: "inputs moved during check"});
   });
   it("rejects a 31-character method name with A4H coordinates", async () => {
     const method = "a".repeat(31);

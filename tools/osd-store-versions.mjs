@@ -1,5 +1,4 @@
 import {warmOverlay} from "./osd-warm-overlay.mjs";
-import {trackedRead} from "./osd-input-audit.mjs";
 // Active/inactive versions, source snapshots and activation provenance.
 import {existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync} from "node:fs";
 import {createHash} from "node:crypto";
@@ -17,10 +16,6 @@ import {forgetMissingObjectOutcomes} from "./osd-activation-journal.mjs";
 export class StoreVersions {
   #store;
   #entries;
-
-  #read(file, encoding) {
-    return trackedRead(this.#store.inputAudit, this.#store.root, file, encoding);
-  }
 
   constructor(store, entries) {
     this.#store = store;
@@ -53,7 +48,7 @@ export class StoreVersions {
     const file = join(this.#store.root, this.#store.inactiveDir, "inactive.json");
     let saved;
     try {
-      saved = JSON.parse(this.#read(file, "utf8"));
+      saved = JSON.parse(readFileSync(file, "utf8"));
     } catch (error) {
       if (error.code !== "ENOENT" && existsSync(file)) {
         // unreadable, and not by a crash of ours (the replace is atomic): kept
@@ -161,7 +156,7 @@ export class StoreVersions {
       const files = this.#filesOfEntry(entry).map((file) => {
         const copy = join(this.#store.root, this.#snapshotOf(file));
         const tree = join(this.#store.root, file);
-        return {file, before: existsSync(copy) ? this.#read(copy, "utf8") : "", after: existsSync(tree) ? this.#read(tree, "utf8") : ""};
+        return {file, before: existsSync(copy) ? readFileSync(copy, "utf8") : "", after: existsSync(tree) ? readFileSync(tree, "utf8") : ""};
       });
       out.push({key, type, files});
     }
@@ -195,7 +190,7 @@ export class StoreVersions {
     for (const file of files) {
       hash.update(file).update("\0");
       if (override.has(file)) hash.update(override.get(file));
-      else if (existsSync(join(this.#store.root, file))) hash.update(this.#read(file));
+      else if (existsSync(join(this.#store.root, file))) hash.update(readFileSync(join(this.#store.root, file)));
       hash.update("\0");
     }
     return hash.digest("hex");
@@ -335,7 +330,7 @@ export class StoreVersions {
         const name = "/" + file;
         const before = registry.getFileByName(name)?.getRaw();
         const copy = join(this.#store.root, this.#snapshotOf(file));
-        const source = existsSync(copy) ? this.#read(copy, "utf8") : undefined;
+        const source = existsSync(copy) ? readFileSync(copy, "utf8") : undefined;
         if (before === source) continue;
         replacements.push([name, source]);
         restore.push([name, before]);
@@ -374,8 +369,8 @@ export class StoreVersions {
         .some((f) => {
           const working = join(this.#store.root, f);
           const active = this.#activeFile(f, entry);
-          if (!existsSync(working)) return active && existsSync(active) && this.#read(active, "utf8") !== "";
-          return !active || !existsSync(active) || this.#read(working, "utf8") !== this.#read(active, "utf8");
+          if (!existsSync(working)) return active && existsSync(active) && readFileSync(active, "utf8") !== "";
+          return !active || !existsSync(active) || readFileSync(working, "utf8") !== readFileSync(active, "utf8");
         })
       : this.#store.inactive.has(`${entry.type} ${entry.name}`);
     return {changedAt, version: differs ? "inactive" : "active"};
@@ -387,7 +382,7 @@ export class StoreVersions {
     const entry = this.#store.find(type, name);
     if (entry === undefined) return undefined;
     return this.#revisionOf(entry, (file) => existsSync(join(this.#store.root, file))
-      ? createHash("sha256").update(this.#read(file)).digest("hex") : "");
+      ? createHash("sha256").update(readFileSync(join(this.#store.root, file))).digest("hex") : "");
   }
 
   // a revision is the files of an object and the digest of each: the same
@@ -433,12 +428,12 @@ export class StoreVersions {
     let inputs = this.#activeInputs?.generation === generation ? this.#activeInputs.inputs : undefined;
     if (inputs === undefined) {
       try {
-        inputs = JSON.parse(this.#read(join(generation, "source-inputs.json"), "utf8"));
+        inputs = JSON.parse(readFileSync(join(generation, "source-inputs.json"), "utf8"));
       } catch {
         // Older generations recorded the aggregate input hash only. Matching
         // that hash proves every input; a partial match proves nothing.
         try {
-          const manifest = JSON.parse(this.#read(join(generation, "manifest.json"), "utf8"));
+          const manifest = JSON.parse(readFileSync(join(generation, "manifest.json"), "utf8"));
           const digests = new Map();
           // New manifests keep identity separate from the diagnostic description;
           // the older shape used transpiler itself to name the generation.
@@ -457,10 +452,10 @@ export class StoreVersions {
     const shared = join(this.#store.root, "build", "source-by-digest", digest);
     if (existsSync(join(generation, "source-shared")) && existsSync(shared)) return shared;
     const target = join(generation, "source", sourceSnapshotPath(file));
-    if (existsSync(target) && createHash("sha256").update(this.#read(target)).digest("hex") === digest) return target;
+    if (existsSync(target) && createHash("sha256").update(readFileSync(target)).digest("hex") === digest) return target;
     const working = join(this.#store.root, file);
     if (!existsSync(working)) return undefined;
-    const bytes = this.#read(working);
+    const bytes = readFileSync(working);
     if (createHash("sha256").update(bytes).digest("hex") !== digest) return undefined;
     mkdirSync(dirname(target), {recursive: true});
     writeSourceSnapshot(target, bytes);
@@ -477,7 +472,7 @@ export class StoreVersions {
     if (active && activeFile === undefined && !classInclude) {
       throw new NotFound(part.type, `${part.name} active version (${part.include ?? "main"})`);
     }
-    const source = active ? (activeFile === undefined ? "" : this.#read(activeFile, "utf8")) : part.source;
+    const source = active ? (activeFile === undefined ? "" : readFileSync(activeFile, "utf8")) : part.source;
     // Retained active bytes, including zero bytes, survive working-file removal.
     const presence = active ? {empty: activeFile === undefined} : {};
     return {...part, ...presence, source, etag: entityTag(active ? "active\0" + source : source)};

@@ -169,7 +169,6 @@ export function rootsOf(root, env = process.env) {
 export class ObjectStore {
   constructor(options = {}) {
     this.root = options.root ?? process.cwd();
-    this.inputAudit = options.inputAudit;
     this.registryIssueOptions = options.registryIssueOptions;
     // test seams: beforeWrite(file) runs between a create's check and its write
     this.hooks = options.hooks ?? {};

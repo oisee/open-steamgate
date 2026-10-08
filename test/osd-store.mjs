@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import {syncBuiltinESMExports} from "node:module";
 import {expect} from "chai";
 import {activeFixture} from "./helpers/source-snapshot.mjs";
 import {existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
@@ -472,11 +474,19 @@ METHOD run. DATA probe TYPE REF TO zcl_osd_probe. CREATE OBJECT probe. probe->ru
 
   it("discovers an abapGit root package in lexical order", () => {
     const tree = mkdtempSync(join(tmpdir(), "osd-root-package-"));
+    const originalRead = fs.readdirSync;
     try {
       writeFileSync(join(tree, "z_created_first.devc.xml"), "");
       writeFileSync(join(tree, "a_created_second.devc.xml"), "");
+      // Force the platform-independent reverse order that the old code used.
+      fs.readdirSync = (folder, ...args) => folder === tree
+        ? ["z_created_first.devc.xml", "a_created_second.devc.xml"]
+        : originalRead(folder, ...args);
+      syncBuiltinESMExports();
       expect(rootPackage(tree, "$FALLBACK")).to.equal("A_CREATED_SECOND");
     } finally {
+      fs.readdirSync = originalRead;
+      syncBuiltinESMExports();
       rmSync(tree, {recursive: true, force: true});
     }
   });
