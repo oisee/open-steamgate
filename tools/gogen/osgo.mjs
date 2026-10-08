@@ -12,16 +12,21 @@
 // zz_boot.go (what boots, which SICF nodes are mounted, the launchpad tiles
 // and the pack folders, as read from the checkout now).
 import {execFileSync} from "node:child_process";
-import {existsSync, mkdirSync, writeFileSync} from "node:fs";
+import {existsSync, mkdirSync, rmSync, writeFileSync} from "node:fs";
 import {join, relative} from "node:path";
 import {columnRegistry, compileProgram} from "./frontend.mjs";
 import {emitGo} from "./emit-go.mjs";
 import {home} from "./home.mjs";
+import {adtSourceHash} from "../osd-adt-gogen-gate.mjs";
 
 const here = import.meta.dirname;
 const echo = process.argv.includes("--echo");
 const dir = join(here, "go", "cmd", "osgo");
 const out = join(here, ".out", echo ? "osgo-echo" : "osgo");
+const reportPath = `${out}-compile-report.json`;
+// A failed build must not leave a previous successful report for the gate.
+rmSync(reportPath, {force: true});
+const sourceHash = adtSourceHash();
 const sourceEpoch = process.env.SOURCE_DATE_EPOCH ?? execFileSync("git", ["show", "-s", "--format=%ct", "HEAD"], {cwd: home, encoding: "utf8"}).trim();
 if (!/^\d+$/.test(sourceEpoch)) throw new Error(`invalid SOURCE_DATE_EPOCH: ${sourceEpoch}`);
 const builtAt = new Date(Number(sourceEpoch) * 1000).toISOString().slice(0, 16).replace("T", " ");
@@ -248,8 +253,6 @@ ${webapps.map((w) => `\t${JSON.stringify(w.path)}: ${JSON.stringify(relative(hom
 }
 `);
 mkdirSync(join(here, ".out"), {recursive: true});
-writeFileSync(join(here, ".out", `${echo ? "osgo-echo" : "osgo"}-compile-report.json`),
-  JSON.stringify({statementStubs: program.partial, methodsNotCompiled: program.skipped}, null, 2) + "\n");
 try { execFileSync("gofmt", ["-w", dir], {stdio: ["ignore", "pipe", "pipe"]}); } catch (e) { console.log(`gofmt: ${String(e.stderr).split("\n").slice(0, 10).join("\n")}`); process.exit(1); }
 const t1 = performance.now();
 try {
@@ -260,4 +263,8 @@ try {
   process.exit(1);
 }
 console.log(`go build ${Math.round(performance.now() - t1)} ms -> ${out}${existsSync(out) ? "" : " (missing!)"}`);
+if (!existsSync(out)) throw new Error("osgo build produced no binary");
+if (sourceHash !== adtSourceHash()) throw new Error("ADT sources changed during osgo build; rebuild before gating");
+writeFileSync(reportPath, JSON.stringify({classes: program.classes.map(c => c.name), adtSourceHash: sourceHash,
+  statementStubs: program.partial, methodsNotCompiled: program.skipped}, null, 2) + "\n");
 console.log(`${services.length} SICF nodes mounted, ${notServed.length} not served, ${webapps.length} pack folders, ${tiles.tiles.length} tiles, ${channels.length} push channels${channelsLeftOut.length ? ` (left out: ${channelsLeftOut.map((c) => `${c.path} ${c.why}`).join("; ")})` : ""}`);
