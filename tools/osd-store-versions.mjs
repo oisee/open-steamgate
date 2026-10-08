@@ -1,6 +1,6 @@
 import {warmOverlay} from "./osd-warm-overlay.mjs";
 // Active/inactive versions, source snapshots and activation provenance.
-import {existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync} from "node:fs";
+import {existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, writeFileSync} from "node:fs";
 import {createHash} from "node:crypto";
 import {dirname, join, relative, resolve} from "node:path";
 import {hashOf, inputsOf, liveHash, normalPath} from "./osd-build.mjs";
@@ -101,7 +101,8 @@ export class StoreVersions {
   #recoverFromCopies() {
     const folder = join(this.#store.root, this.#store.inactiveDir, "active");
     if (!existsSync(folder)) return;
-    const copies = new Set(walkFiles(folder).map((f) => sourceOriginalPath(relative(folder, f))));
+    const sorted = this.#store.registryInputs === true;
+    const copies = new Set(walkFiles(folder, [], sorted).map((f) => sourceOriginalPath(relative(folder, f))));
     if (copies.size === 0) return;
     this.#keepOrphans = true;
     for (const entry of this.#entries().values()) {
@@ -125,7 +126,7 @@ export class StoreVersions {
     const folder = join(this.#store.root, this.#store.inactiveDir, "active");
     if (!existsSync(folder)) return;
     const owned = new Set([...this.#saved.values(), ...this.#retained.values()].flatMap((r) => r.files.map((f) => resolve(this.#store.root, this.#snapshotOf(f)))));
-    for (const file of walkFiles(folder)) {
+    for (const file of walkFiles(folder, [], this.#store.registryInputs === true)) {
       if (!owned.has(resolve(file))) removeDurable(file);
     }
   }
@@ -319,7 +320,7 @@ export class StoreVersions {
   // (#withSource's borrowing, for several files).
   withOverlay(activating, fn) {
     const registry = this.#store.registry();
-    const replacements = [], restore = [];
+    const replacements = [], restore = [], paths = this.#store.registryInputs === true ? new Map() : undefined;
     for (const key of this.#store.inactive) {
       if (activating.has(key)) continue;
       const [type, ...rest] = key.split(" ");
@@ -330,16 +331,19 @@ export class StoreVersions {
         const name = "/" + file;
         const before = registry.getFileByName(name)?.getRaw();
         const copy = join(this.#store.root, this.#snapshotOf(file));
-        const source = existsSync(copy) ? readFileSync(copy, "utf8") : undefined;
+        const hasCopy = existsSync(copy);
+        const path = paths !== undefined && hasCopy ? realpathSync(copy) : undefined;
+        const source = hasCopy ? readFileSync(path ?? copy, "utf8") : undefined;
+        if (path !== undefined) paths.set(name, path);
         if (before === source) continue;
         replacements.push([name, source]);
         restore.push([name, before]);
       }
     }
-    if (replacements.length === 0) return fn(registry);
+    if (replacements.length === 0) return fn(registry, paths);
     try {
       this.#store.updateRegistryFiles(registry, replacements);
-      return fn(registry);
+      return fn(registry, paths);
     } finally {
       this.#store.updateRegistryFiles(registry, restore);
     }
@@ -516,10 +520,12 @@ export class StoreVersions {
 }
 
 // every file under a folder, for the copies of active versions
-function walkFiles(dir, out = []) {
-  for (const e of readdirSync(dir, {withFileTypes: true})) {
+function walkFiles(dir, out = [], sorted = false) {
+  const entries = readdirSync(dir, {withFileTypes: true});
+  if (sorted) entries.sort((left, right) => left.name.localeCompare(right.name));
+  for (const e of entries) {
     const p = join(dir, e.name);
-    if (e.isDirectory()) walkFiles(p, out);
+    if (e.isDirectory()) walkFiles(p, out, sorted);
     else if (e.isFile()) out.push(p);
   }
   return out;

@@ -6,9 +6,9 @@ import {warmVerdict} from "./osd-hot.mjs";
 // Validation is synchronous, even when publication is deferred to after the
 // calling step. The store checks every include in the activation's source view;
 // compiler availability must never turn that verdict into a promise.
-export function prepareActivation(store, named, {transpile = true, forced = false} = {}) {
+export function prepareActivation(store, named, {transpile = true, forced = false, beforeCheck} = {}) {
   return named.map(o => ({...o, ...(transpile && forced ? store.warmActivation(o.type, o.name)
-    : store.activate(o.type, o.name, {activating: named}))}));
+    : store.activate(o.type, o.name, {activating: named, beforeCheck}))}));
 }
 
 // One publication/promotion contract for both entry points. publish() owns
