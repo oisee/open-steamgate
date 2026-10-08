@@ -211,6 +211,19 @@ func DialogStep(work func()) {
 	end(true)
 }
 
+// DialogStepIn runs work for a known Session while marking that its host owns
+// WorkProcess. The host has already taken the mutex; this only records that
+// ownership so an in-step yield can give the work process up selectively.
+func DialogStepIn(s *Session, work func()) {
+	if s == nil {
+		DialogStep(work)
+		return
+	}
+	s.HoldsWorkProcess = true
+	defer func() { s.HoldsWorkProcess = false }()
+	DialogStep(work)
+}
+
 // BeginUnitLUW opens the LUW a unit run works in, which is how the Node
 // unit run behaves: its SQLite client opens a transaction and only COMMIT
 // WORK or ROLLBACK WORK ends it (the next begins with the next write), with

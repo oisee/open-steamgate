@@ -3,6 +3,12 @@
 // hooks when a host installs one.
 package hostclass
 
+import (
+	"time"
+
+	"osg/gogen/enq"
+)
+
 // Raise asks generated code to raise an ABAP exception via the required
 // static Factory on Class. Text is only diagnostic text for Error(); it is
 // never used to construct the exception.
@@ -33,4 +39,12 @@ var ZCL_OSD_ENQ_KERNEL = struct {
 	ContextAlive func(step any, id string) (bool, error)
 	Owns         func(step any, id string) (bool, error)
 	SessionID    func(step any, id string) (string, error)
+}{}
+
+// KERNEL_LOCK is the host replacement for the one kernel lock object. A nil
+// field leaves the generated caller's refusal unchanged.
+var KERNEL_LOCK = struct {
+	Enqueue    func(step any, r enq.Request, sleep func(time.Duration)) (enq.Result, error)
+	Dequeue    func(step any, r enq.Request) error
+	DequeueAll func(step any) error
 }{}

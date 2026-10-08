@@ -209,7 +209,7 @@ func step(x *abap.ICFExchange, base string) (dump any, frames []string) {
 			}
 		}()
 		s := &abap.Session{Statics: abap.ProcessStatics}
-		abap.DialogStep(func() { runShim(s, x, base) })
+		abap.DialogStepIn(s, func() { runShim(s, x, base) })
 	}()
 	return dump, frames
 }
