@@ -7,6 +7,7 @@ import {installPin, pinPath} from "../tools/osd-transpiler-pin.mjs";
 import {doctorWarmPin, probe, WARM_PIN_WARNING} from "../tools/osd-warm-capabilities.mjs";
 import {hashOf, inputsOf} from "../tools/osd-build.mjs";
 import {warmUp} from "../tools/osd-store-warm.mjs";
+import {describeTranspiler, packageInUse} from "../tools/osd-transpiler.mjs";
 
 function fixture() {
   // Checkouts used for shard validation may themselves be temporary. The
@@ -69,6 +70,30 @@ describe("local transpiler pin", () => {
       writeFileSync(join(f.root, "libs.lock.json"), JSON.stringify({transpiler: {repo: "test/transpiler", ref: "0".repeat(40)}, libraries: []}));
       assert.throws(() => installPin(f.root, {...process.env, TRANSPILER: f.clone}), /build failed/);
       assert(!existsSync(join(f.root, "node_modules")));
+    } finally { rmSync(f.root, {recursive: true, force: true}); }
+  });
+
+  it("describes a linked build at the locked ref as pinned", () => {
+    const f = fixture();
+    try {
+      mkdirSync(join(f.root, "node_modules/@abaplint"), {recursive: true});
+      symlinkSync(join(f.clone, "packages/transpiler"), join(f.root, "node_modules/@abaplint/transpiler"));
+      assert.equal(describeTranspiler(f.root),
+        `transpiler: the pinned build of test/transpiler ${f.ref.slice(0, 8)} (libs.lock.json), at ${join(f.clone, "packages/transpiler")}, calling itself 0.0.0`);
+    } finally { rmSync(f.root, {recursive: true, force: true}); }
+  });
+
+  it("ignores file-mode-only changes in a linked build", () => {
+    const f = fixture();
+    const executable = join(f.clone, "packages/cli/abap_transpile");
+    try {
+      mkdirSync(join(f.root, "node_modules/@abaplint"), {recursive: true});
+      symlinkSync(join(f.clone, "packages/transpiler"), join(f.root, "node_modules/@abaplint/transpiler"));
+      chmodSync(executable, 0o644);
+      assert.equal(packageInUse(f.root, "transpiler").dirty, false);
+      writeFileSync(executable, "#!/bin/sh\nexit 1\n");
+      chmodSync(executable, 0o755);
+      assert.equal(packageInUse(f.root, "transpiler").dirty, true);
     } finally { rmSync(f.root, {recursive: true, force: true}); }
   });
 

@@ -1920,7 +1920,7 @@ ${t}	}`));
         ...(bind ? [`${t}\t\t\t${bind}`] : []), `${t}\t\t\ts.Sy.Subrc = 0`, `${t}\t\t\ts.Sy.Tabix = ${st.hashed ? "0" : `int32(i${n} + 1)`}`,
         `${t}\t\t\tbreak`, `${t}\t\t}`, `${t}\t}`, `${t}}`];
     }
-    case "replace_chars": HELPER_IMPORTS.add("charsection"); return emitByteStatement(st, ctx, t, {expr, place, charRuntime: "abap.CharacterOps{}"});
+    case "replace_chars": HELPER_IMPORTS.add("charsection"); return emitByteStatement(st, ctx, t, {expr, place});
     case "find_bytes":
     case "replace_bytes":
     case "find_bytes_all": return emitByteStatement(st, ctx, t, {expr, place});

@@ -225,6 +225,7 @@ export class ObjectStore {
     return this.#versions.overlay(activating);
   }
 
+  activeSourceFile(file, entry) { return this.#versions.activeSourceFile(file, entry); }
   withActiveSources(entry, fn) {
     return this.#versions.withActiveSources(entry, fn);
   }
@@ -1408,7 +1409,6 @@ export class ObjectStore {
 
   // The Node store owns compiler IPC; browser check runners remain portable.
   checkWarm(object) { return warmCheck(this, object); }
-
 
   // which file a source belongs in: the object's own, the class include the
   // caller named, or the one a write would create for an object that is not

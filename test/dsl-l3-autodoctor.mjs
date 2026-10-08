@@ -207,7 +207,7 @@ describe('DSL L3 5e: autonomous doctor', function () {
     expect(retry.job_count).not.to.equal(pile.job_count);
     // Even a late tail called with the complete old row cannot overwrite the retry.
     const row = new abap.types.Structure(Object.fromEntries(Object.entries(retry).map(([key,value])=>
-      [key, typeof value==='number' ? new abap.types.Integer().set(value) : new abap.types.String().set(String(value ?? ''))])));
+      [key, typeof value==='number' ? (Math.abs(value) <= 2147483647 ? new abap.types.Integer().set(value) : new abap.types.Packed({length: 16, decimals: 0}).set(value)) : new abap.types.String().set(String(value ?? ''))])));
     row.get().attempt.set(pile.attempt);row.get().job_name.set(pile.job_name);row.get().job_count.set(pile.job_count);
     row.get().status.set('DONE');
     await dialogStep(()=>cls().save_pile({is_pile:row,iv_owned:str('X')}));
@@ -382,7 +382,7 @@ describe('DSL L3 5e: autonomous doctor', function () {
       await run();await daemonHost(abap).idle();
       const pile=read('SELECT * FROM zosd_l3_pile WHERE stage_no=1')[0];
       const row=new abap.types.Structure(Object.fromEntries(Object.entries(pile).map(([key,value])=>
-        [key,typeof value==='number'?new abap.types.Integer().set(value):str(String(value??''))])));
+        [key,typeof value==='number'?(Math.abs(value)<=2147483647?new abap.types.Integer().set(value):new abap.types.Packed({length:16,decimals:0}).set(value)):str(String(value??''))])));
       row.get().status.set('DONE');row.get().attempt.set(pile.attempt-1);
       await dialogStep(()=>cls().save_pile({is_pile:row,iv_owned:str('X')}));
       expect(read('SELECT status FROM zosd_l3_pile WHERE stage_no=1')[0].status.trim()).to.equal('DONE');

@@ -131,6 +131,29 @@ export function walkStoreFiles(store, dir, out) {
 
 // Keep publication validation synchronous without rereading the system on
 // WRITE -> ACTIVATE. Initial parsing is cold; subsequent known edits are not.
+export function configuredRegistry(store, configPath = "abaplint.jsonc") {
+  const collectInputs = store.registryInputs === true;
+  const configFile = collectInputs ? realpathSync(join(store.root, configPath)) : join(store.root, configPath);
+  const configRaw = readFileSync(configFile);
+  const text = configRaw.toString("utf8")
+    .split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
+  const config = JSON.parse(text);
+  // The publication validator owns these rules. Keep identifier and
+  // structural checks identical for saved includes and compiled includes.
+  const validation = structuredClone(publicationValidation);
+  validation.rules.check_syntax = true;
+  validation.rules.forbidden_identifier.check = ["^unique\\d+$"];
+  const registry = new abaplint.Registry(new abaplint.Config(JSON.stringify({
+    global: {files: "/**/*.*"},
+    syntax: config.syntax,
+    // DDLS/SRVD are generator inputs excluded from the transpiler; their
+    // dedicated checks below remain authoritative for those source types.
+    rules: {...validation.rules, allowed_object_types: {...validation.rules.allowed_object_types,
+      allowed: [...validation.rules.allowed_object_types.allowed, "DDLS", "SRVD", "SAPC", "SAMC"]}},
+  })));
+  return {registry, configFile, configSha: createHash("sha256").update(configRaw).digest("hex")};
+}
+
 export function buildRegistry(store, configPath = "abaplint.jsonc") {
   const shared = PARSED.get(store.root);
   if (shared !== undefined) {
@@ -147,27 +170,10 @@ export function buildRegistry(store, configPath = "abaplint.jsonc") {
     store.parsed = shared;
     return shared;
   }
-  const collectInputs = store.registryInputs === true;
-  const configFile = collectInputs ? realpathSync(join(store.root, configPath)) : join(store.root, configPath);
-  const configRaw = collectInputs ? readFileSync(configFile) : undefined;
-  const text = (configRaw ?? readFileSync(configFile, "utf8")).toString("utf8")
-    .split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
-  const config = JSON.parse(text);
-  // The publication validator owns these rules. Keep identifier and
-  // structural checks identical for saved includes and compiled includes.
-  const validation = structuredClone(publicationValidation);
-  validation.rules.check_syntax = true;
-  validation.rules.forbidden_identifier.check = ["^unique\\d+$"];
-  const registry = new abaplint.Registry(new abaplint.Config(JSON.stringify({
-    global: {files: "/**/*.*"},
-    syntax: config.syntax,
-    // DDLS/SRVD are generator inputs excluded from the transpiler; their
-    // dedicated checks below remain authoritative for those source types.
-    rules: {...validation.rules, allowed_object_types: {...validation.rules.allowed_object_types,
-      allowed: [...validation.rules.allowed_object_types.allowed, "DDLS", "SRVD", "SAPC", "SAMC"]}},
-  })));
-  const paths = collectInputs ? new Map() : undefined;
-  if (collectInputs) INPUTS.set(registry, {configFile, configSha: createHash("sha256").update(configRaw).digest("hex"), paths});
+  const configured = configuredRegistry(store, configPath);
+  const registry = configured.registry;
+  const paths = store.registryInputs === true ? new Map() : undefined;
+  if (paths !== undefined) INPUTS.set(registry, {configFile: configured.configFile, configSha: configured.configSha, paths});
   // everything, not only what the index calls an object: a class needs its
   // local includes, and a type pool is not an ADT object but the check
   // still needs it
@@ -177,7 +183,7 @@ export function buildRegistry(store, configPath = "abaplint.jsonc") {
       if (hidden.has(file) || /\.(abap|xml|asddls)$/.test(file) === false) {
         continue;
       }
-      const path = collectInputs ? realpathSync(join(store.root, file)) : join(store.root, file);
+      const path = paths !== undefined ? realpathSync(join(store.root, file)) : join(store.root, file);
       if (paths !== undefined) paths.set("/" + file, path);
       registry.addFile(new abaplint.MemoryFile("/" + file, readFileSync(path, "utf8")));
     }

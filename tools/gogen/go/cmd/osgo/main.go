@@ -18,6 +18,7 @@
 package main
 
 import (
+	"context"
 	_ "embed"
 	"encoding/json"
 	"flag"
@@ -40,7 +41,10 @@ import (
 
 	"osg/gogen/abap"
 	"osg/gogen/apc"
+	"osg/gogen/compiler"
+	"osg/gogen/objstore"
 	"osg/gogen/osdbind"
+	"osg/gogen/storecompiler"
 	"osg/gogen/sysid"
 )
 
@@ -415,6 +419,7 @@ func main() {
 	addr := flag.String("addr", "", "address to listen on (default OSD_BIND, else loopback: 127.0.0.1 and ::1)")
 	dbFile := flag.String("db", "", "an SQLite file (WAL) instead of the in-memory database; seeded once, when it has no tables, and refused when another build seeded it")
 	homeDir := flag.String("home", "", "data directory; defaults -db to <home>/osgo.sqlite and makes a fresh directory a full database reset")
+	compilerStatus := flag.Bool("compiler-status", false, "print compiler sidecar status as JSON")
 	version := flag.Bool("version", false, "print release tag and commit")
 	adtFlag := flag.Bool("adt", false, "mount /sap/bc/adt through ZCL_OSD_ADT_HANDLER (also OSD_OSGO_ADT=1; default off)")
 	root := flag.String("root", osgRoot, "the checkout whose webapp/ is served")
@@ -426,6 +431,16 @@ func main() {
 	tlsCert := flag.String("tls-cert", "", "the certificate (PEM) for -tls-port")
 	tlsKey := flag.String("tls-key", "", "its private key (PEM)")
 	flag.Parse()
+	if *compilerStatus {
+		raw, err := compiler.StatusJSON(context.Background(), compiler.Options{Root: *root, Version: releaseTag})
+		if err == nil {
+			_, err = os.Stdout.Write(raw)
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+		}
+		return
+	}
 	if *version {
 		fmt.Printf("osgo %s (%s)\n", releaseTag, releaseCommit)
 		return
@@ -491,6 +506,10 @@ func main() {
 	if err := abap.SetStore(*root, storeConfig, ""); err != nil {
 		log.Fatalf("store: %v", err)
 	}
+
+	compilerClient := compiler.New(compiler.Options{Root: *root, Version: releaseTag})
+	defer compilerClient.Close()
+	objstore.SetCompiler(storecompiler.Adapter{Client: compilerClient}, liveGeneration(*root))
 
 	if *dbFile == "" {
 		if err := abap.OpenDB(dbScript); err != nil {

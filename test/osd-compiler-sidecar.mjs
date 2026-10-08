@@ -6,7 +6,11 @@ import {tmpdir} from "node:os";
 import {join, resolve} from "node:path";
 import {createInterface} from "node:readline";
 import {once} from "node:events";
-import {checkSnapshot} from "../tools/osd-compiler-sidecar.mjs";
+import {checkSnapshot, outlineSnapshot} from "../tools/osd-compiler-sidecar.mjs";
+import {ObjectStore} from "../tools/osd-store.mjs";
+import {StoreDestination} from "../tools/osd-store-destination.mjs";
+import {files as outlineFiles, name as outlineName} from "./adt-conformance/fixtures/source.mjs";
+import {expected as outlineFacts} from "./adt-conformance/fixtures/outline.mjs";
 import {compilerCommand} from "../tools/osd-host.mjs";
 
 describe("osd compiler --stdio", function () {
@@ -67,15 +71,180 @@ describe("osd compiler --stdio", function () {
     if (outside) rmSync(outside, {recursive: true, force: true});
   });
 
-  it("advertises contract, version, pin, check and limits", async () => {
+  it("advertises contract, version, pin, check, outline and limits", async () => {
     const hello = await send({id: 0, op: "hello", contract: 1, osgo: "fixture", root});
     let version = "source";
     try { version = JSON.parse(readFileSync("osd-version.json", "utf8")).version; } catch (error) { if (error.code !== "ENOENT") throw error; }
     expect(hello).to.include({id: 0, contract: 1, osd: version,
       transpiler: JSON.parse(readFileSync("libs.lock.json", "utf8")).transpiler.ref});
-    expect(hello.capabilities).to.deep.equal(["check"]);
+    expect(hello.capabilities).to.deep.equal(["check", "outline"]);
     expect(hello.limits.maxConcurrentRequests).to.equal(1);
     expect(hello.limits.maxSnapshotBytes).to.be.greaterThan(0);
+  });
+  describe("outline", () => {
+    let fixture, snap, object, store, destination;
+    const sha = text => createHash("sha256").update(text).digest("hex");
+    const rows = node => ({...node, extra: Object.entries(node.extra ?? {}).map(([name, value]) => ({name, value})),
+      links: node.links ?? [], children: (node.children ?? []).map(rows)});
+    const request = () => send({id: ++nextId, op: "outline", snapshot: snap, object});
+    const nodeOutline = async () => (await destination.execute({IV_COMMAND: "PARSE",
+      IV_JSON: JSON.stringify({kind: "OUTLINE", ...object})})).EV_JSON;
+    const nodeOutlineFor = async target => (await destination.execute({IV_COMMAND: "PARSE",
+      IV_JSON: JSON.stringify({kind: "OUTLINE", type: target.type, name: target.name, version: target.version})})).EV_JSON;
+    const snapshotFor = (name, text) => {
+      const path = `src/${name.toLowerCase()}.clas.abap`;
+      writeFileSync(join(fixture, path), text);
+      return {root: fixture, generation: "outline-fixture", objects: [{type: "CLAS", name, version: "inactive",
+        files: [{path, sha256: sha(text)}]}]};
+    };
+    beforeEach(() => {
+      fixture = mkdtempSync(join(tmpdir(), "osd-sidecar-outline-"));
+      mkdirSync(join(fixture, "src"));
+      writeFileSync(join(fixture, "abap_transpile.json"), JSON.stringify({input_folder: ["src"], libs: []}));
+      writeFileSync(join(fixture, "abaplint.jsonc"), JSON.stringify({syntax: {version: "v702"}}));
+      object = {type: "CLAS", name: outlineName, version: "inactive"};
+      snap = {root: fixture, generation: "outline-fixture", objects: [{...object,
+        files: Object.entries(outlineFiles).map(([name, text]) => {
+          const path = "src/" + name;
+          writeFileSync(join(fixture, path), text);
+          return {path, sha256: sha(text)};
+        })}]};
+      store = new ObjectStore({root: fixture});
+      destination = new StoreDestination({store});
+    });
+    afterEach(() => rmSync(fixture, {recursive: true, force: true}));
+    for (const part of ["main", "testclasses", "implementations"]) {
+      it(`returns byte-equal Node PARSE OUTLINE with measured ${part} coordinates`, async () => {
+        const response = await request();
+        expect(response.error, JSON.stringify(response)).to.equal(undefined);
+        expect(JSON.stringify(response.outline)).to.equal(await nodeOutline());
+        expect(response.outline).to.deep.equal({found: true, ...rows(outlineFacts)});
+        const node = part === "main" ? response.outline : response.outline.children.find(n =>
+          n.name === (part === "testclasses" ? "LTCL_PROBE" : "LCL_HELPER"));
+        expect(node.links.some(l => l.href.includes(part === "main" ? "source/main#" : `includes/${part}#`))).to.equal(true);
+        const pairs = snap.objects[0].files.map(f => ["/" + f.path, f.sha256]).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
+        expect(response.registryHash).to.equal(sha(JSON.stringify(pairs)));
+        expect(response.inputCount).to.equal(3);
+        expect(response.configSha).to.equal(sha(readFileSync(join(fixture, "abaplint.jsonc"))));
+        expect(response.virtualFiles).to.deep.equal([]);
+      });
+    }
+    it("refuses a logical path that names another object's file", async () => {
+      const own = "ZCL_OUTLINE_OWN";
+      const text = `CLASS ${own.toLowerCase()} DEFINITION PUBLIC.\nENDCLASS.\nCLASS ${own.toLowerCase()} IMPLEMENTATION.\nENDCLASS.\n`;
+      const snap = snapshotFor(own, text);
+      const target = {type: "CLAS", name: own, version: "inactive"};
+      for (const logicalPath of ["src/zcl_outline_other.clas.abap", "src/zcl_outline_own.prog.abap", "src/zcl_outline_own"]) {
+        const aliased = {...snap, objects: [{...snap.objects[0], files: [{...snap.objects[0].files[0], logicalPath}]}]};
+        let error;
+        try { await outlineSnapshot(aliased, target); } catch (e) { error = e; }
+        expect(error?.protocolCode, logicalPath).to.equal("BAD_REQUEST");
+      }
+      const own2 = {...snap, objects: [{...snap.objects[0], files: [{...snap.objects[0].files[0], logicalPath: "src/sub/zcl_outline_own.clas.abap"}]}]};
+      expect((await outlineSnapshot(own2, target)).outline.found).to.equal(true);
+      // the store's own type-to-file rules: an include lives in .prog, a
+      // structure in .tabl, a package in package.devc.xml or <name>.devc.xml
+      const {namesObject} = await import("../tools/osd-compiler-sidecar.mjs");
+      for (const [path, object, ok] of [
+        ["src/zosd_inc.prog.abap", {type: "INCL", name: "ZOSD_INC"}, true],
+        ["src/zosd_s.tabl.xml", {type: "STRU", name: "ZOSD_S"}, true],
+        ["src/package.devc.xml", {type: "DEVC", name: "$ZPKG"}, true],
+        ["src/$zpkg.devc.xml", {type: "DEVC", name: "$ZPKG"}, true],
+        ["src/#ns#zcl_x.clas.testclasses.abap", {type: "CLAS", name: "/NS/ZCL_X"}, true],
+        ["src/zosd_inc.prog.abap", {type: "INCL", name: "ZOSD_OTHER"}, false],
+        ["src/zosd_s.tabl.xml", {type: "STRU", name: "ZOSD_T"}, false],
+        ["src/zosd_inc.clas.abap", {type: "INCL", name: "ZOSD_INC"}, false],
+      ]) expect(namesObject(path, object), path).to.equal(ok);
+    });
+    it("uses the configured syntax version for a DEFAULT IGNORE declaration", async () => {
+      const name = "ZCL_OUTLINE_DEFAULT";
+      const text = `CLASS ${name.toLowerCase()} DEFINITION PUBLIC.\n  PUBLIC SECTION.\n    METHODS run DEFAULT IGNORE.\nENDCLASS.\nCLASS ${name.toLowerCase()} IMPLEMENTATION.\n  METHOD run.\n  ENDMETHOD.\nENDCLASS.\n`;
+      const target = {type: "CLAS", name, version: "inactive"};
+      store.write("CLAS", name, text);
+      const response = await outlineSnapshot(snapshotFor(name, text), target);
+      expect(JSON.stringify(response.outline)).to.equal(await nodeOutlineFor(target));
+      expect(response.outline.links.some(link => link.href.includes("source/main#"))).to.equal(true);
+    });
+    it("matches Node outline when inherited and implemented objects are absent", async () => {
+      const targetName = "ZCL_OUTLINE_DEPENDENT";
+      store.write("CLAS", "ZCL_OUTLINE_BASE", "CLASS zcl_outline_base DEFINITION PUBLIC.\n  PUBLIC SECTION.\n    METHODS base.\nENDCLASS.\nCLASS zcl_outline_base IMPLEMENTATION.\n  METHOD base.\n  ENDMETHOD.\nENDCLASS.\n");
+      store.write("INTF", "ZIF_OUTLINE_EXTERNAL", "INTERFACE zif_outline_external PUBLIC.\n  METHODS external.\nENDINTERFACE.\n");
+      const text = `CLASS ${targetName.toLowerCase()} DEFINITION PUBLIC INHERITING FROM zcl_outline_base.\n  PUBLIC SECTION.\n    INTERFACES zif_outline_external.\n    METHODS run.\nENDCLASS.\nCLASS ${targetName.toLowerCase()} IMPLEMENTATION.\n  METHOD run.\n  ENDMETHOD.\nENDCLASS.\n`;
+      store.write("CLAS", targetName, text);
+      const target = {type: "CLAS", name: targetName, version: "inactive"};
+      const nodeDestination = new StoreDestination({store: new ObjectStore({root: fixture})});
+      const nodeJson = await nodeDestination.execute({IV_COMMAND: "PARSE",
+        IV_JSON: JSON.stringify({kind: "OUTLINE", ...target})});
+      const response = await outlineSnapshot(snapshotFor(targetName, text), target);
+      expect(JSON.stringify(response.outline)).to.equal(nodeJson.EV_JSON);
+    });
+    it("uses an inactive edit's shifted coordinates rather than active copies", async () => {
+      const baseline = await request();
+      store.write("CLAS", outlineName, "\n\n" + outlineFiles[`${outlineName.toLowerCase()}.clas.abap`]);
+      const file = snap.objects[0].files[0];
+      file.sha256 = sha(readFileSync(join(fixture, file.path)));
+      const response = await request();
+      expect(JSON.stringify(response.outline)).to.equal(await nodeOutline());
+      expect(response.outline.links[0].href).to.include("start=4,6;end=4,28");
+      expect(response.outline.links[0].href).not.to.equal(baseline.outline.links[0].href);
+      expect(response.registryHash).not.to.equal(baseline.registryHash);
+    });
+    it("uses the active snapshot's named text despite stale active copies", async () => {
+      store.write("CLAS", outlineName, "\n\n" + outlineFiles[`${outlineName.toLowerCase()}.clas.abap`]);
+      snap.objects[0].files[0].sha256 = sha(readFileSync(join(fixture, snap.objects[0].files[0].path)));
+      mkdirSync(join(fixture, "build/inactive/active/src"), {recursive: true});
+      for (const [name, text] of Object.entries(outlineFiles)) writeFileSync(join(fixture, "build/inactive/active/src", name), text);
+      object.version = snap.objects[0].version = "active";
+      const response = await request();
+      expect(response.error).to.equal(undefined);
+      expect(response.outline.links[0].href).to.include("start=4,6;end=4,28");
+      expect(JSON.parse(await nodeOutline()).links[0].href).to.include("start=2,6;end=2,28");
+    });
+    it("refuses an outline snapshot hash lie", async () => {
+      snap.objects[0].files[1].sha256 = "0".repeat(64);
+      expect((await request()).error.code).to.equal("SNAPSHOT_MISMATCH");
+    });
+    it("returns found:false for an unknown outline object", async () => {
+      object.name = snap.objects[0].name = "ZCL_OUTLINE_ABSENT";
+      const response = await request();
+      expect(response.error).to.equal(undefined);
+      expect(response.outline).to.deep.equal({found: false});
+      expect(JSON.stringify(response.outline)).to.equal(await nodeOutline());
+    });
+    it("re-verifies outline inputs before answering", async () => {
+      let error;
+      try {
+        await outlineSnapshot(snap, object, {beforeAnswer() {
+          writeFileSync(join(fixture, snap.objects[0].files[2].path), "changed");
+        }});
+      } catch (caught) {error = caught;}
+      expect(error).to.have.property("protocolCode", "SNAPSHOT_MISMATCH");
+    });
+    it("re-verifies outline configuration before answering", async () => {
+      const configPath = join(fixture, "abaplint.jsonc");
+      const before = readFileSync(configPath);
+      let error;
+      try {
+        error = await outlineSnapshot(snap, object, {beforeAnswer() {
+          writeFileSync(configPath, JSON.stringify({syntax: {version: "v750"}}));
+        }});
+      } catch (caught) {error = caught;}
+      finally {writeFileSync(configPath, before);}
+      expect(error).to.include({protocolCode: "SNAPSHOT_MISMATCH", message: "inputs moved during check"});
+    });
+    it("enforces outline realpath containment", async () => {
+      const file = snap.objects[0].files[0];
+      rmSync(join(fixture, file.path));
+      symlinkSync(join(root, "abaplint.jsonc"), join(fixture, file.path));
+      expect((await request()).error.code).to.equal("BAD_REQUEST");
+    });
+    it("requires one matching outline object and version", async () => {
+      object.version = "active";
+      expect((await request()).error.code).to.equal("BAD_REQUEST");
+      object.version = "inactive";
+      snap.objects.push({...snap.objects[0], files: [{path: "abaplint.jsonc", sha256: sha(readFileSync(join(fixture, "abaplint.jsonc")))}]});
+      expect((await request()).error.code).to.equal("BAD_REQUEST");
+    });
   });
   it("checks a clean class without diagnostics", async () => {
     const response = await send({id: ++nextId, op: "check", snapshot: snapshot("ZCL_SC_CLEAN", source("ZCL_SC_CLEAN"))});
@@ -156,6 +325,64 @@ describe("osd compiler --stdio", function () {
       expect(baseline.registryHash).to.equal(expectedHash);
     });
   }
+  for (const resolver of ["generation", "pre-save", "shared-digest", "overlay-pre-save", "overlay-archive", "legacy-snapshot", "legacy-working"]) {
+    it(`maps the store's ${resolver} physical source to its logical filename`, async () => {
+      const {storeConfig} = await import("../tools/gogen/store.mjs");
+      const fixture = mkdtempSync(join(tmpdir(), "osd-mapping-"));
+      const sha = text => createHash("sha256").update(text).digest("hex");
+      const logical = "src/zcl_mapping.clas.abap", archive = "archive/zcl_mapping.clas.abap";
+      const active = source("ZCL_MAPPING", "original"), working = source("ZCL_MAPPING", "changed");
+      const put = (path, text) => { mkdirSync(join(fixture, path, ".."), {recursive: true}); writeFileSync(join(fixture, path), text); };
+      try {
+        put("abap_transpile.json", JSON.stringify({input_folder:["src"], libs:[]}));
+        put("abaplint.jsonc", JSON.stringify({syntax:{version:"v702"}}));
+        put(logical, working);
+        mkdirSync(join(fixture, "build/by-input/test"), {recursive:true});
+        symlinkSync("by-input/test", join(fixture, "build/live"));
+        const generation = "build/by-input/test/source/";
+        let physical;
+        if (resolver === "generation" || resolver === "overlay-archive" || resolver === "overlay-pre-save") {
+          put(generation + ".complete", "1");
+          physical = resolver === "overlay-pre-save" ? "build/inactive/active/" + logical : generation + (resolver === "overlay-archive" ? archive : logical);
+        } else if (resolver === "pre-save") {
+          physical = "build/inactive/active/" + logical;
+        } else if (resolver === "shared-digest") {
+          put("build/by-input/test/source-shared", "1");
+          physical = "build/source-by-digest/" + sha(active);
+        } else {
+          physical = generation + logical;
+          if (resolver === "legacy-working") put(logical, active);
+        }
+        const inputs = {[logical]:sha(active)};
+        if (resolver === "shared-digest") {
+          for (const include of ["locals_imp", "macros"]) {
+            const path = logical.replace(".clas.abap", `.clas.${include}.abap`);
+            put(path, "");
+            inputs[path] = sha("");
+          }
+          put("build/source-by-digest/"+sha(""), "");
+        }
+        put("build/by-input/test/source-inputs.json", JSON.stringify(inputs));
+        if (resolver !== "legacy-working") put(physical, active);
+        const roots = resolver.startsWith("overlay-") ? [{path:"src", writable:true, overlayOf:"archive"}] : undefined;
+        const store = new ObjectStore({root:fixture, ...(roots ? {roots} : {})});
+        const facts = await storeConfig(fixture, {store, storeModule:resolve("tools/osd-store.mjs")});
+        expect(facts.active[logical]).to.equal(physical);
+        const object = {type:"CLAS", name:"ZCL_MAPPING", version:"active"};
+        const snap = {root:fixture, generation:"test", objects:[{...object,
+          files:Object.entries(facts.active).map(([logicalPath,path]) => ({path,logicalPath,sha256:facts.built[logicalPath]}))}]};
+        const response = await send({id:++nextId, op:"outline", snapshot:snap, object});
+        const expected = await new StoreDestination({store}).execute({IV_COMMAND:"PARSE", IV_JSON:JSON.stringify({kind:"OUTLINE", ...object})});
+        expect(response.error, JSON.stringify(response)).to.equal(undefined);
+        expect(JSON.stringify(response.outline)).to.equal(expected.EV_JSON);
+        expect(response.registryHash).to.equal(sha(JSON.stringify(Object.entries(inputs).map(([path,hash]) => ["/"+path,hash]).sort(([a],[b]) => a < b ? -1 : a > b ? 1 : 0))));
+        const check = await send({id:++nextId, op:"check", snapshot:{...snap, checkMode:"saved"}});
+        expect(check.error, JSON.stringify(check)).to.equal(undefined);
+        expect(check.diagnostics).to.deep.equal([]);
+      } finally { rmSync(fixture, {recursive:true, force:true}); }
+    });
+  }
+
   it("covers library sources in the registry identity and verdict", async () => {
     const fixture = mkdtempSync(join(tmpdir(), "osd-sidecar-library-"));
     try {
@@ -257,7 +484,7 @@ describe("osd compiler --stdio", function () {
     rmSync(join(root, path));
   });
   it("refuses unsupported operations", async () => {
-    const response = await send({id: "outline", op: "outline"});
+    const response = await send({id: "outline", op: "activate"});
     expect(response.id).to.equal("outline");
     expect(response.error.code).to.equal("UNSUPPORTED_OP");
   });

@@ -10,8 +10,7 @@
 // answer to the same question.
 import {createHash} from "node:crypto";
 import {existsSync, readFileSync} from "node:fs";
-import {join} from "node:path";
-import {sourceSnapshotPath} from "../osd-source-snapshot.mjs";
+import {join, relative} from "node:path";
 
 export async function storeConfig(root, options = {}) {
   const {ObjectStore, exclusionsOf, INCLUDES, TYPES} = await import(options.storeModule ?? `${root}/tools/osd-store.mjs`);
@@ -24,8 +23,6 @@ export async function storeConfig(root, options = {}) {
   const excluded = (options.excluded ?? store.excluded ?? exclusionsOf(root)).map((re) => re.source);
   const built = {};
   const active = {};
-  const {liveHash} = await import("../osd-build.mjs");
-  const hash = liveHash(root);
   for (const slim of store.list()) {
     const entry = store.find(slim.type, slim.name);
     if (entry === undefined || TYPES[entry.type]?.source !== true) continue;
@@ -33,7 +30,6 @@ export async function storeConfig(root, options = {}) {
     for (const [include, suffix] of includes) {
       const file = entry.type === "CLAS" ? entry.file.replace(/\.clas\.abap$/, suffix) : entry.file;
       if (existsSync(join(root, file))) built[file] = digest(readFileSync(join(root, file)));
-      if (hash === undefined) continue;
       // Let Node resolve complete snapshots, shared digest storage and overlays.
       // This also handles edits that happened before emission and empty includes.
       let retained;
@@ -41,16 +37,9 @@ export async function storeConfig(root, options = {}) {
       catch (error) { if (error.code === "NOT_FOUND") continue; throw error; }
       if (retained.empty) continue;
       const proof = digest(retained.source);
-      const generation = join("build/by-input", hash);
-      const original = entry.overlayOf ? join(entry.overlayOf, file.slice(entry.root.length + 1)) : file;
-      const candidates = [
-        join(generation, "source", sourceSnapshotPath(file)),
-        join("build/inactive/active", sourceSnapshotPath(file)),
-        join(generation, "source", sourceSnapshotPath(original)),
-        join("build/source-by-digest", proof), file,
-      ];
-      const path = candidates.find(path => existsSync(join(root, path)) && digest(readFileSync(join(root, path))) === proof);
-      if (path === undefined) throw new Error(`no retained active source path for ${file}`);
+      const physical = store.activeSourceFile(file, entry);
+      if (physical === undefined) throw new Error(`no retained active source path for ${file}`);
+      const path = relative(root, physical).replaceAll("\\", "/");
       built[file] = proof;
       active[file] = path;
     }

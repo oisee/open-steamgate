@@ -113,10 +113,9 @@ to ABAP output parameters; they live beside host information in
 `go/abap/sysinfo.go`. Neither needs a separate capability package.
 
 The budget check also attributed the inherited charsection-to-abap dependency
-to this branch because it changes Go code. `go/charsection` now takes a narrow
-`Text` interface for the existing UTF-16 operations. The runtime supplies
-CharacterOps, and the emitter passes it explicitly. Existing supplementary and
-unpaired-surrogate tests still run through those same runtime operations.
+to this branch because it changes Go code. That carve-out landed on main
+separately (#663: `charsection.Text`, supplied as `abap.Text16`), and this
+branch uses it as merged.
 `go list -deps ./timestamp ./charsection` contains no `osg/gogen/abap`.
 
 Budget edits name the ADT cases and each binding's purpose. They touch only

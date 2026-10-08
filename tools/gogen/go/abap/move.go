@@ -212,12 +212,3 @@ func ClearData(d Data) {
 		panic(NotCompiled("CLEAR", "generic data of type kind "+string(d.T.Kind)))
 	}
 }
-
-// CharacterOps binds the runtime's UTF-16 operations to character-section helpers.
-type CharacterOps struct{}
-
-func (CharacterOps) CFit(s string, n int) string        { return CFit(s, n) }
-func (CharacterOps) PadC(s string, n int) string        { return PadC(s, n) }
-func (CharacterOps) Strlen(s string) int32              { return Strlen(s) }
-func (CharacterOps) SubS(s string, off, n int32) string { return SubS(s, off, n) }
-func (CharacterOps) JoinUTF16(parts ...string) string   { return JoinUTF16(parts...) }
