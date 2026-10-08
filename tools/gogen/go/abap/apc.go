@@ -26,7 +26,7 @@ func (e *ErrDump) Error() string { return fmt.Sprintf("dump in %s: %v", e.Step, 
 
 // APCStep is the default dialog step of a channel: the work process held,
 // a database LUW of its own, a dump returned rather than raised.
-func APCStep(name string, work func()) (err error) {
+func APCStep(name string, work func(), sessions ...*Session) (err error) {
 	WorkProcess.Lock()
 	defer WorkProcess.Unlock()
 	defer func() {
@@ -34,6 +34,10 @@ func APCStep(name string, work func()) (err error) {
 			err = &ErrDump{Step: name, Dump: r}
 		}
 	}()
-	DialogStep(work)
+	var s *Session
+	if len(sessions) > 0 {
+		s = sessions[0]
+	}
+	DialogStepIn(s, work)
 	return nil
 }
