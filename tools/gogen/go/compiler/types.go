@@ -5,6 +5,10 @@ import "fmt"
 
 const Contract = 1
 
+// CodeHandshake is the local refusal for a hello reply that is present but
+// malformed or incomplete; it never leaves the Go client.
+const CodeHandshake = "HANDSHAKE"
+
 type Refusal struct {
 	Code string `json:"code"`
 	Text string `json:"text"`

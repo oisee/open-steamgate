@@ -43,11 +43,21 @@ func TestMain(m *testing.M) {
 				}
 				response["contract"], response["osd"], response["transpiler"] = contract, "test-osd", "test-pin"
 				response["capabilities"], response["limits"] = caps, Limits{1234, 1}
+				if field, ok := strings.CutPrefix(mode, "hello-missing:"); ok {
+					delete(response, field)
+				}
+				if mode == "other-pin" {
+					response["transpiler"] = "other-pin"
+				}
 			} else {
 				if marker := os.Getenv("COMPILER_MARKER"); marker != "" {
 					_ = os.WriteFile(marker, []byte("sent"), 0600)
 				}
 				switch {
+				case mode == "answer-exit":
+					response["diagnostics"] = []Diagnostic{}
+					_ = json.NewEncoder(os.Stdout).Encode(response)
+					os.Exit(0)
 				case mode == "timeout":
 					time.Sleep(time.Hour)
 				case mode == "crash":
@@ -79,6 +89,14 @@ func fake(t *testing.T, mode string) *Client {
 	c := New(Options{Root: "test-root", Version: "test-version", CheckTimeout: time.Second, RestartBackoff: time.Millisecond})
 	t.Cleanup(func() { _ = c.Close() })
 	return c
+}
+func mustExecutable(t *testing.T) string {
+	t.Helper()
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return executable
 }
 func code(t *testing.T, err error, want string) {
 	t.Helper()
@@ -186,6 +204,103 @@ func TestTimeoutRestart(t *testing.T) {
 		t.Fatalf("restart: %+v", c.Status())
 	}
 }
+func TestAdmissionRespectsContext(t *testing.T) {
+	c := fake(t, "timeout")
+	marker := filepath.Join(t.TempDir(), "sent")
+	t.Setenv("COMPILER_MARKER", marker)
+	c.options.CheckTimeout = 2 * time.Second
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := c.Check(ctx, Snapshot{})
+		done <- err
+	}()
+	for range 100 {
+		if _, err := os.Stat(marker); err == nil {
+			break
+		}
+		select {
+		case err := <-done:
+			t.Fatalf("slow Hello ended early: %v", err)
+		case <-time.After(2 * time.Millisecond):
+		}
+	}
+	start := time.Now()
+	shortCtx, shortCancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	err := c.Hello(shortCtx)
+	shortCancel()
+	elapsed := time.Since(start)
+	code(t, err, "TIMEOUT")
+	if elapsed > 500*time.Millisecond {
+		t.Fatalf("queued Hello blocked for %s", elapsed)
+	}
+	cancel()
+	if err = <-done; err == nil || !strings.Contains(err.Error(), "TIMEOUT") {
+		t.Fatal(err)
+	}
+}
+func TestFastExitResponse(t *testing.T) {
+	t.Setenv("OSGO_SIDECAR", mustExecutable(t))
+	t.Setenv("COMPILER_FAKE", "answer-exit")
+	for iteration := range 200 {
+		c := New(Options{Root: "test-root", Version: "test-version", CheckTimeout: 2 * time.Second, RestartBackoff: time.Millisecond})
+		if _, err := c.Check(context.Background(), Snapshot{}); err != nil {
+			t.Fatalf("iteration %d failed: %v", iteration+1, err)
+		}
+		if err := c.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+func TestIdleDeathRestart(t *testing.T) {
+	c := fake(t, "answer")
+	if err := c.Hello(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	cmd := c.cmd
+	waited := c.waited
+	killProcess(cmd)
+	select {
+	case <-c.exited:
+	case <-time.After(time.Second):
+		t.Fatal("exit was not observed")
+	}
+	if err := c.Hello(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if c.Status().Restarts != 1 || c.cmd == nil {
+		t.Fatalf("idle restart: restarts=%d cmd=%v", c.Status().Restarts, c.cmd)
+	}
+	select {
+	case err := <-waited:
+		t.Fatalf("old exit state was not consumed: %v", err)
+	default:
+	}
+}
+func TestRestartBackoffDelay(t *testing.T) {
+	c := fake(t, "timeout")
+	c.options.CheckTimeout = 20 * time.Millisecond
+	c.options.RestartBackoff = 37 * time.Millisecond
+	if err := c.Hello(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	_, err := c.Check(context.Background(), Snapshot{})
+	code(t, err, "TIMEOUT")
+	t.Setenv("COMPILER_FAKE", "answer")
+	base := c.retryAt.Add(-37 * time.Millisecond)
+	c.now = func() time.Time { return base }
+	var delays []time.Duration
+	c.after = func(delay time.Duration) <-chan time.Time {
+		delays = append(delays, delay)
+		return time.After(0)
+	}
+	if _, err = c.Check(context.Background(), Snapshot{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(delays) != 1 || delays[0] != 37*time.Millisecond {
+		t.Fatalf("backoff delays: %v", delays)
+	}
+}
 func TestCrashRestart(t *testing.T) {
 	c := fake(t, "crash")
 	_, err := c.Check(context.Background(), Snapshot{})
@@ -234,6 +349,35 @@ func TestSerialized(t *testing.T) {
 		t.Fatal("requests not serialized")
 	}
 }
+func TestTranspilerExpectation(t *testing.T) {
+	t.Run("accept-and-report", func(t *testing.T) {
+		c := fake(t, "answer")
+		if err := c.Hello(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if c.Status().Transpiler != "test-pin" {
+			t.Fatal("accepted pin was not reported")
+		}
+	})
+	t.Run("mismatch", func(t *testing.T) {
+		c := fake(t, "other-pin")
+		c.options.ExpectTranspiler = "test-pin"
+		err := c.Hello(context.Background())
+		code(t, err, "VERSION_MISMATCH")
+		if c.cmd != nil {
+			t.Fatal("mismatched process retained")
+		}
+	})
+}
+func TestHelloRequiredFields(t *testing.T) {
+	for _, field := range []string{"contract", "osd", "transpiler", "capabilities", "limits"} {
+		t.Run(field, func(t *testing.T) {
+			c := fake(t, "hello-missing:"+field)
+			err := c.Hello(context.Background())
+			code(t, err, "HANDSHAKE")
+		})
+	}
+}
 func TestSnapshot(t *testing.T) {
 	root := t.TempDir()
 	outside := filepath.Join(t.TempDir(), "outside")
@@ -247,13 +391,28 @@ func TestSnapshot(t *testing.T) {
 	if snap.Objects[0].Files[0].SHA256 != "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" || snap.Generation != "generation" || snap.Root != root {
 		t.Fatalf("snapshot: %+v", snap)
 	}
+	if err = os.WriteFile(filepath.Join(filepath.Dir(root), "escape"), []byte("sibling"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	if err = os.Symlink(outside, filepath.Join(root, "link")); err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{"../escape", outside, "link"} {
+	for _, path := range []string{"../escape", outside} {
 		objects[0].Files = []string{path}
 		if _, err = BuildSnapshot(root, "generation", objects); err == nil {
 			t.Fatalf("accepted escape %s", path)
 		}
+		var pathErr *SnapshotPathError
+		if !errors.As(err, &pathErr) {
+			t.Fatalf("lexical refusal for %s is %T, want *SnapshotPathError", path, err)
+		}
+	}
+	objects[0].Files = []string{"link"}
+	if _, err = BuildSnapshot(root, "generation", objects); err == nil {
+		t.Fatal("accepted symlink escape")
+	}
+	var pathErr *SnapshotPathError
+	if errors.As(err, &pathErr) {
+		t.Fatalf("symlink escape used lexical error: %v", err)
 	}
 }

@@ -406,10 +406,13 @@ func main() {
 	tlsKey := flag.String("tls-key", "", "its private key (PEM)")
 	flag.Parse()
 	if *compilerStatus {
-		client := compiler.New(compiler.Options{Root: *root, Version: releaseTag})
-		defer client.Close()
-		_ = client.Hello(context.Background())
-		_ = json.NewEncoder(os.Stdout).Encode(client.Status())
+		raw, err := compiler.StatusJSON(context.Background(), compiler.Options{Root: *root, Version: releaseTag})
+		if err == nil {
+			_, err = os.Stdout.Write(raw)
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+		}
 		return
 	}
 	if *version {
