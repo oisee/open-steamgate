@@ -2810,6 +2810,24 @@ function statement(node, ctx) {
     keyGuard(table.type, "DELETE TABLE");
     return {s: "delete_key", table, key: field.name, value: convert(source(value, ctx, field.type), field.type)};
   }
+  // DELETE TABLE itab FROM wa: the first row whose primary key equals wa's
+  // goes (the ADT front's namespace bindings, a HASHED table); a key that
+  // is a standard table's default key or the whole line is not here
+  if (isStmt(node, Statements.DeleteInternal) && /^DELETE\s+TABLE\s+[^\s.]+\s+FROM\s+[^\s.]+\s*\.?$/i.test(text)) {
+    const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    const keys = table.type.k === "table" ? table.type.hashed ?? table.type.sorted : null;
+    if (!keys || table.type.row.k !== "struct" || keys.includes("TABLE_LINE")) throw new Unsupported(`DELETE form: ${text}`);
+    const fields = keys.map((k) => fieldOf(ctx, table.type.row, k, text));
+    for (const f of fields) if (!["c", "string", "n", "d", "t", "i", "int8"].includes(f.type.k)) throw new Unsupported(`DELETE TABLE FROM keyed on a ${f.type.k}`);
+    keyGuard(table.type, "DELETE TABLE");
+    // critic of #688: inside a LOOP over the same table a system steps the
+    // loop back and unassigns its field symbol; neither emitter does
+    const bare = (x) => JSON.stringify(x, (k, v) => (k === "type" ? undefined : v));
+    if (ctx.loopStack?.some((l) => bare(l.table) === bare(table))) throw new Unsupported(`${text.replace(/\s*\.$/, "")} inside a LOOP over the same table: the loop index and its field symbol were not adjusted`);
+    const vNode = node.findDirectExpression(Expressions.Source) ?? node.findDirectExpression(Expressions.SimpleSource2);
+    if (!vNode) throw new Unsupported(`DELETE form: ${text}`);
+    return {s: "delete_from", table, value: convert(source(vNode, ctx, table.type.row), table.type.row), keys: fields.map((f) => f.name)};
+  }
   if (isStmt(node, Statements.DeleteInternal) && /^DELETE\s+\S+\s+FROM\s+/i.test(text)) {
     const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
     if (table.type.k !== "table" || table.type.hashed || table.type.sorted) throw new Unsupported(`DELETE range of a ${table.type.k}`);

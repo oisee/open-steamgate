@@ -74,6 +74,10 @@ const EXPECT = {
   ZCL_GOGEN_T_COPYINSERT: "1",
   ZCL_GOGEN_T_COPYDATA: "1",
   ZCL_GOGEN_T_COPYHASH: "1",
+  // Unmeasured (ABAP keyword documentation: DELETE TABLE itab FROM wa matches
+  // the primary table key only): hashed one-field key, hashed two-field key,
+  // sorted unique key; the ADT front needs the hashed form (adt-i5, 10-08).
+  ZCL_GOGEN_T_DELFROM: "0/1/4/1/b/0/21a2a/0/ac",
   ZCL_GOGEN_T_COPYDREF: {Go: "ERROR NOT_COMPILED in ZCL_GOGEN_T_COPYDREF=>RUN (zcl_gogen_t_copydref.clas.abap:19): target lr->* at zcl_gogen_t_copydref.clas.abap:19", JS: "ERROR NOT_COMPILED in ZCL_GOGEN_T_COPYDREF=>RUN (zcl_gogen_t_copydref.clas.abap:19): target lr->*"},
   ZCL_GOGEN_T_SCALARBIND: {Go: "ERROR GETWA_NOT_ASSIGNED in table row binding after structural mutation at zcl_gogen_t_scalarbind.clas.abap:18", JS: "ERROR GETWA_NOT_ASSIGNED in table row binding after structural mutation"},
   ZCL_GOGEN_T_REBIND: {Go: "ERROR GETWA_NOT_ASSIGNED in table row binding after structural mutation at zcl_gogen_t_rebind.clas.abap:18", JS: "ERROR GETWA_NOT_ASSIGNED in table row binding after structural mutation"},
@@ -932,6 +936,15 @@ for (const f of demoDrift) { bad += 1; console.log(`FAIL testdata/${f} differs f
 const own = refused.broken.includes("zcl_gogen_t_rf_own");
 if (!own) bad += 1;
 console.log(`${own ? "ok  " : "FAIL"} refused ZCL_GOGEN_T_RF_OWN left out by abaplint's syntax check`);
+// DELETE TABLE itab FROM wa inside a LOOP over the same table (#688 critic)
+const DEL_REFUSED = {23: "DELETE TABLE lt FROM wa inside a LOOP over the same table: the loop index and its field symbol were not adjusted", 26: "DELETE TABLE lt FROM <row> inside a LOOP over the same table: the loop index and its field symbol were not adjusted", 30: "DELETE TABLE lt FROM wa inside a LOOP over the same table: the loop index and its field symbol were not adjusted"};
+const rdel = compileProgram({folders: [join(here, "testdata-refused"), core], objects: ["zcl_gogen_t_rf_delfrom"], tolerant: true});
+const dgot = new Map(rdel.partial.map((x) => [Number(/zcl_gogen_t_rf_delfrom\.clas\.abap:(\d+)\)/.exec(x)?.[1]), x.slice(x.indexOf("): ") + 3)]));
+for (const line of new Set([...Object.keys(DEL_REFUSED).map(Number), ...dgot.keys()])) {
+  const ok = dgot.get(line) === DEL_REFUSED[line];
+  if (!ok) bad += 1;
+  console.log(`${ok ? "ok  " : "FAIL"} refused delfrom :${line}: ${dgot.get(line) ?? "(compiled)"}${ok ? "" : `\n     want: ${DEL_REFUSED[line] ?? "(compiled)"}`}`);
+}
 const resumable = compileProgram({folders: [join(here, "testdata-refused"), core], objects: ["zcl_gogen_t_rf_resume", "CX_SY_ZERODIVIDE"], tolerant: true});
 const resumeRefused = resumable.partial.some((x) => x.includes("RAISE RESUMABLE:"));
 if (!resumeRefused) bad += 1;
