@@ -15,8 +15,8 @@
   ],
   "budgets": {
     "go:abap": {
-      "lines": 11817,
-      "reason": "osgo 026/029 (#658, #659): UTF-16 units and class statics per Session (carve-out queued, stoker QUEUE #33). ADT batch 1 (adt-i5 cases 1-7): Session message fields (sy-msgno as NUMC 3), MESSAGE RAISING binding with scoped restoration, classic exceptions keyed by the resolved interface method, date/time and signed MOVE adapters, object-wrapper identity, STORE answer projection and conservative ADT host answers; timestamp conversion lives in go/timestamp. abapiti 037: cl_http_utility=>decode_base64 beside its encode_base64 sibling (the @KERNEL text decode)."
+      "lines": 11828,
+      "reason": "osgo 026/029 (#658, #659): UTF-16 units and class statics per Session (carve-out queued, stoker QUEUE #33). ADT batch 1 (adt-i5 cases 1-7): Session message fields (sy-msgno as NUMC 3), MESSAGE RAISING binding with scoped restoration, classic exceptions keyed by the resolved interface method, date/time and signed MOVE adapters, object-wrapper identity, STORE answer projection and conservative ADT host answers; timestamp conversion lives in go/timestamp. abapiti 037: cl_http_utility=>decode_base64 beside its encode_base64 sibling (the @KERNEL text decode). StoreHook: a host answers ZOSD_STORE for the calling step first (adt-i5's per-session SYSTEM facts), replacing a text substitution of emitter output."
     },
     "go:abaperr": {
       "lines": 13,
@@ -407,8 +407,8 @@
       "reason": "osgo 026/029 (#658, #659, 2026-10-08): UTF-16 units with the surrogate-half invariant and class statics per Session; carving utf16/statics out of go/abap is queued (stoker QUEUE #33)"
     },
     "tools/gogen/go/abap/store.go": {
-      "lines": 126,
-      "reason": "ADT batch 1 (adt-i5 cases 1-7): Forward scalar backend JSON/state answers and project SUBJECT_FULL with reflection for compatibility with older store backends."
+      "lines": 137,
+      "reason": "ADT batch 1 (adt-i5 cases 1-7): Forward scalar backend JSON/state answers and project SUBJECT_FULL with reflection for compatibility with older store backends. StoreHook: a host answers ZOSD_STORE for the calling step first (adt-i5's per-session SYSTEM facts), replacing a text substitution of emitter output."
     },
     "tools/gogen/go/abap/strings.go": {
       "lines": 636,
