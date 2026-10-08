@@ -440,7 +440,7 @@ rather than reports.
 | source of a program | GET | `/sap/bc/adt/programs/programs/{name}/source/main` | `text/plain` | raw ABAP |
 | source of an include | GET | `/sap/bc/adt/programs/includes/{name}/source/main` | `text/plain` | raw ABAP |
 | a CDS view | GET | `/sap/bc/adt/ddic/ddl/sources/{name}/source/main` | `text/plain` | DDL source |
-| object structure | GET | `/sap/bc/adt/oo/classes/{name}/objectstructure` | `application/vnd.sap.adt.objectstructure.v2+xml` | methods and includes |
+| object structure | GET | `/sap/bc/adt/oo/classes/{name}/objectstructure` | `application/vnd.sap.adt.objectstructure.v2+xml` | methods and nested local/test classes |
 | class document | GET | `/sap/bc/adt/oo/classes/{name}` | `application/vnd.sap.adt.oo.classes.v4+xml` | properties, includes, state |
 | package | GET | `/sap/bc/adt/packages/{name}` | `application/vnd.sap.adt.packages.v1+xml` (or v2) | package document |
 | package contents | POST | `/sap/bc/adt/repository/nodestructure` | node structure XML | one level of the tree |
@@ -945,3 +945,24 @@ The ABAP group rejects `OSD_ADT=js` and asserts `X-OSD-Served-By: ABAP` on
 include GETs and object POSTs. Eclipse recovery is conditional on GET 404:
 POST `/includes`, PUT 200, then GET the saved source. Include creation and PUT
 remain HOST orchestration under one-runtime.
+
+Class objectstructure and STORE `PARSE {"kind":"OUTLINE"}` use the measured
+A4H 7.58 coordinate convention: lines are 1-based and columns are 0-based.
+`definitionBlock` and `implementationBlock` end at the column of the closing
+period; a consumer includes that character when slicing. Identifier links
+select only the name token, with the end at the boundary after the name.
+Local and test methods are nested under `CLAS/OCL` as `CLAS/OLD`; their links
+use `./includes/implementations` or `./includes/testclasses` and the physical
+include's line numbers. Main links use `./source/main`. Attributes such as
+`visibility`, `level` and `clif_name` are plain XML attributes; class outlines
+have no `sourceUri` or synthetic `CLAS/I` entries. Explicit v1 or XML Accept
+selects the v1 content type; the document body is the same as v2.
+
+Structured DATA, CLASS-DATA and CONSTANTS retain one `CLAS/OA` entry for
+the outer structure name, with a block through its matching END OF and an
+identifier at the name token. Components, including nested structures, have
+no separate outline entries. This preserves the previous outline ownership;
+these declaration shapes were not measured against A4H. Events, TYPES,
+FRIENDS, macros and local interfaces also remain **not measured**: events,
+types, friends and macros have no entries, and local interfaces retain the
+existing `CLAS/OCL` label.

@@ -223,6 +223,14 @@ export class ObjectStore {
     return this.#versions.overlay(activating);
   }
 
+  withActiveSources(entry, fn) {
+    return this.#versions.withActiveSources(entry, fn);
+  }
+
+  withOverlay(activating, fn) {
+    return this.#versions.withOverlay(activating, fn);
+  }
+
   inactiveObjects() {
     return this.#versions.inactiveObjects();
   }
