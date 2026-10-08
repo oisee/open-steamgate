@@ -878,7 +878,10 @@ describe("tools/adt-facade: the development loop", () => {
       expect(store.check("CLAS", CALLER).issues).to.have.length(0);
       // the caller is part of the system: active, as a caller is. One that was
       // never activated is not built and does not hold an activation back
-      store.completeActivation(store.activate("CLAS", CALLER));
+      const activating = new Set([`CLAS ${SCRATCH}`, `CLAS ${CALLER}`]);
+      const checked = [SCRATCH, CALLER].map(name => store.activate("CLAS", name, {activating}));
+      expect(checked.every(result => result.active)).to.equal(true);
+      store.completeActivations(checked);
 
       // the rename: legal ABAP, self-consistent, and it takes the method
       // the caller calls out from under it

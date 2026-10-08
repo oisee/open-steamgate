@@ -1,5 +1,8 @@
 import {expect} from "chai";
 import express from "express";
+import {mkdtempSync, rmSync} from "node:fs";
+import {tmpdir} from "node:os";
+import {join} from "node:path";
 import {adtRouter} from "../tools/adt-facade.mjs";
 
 describe("tools/adt-facade: notebook ABAP cells", () => {
@@ -66,7 +69,8 @@ ENDCLASS.`;
 
 describe("portable AMDP Check remains advisory", () => {
   it("reports the SQLite refusal as a warning on the SQLScript line and activates", async () => {
-    const store = {
+    const root = mkdtempSync(join(tmpdir(), "adt-advisory-journal-"));
+    const store = {root,
       check: () => ({issues: []}), find: () => undefined,
       activate: () => ({type: "CLAS", name: "ZCL_PORTABILITY_TEST", active: true, issues: []}),
       completeActivations: () => true,
@@ -100,6 +104,7 @@ describe("portable AMDP Check remains advisory", () => {
       expect(await activated.text()).to.contain("activationExecuted");
     } finally {
       await new Promise((resolve) => server.close(resolve));
+      rmSync(root, {recursive: true, force: true});
     }
   });
 });

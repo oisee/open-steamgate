@@ -1,5 +1,6 @@
 // Pure repository-name policy shared by preflight and creation.
-const OBJECT_NAME = /^(\/[A-Z0-9_]{1,10}\/)?[A-Z0-9_]{1,40}$/;
+export const OBJECT_NAME_PATTERN = "(?:/[A-Z0-9_]{1,10}/)?[A-Z0-9_]{1,40}";
+const OBJECT_NAME = new RegExp(`^${OBJECT_NAME_PATTERN}$`);
 const PACKAGE_NAME = /^(\$|\/[A-Z0-9_]{1,10}\/)?[A-Z0-9_]{1,30}$/;
 
 export function nameProblem(type, name) {
