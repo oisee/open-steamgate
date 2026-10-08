@@ -75,8 +75,8 @@
       "reason": "ADT on osgo slice 1a round 1: /sap/bc/adt mount behind -adt / OSD_OSGO_ADT=1 through the testable real route matcher, runShim + DialogStep, NotCompiled -> 501"
     },
     "go:cmd/storecmp": {
-      "lines": 41,
-      "reason": "baseline 2026-10-01"
+      "lines": 171,
+      "reason": "#653 store parity: RFC-signature adapter mode (typed scalar/table adapters) beside the raw protocol, required by stoker before merge"
     },
     "go:cmd/sxmlbench": {
       "lines": 67,
