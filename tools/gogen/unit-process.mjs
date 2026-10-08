@@ -9,7 +9,9 @@ import {performance} from "node:perf_hooks";
 function processTimeout() {
   const raw = process.env.GOGEN_UNIT_TIMEOUT_MS;
   if (raw === undefined) return 120000;
-  if (!/^[1-9][0-9]*$/.test(raw)) throw new Error(`GOGEN_UNIT_TIMEOUT_MS must be a positive whole number of milliseconds, got '${raw}'`);
+  // setTimeout fires at once above 2^31-1 ms (about 24.8 days)
+  if (!/^[1-9][0-9]*$/.test(raw) || Number(raw) > 2147483647)
+    throw new Error(`GOGEN_UNIT_TIMEOUT_MS must be a whole number of milliseconds from 1 to 2147483647, got '${raw}'`);
   return Number(raw);
 }
 

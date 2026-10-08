@@ -534,7 +534,7 @@ test("GOGEN_UNIT_TIMEOUT_MS bounds a test process, and a value that is not a pos
     const result = await runUnit({bin: wrapper, groups, ready, jobs: 1, out, runDir: out});
     assert.ok(Date.now() - started < 20000);
     assert.deepEqual(reconcile(ready, result.actual).map((row) => row.message), ["runner died: timeout after 300 ms"]);
-    for (const bad of ["0", "-5", "1.5", "abc", ""]) {
+    for (const bad of ["0", "-5", "1.5", "abc", "", "2147483648"]) {
       process.env.GOGEN_UNIT_TIMEOUT_MS = bad;
       await assert.rejects(runUnit({bin: wrapper, groups, ready, jobs: 1, out, runDir: out}), /GOGEN_UNIT_TIMEOUT_MS/);
     }
