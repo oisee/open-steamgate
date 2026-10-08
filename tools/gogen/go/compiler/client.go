@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,6 +17,7 @@ type Options struct {
 	Root, Version    string
 	CheckTimeout     time.Duration
 	RestartBackoff   time.Duration
+	KillGrace        time.Duration
 	ExpectTranspiler string
 }
 type Client struct {
@@ -25,12 +25,7 @@ type Client struct {
 	admission chan struct{}
 	options   Options
 	status    Status
-	cmd       *exec.Cmd
-	stdin     io.WriteCloser
-	answers   chan json.RawMessage
-	exited    chan struct{}
-	dead      <-chan struct{}
-	waited    <-chan error
+	proc      *proc
 	nextID    uint64
 	starts    int
 	retryAt   time.Time
@@ -45,6 +40,9 @@ func New(options Options) *Client {
 	}
 	if options.RestartBackoff <= 0 {
 		options.RestartBackoff = 100 * time.Millisecond
+	}
+	if options.KillGrace <= 0 {
+		options.KillGrace = 2 * time.Second
 	}
 	if options.Version == "" {
 		options.Version = "development"
@@ -92,9 +90,11 @@ func (c *Client) Hello(ctx context.Context) error {
 	case c.admission <- struct{}{}:
 		defer func() { <-c.admission }()
 	case <-ctx.Done():
-		return c.record(&Refusal{Code: "TIMEOUT", Text: ctx.Err().Error()})
+		return &Refusal{Code: "TIMEOUT", Text: ctx.Err().Error()}
 	}
-	c.mu.Lock()
+	if err := c.lock(ctx); err != nil {
+		return err
+	}
 	defer c.mu.Unlock()
 	return c.ensure(ctx)
 }
@@ -106,9 +106,11 @@ func (c *Client) Check(ctx context.Context, snapshot Snapshot) (CheckResult, err
 	case c.admission <- struct{}{}:
 		defer func() { <-c.admission }()
 	case <-ctx.Done():
-		return CheckResult{}, c.record(&Refusal{Code: "TIMEOUT", Text: ctx.Err().Error()})
+		return CheckResult{}, &Refusal{Code: "TIMEOUT", Text: ctx.Err().Error()}
 	}
-	c.mu.Lock()
+	if err := c.lock(ctx); err != nil {
+		return CheckResult{}, err
+	}
 	defer c.mu.Unlock()
 	if err := c.ensure(ctx); err != nil {
 		return CheckResult{}, err
@@ -122,29 +124,37 @@ func (c *Client) Check(ctx context.Context, snapshot Snapshot) (CheckResult, err
 	return result, err
 }
 
+// A concurrent Close may own mu during bounded cleanup. Admission still honors ctx.
+func (c *Client) lock(ctx context.Context) error {
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	for !c.mu.TryLock() {
+		select {
+		case <-ctx.Done():
+			return &Refusal{Code: "TIMEOUT", Text: ctx.Err().Error()}
+		case <-ticker.C:
+		}
+	}
+	return nil
+}
+
 func (c *Client) record(err error) error { c.status.LastError = err.Error(); return err }
 func (c *Client) ensure(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return c.record(&Refusal{Code: "TIMEOUT", Text: err.Error()})
+	}
 	if c.closed {
 		return c.record(&Refusal{Code: "INTERNAL", Text: "client closed"})
 	}
-	if c.cmd != nil {
+	if c.proc != nil {
 		select {
-		case <-c.exited:
-			_ = c.reap()
-			c.record(&Refusal{Code: "INTERNAL", Text: "idle sidecar exited"})
+		case <-c.proc.done:
+		case <-c.proc.dead:
 		default:
-			select {
-			case <-c.dead:
-				<-c.exited
-				_ = c.reap()
-				c.record(&Refusal{Code: "INTERNAL", Text: "idle sidecar exited"})
-			default:
-				return nil
-			}
+			return nil
 		}
-	}
-	if err := ctx.Err(); err != nil {
-		return c.record(&Refusal{Code: "TIMEOUT", Text: err.Error()})
+		c.stop()
+		c.record(&Refusal{Code: "INTERNAL", Text: "idle sidecar exited"})
 	}
 	if delay := c.retryAt.Sub(c.now()); delay > 0 {
 		select {
@@ -175,7 +185,7 @@ func (c *Client) ensure(ctx context.Context) error {
 		return c.record(err)
 	}
 	// Tool logs must never be confused with NDJSON responses.
-	cmd.Stderr = os.Stderr
+	cmd.Stderr = nil
 	cmd.Stdout = stdoutWrite
 	if err = cmd.Start(); err != nil {
 		stdin.Close()
@@ -184,10 +194,7 @@ func (c *Client) ensure(ctx context.Context) error {
 		return c.record(&Refusal{Code: "INTERNAL", Text: err.Error()})
 	}
 	stdoutWrite.Close()
-	c.cmd, c.stdin = cmd, stdin
-	c.answers, c.exited = make(chan json.RawMessage, 1), make(chan struct{})
-	c.dead, c.waited = watchProcessExit(cmd)
-	go readStdout(stdoutRead, c.answers, c.exited)
+	c.proc = newProc(cmd, stdin, stdoutRead)
 	if c.starts > 0 {
 		c.status.Restarts++
 	}
@@ -200,6 +207,7 @@ func (c *Client) ensure(ctx context.Context) error {
 	}
 	c.status.Contract, c.status.OSD, c.status.Transpiler = hello.Contract, hello.OSD, hello.Transpiler
 	c.status.Capabilities, c.status.Limits = hello.Capabilities, hello.Limits
+	c.proc.maxLine.Store(hello.Limits.MaxSnapshotBytes)
 	if hello.Contract != Contract {
 		c.stop()
 		return c.record(&Refusal{Code: "CONTRACT_MISMATCH", Text: fmt.Sprintf("expected %d, got %d", Contract, hello.Contract)})
@@ -227,7 +235,7 @@ func (hello *helloReply) UnmarshalJSON(raw []byte) error {
 	type wireHello helloReply
 	var value wireHello
 	if err := json.Unmarshal(raw, &value); err != nil {
-		return err
+		return &Refusal{Code: CodeHandshake, Text: err.Error()}
 	}
 	*hello = helloReply(value)
 	missing := func(field string) bool {
@@ -235,7 +243,7 @@ func (hello *helloReply) UnmarshalJSON(raw []byte) error {
 		return !ok || string(value) == "null"
 	}
 	for _, field := range []string{"contract", "osd", "transpiler", "capabilities", "limits"} {
-		if missing(field) || (field == "contract" && hello.Contract == 0) || (field == "limits" && hello.Limits == (Limits{})) {
+		if missing(field) || (field == "contract" && hello.Contract == 0) || (field == "limits" && (hello.Limits.MaxSnapshotBytes <= 0 || hello.Limits.MaxConcurrentRequests <= 0)) {
 			return &Refusal{Code: CodeHandshake, Text: "hello is missing " + field}
 		}
 	}
@@ -245,97 +253,34 @@ func (hello *helloReply) UnmarshalJSON(raw []byte) error {
 	return nil
 }
 
-func readStdout(stdout *os.File, answers chan<- json.RawMessage, exited chan<- struct{}) {
-	defer stdout.Close()
-	decoder := json.NewDecoder(stdout)
-	for {
-		var raw json.RawMessage
-		if err := decoder.Decode(&raw); err != nil {
-			close(exited)
-			_, _ = io.Copy(io.Discard, stdout)
-			return
-		}
-		select {
-		case answers <- raw:
-		default:
-		}
-	}
-}
-
 func (c *Client) exchange(ctx context.Context, id uint64, request any, target any) error {
-	// The write is separate so a blocked pipe remains subject to the deadline.
+	p := c.proc
+	fail := func(code, text string) error {
+		c.stop()
+		return c.record(&Refusal{Code: code, Text: text})
+	}
 	written := make(chan error, 1)
-	writeFinished := false
-	go func() {
-		written <- json.NewEncoder(c.stdin).Encode(request)
-	}()
+	go func() { written <- json.NewEncoder(p.stdin).Encode(request) }()
 	select {
 	case <-ctx.Done():
-		c.stop()
-		<-written
-		return c.record(&Refusal{Code: "TIMEOUT", Text: ctx.Err().Error()})
-	case writeErr := <-written:
-		writeFinished = true
-		if writeErr != nil {
-			c.stop()
-			return c.record(&Refusal{Code: "INTERNAL", Text: writeErr.Error()})
+		return fail("TIMEOUT", ctx.Err().Error())
+	case err := <-written:
+		if err != nil {
+			return fail("INTERNAL", err.Error())
 		}
 	}
-	var raw json.RawMessage
-	select {
-	case raw = <-c.answers:
-		if !writeFinished {
-			if err := <-written; err != nil {
-				c.stop()
-				return c.record(&Refusal{Code: "INTERNAL", Text: err.Error()})
-			}
+	raw, err := p.answer(ctx)
+	if err != nil {
+		if ctx.Err() != nil {
+			return fail("TIMEOUT", ctx.Err().Error())
 		}
-		if raw == nil {
-			c.stop()
-			return c.record(&Refusal{Code: "INTERNAL", Text: "empty response"})
-		}
-	default:
-		select {
-		case raw = <-c.answers:
-			if !writeFinished {
-				if err := <-written; err != nil {
-					c.stop()
-					return c.record(&Refusal{Code: "INTERNAL", Text: err.Error()})
-				}
-			}
-			if raw == nil {
-				c.stop()
-				return c.record(&Refusal{Code: "INTERNAL", Text: "empty response"})
-			}
-		case <-ctx.Done():
-			c.stop()
-			if !writeFinished {
-				<-written
-			}
-			return c.record(&Refusal{Code: "TIMEOUT", Text: ctx.Err().Error()})
-		case <-c.exited:
-			c.stop()
-			if !writeFinished {
-				<-written
-			}
-			return c.record(&Refusal{Code: "INTERNAL", Text: "sidecar exited without a response"})
-		}
-	}
-	if raw == nil {
-		c.stop()
-		return c.record(&Refusal{Code: "INTERNAL", Text: "sidecar closed its response stream"})
-	}
-	select {
-	default:
-	case <-ctx.Done():
-		c.stop()
-		return c.record(&Refusal{Code: "TIMEOUT", Text: ctx.Err().Error()})
+		return fail("INTERNAL", err.Error())
 	}
 	var envelope struct {
 		ID    *uint64  `json:"id"`
 		Error *Refusal `json:"error"`
 	}
-	err := json.Unmarshal(raw, &envelope)
+	err = json.Unmarshal(raw, &envelope)
 	if err != nil || envelope.ID == nil || *envelope.ID != id {
 		c.stop()
 		return c.record(&Refusal{Code: "INTERNAL", Text: "invalid response id or envelope"})
@@ -355,32 +300,21 @@ func (c *Client) exchange(ctx context.Context, id uint64, request any, target an
 	return nil
 }
 
-func (c *Client) reap() error {
-	if c.cmd == nil {
-		return nil
-	}
-	<-c.exited
-	err := <-c.waited
-	c.cmd, c.stdin = nil, nil
-	c.answers, c.exited, c.dead, c.waited = nil, nil, nil, nil
-	return err
-}
-
+// stop is called with mu held. All waits are bounded; the reader owns no client state.
 func (c *Client) stop() {
-	if c.cmd == nil {
+	p := c.proc
+	if p == nil {
 		return
 	}
-	killProcess(c.cmd)
-	c.stdin.Close()
-	<-c.exited
-	err := <-c.waited
-	if err != nil {
-		c.record(&Refusal{Code: "INTERNAL", Text: "sidecar wait: " + err.Error()})
-	}
-	c.cmd = nil
-	c.stdin = nil
-	c.answers, c.exited, c.dead, c.waited = nil, nil, nil, nil
+	c.proc = nil
 	c.retryAt = c.now().Add(c.options.RestartBackoff)
+	killProcess(p.cmd)
+	_ = p.stdin.Close()
+	_ = p.stdout.Close()
+	select {
+	case <-p.dead:
+	case <-time.After(c.options.KillGrace):
+	}
 }
 func (c *Client) Close() error {
 	c.mu.Lock()

@@ -67,8 +67,14 @@ serialized requests. Discovery tries `OSGO_SIDECAR`, then `osd` beside the osgo
 executable, and never searches PATH. `BuildSnapshot` hashes raw files relative
 to the root and refuses lexical or symlink escapes. `Check` returns diagnostics
 and the registry identity, or a typed refusal preserving the protocol code.
-The default check deadline is 30 seconds and can be configured. A timeout or
-crash stops the process group; the next request restarts after backoff.
+The default check deadline is 30 seconds and covers admission, handshake, stdin
+writes and response reads. Protocol anomalies, timeout and cancellation during
+an operation stop the process group; cleanup waits at most 2 seconds for the
+child (configurable with `KillGrace`). Idle deaths detected by the next request
+use the same cleanup and backoff. Buffered final answers survive EOF. Sidecar
+stderr is discarded. Both hello limits must be positive integers; response lines
+are capped at 1 MiB before hello and `maxSnapshotBytes` afterward, including the
+newline. Canceled admissions return without updating the last error.
 
 `osgo -compiler-status [-root <tree>]` performs hello and prints JSON containing
 discovery, versions, contract, capabilities, limits, restarts and the last error.

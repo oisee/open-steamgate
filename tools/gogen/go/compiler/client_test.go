@@ -5,7 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -16,8 +19,18 @@ import (
 
 func TestMain(m *testing.M) {
 	if mode := os.Getenv("COMPILER_FAKE"); mode != "" {
-		scanner := bufio.NewScanner(os.Stdin)
-		for scanner.Scan() {
+		if mode == "descendant" {
+			for {
+				_ = os.WriteFile(os.Getenv("COMPILER_MARKER"), []byte(fmt.Sprint(time.Now().UnixNano())), 0600)
+				time.Sleep(5 * time.Millisecond)
+			}
+		}
+		reader := bufio.NewReader(os.Stdin)
+		for {
+			line, err := reader.ReadBytes('\n')
+			if err != nil {
+				break
+			}
 			var request struct {
 				ID       uint64 `json:"id"`
 				Op       string `json:"op"`
@@ -25,7 +38,7 @@ func TestMain(m *testing.M) {
 				OSGO     string `json:"osgo"`
 				Root     string `json:"root"`
 			}
-			if json.Unmarshal(scanner.Bytes(), &request) != nil {
+			if json.Unmarshal(line, &request) != nil {
 				os.Exit(3)
 			}
 			response := map[string]any{"id": request.ID}
@@ -42,21 +55,62 @@ func TestMain(m *testing.M) {
 					caps = []string{}
 				}
 				response["contract"], response["osd"], response["transpiler"] = contract, "test-osd", "test-pin"
-				response["capabilities"], response["limits"] = caps, Limits{1234, 1}
+				response["capabilities"], response["limits"] = caps, Limits{4 * 1024 * 1024, 1}
 				if field, ok := strings.CutPrefix(mode, "hello-missing:"); ok {
 					delete(response, field)
+				}
+				if limits, ok := strings.CutPrefix(mode, "limits:"); ok {
+					response["limits"] = json.RawMessage(limits)
 				}
 				if mode == "other-pin" {
 					response["transpiler"] = "other-pin"
 				}
 			} else {
-				if marker := os.Getenv("COMPILER_MARKER"); marker != "" {
+				if marker := os.Getenv("COMPILER_MARKER"); marker != "" && mode != "descendant-exit" {
 					_ = os.WriteFile(marker, []byte("sent"), 0600)
 				}
 				switch {
+				case mode == "close-stdout" || mode == "malformed-alive":
+					if mode == "malformed-alive" {
+						_, _ = io.WriteString(os.Stdout, "broken\n")
+					}
+					_ = os.Stdout.Close()
+					time.Sleep(time.Hour)
+				case mode == "descendant-exit":
+					child := exec.Command(os.Args[0])
+					child.Env = append(os.Environ(), "COMPILER_FAKE=descendant")
+					child.Stdout = os.Stdout
+					if child.Start() != nil {
+						os.Exit(8)
+					}
+					// Wait until the descendant proves it is alive and owns stdout.
+					for {
+						if _, err := os.Stat(os.Getenv("COMPILER_MARKER")); err == nil {
+							break
+						}
+						time.Sleep(time.Millisecond)
+					}
+					os.Exit(0)
+				case mode == "fragmented" || mode == "large":
+					response["diagnostics"] = []Diagnostic{{Text: strings.Repeat("x", 128*1024)}}
+					raw, _ := json.Marshal(response)
+					if mode == "fragmented" {
+						for i := 0; i < len(raw); i += 997 {
+							end := min(i+997, len(raw))
+							_, _ = os.Stdout.Write(raw[i:end])
+						}
+						_, _ = io.WriteString(os.Stdout, "\n")
+					} else {
+						_, _ = os.Stdout.Write(append(raw, '\n'))
+					}
+					continue
+				case mode == "stderr-flood":
+					_, _ = io.WriteString(os.Stderr, strings.Repeat("log", 1024*1024))
+					response["diagnostics"] = []Diagnostic{}
 				case mode == "answer-exit":
 					response["diagnostics"] = []Diagnostic{}
 					_ = json.NewEncoder(os.Stdout).Encode(response)
+					_ = os.Stdout.Close()
 					os.Exit(0)
 				case mode == "timeout":
 					time.Sleep(time.Hour)
@@ -72,6 +126,13 @@ func TestMain(m *testing.M) {
 				}
 			}
 			_ = json.NewEncoder(os.Stdout).Encode(response)
+			if request.Op == "hello" && mode == "idle-close" {
+				_ = os.Stdout.Close()
+				time.Sleep(time.Hour)
+			}
+			if request.Op == "hello" && mode == "blocked-write" {
+				time.Sleep(time.Hour)
+			}
 		}
 		os.Exit(0)
 	}
@@ -86,6 +147,7 @@ func fake(t *testing.T, mode string) *Client {
 	}
 	t.Setenv("OSGO_SIDECAR", executable)
 	t.Setenv("COMPILER_FAKE", mode)
+	t.Setenv("GORACE", "atexit_sleep_ms=0")
 	c := New(Options{Root: "test-root", Version: "test-version", CheckTimeout: time.Second, RestartBackoff: time.Millisecond})
 	t.Cleanup(func() { _ = c.Close() })
 	return c
@@ -143,7 +205,7 @@ func TestDiscovery(t *testing.T) {
 }
 func TestHelloAndCheck(t *testing.T) {
 	c := fake(t, "answer")
-	if c.cmd != nil || c.Status().Found {
+	if c.proc != nil || c.Status().Found {
 		t.Fatal("must be lazy")
 	}
 	result, err := c.Check(context.Background(), Snapshot{})
@@ -154,7 +216,7 @@ func TestHelloAndCheck(t *testing.T) {
 		t.Fatalf("answer: %+v", result)
 	}
 	status := c.Status()
-	if !status.Found || status.Path == "" || status.OSD != "test-osd" || status.Transpiler != "test-pin" || status.Contract != 1 || status.Limits != (Limits{1234, 1}) || !reflect.DeepEqual(status.Capabilities, []string{"check"}) {
+	if !status.Found || status.Path == "" || status.OSD != "test-osd" || status.Transpiler != "test-pin" || status.Contract != 1 || status.Limits != (Limits{4 * 1024 * 1024, 1}) || !reflect.DeepEqual(status.Capabilities, []string{"check"}) {
 		t.Fatalf("hello: %+v", status)
 	}
 	status.Capabilities[0] = "mutated"
@@ -192,7 +254,7 @@ func TestTimeoutRestart(t *testing.T) {
 	c.options.CheckTimeout = 30 * time.Millisecond
 	_, err := c.Check(context.Background(), Snapshot{})
 	code(t, err, "TIMEOUT")
-	if c.cmd != nil {
+	if c.proc != nil {
 		t.Fatal("child retained")
 	}
 	t.Setenv("COMPILER_FAKE", "answer")
@@ -242,6 +304,7 @@ func TestAdmissionRespectsContext(t *testing.T) {
 func TestFastExitResponse(t *testing.T) {
 	t.Setenv("OSGO_SIDECAR", mustExecutable(t))
 	t.Setenv("COMPILER_FAKE", "answer-exit")
+	t.Setenv("GORACE", "atexit_sleep_ms=0")
 	for iteration := range 200 {
 		c := New(Options{Root: "test-root", Version: "test-version", CheckTimeout: 2 * time.Second, RestartBackoff: time.Millisecond})
 		if _, err := c.Check(context.Background(), Snapshot{}); err != nil {
@@ -257,24 +320,24 @@ func TestIdleDeathRestart(t *testing.T) {
 	if err := c.Hello(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	cmd := c.cmd
-	waited := c.waited
+	cmd := c.proc.cmd
+	dead := c.proc.dead
 	killProcess(cmd)
 	select {
-	case <-c.exited:
+	case <-c.proc.done:
 	case <-time.After(time.Second):
 		t.Fatal("exit was not observed")
 	}
 	if err := c.Hello(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if c.Status().Restarts != 1 || c.cmd == nil {
-		t.Fatalf("idle restart: restarts=%d cmd=%v", c.Status().Restarts, c.cmd)
+	if c.Status().Restarts != 1 || c.proc == nil {
+		t.Fatalf("idle restart: restarts=%d cmd=%v", c.Status().Restarts, c.proc)
 	}
 	select {
-	case err := <-waited:
-		t.Fatalf("old exit state was not consumed: %v", err)
+	case <-dead:
 	default:
+		t.Fatal("old child was not reaped")
 	}
 }
 func TestRestartBackoffDelay(t *testing.T) {
@@ -305,7 +368,7 @@ func TestCrashRestart(t *testing.T) {
 	c := fake(t, "crash")
 	_, err := c.Check(context.Background(), Snapshot{})
 	code(t, err, "INTERNAL")
-	if c.cmd != nil {
+	if c.proc != nil {
 		t.Fatal("child retained")
 	}
 	t.Setenv("COMPILER_FAKE", "answer")
@@ -320,7 +383,7 @@ func TestContractMismatch(t *testing.T) {
 	c := fake(t, "mismatch")
 	err := c.Hello(context.Background())
 	code(t, err, "CONTRACT_MISMATCH")
-	if c.cmd != nil || c.Status().Contract != 2 {
+	if c.proc != nil || c.Status().Contract != 2 {
 		t.Fatal("mismatched process retained or contract lost")
 	}
 }
@@ -328,7 +391,7 @@ func TestBadID(t *testing.T) {
 	c := fake(t, "bad-id")
 	_, err := c.Check(context.Background(), Snapshot{})
 	code(t, err, "INTERNAL")
-	if c.cmd != nil {
+	if c.proc != nil {
 		t.Fatal("bad protocol retained")
 	}
 }
@@ -364,7 +427,7 @@ func TestTranspilerExpectation(t *testing.T) {
 		c.options.ExpectTranspiler = "test-pin"
 		err := c.Hello(context.Background())
 		code(t, err, "VERSION_MISMATCH")
-		if c.cmd != nil {
+		if c.proc != nil {
 			t.Fatal("mismatched process retained")
 		}
 	})

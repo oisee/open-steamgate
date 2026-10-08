@@ -503,8 +503,8 @@
       "reason": "#641 zip layers: user source layers (zip cache + overlay) enter the build inputs and the generation hash"
     },
     "go:compiler": {
-      "lines": 592,
-      "reason": "Fix1 safety scope: context-aware admission, owned stdout/process lifecycle, rooted snapshots, complete handshake validation, restart clock injection, and status JSON; no ABAP bindings."
+      "lines": 610,
+      "reason": "Fix2 lifecycle simplification: one proc owns pipes, bounded NDJSON reader and completion signals; cancellable admission, bounded group cleanup (including Windows taskkill), idle-death backoff, final-answer EOF drain and positive integer hello limits. Preserves Fix1 rooted snapshots, discovery, version checks and status JSON; no ABAP bindings."
     }
   },
   "readmeMissing": [
