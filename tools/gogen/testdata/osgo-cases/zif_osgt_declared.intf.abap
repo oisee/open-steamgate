@@ -1,0 +1,2 @@
+INTERFACE zif_osgt_declared PUBLIC.
+ENDINTERFACE.

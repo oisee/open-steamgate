@@ -1797,6 +1797,19 @@ const RUNTIME_CX = ["CX_SY_ZERODIVIDE", "CX_SY_ARITHMETIC_OVERFLOW", "CX_SY_CONV
 // A4H, 2026-09-23)
 const RUNTIME_CX_SUPER = {CX_SY_REPLACE_INFINITE_LOOP: "CX_DYNAMIC_CHECK", CX_SY_OPEN_SQL_DATA_ERROR: "CX_SY_OPEN_SQL_ERROR"};
 
+// IS INSTANCE OF on an initial reference answers by its static type: true
+// when an up cast from it to the target is legal (A4H 7.58, 2026-10-08:
+// REF TO zcl_a -> zcl_a true, -> a subclass false; REF TO object -> zcl_a
+// false; REF TO zif_x -> zif_x true)
+function upcastable(reg, from, to) {
+  if (to.name === "OBJECT" || from.name === to.name) return true;
+  if (from.name === "OBJECT") return false;
+  if (!to.intf) return !from.intf && isSubclass(reg, from.name, to.name);
+  if (from.intf) return componentInterfaces(reg, from.name).includes(to.name);
+  return [from.name, ...ancestors(reg, from.name)].some((c) => (clasDef(reg, c)?.getImplementing() ?? [])
+    .some((i) => upper(i.name) === to.name || componentInterfaces(reg, upper(i.name)).includes(to.name)));
+}
+
 function isSubclass(reg, cls, ancestor) {
   for (let c = cls, guard = 0; c && guard < 20; guard += 1) {
     if (c === ancestor) return true;
@@ -2240,25 +2253,34 @@ function statement(node, ctx) {
   // SEPARATED BY, RESPECTING BLANKS, LINES OF and a target of fixed length
   // stay refused in byte mode; character mode is ultra/events' CONCATENATE
   // further down.
-  if (isStmt(node, Statements.Concatenate) && /\bIN\s+BYTE\s+MODE\b/i.test(text)) {
-    if (!/\bIN\s+BYTE\s+MODE\s*\.?$/i.test(text) || /\b(SEPARATED|RESPECTING)\b/i.test(text)) throw new Unsupported(`CONCATENATE form: ${text}`);
-    const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
-    // CONCATENATE LINES OF itab INTO xstr IN BYTE MODE: the rows joined once,
-    // the way a reader gathers its pieces without copying the whole each time
-    if (/^CONCATENATE\s+LINES\s+OF\b/i.test(text)) {
-      const table = source(node.findDirectExpressions(Expressions.SimpleSource3)[0] ?? node.findDirectExpression(Expressions.Source), ctx);
-      if (target.type.k !== "xstring" || table?.type.k !== "table" || table.type.row.k !== "xstring") throw new Unsupported(`CONCATENATE form: ${text}`);
-      return {s: "concat_bytes", target, table, row: {e: "temp", name: "ConcatRow", type: table.type.row}};
+  if (isStmt(node, Statements.Concatenate)) {
+    const keywords = node.getChildren().filter((k) => k instanceof Nodes.TokenNode).map((k) => upper(tokenStr(k)));
+    const hasKeywords = (...words) => keywords.some((_, i) => words.every((word, j) => keywords[i + j] === word));
+    const endsWithKeywords = (...words) => {
+      const end = keywords.at(-1) === "." ? keywords.length - 1 : keywords.length;
+      const start = end - words.length;
+      return start >= 0 && words.every((word, i) => keywords[start + i] === word);
+    };
+    if (hasKeywords("IN", "BYTE", "MODE")) {
+      if (!endsWithKeywords("IN", "BYTE", "MODE") || hasKeywords("SEPARATED") || hasKeywords("RESPECTING")) throw new Unsupported(`CONCATENATE form: ${text}`);
+      const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+      // CONCATENATE LINES OF itab INTO xstr IN BYTE MODE: the rows joined once,
+      // the way a reader gathers its pieces without copying the whole each time
+      if (hasKeywords("LINES", "OF") && keywords[1] === "LINES" && keywords[2] === "OF") {
+        const table = source(node.findDirectExpressions(Expressions.SimpleSource3)[0] ?? node.findDirectExpression(Expressions.Source), ctx);
+        if (target.type.k !== "xstring" || table?.type.k !== "table" || table.type.row.k !== "xstring") throw new Unsupported(`CONCATENATE form: ${text}`);
+        return {s: "concat_bytes", target, table, row: {e: "temp", name: "ConcatRow", type: table.type.row}};
+      }
+      // parity-wave2: into an x of fixed length (A4H 2026-09-24,
+      // ZCL_GOGEN_T_BYTECATX): padded with 00 on the right and sy-subrc 0,
+      // cut to the length and sy-subrc 4 when longer; the operands, the target
+      // among them, are read first
+      if (target.type.k !== "xstring" && target.type.k !== "x") throw new Unsupported(`CONCATENATE IN BYTE MODE into a ${target.type.k}`);
+      const parts = node.findDirectExpressions(Expressions.SimpleSource3).map((n) => source(n, ctx));
+      if (parts.length < 2) throw new Unsupported(`CONCATENATE form: ${text}`);
+      for (const p of parts) if (p.type.k !== "x" && p.type.k !== "xstring") throw new Unsupported(`CONCATENATE IN BYTE MODE of a ${p.type.k}`);
+      return {s: "concat_bytes", target, parts: parts.map((p) => convert(p, XS)), fixed: target.type.k === "x" ? target.type.len : undefined};
     }
-    // parity-wave2: into an x of fixed length (A4H 2026-09-24,
-    // ZCL_GOGEN_T_BYTECATX): padded with 00 on the right and sy-subrc 0,
-    // cut to the length and sy-subrc 4 when longer; the operands, the target
-    // among them, are read first
-    if (target.type.k !== "xstring" && target.type.k !== "x") throw new Unsupported(`CONCATENATE IN BYTE MODE into a ${target.type.k}`);
-    const parts = node.findDirectExpressions(Expressions.SimpleSource3).map((n) => source(n, ctx));
-    if (parts.length < 2) throw new Unsupported(`CONCATENATE form: ${text}`);
-    for (const p of parts) if (p.type.k !== "x" && p.type.k !== "xstring") throw new Unsupported(`CONCATENATE IN BYTE MODE of a ${p.type.k}`);
-    return {s: "concat_bytes", target, parts: parts.map((p) => convert(p, XS)), fixed: target.type.k === "x" ? target.type.len : undefined};
   }
   if (isStmt(node, Statements.Condense)) {
     const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
@@ -2377,8 +2399,10 @@ function statement(node, ctx) {
   // else sy-subrc 0; LINES OF an empty table clears the target
   if (isStmt(node, Statements.Concatenate)) {
     const kids = node.getChildren();
-    const respecting = /\bRESPECTING\s+BLANKS\b/i.test(text);
-    const lines = /^CONCATENATE\s+LINES\s+OF\b/i.test(text);
+    const keywords = node.getChildren().filter((k) => k instanceof Nodes.TokenNode).map((k) => upper(tokenStr(k)));
+    const hasKeywords = (...words) => keywords.some((_, i) => words.every((word, j) => keywords[i + j] === word));
+    const respecting = hasKeywords("RESPECTING", "BLANKS");
+    const lines = keywords[1] === "LINES" && keywords[2] === "OF";
     const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
     if (!["string", "c", "n", "d"].includes(target.type.k)) throw new Unsupported(`CONCATENATE into a ${target.type.k}`);
     const piece = (x) => {
@@ -4006,7 +4030,11 @@ function namedType(typeNode, ctx, inferred) {
     return inferred;
   }
   const t = upper(text);
-  const builtin = {I, F, STRING: S, XSTRING: XS, INT8, D: C(8), T: C(6)}[t];
+  const builtin = {
+    I, F, STRING: S, XSTRING: XS, INT8, D: {k: "d", len: 8}, T: {k: "t", len: 6},
+    OBJECT: {k: "ref", name: "OBJECT", intf: true},
+    P: {k: "p", len: 8, dec: 0}, C: C(1), N: {k: "n", len: 1}, X: X(1), ABAP_BOOL: C(1),
+  }[t];
   if (builtin) return builtin;
   const pool = t.includes("_") ? ctx.reg.getObject("TYPE", t.split("_")[0]) : undefined;
   const poolType = pool ? new abaplint.SyntaxLogic(ctx.reg, pool).run().spaghetti.getFirstChild()?.getFirstChild()?.findType(t) : undefined;
@@ -5626,6 +5654,7 @@ function valueBody(body, to, ctx, text) {
     }
     return literal;
   }
+  if (body === null && to.k !== "struct") return {e: "zero", type: to};
   if (to.k !== "struct") throw new Unsupported(`VALUE for a ${to.k}: ${text}`);
   const fields = [];
   for (const c of body?.getChildren() ?? []) {
@@ -6469,6 +6498,15 @@ function compare(node, ctx) {
   const not = kids.length > 0 && isTok(kids[0], "NOT");
   const sources = node.findDirectExpressions(Expressions.Source);
   const text = upper(node.concatTokens());
+  const instanceClass = node.findDirectExpression(Expressions.ClassName);
+  if (/\bIS\s+(NOT\s+)?INSTANCE\s+OF\b/.test(text) && sources.length === 1 && instanceClass !== undefined) {
+    const value = source(sources[0], ctx);
+    if (value.type.k !== "ref") throw new Unsupported(`IS INSTANCE OF a ${value.type.k}`);
+    const target = namedType(instanceClass, ctx);
+    if (target.intf) ctx.program.interfaces.add(target.name);
+    const result = {c: "instance_of", x: value, type: target, initial: upcastable(ctx.reg, value.type, target)};
+    return /\bIS\s+NOT\s+INSTANCE\s+OF\b/.test(text) !== not ? {c: "not", x: result} : result;
+  }
   if (/\bIS\s+(NOT\s+)?SUPPLIED\b/.test(text)) {
     const nm = upper(/^(?:NOT\s+)?(\S+)\s+IS\b/.exec(text)?.[1] ?? "");
     if (!ctx.sig.params.some((p) => p.suppliedOf === nm)) throw new Unsupported(`${nm} IS SUPPLIED: not a parameter this method's declaration tracks`);
