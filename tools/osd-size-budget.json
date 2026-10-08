@@ -503,7 +503,7 @@
       "reason": "#641 zip layers: user source layers (zip cache + overlay) enter the build inputs and the generation hash"
     },
     "go:compiler": {
-      "lines": 857,
+      "lines": 878,
       "reason": "Fix3 preserves Fix2 lifecycle, admission, idle backoff and EOF drain; adds suspended Windows startup into a kill-on-close Job Object with owned cleanup, independent configurable response-line budget, and required check verdict field/hash validation. Fix4 adds unreaped Unix group ownership and context-aware bounded regular-file snapshots. Discovery, version checks and status JSON remain; no ABAP bindings."
     }
   },

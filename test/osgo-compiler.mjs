@@ -19,7 +19,7 @@ describe("Go compiler client with real osd", function () {
       const launcher = join(dir, "osd");
       // Discovery is binary-only; this launcher stands in for build/osd and runs the same entry point.
       writeFileSync(launcher, `#!/bin/sh\nexec ${quote(process.execPath)} ${quote(resolve("bin/osd.mjs"))} "$@"\n`, {mode: 0o700});
-      const result = spawnSync("go", ["test", "./compiler", "-count=1", "-v"], {
+      const result = spawnSync("go", ["test", "./compiler", "-count=1", "-v", "-timeout=60s"], {
         cwd: resolve("tools/gogen/go"), encoding: "utf8", timeout: 90000,
         env: {...process.env, GOCACHE: process.env.GOCACHE ?? "/tmp/osgo-gocache", OSGO_COMPILER_INTEGRATION: launcher},
       });

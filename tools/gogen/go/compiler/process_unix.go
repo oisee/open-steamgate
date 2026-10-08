@@ -3,6 +3,7 @@
 package compiler
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"syscall"
@@ -17,8 +18,12 @@ func startProcess(cmd *exec.Cmd) (processLifecycle, error) {
 	}
 	exited := make(chan struct{})
 	go func() {
-		defer close(exited)
-		waitForExitWithoutReap(cmd.Process.Pid)
+		// Only an observed exit closes exited: a failed wait must not make a
+		// healthy sidecar look dead (the reader still sees a real death as EOF).
+		// ECHILD: cleanup has already reaped it, so it has exited too.
+		if err := waitForExitWithoutReap(cmd.Process.Pid); err == nil || errors.Is(err, syscall.ECHILD) {
+			close(exited)
+		}
 	}()
 	return processLifecycle{
 		kill:   func() { _ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) },

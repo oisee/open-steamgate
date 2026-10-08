@@ -268,10 +268,13 @@ func TestKillGraceBound(t *testing.T) {
 		t.Fatal(err)
 	}
 	real := c.proc
-	// Model a Wait implementation that never signals completion; cleanup still returns.
+	// Model a Wait that does not complete within the grace; cleanup still returns.
+	// The test releases it afterwards so no goroutine outlives the test.
+	release := make(chan struct{})
+	defer close(release)
 	c.proc = &proc{
 		kill: real.kill, stdin: real.stdin, stdout: real.stdout,
-		wait: func() error { select {} }, exited: make(chan struct{}),
+		wait: func() error { <-release; return nil }, exited: make(chan struct{}),
 		dead: make(chan struct{}),
 	}
 	c.options.KillGrace = 15 * time.Millisecond
