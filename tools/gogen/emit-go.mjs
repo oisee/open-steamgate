@@ -1052,7 +1052,7 @@ function place(p, ctx) {
         ? `(*func() *${type} { Ensure_${typeName(owner)}(s); return &${field} }())` : field;
     }
     case "const": return p.go;
-    case "sy": return `s.Sy.${p.field}`;
+    case "sy": return p.field === "Msgno" ? `(*s.Sy.MessageNumber())` : `s.Sy.${p.field}`;
     case "field": return `${PLACES.has(p.base.e) || p.base.e === "const" ? place(p.base, ctx) : `(${expr(p.base, ctx)})`}.${ident(p.name)}`;
     case "dref_field": return `abap.DerefAs[${goType(p.struct)}](${expr(p.base, ctx)}, ${JSON.stringify(`->${p.name}`)}).${ident(p.name)}`;
     case "fs": return p.type.k === "data" ? ident(p.name) : p.type.k === "struct" ? `(*${ident(p.name)})` : `(*abap.CheckedRowPtr(${ident(p.name)}))`;
@@ -1417,10 +1417,10 @@ function stmtLines(st, ctx, d) {
       // CALL FUNCTION of a module the host implements (frontend NATIVE_FM):
       // every actual as generic data, the module's classic exceptions by name
       const call = `${helperFn(st.fn)}(s, map[string]abap.Data{${st.args.map((x) => `${JSON.stringify(x.name)}: ${expr(x.value, ctx)}`).join(", ")}})`;
-      if (!st.exceptions) return [`${t}${call}`];
+      if (!st.exceptions) return [`${t}func() { defer abap.MessageCallScope(s, ${JSON.stringify(st.name)}, nil, -1)(); ${call} }()`];
       const m = Object.entries(st.exceptions.map).map(([k, v]) => `${JSON.stringify(k)}: ${v}`).join(", ");
       return [`${t}func() {`, `${t}\tdefer abap.Classic(s, ${JSON.stringify(st.name)}, map[string]int32{${m}}, ${st.exceptions.others})`,
-        `${t}\t${call}`, `${t}\ts.Sy.Subrc = 0`, `${t}}()`];
+        `${t}\tdefer abap.MessageCallScope(s, ${JSON.stringify(st.name)}, map[string]int32{${m}}, ${st.exceptions.others})()`, `${t}\t${call}`, `${t}\ts.Sy.Subrc = 0`, `${t}}()`];
     }
     case "native": {
       const m = ctx.method;
@@ -2051,7 +2051,7 @@ function expr(e, ctx) {
     case "padc": return `abap.PadC(${expr(e.x, ctx)}, ${e.n})`;
     case "flag": return String(e.value);
     case "str_fn": return `abap.${e.fn}(${e.args.map((a) => expr(a, ctx)).join(", ")})`;
-    case "sy": return `s.Sy.${e.field}`;
+    case "sy": return place(e, ctx);
     case "sy_mandt": return "abap.Mandt";
     case "sy_host": return `abap.${e.name}`;
     case "int": return `int32(${e.value})`;
@@ -2113,12 +2113,15 @@ function expr(e, ctx) {
     case "call": {
       const args = ["s", ...e.args.map((a) => (a.dir === "importing" ? importingArg(a, ctx)
         : a.wrap ? `&${expr(a.wrap, ctx)}` : a.place === null ? `new(${goType(a.type)})` : `&${place(a.place, ctx)}`))];
-      if (e.receiver) return `${expr(e.receiver, ctx)}.${typeName(e.method)}(${args.join(", ")})`;
-      if (e.owner) return `${funcName(e.owner, e.method)}(${args.join(", ")})`;
-      if (e.static) return `${funcName(ctx.cls.name, e.method)}(${args.join(", ")})`;
-      // SUPER->m( ): the superclass's part, bound statically
-      if (e.sup) return `me.${typeName(e.sup)}.${typeName(e.method)}(${args.join(", ")})`;
-      return `${self(ctx, e.method)}.${typeName(e.method)}(${args.join(", ")})`;
+      let call;
+      if (e.receiver) call = `${expr(e.receiver, ctx)}.${typeName(e.method)}(${args.join(", ")})`;
+      else if (e.owner) call = `${funcName(e.owner, e.method)}(${args.join(", ")})`;
+      else if (e.static) call = `${funcName(ctx.cls.name, e.method)}(${args.join(", ")})`;
+      else if (e.sup) call = `me.${typeName(e.sup)}.${typeName(e.method)}(${args.join(", ")})`;
+      else call = `${self(ctx, e.method)}.${typeName(e.method)}(${args.join(", ")})`;
+      const codes = Object.entries(e.exceptions?.map ?? {}).map(([k, v]) => `${JSON.stringify(k)}: ${v}`).join(", ");
+      const result = e.type.k === "void" ? "" : goType(e.type);
+      return `func() ${result} { defer abap.MessageCallScope(s, ${JSON.stringify(e.callee)}, map[string]int32{${codes}}, ${e.exceptions?.others ?? -1})(); ${result ? "return " : ""}${call} }()`;
     }
     case "nop_call": return "";
     case "xbytes": return constLiteral({type: e.type, value: e.value});
@@ -2243,6 +2246,7 @@ function conv(e, ctx) {
     case "x2i": case "x2i8": return `${to === "i" ? "int32" : "int64"}(${helperFn("intbytes.FromX")}(${x}, ${to === "i" ? 4 : 8}))`;
     case "xs2x": return `abap.XFit(${x}, ${e.to.len})`;
     case "c2x": return e.to.k === "x" ? `abap.XFit(abap.CToX(${x}), ${e.to.len})` : `abap.CToX(${x})`;
+    case "t2i": return `abap.TToI(${x})`;
     case "d2i": return `abap.DToI(${x})`;
     case "c2n":
       if (to === "f") return `abap.ParseF(${x})`;
@@ -2272,8 +2276,8 @@ function cond(c, ctx) {
       return `func() bool { rows${n} := ${expr(c.range, ctx)}; hasI${n}, hit${n} := false, false; for _, r${n} := range rows${n} { match${n} := false; switch r${n}.${ident("OPTION")} { case "EQ": match${n} = ${expr(c.value, ctx)} == r${n}.${ident("LOW")}; case "BT": match${n} = ${expr(c.value, ctx)} >= r${n}.${ident("LOW")} && ${expr(c.value, ctx)} <= r${n}.${ident("HIGH")}; default: panic(abap.NotCompiled("IN range", "selection option other than EQ or BT")) }; if r${n}.${ident("SIGN")} == "I" { hasI${n} = true; if match${n} { hit${n} = true } } else if r${n}.${ident("SIGN")} == "E" { if match${n} { return false } } else { panic(abap.NotCompiled("IN range", "selection sign other than I or E")) } }; return !hasI${n} || hit${n} }()`;
     }
     case "co": return `abap.CO(${expr(c.l, ctx)}, ${expr(c.r, ctx)})`;
-    case "cs": HELPER_IMPORTS.add("charsearch"); return `hCharsearch.WithPos(s, ${expr(c.l, ctx)}, ${expr(c.r, ctx)})`;
-    case "cp": return `abap.CP(${expr(c.l, ctx)}, ${expr(c.r, ctx)}, ${!!c.cpat})`;
+    case "cs": HELPER_IMPORTS.add("charsearch"); return `hCharsearch.WithPos(s, ${expr(c.l, ctx)}, ${expr(c.r, ctx)}, ${!!c.csubject})`;
+    case "cp": return `abap.CP(${expr(c.l, ctx)}, ${expr(c.r, ctx)}, ${!!c.cpat}, ${!!c.csubject})`;
     case "ca": return `abap.CA(${expr(c.l, ctx)}, ${expr(c.r, ctx)})`;
     case "cmp":
       // a generic operand (frontend compareValues, unwrap_chars): the pair

@@ -103,6 +103,10 @@ func MoveData(dst, src Data) {
 			return
 		}
 	case 'C':
+		if sk == 'I' {
+			*dst.P.(*string) = PToC(IToP(*src.P.(*int32)), 0, dst.T.Len)
+			return
+		}
 		if sk == 'g' || sk == 'C' {
 			*dst.P.(*string) = CFit(*src.P.(*string), dst.T.Len)
 			return

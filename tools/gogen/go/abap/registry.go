@@ -70,7 +70,7 @@ type ClassicException struct {
 func (c ClassicException) Error() string { return "RAISE_EXCEPTION " + c.Name + " in " + c.Method }
 
 // Classic is deferred around a call with EXCEPTIONS: the exception named, or
-// OTHERS, sets sy-subrc; anything else goes on.
+// OTHERS, sets sy-subrc; -1 means absent, so an assigned zero is handled.
 func Classic(s *Session, method string, m map[string]int32, others int32) {
 	r := recover()
 	if r == nil {
@@ -81,7 +81,7 @@ func Classic(s *Session, method string, m map[string]int32, others int32) {
 			s.Sy.Subrc = v
 			return
 		}
-		if others != 0 {
+		if others >= 0 {
 			s.Sy.Subrc = others
 			return
 		}
@@ -149,4 +149,43 @@ func RegisterLocalDestination(s *Session, name string) {
 		s.localDestinations = map[string]bool{}
 	}
 	s.localDestinations[strings.TrimRight(name, " ")] = true
+}
+
+// MessageCallScope carries only the immediate caller's EXCEPTIONS assignment.
+// Every call, including one without EXCEPTIONS, masks its parent's assignment.
+type messageCall struct {
+	method string
+	codes  map[string]int32
+	others int32
+}
+
+func MessageCallScope(s *Session, method string, codes map[string]int32, others int32) func() {
+	previous := s.messageCall
+	s.messageCall = &messageCall{method, codes, others}
+	return func() { s.messageCall = previous }
+}
+
+// MESSAGE ... RAISING sets the session fields before raising. Classic's
+// deferred handler assigns sy-subrc using the caller's EXCEPTIONS mapping.
+func MessageRaise(s *Session, id, ty, no, name, method string, values ...string) {
+	s.Sy.Msgid = CFit(strings.ToUpper(id), 20)
+	s.Sy.Msgty = CFit(strings.ToUpper(ty), 1)
+	s.Sy.Msgno = CToN(no, 3)
+	dst := []*string{&s.Sy.Msgv1, &s.Sy.Msgv2, &s.Sy.Msgv3, &s.Sy.Msgv4}
+	for i, p := range dst {
+		*p = ""
+		if i < len(values) {
+			*p = CFit(values[i], 50)
+		}
+	}
+	if c := s.messageCall; c != nil && c.method == method {
+		if _, assigned := c.codes[name]; assigned || c.others >= 0 {
+			panic(ClassicException{Name: name, Method: method})
+		}
+	}
+	// As for plain MESSAGE, S/I continue. Other types are not implemented by
+	// this host's plain MESSAGE path; preserve that explicit refusal.
+	if s.Sy.Msgty != "S" && s.Sy.Msgty != "I" {
+		panic(NotCompiled("MESSAGE", "plain MESSAGE type "+s.Sy.Msgty))
+	}
 }

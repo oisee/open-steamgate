@@ -86,6 +86,14 @@ func UniqueKeyCheck(n int, dup func(i int) bool, key string) {
 // any((*Sub)(nil)) and any((*Base)(nil)), unequal to Go, are equal here.
 // Bound references compare by identity.
 func RefEq(a, b any) bool {
+	// CATCH cx_root can wrap an object to also accept runtime exceptions.
+	// Compare the underlying ABAP object, rather than these host wrappers.
+	if e, ok := a.(*Exception); ok && e != nil && e.Obj != nil {
+		a = e.Obj
+	}
+	if e, ok := b.(*Exception); ok && e != nil && e.Obj != nil {
+		b = e.Obj
+	}
 	na, nb := refNil(a), refNil(b)
 	if na || nb {
 		return na && nb

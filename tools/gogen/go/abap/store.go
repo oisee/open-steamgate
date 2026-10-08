@@ -1,6 +1,9 @@
 package abap
 
-import "osg/gogen/objstore"
+import (
+	"osg/gogen/objstore"
+	"reflect"
+)
 
 // The object store (CALL FUNCTION 'ZOSD_STORE' DESTINATION 'STORE') lives in
 // go/objstore, a package with no import of go/abap and no Session. What stays
@@ -44,6 +47,7 @@ func storeInputs(args map[string]Data) map[string]*string {
 // ZOSD_STORE adapts DESTINATION 'STORE': inputs in, scalars and tables out.
 func ZOSD_STORE(s *Session, args map[string]Data) {
 	a := StoreCall(storeInputs(args))
+	// The backend supplies EV_JSON and EV_STATE; the adapter passes them through.
 	for k, v := range a.Scalars {
 		if d, ok := fmArg(args, k); ok {
 			v := v
@@ -78,13 +82,7 @@ func ZOSD_STORE(s *Session, args map[string]Data) {
 		}
 	}
 	fillRows("ET_REVISION", len(a.Revisions), func(i int, set func(string, any)) {
-		r := a.Revisions[i]
-		set("REVISION", r.REVISION)
-		set("SHORT", r.SHORT)
-		set("AUTHOR", r.AUTHOR)
-		set("DATE", r.DATE)
-		set("TIME", r.TIME)
-		set("SUBJECT", r.SUBJECT)
+		storeRevisionRow(a.Revisions[i], set)
 	})
 	fillRows("ET_OBJECT", len(a.Objects), func(i int, set func(string, any)) {
 		r := a.Objects[i]
@@ -110,4 +108,19 @@ func ZOSD_STORE(s *Session, args map[string]Data) {
 		set("COUNT", a.Types[i].COUNT)
 	})
 	fillRows("ET_TOKEN", 0, nil)
+}
+
+// storeRevisionRow projects the backend's revision string fields. Reading
+// optional fields by name keeps the adapter buildable with older backends.
+// The backend supplies SUBJECT_FULL; the adapter passes it through.
+func storeRevisionRow(row any, set func(string, any)) {
+	r := reflect.ValueOf(row)
+	for _, name := range []string{"REVISION", "SHORT", "AUTHOR", "DATE", "TIME", "SUBJECT", "SUBJECT_FULL"} {
+		value := ""
+		f := r.FieldByName(name)
+		if f.IsValid() && f.Kind() == reflect.String {
+			value = f.String()
+		}
+		set(name, value)
+	}
 }

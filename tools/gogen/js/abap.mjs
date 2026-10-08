@@ -349,7 +349,11 @@ export function DateAdd(date, days) {
   if (out < "15821015" || out > "99991231") throw notCompiled("date arithmetic: a result outside the measured range");
   return out;
 }
-export function CSWithPos(s, a, b) {
+export function CSWithPos(s, a, b, fixed = false) {
+  if ((a === "" || (fixed && a.replace(/ +$/, "") === "")) && b !== "") {
+    s.sy.fdpos = a.length;
+    return false;
+  }
   const upper = a.toUpperCase();
   const pos = upper.indexOf(b.toUpperCase());
   s.sy.fdpos = pos < 0 ? upper.length : pos;
@@ -496,13 +500,13 @@ export class ClassicException extends Error {
 export function classic(s, e, method, map, others) {
   if (e instanceof ClassicException && e.method === method) {
     if (map[e.exName] !== undefined) { s.sy.subrc = map[e.exName]; return; }
-    if (others !== 0) { s.sy.subrc = others; return; }
+    if (others >= 0) { s.sy.subrc = others; return; }
   }
   throw e;
 }
 
 // CP and CA: see the Go runtime (conv.go), measured on A4H
-export function CP(a, p, cpat) {
+export function CP(a, p, cpat, csubject = false) {
   if (cpat && p === "") p = " ";
   const ps = [];
   const pr = [...p];
@@ -512,10 +516,12 @@ export function CP(a, p, cpat) {
     else if (pr[i] === "+") ps.push({k: "+"});
     else ps.push({r: pr[i], k: "l"});
   }
+  if (cpat) while (ps.length > 1 && ps.at(-1).k === "l" && ps.at(-1).r === " ") ps.pop();
   const ar = [...a];
   const eq = (t, c) => (t.k === "+" ? true : t.k === "e" ? t.r === c : t.r.toUpperCase() === c.toUpperCase());
   let i = 0, j = 0, star = -1, mark = 0;
   while (i < ar.length) {
+    if (j === ps.length && csubject && ar.slice(i).every((c) => c === " ")) return true;
     if (j < ps.length && ps[j].k !== "*" && eq(ps[j], ar[i])) { i++; j++; }
     else if (j < ps.length && ps[j].k === "*") { star = j; mark = i; j++; }
     else if (star >= 0) { j = star + 1; mark++; i = mark; }
@@ -697,7 +703,14 @@ export function isA(cls, ancestor) {
   for (let c = cls, n = 0; c && n < 40; c = supers.get(c), n += 1) if (c === ancestor) return true;
   return false;
 }
+export function RefEq(a, b) {
+  const object = (v) => v instanceof Raised ? v.obj : v ?? null;
+  return object(a) === object(b);
+}
 export function raise(obj, cls) {
+  // A runtime catch stores the exception wrapper, while a class catch stores
+  // its object. Re-raising either retains its original class and identity.
+  if (!cls && (obj instanceof Raised || obj instanceof AbapError)) return obj;
   if (obj === null || obj === undefined) throw new AbapError("OBJECTS_OBJREF_NOT_ASSIGNED", "RAISE EXCEPTION of an initial reference");
   const c = cls || obj.constructor?.$abap;
   if (!c) throw new AbapError("NOT_COMPILED", "RAISE EXCEPTION: the class of the object is not registered");
@@ -1060,6 +1073,12 @@ export function CallStatic(s, cls, method, args) {
   e.call(s, args);
 }
 export function paramMissing(op) { throw new AbapError("CX_SY_DYN_CALL_PARAM_MISSING", op); }
+// t -> i: mirror go/abap/datesplit.go, including invalid digit/length moves.
+export function TToI(v) {
+  if (!/^\d{6}$/.test(v)) return 0;
+  return Number(v.slice(0, 2)) * 3600 + Number(v.slice(2, 4)) * 60 + Number(v.slice(4, 6));
+}
+
 // d -> i, measured on A4H (go/abap/datesplit.go DToI says how)
 export function DToI(v) {
   if (!/^\d{8}$/.test(v)) return 0;

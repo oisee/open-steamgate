@@ -1,6 +1,7 @@
 package abap
 
 import (
+	"osg/gogen/timestamp"
 	"strings"
 )
 
@@ -55,6 +56,22 @@ func DToI(v string) int32 {
 	return int32(jdn - 1721424)
 }
 
+// TToI is a time operand's seconds since midnight.
+func TToI(v string) int32 {
+	if len(v) != 6 {
+		return 0
+	}
+	n := int32(0)
+	for i, factor := range []int32{3600, 60, 1} {
+		a, b := v[2*i], v[2*i+1]
+		if a < '0' || a > '9' || b < '0' || b > '9' {
+			return 0
+		}
+		n += (int32(a-'0')*10 + int32(b-'0')) * factor
+	}
+	return n
+}
+
 // SplitN is SPLIT v AT sep INTO n fields, measured on A4H: the pieces at
 // each separator, the last field taking the rest after its separator, a
 // field without a piece empty.
@@ -74,4 +91,34 @@ func SplitFit(s *Session, piece string, n int) string {
 		s.Sy.Subrc = 4
 	}
 	return CFit(piece, n)
+}
+
+// Host statement adapters use ordinary native IR so both emitters can
+// compile the surrounding class, even when a host lacks this operation.
+func ConvertTimestampInto(s *Session, stamp, zone string, date, clock Data) {
+	d, tm, rc, ok, err := timestamp.ToDateTime(stamp, zone)
+	if err != nil {
+		panic(NotCompiled("CONVERT TIME STAMP", err.Error()))
+	}
+	s.Sy.Subrc = rc
+	if !ok {
+		return
+	}
+	if date.P != nil {
+		MoveData(date, Data{P: &d, T: TString})
+	}
+	if clock.P != nil {
+		MoveData(clock, Data{P: &tm, T: TString})
+	}
+}
+
+func ConvertDateTimeInto(s *Session, date, clock, zone string, stamp Data) {
+	ts, rc, ok, err := timestamp.FromDateTime(date, clock, zone)
+	if err != nil {
+		panic(NotCompiled("CONVERT TIME STAMP", err.Error()))
+	}
+	s.Sy.Subrc = rc
+	if ok {
+		MoveData(stamp, Data{P: &ts, T: TString})
+	}
 }

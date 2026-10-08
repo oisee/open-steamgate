@@ -143,7 +143,11 @@ export function compileProgram({folders, objects, tolerant = false, skip = () =>
   }
   REG = reg;
   prepareSession(session, reg);
-  const diagnostics = syntaxDiagnostics(reg, (fn) => wanted.includes(objName(fn)), objName, session);
+  // abaplint's RAISE syntax checker only accepts ObjectReferenceType, not
+  // its generic REF TO object sibling. The dynamic raise path below checks
+  // the actual registered object; retain every other syntax diagnostic.
+  const diagnostics = syntaxDiagnostics(reg, (fn) => wanted.includes(objName(fn)), objName, session)
+    .filter((d) => !d.message.endsWith("RAISE EXCEPTION, must be object reference, got GenericObjectReferenceType"));
   // Tolerant surveys leave broken objects out, retaining their diagnostics.
   if (diagnostics.length && !tolerant) throw new Error(diagnostics.map((d) => d.message).join("\n"));
   const broken = new Set(diagnostics.map((d) => d.object.toLowerCase()));
@@ -762,6 +766,12 @@ const NATIVE = new Map([
  *   {bound}               a line of that loop whose work the binds do
  */
 const KERNEL = new Map([
+  // ADT capability answers match Node's parent kernel / non-one-runtime host.
+  ["ZCL_OSD_ADT_HOST=>ONE_RUNTIME|rv_on.set(abap.context.RFCDestinations.STORE?.localSystem ? \"X\" : \"\");", {fn: "abap.ADTOneRuntime", args: ["&RV_ON:c"]}],
+  ["ZCL_OSD_KERNEL_GUARD=>HAS_SERVING_DATABASE|if (globalThis.__osdAdtKernel !== undefined) rv_available.set(\" \");", {fn: "abap.ADTUnavailable", args: ["&RV_AVAILABLE:c"]}],
+  ["ZCL_OSD_KERNEL_GUARD=>HAS_GENERATION|if (globalThis.__osdAdtKernel !== undefined || !((typeof process !== \"undefined\" && process.env?.OSD_ADT_ONE_RUNTIME === \"1\") || abap.context.RFCDestinations.STORE?.oneRuntimeEnabled?.() === true)) rv_available.set(\" \");", {fn: "abap.ADTUnavailable", args: ["&RV_AVAILABLE:c"]}],
+  // CALL_CLASSRUN's try/catch needs an exception boundary and a caught host
+  // error; fn/loop/bound/end cannot express those, so its lines stay refused.
   // the class name of an object as the transpiler runtime names it (go/classname)
   ["CL_ABAP_CLASSDESCR=>GET_CLASS_NAME|lv_name.set(p_object.get().constructor.INTERNAL_NAME);", {fn: "classname.Internal", args: ["P_OBJECT:ref", "&LV_NAME:string"]}],
   ["CL_EXPRESS_ICF_SHIM=>RUN|lv_classname.set(INPUT.class);", {fn: "abap.ICFClass", args: ["REQ:data", "&LV_CLASSNAME:string"]}],
@@ -928,10 +938,10 @@ const NATIVE_FM = new Map([
 const DESTINATION_FM = new Map([
   ["STORE ZOSD_STORE", {fn: "abap.ZOSD_STORE", params: {
     IV_COMMAND: "exporting", IV_TYPE: "exporting", IV_NAME: "exporting", IV_INCLUDE: "exporting",
-    IV_SOURCE: "exporting", IV_FILTER: "exporting", IV_LIMIT: "exporting", IV_REVISION: "exporting",
+    IV_SOURCE: "exporting", IV_FILTER: "exporting", IV_LIMIT: "exporting", IV_REVISION: "exporting", IV_JSON: "exporting",
     EV_SOURCE: "importing", EV_FILE: "importing", EV_PACKAGE: "importing", EV_VERSION: "importing",
     EV_WRITABLE: "importing", EV_ACTIVE: "importing", EV_LIVE: "importing", EV_NOTE: "importing",
-    EV_COUNT: "importing", EV_MS: "importing", EV_ERROR: "importing",
+    EV_COUNT: "importing", EV_MS: "importing", EV_ERROR: "importing", EV_JSON: "importing", EV_STATE: "importing", EV_CHANGED: "importing",
     ET_OBJECT: "tables", ET_ISSUE: "tables", ET_TYPE: "tables", ET_TOKEN: "tables", ET_REVISION: "tables"}}],
 ]);
 
@@ -992,7 +1002,7 @@ function callFunction(node, ctx, text) {
           args.push({name: pname, value: convert(target, {k: "data"})});
         }
       } else if (isExpr(k, Expressions.ParameterListExceptions)) {
-        exceptions = {map: {}, others: 0};
+        exceptions = {map: {}, others: -1};
         for (const x of k.findDirectExpressions(Expressions.ParameterException)) {
           const v = x.findDirectExpression(Expressions.Integer);
           if (!v) throw new Unsupported(`EXCEPTIONS with a value that is not a number: ${x.concatTokens()}`);
@@ -1039,10 +1049,10 @@ function compiledFunctionCall(node, ctx, text, name) {
           targets.set(upper(p.findDirectExpression(Expressions.ParameterName).concatTokens()), {kw, target: lvalue(p.findDirectExpression(Expressions.Target), ctx)});
         }
       } else if (isExpr(k, Expressions.ParameterListExceptions)) {
-        exceptions = {map: {}, others: 0};
+        exceptions = {map: {}, others: -1};
         for (const x of k.findDirectExpressions(Expressions.ParameterException)) {
           const v = x.findDirectExpression(Expressions.Integer);
-          if (!v || Number(v.concatTokens()) === 0) throw new Unsupported(`EXCEPTIONS with a value that is not a number other than 0: ${x.concatTokens()}`);
+          if (!v) throw new Unsupported(`EXCEPTIONS with a value that is not a number: ${x.concatTokens()}`);
           const nm = x.findDirectExpression(Expressions.ParameterName);
           if (nm) exceptions.map[upper(nm.concatTokens())] = Number(v.concatTokens());
           else exceptions.others = Number(v.concatTokens());
@@ -2111,6 +2121,18 @@ function uniqueGuard(tableType, what) {
   if (unique.length) throw new Unsupported(`${what} on a table with the unique secondary key ${unique[0].name}`);
 }
 
+/** String operators share exactly the logical-expression semantics. */
+function stringComparison(op, l, r) {
+  const kinds = {CP: "cp", NP: "cp", CA: "ca", NA: "ca", CS: "cs", NS: "cs", CO: "co", CN: "co"};
+  if (!kinds[op]) return null;
+  const kind = kinds[op];
+  // CS keeps the subject's blanks; CA/CO keep both. CP keeps escaped
+  // pattern blanks and distinguishes fixed subjects from strings.
+  const c = {c: kind, l: padded(l), r: kind === "cs" ? convert(r, S) : padded(r),
+    cpat: r.type.k === "c", csubject: l.type.k === "c"};
+  return ["NP", "NA", "NS", "CN"].includes(op) ? {c: "not", x: c} : c;
+}
+
 /** WHERE comp op value [AND ...] over the rows of a table of structures */
 function whereOf(cc, rowType, ctx, text) {
   const where = [];
@@ -2132,6 +2154,8 @@ function whereOf(cc, rowType, ctx, text) {
       }
       const opT = upper(kids[1].concatTokens());
       const op = OPS[opT] ?? opT;
+      const sc = ["CP", "NP", "CA", "NA", "CS", "NS", "CO", "CN"].includes(op) ? stringComparison(op, fx, source(kids[2], ctx, rowType)) : null;
+      if (sc) { where.push({fx: {e: "bool", cond: sc, blank: "", type: C(1)}, op: "=", value: {e: "chars", value: "X", type: C(1)}, calc: S}); continue; }
       if (!["=", "<>", "<", "<=", ">", ">="].includes(op)) throw new Unsupported(`WHERE table_line operator ${op}`);
       const v = source(kids[2], ctx, rowType);
       const calc = numeric(rowType) || numeric(v.type) ? (rowType.k === "f" || v.type.k === "f" ? F : I) : S;
@@ -2156,6 +2180,8 @@ function whereOf(cc, rowType, ctx, text) {
     const f = fx !== null ? {name: fx.name, type: fx.type} : fieldOf(ctx, rowType, comp.concatTokens(), text);
     const opT = upper(opN.concatTokens());
     const op = OPS[opT] ?? opT;
+    const sc = ["CP", "NP", "CA", "NA", "CS", "NS", "CO", "CN"].includes(op) ? stringComparison(op, fx ?? {e: "field", base: {e: "lrow", type: rowType}, name: f.name, type: f.type}, source(src, ctx, f.type)) : null;
+    if (sc) { where.push({fx: {e: "bool", cond: sc, blank: "", type: C(1)}, op: "=", value: {e: "chars", value: "X", type: C(1)}, calc: S}); continue; }
     if (!["=", "<>", "<", "<=", ">", ">="].includes(op)) throw new Unsupported(`WHERE operator ${op}`);
     const v = source(src, ctx, f.type);
     const calc = numeric(f.type) || numeric(v.type) ? (f.type.k === "f" || v.type.k === "f" ? F : I) : S;
@@ -2785,6 +2811,33 @@ function statement(node, ctx) {
     if (target.type.k !== "i") throw new Unsupported(`GET RUN TIME FIELD into a ${target.type.k}`);
     return {s: "get_runtime", target};
   }
+  if (isStmt(node, Statements.Convert)) {
+    const kids = node.getChildren();
+    const inputs = new Map(), outputs = new Map();
+    for (let i = 0; i < kids.length; i++) {
+      if (!isExpr(kids[i], Expressions.Source) && !isExpr(kids[i], Expressions.Target)) continue;
+      const key = upper(kids[i - 1].concatTokens());
+      (isExpr(kids[i], Expressions.Source) ? inputs : outputs).set(key, kids[i]);
+    }
+    if (!inputs.has("ZONE") || /DAYLIGHT|UTCLONG|INVERTED/i.test(text)) throw new Unsupported(`CONVERT form: ${text}`);
+    const zone = convert(source(inputs.get("ZONE"), ctx), S);
+    if (inputs.has("STAMP")) {
+      const stamp = source(inputs.get("STAMP"), ctx);
+      if (stamp.type.k !== "p") throw new Unsupported(`CONVERT TIME STAMP of a ${stamp.type.k}`);
+      const date = outputs.has("DATE") ? lvalue(outputs.get("DATE"), ctx) : null;
+      const time = outputs.has("TIME") ? lvalue(outputs.get("TIME"), ctx) : null;
+      if ((!date && !time) || (date && date.type.k !== "d") || (time && time.type.k !== "t")) throw new Unsupported(`CONVERT targets: ${text}`);
+      return {s: "native", fn: "abap.ConvertTimestampInto", stmt: true, args: [stamp, zone,
+        date ? convert(date, {k: "data"}) : {e: "zero", type: {k: "data"}},
+        time ? convert(time, {k: "data"}) : {e: "zero", type: {k: "data"}}].map((value) => ({value}))};
+    }
+    if (!inputs.has("DATE") || !inputs.has("TIME") || !outputs.has("STAMP")) throw new Unsupported(`CONVERT form: ${text}`);
+    const stamp = lvalue(outputs.get("STAMP"), ctx);
+    if (stamp.type.k !== "p") throw new Unsupported(`CONVERT INTO TIME STAMP of a ${stamp.type.k}`);
+    return {s: "native", fn: "abap.ConvertDateTimeInto", stmt: true, args: [
+      convert(source(inputs.get("DATE"), ctx), S), convert(source(inputs.get("TIME"), ctx), S), zone,
+      convert(stamp, {k: "data"})].map((value) => ({value}))};
+  }
   // ultra/events: GET TIME STAMP FIELD ts into a TIMESTAMP p(8,0) or a
   // TIMESTAMPL p(11,7): UTC, as sy-datum and sy-uzeit are here
   if (isStmt(node, Statements.GetTime)) {
@@ -2798,11 +2851,41 @@ function statement(node, ctx) {
   if (isStmt(node, Statements.RaiseEvent)) return raiseEvent(node, ctx, text);
   // RAISE EXCEPTION TYPE cls [EXPORTING ...] / RAISE EXCEPTION obj
   if (isStmt(node, Statements.Raise) && /^RAISE\s+(EXCEPTION|RESUMABLE|SHORTDUMP)\b/i.test(text)) return raiseException(node, ctx, text);
+  if (isStmt(node, Statements.Message)) {
+    const raising = node.findDirectExpression(Expressions.ExceptionName);
+    const msg = node.findDirectExpression(Expressions.MessageSource);
+    if (!raising || !msg || /DISPLAY LIKE|INTO/i.test(text)) throw new Unsupported(`MESSAGE form: ${text}`);
+    let id, ty, no;
+    const short = msg.findDirectExpression(Expressions.MessageTypeAndNumber);
+    if (short) {
+      const m = /^([a-z])(\d{3})$/i.exec(short.concatTokens());
+      const cls = msg.findDirectExpression(Expressions.MessageClass);
+      if (!m || !cls) throw new Unsupported(`MESSAGE without explicit class: ${text}`);
+      id = {e: "str", value: upper(cls.concatTokens()), type: S};
+      ty = {e: "str", value: upper(m[1]), type: S};
+      no = {e: "str", value: m[2], type: S};
+    } else {
+      const kids = msg.getChildren();
+      const read = (key) => {
+        const i = kids.findIndex((k) => isTok(k, key));
+        if (i < 0) throw new Unsupported(`MESSAGE missing ${key}`);
+        return source(kids[i + 1], ctx);
+      };
+      id = convert(read("ID"), S);
+      ty = convert(read("TYPE"), S);
+      no = convert(read("NUMBER"), {k: "n", len: 3});
+    }
+    const values = node.findDirectExpressions(Expressions.MessageSourceSource).map((x) => convert(source(x, ctx), C(50)));
+    if (values.length > 4) throw new Unsupported(`MESSAGE WITH more than four values: ${text}`);
+    const name = {e: "str", value: upper(raising.concatTokens()), type: S};
+    const method = {e: "str", value: ctx.method, type: S};
+    return {s: "native", fn: "abap.MessageRaise", stmt: true, args: [id, ty, no, name, method, ...values].map((value) => ({value}))};
+  }
   // RAISE name: a classic exception, for the caller's EXCEPTIONS list
   if (isStmt(node, Statements.Raise) && !/^RAISE\s+(EXCEPTION|RESUMABLE)\b/i.test(text)) {
     const n = node.findDirectExpression(Expressions.ExceptionName);
     if (!n) throw new Unsupported(`RAISE form: ${text}`);
-    return {s: "raise_classic", name: upper(n.concatTokens()), method: ctx.method.includes("~") ? ctx.method.split("~")[1] : ctx.method};
+    return {s: "raise_classic", name: upper(n.concatTokens()), method: ctx.method};
   }
   // CALL METHOD (class)=>m EXPORTING ...: a static method by class name,
   // through the program's registry of static methods
@@ -3562,6 +3645,11 @@ function classRefIntfAttribute(base, name, ctx, write) {
 /* --------------------------------------------------------------- expressions */
 
 const SY = {"SY-INDEX": "Index", "SY-TABIX": "Tabix", "SY-SUBRC": "Subrc", "SY-DBCNT": "Dbcnt", "SY-FDPOS": "Fdpos"};
+const SY_MESSAGES = {
+  "SY-MSGID": {field: "Msgid", type: C(20)}, "SY-MSGNO": {field: "Msgno", type: {k: "n", len: 3}},
+  "SY-MSGTY": {field: "Msgty", type: C(1)},
+  ...Object.fromEntries([1, 2, 3, 4].map((i) => [`SY-MSGV${i}`, {field: `Msgv${i}`, type: C(50)}])),
+};
 const CONSTRUCTORS = new Set(["VALUE", "CONV", "NEW", "REF", "COND", "SWITCH", "EXACT", "CORRESPONDING", "REDUCE", "FILTER", "CAST", "BOOLC", "XSDBOOL"]);
 
 /**
@@ -3710,10 +3798,9 @@ function source(node, ctx, outer, hint = outer) {
   // 2026-09-24, ZCL_GOGEN_T_XARITH: 'EDB88320' DIV 2 is -153337456, x1 FF
   // + 1 is 256, x8 ...000000FF is 255, x1 0A + p 1.5 is 11.50 in p, 07 / 2
   // into i is 4); arith converts such a leaf to i first
-  const leaves = leafTypes(node, ctx).map((t) => (t.k === "x" || t.k === "xstring" ? I : t));
-  // a character target (c, string) does not take part: the calculation
-  // type of `s = i + 1` is not measured, so it is refused below unless the
-  // operands decide it (a p or character operand: p, an f: f)
+  const leaves = leafTypes(node, ctx).map((t) => (["x", "xstring", "d", "t"].includes(t.k) ? I : t));
+  // A character target does not take part: compute from the operands,
+  // then MOVE the result (JS oracle: adt-cases calculation probe).
   const charTarget = target !== undefined && charlike(target);
   const types = [...leaves, ...(target === undefined || charTarget ? [] : [target])];
   // ** computes in f when the operands are integers (measured on A4H:
@@ -3729,7 +3816,6 @@ function source(node, ctx, outer, hint = outer) {
     if (odd) throw new Unsupported(`calculation type p with a ${odd.k} operand: ${node.concatTokens()}`);
     return arith(node, ctx, P31);
   }
-  if (charTarget) throw new Unsupported(`calculation type of ${node.concatTokens()} into a character field: not measured`);
   if (types.some((t) => t.k === "int8")) return arith(node, ctx, INT8);
   // a d operand counts its days as an i (measured on A4H: ( d / 7 ) * 7
   // into i rounds in between, so the calculation type is i, not p); a d
@@ -3840,8 +3926,9 @@ function arith(node, ctx, calc, hint) {
     if (isExpr(item.node, Expressions.Source)) return arith(item.node, ctx, t);
     let v = sourceOperand(item.node, ctx, t === undefined ? item.hint : t);
     if (item.comps) v = componentsOf(v, item.comps, ctx);
-    // an x operand of arithmetic that is not a bit operation: through i
-    if (t !== undefined && (v.type.k === "x" || v.type.k === "xstring") && t.k !== "x" && t.k !== "xstring" && t.k !== "i") v = convert(v, I);
+    // Byte, date and time operands enter arithmetic through their integer
+    // value (dates in days, times in seconds), before the calculation type.
+    if (t !== undefined && ["x", "xstring", "d", "t"].includes(v.type.k) && !["x", "xstring", "i"].includes(t.k)) v = convert(v, I);
     return t === undefined ? v : convert(v, t);
   };
   let expr;
@@ -3898,6 +3985,7 @@ function sourceOperand(n, ctx, hint) {
 function fieldChain(n, ctx) {
   const kids = isExpr(n, Expressions.SourceField) ? [n] : n.getChildren();
   const text = upper(n.concatTokens());
+  if (SY_MESSAGES[text]) return {e: "sy", ...SY_MESSAGES[text]};
   if (SY[text] !== undefined) return {e: "sy", field: SY[text], type: I};
   // the logon client: the transpiler runtime's constant (abap.Mandt)
   if (text === "SY-MANDT") return {e: "sy_mandt", type: C(3)};
@@ -5447,7 +5535,7 @@ function raiseException(node, ctx, text) {
   const src = node.findDirectExpression(Expressions.Source) ?? node.findDirectExpression(Expressions.SimpleSource2);
   if (!src) throw new Unsupported(`RAISE EXCEPTION form: ${text.slice(0, 80)}`);
   const value = source(src, ctx);
-  if (value.type.k !== "ref" || value.type.name === "OBJECT") throw new Unsupported(`RAISE EXCEPTION of a ${value.type.k === "ref" ? "REF TO object" : value.type.k}`);
+  if (!["ref", "exc"].includes(value.type.k)) throw new Unsupported(`RAISE EXCEPTION of a ${value.type.k}`);
   return {s: "raise", value, cls: null};
 }
 
@@ -6048,7 +6136,7 @@ function call(chain, ctx, statement, hint) {
     // called ends it, and sy-subrc says which
     const exl = full.findDirectExpression(Expressions.ParameterListExceptions);
     if (exl) {
-      exceptions = {map: {}, others: 0};
+      exceptions = {map: {}, others: -1};
       for (const x of exl.findDirectExpressions(Expressions.ParameterException)) {
         const v = x.findDirectExpression(Expressions.Integer);
         if (!v) throw new Unsupported(`EXCEPTIONS with a value that is not a number: ${x.concatTokens()}`);
@@ -6110,13 +6198,14 @@ function call(chain, ctx, statement, hint) {
   // SUPER->constructor( ) of a chain where no superclass has a constructor does nothing
   if (sig.none) return {e: "nop_call", type: {k: "void"}};
   return {e: "call", method: qualified, static: sig.static, owner, receiver, sup, args, type: sig.returning?.type ?? {k: "void"},
-    exceptions, receiving, callee: name.includes("~") ? name.split("~")[1] : name};
+    exceptions, receiving, callee: qualified};
 }
 
 function defaultValue(p, ctx) {
   let t = p.default;
   // A system field in a signature default is read when the call is made.
   // ASSERT_SUBRC's ACT defaults to sy-subrc.
+  if (SY_MESSAGES[upper(t)]) return convert({e: "sy", ...SY_MESSAGES[upper(t)]}, p.type);
   if (SY[upper(t)] !== undefined) return convert({e: "sy", field: SY[upper(t)], type: I}, p.type);
   // SPACE is a built-in value, not an attribute of the class which declares
   // the method. GUI_UPLOAD's optional CODEPAGE uses exactly this default.
@@ -6297,6 +6386,9 @@ export function convert(expr, to) {
   // before 15821015 (15821004 is 577736, 15821015 is 577737), an invalid
   // date is 0 (abap.DToI)
   if (to.k === "i" && from.k === "d") return ok("d2i");
+  if (to.k === "i" && from.k === "t") return ok("t2i");
+  // Reuse the existing signed, right-aligned packed MOVE formatting.
+  if (to.k === "c" && from.k === "i") return convert(convert(expr, {k: "p", len: 8, dec: 0}), to);
   // d / t into characters: the eight / six digits as they are (both are
   // held as their digits already); into a c they are cut or padded as any
   // characters are
@@ -6537,7 +6629,7 @@ function compare(node, ctx) {
       const r = {c: "data_bound", x: v};
       return /\bIS\s+NOT\s+BOUND\b/.test(text) !== not ? {c: "not", x: r} : r;
     }
-    if (v.type.k !== "ref") throw new Unsupported(`IS BOUND of a ${v.type.k}`);
+    if (!["ref", "exc"].includes(v.type.k)) throw new Unsupported(`IS BOUND of a ${v.type.k}`);
     const r = {c: "initial", x: v};
     return /\bIS\s+NOT\s+BOUND\b/.test(text) !== not ? r : {c: "not", x: r};
   }
@@ -6569,26 +6661,8 @@ function compare(node, ctx) {
     const result = {c: "in_range", value, range};
     return not ? {c: "not", x: result} : result;
   }
-  if (op === "CO" || op === "CS" || op === "CN" || op === "NS") {
-    // measured on A4H: CO is true for an empty operand; CS ignores case and
-    // an empty pattern is always found; trailing blanks count in a string,
-    // a c operand has none stored. CN and NS are the negations of CO and CS
-    // (ultra/itab: NS in the demo DPC's search; A4H ZCL_GOGEN_T_NSCN)
-    const neg = op === "CN" || op === "NS";
-    const r = {c: op === "CO" || op === "CN" ? "co" : "cs", l: convert(source(sources[0], ctx), S), r: convert(source(sources[1], ctx), S)};
-    return neg !== not ? {c: "not", x: r} : r;
-  }
-  if (["CP", "NP", "CA", "NA"].includes(op)) {
-    // measured on A4H (2026-09-23): CP ignores case except after #, + is one
-    // character, #* #+ ## are literal; trailing blanks count in a string and
-    // not in a c, and a c pattern that is all blanks is one blank ('' CP ''
-    // is false). CA is case-sensitive. sy-fdpos is not set (not read on
-    // any path compiled so far; reading it is refused)
-    const rs = source(sources[1], ctx);
-    const r = {c: op === "CP" || op === "NP" ? "cp" : "ca", l: convert(source(sources[0], ctx), S), r: convert(rs, S), cpat: rs.type.k === "c"};
-    const neg = (op === "NP" || op === "NA") !== not;
-    return neg ? {c: "not", x: r} : r;
-  }
+  const stringCond = ["CP", "NP", "CA", "NA", "CS", "NS", "CO", "CN"].includes(op) ? stringComparison(op, source(sources[0], ctx), source(sources[1], ctx)) : null;
+  if (stringCond) return not ? {c: "not", x: stringCond} : stringCond;
   if (!["=", "<>", "<", "<=", ">", ">="].includes(op)) throw new Unsupported(`comparison operator ${op}`);
   const types = [...leafTypes(sources[0], ctx), ...leafTypes(sources[1], ctx)];
   let r;
@@ -6769,7 +6843,7 @@ function compareValues(op, l, r, ctx) {
   // are not measured
   if (l.type.k === "n" && r.type.k === "n" && l.type.len === r.type.len) return {c: "cmp", op, l: convert(l, S), r: convert(r, S), type: S};
   // two object references, = and <>: the same object or not (ultra/json)
-  if (l.type.k === "ref" && r.type.k === "ref" && (op === "=" || op === "<>")) return {c: "refeq", op, l, r};
+  if (["ref", "exc"].includes(l.type.k) && ["ref", "exc"].includes(r.type.k) && (op === "=" || op === "<>")) return {c: "refeq", op, l, r};
   // parity-wave1: a generic operand against a c, a string or another
   // generic operand (A4H ZCL_GOGEN_T_GENCMP): holding a c or a string at
   // run time, the typed rule above, both read as strings and a c without
