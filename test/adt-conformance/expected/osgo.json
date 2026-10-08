@@ -8,7 +8,7 @@
   "C2-discovery": "pass",
   "C3-head": "pass",
   "C9-systeminformation": "pass",
-  "C4-nodestructure": "known-gap: 501, NotCompiled in ZCL_OSD_ADT_TREE=>KINDS (zcl_osd_adt_tree.clas.abap:313: calculation type of lines( rt_kinds ) + 1)",
+  "C4-nodestructure": "pass",
   "C5-search": "pass",
   "C6-class-document": "pass",
   "R1-source-default": "pass",

@@ -1,6 +1,9 @@
 package abap
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 // The rows written stand in for what an INSERT of ABAP would write; the
 // statements are raw here because the test is about the LUW, not the SQL.
@@ -204,5 +207,58 @@ func TestLUWStatementCache(t *testing.T) {
 	}
 	if _, err := conn().Exec(ins, "A"); err == nil {
 		t.Fatal("a duplicate key through a cached statement is still refused")
+	}
+}
+
+// A waiting step ends its transaction so another full SQLite step can run.
+func TestYieldSleepSQLiteSteps(t *testing.T) {
+	if err := OpenDB([]byte(`["CREATE TABLE t (id TEXT PRIMARY KEY)"]`)); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { db.Close(); db = nil; tx = nil }()
+	done := make(chan any, 1)
+	WorkProcess.Lock()
+	s := &Session{}
+	DialogStepIn(s, func() {
+		go func() {
+			WorkProcess.Lock()
+			defer WorkProcess.Unlock()
+			var dump any
+			func() {
+				defer func() { dump = recover() }()
+				DialogStep(func() {
+					if _, err := conn().Exec("INSERT INTO t VALUES ('B')"); err != nil {
+						panic(err)
+					}
+				})
+			}()
+			done <- dump
+		}()
+		s.YieldSleep(50 * time.Millisecond)
+		select {
+		case dump := <-done:
+			if dump != nil {
+				t.Errorf("step B dumped: %v", dump)
+			}
+		default:
+			t.Error("step B did not run during the yield")
+		}
+		if tx == nil {
+			t.Error("step A resumed without a transaction")
+		}
+		if _, err := conn().Exec("INSERT INTO t VALUES ('A')"); err != nil {
+			t.Fatal(err)
+		}
+	})
+	WorkProcess.Unlock()
+	var count int
+	if err := DB().QueryRow("SELECT COUNT(*) FROM t").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 {
+		t.Fatalf("rows = %d, want 2", count)
+	}
+	if s.HoldsWorkProcess {
+		t.Fatal("step left ownership set")
 	}
 }

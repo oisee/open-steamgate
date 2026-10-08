@@ -26,9 +26,23 @@ type fakeHost struct {
 	calls  []string
 	closed chan string
 	news   int
+	yield  bool
 }
 
 func (f *fakeHost) Open(s *abap.Session) bool {
+	if f.yield {
+		if !s.HoldsWorkProcess {
+			panic("APC session does not own work process")
+		}
+		entered := make(chan struct{})
+		go func() { abap.WorkProcess.Lock(); close(entered); abap.WorkProcess.Unlock() }()
+		s.YieldSleep(50 * time.Millisecond)
+		select {
+		case <-entered:
+		default:
+			panic("APC sleep retained work process")
+		}
+	}
 	f.calls = append(f.calls, "open")
 	if f.reject {
 		return false
@@ -52,8 +66,11 @@ func (f *fakeHost) Drain(s *abap.Session) []string {
 	return q
 }
 
-func serve(t *testing.T, f *fakeHost) (*httptest.Server, string) {
+func serve(t *testing.T, f *fakeHost, steps ...func(string, func()) error) (*httptest.Server, string) {
 	ch := &Channel{Name: "t", New: func(s *abap.Session, r *http.Request) Host { f.news++; return f }, Logf: func(string, ...any) {}}
+	if len(steps) > 0 {
+		ch.Step = steps[0]
+	}
 	srv := httptest.NewServer(ch)
 	t.Cleanup(srv.Close)
 	return srv, "ws" + strings.TrimPrefix(srv.URL, "http")
@@ -251,5 +268,27 @@ func TestAPCOrigin(t *testing.T) {
 		read(t, c)
 		c.Close(websocket.StatusNormalClosure, "")
 		<-h.closed
+	}
+}
+
+func TestAPCYieldSleep(t *testing.T) {
+	for _, custom := range []bool{false, true} {
+		t.Run(fmt.Sprint("custom=", custom), func(t *testing.T) {
+			f := &fakeHost{yield: true, closed: make(chan string, 1)}
+			var step func(string, func()) error
+			if custom {
+				step = func(name string, work func()) error { return abap.APCStep(name, work) }
+			}
+			_, url := serve(t, f, step)
+			c, _, err := websocket.Dial(context.Background(), url, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := read(t, c); got != "hello" {
+				t.Fatal(got)
+			}
+			c.Close(websocket.StatusNormalClosure, "bye")
+			<-f.closed
+		})
 	}
 }

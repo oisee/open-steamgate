@@ -3,6 +3,7 @@ package abap
 import (
 	"database/sql"
 	"strings"
+	"time"
 )
 
 // The database LUW of the kernel. A dialog step opens one database
@@ -55,13 +56,13 @@ func plainConn() querier {
 const stmtCacheMax = 4096
 
 var (
-	stmtCache	= map[string]*sql.Stmt{}
-	stmtSeen	= map[string]int{}
-	stmtPending	[]string
-	txStmts		= map[string]*sql.Stmt{}
+	stmtCache   = map[string]*sql.Stmt{}
+	stmtSeen    = map[string]int{}
+	stmtPending []string
+	txStmts     = map[string]*sql.Stmt{}
 	// the database the cache belongs to: another one (OpenDB again) starts
 	// it empty
-	stmtDB	*sql.DB
+	stmtDB *sql.DB
 )
 
 func stmtCacheFor(d *sql.DB) {
@@ -202,13 +203,48 @@ func DialogStep(work func()) {
 			defer func() { recover() }()
 			end(false)
 		}()
-		if dump != nil {	// nil: runtime.Goexit, which goes on by itself
+		if dump != nil { // nil: runtime.Goexit, which goes on by itself
 			panic(dump)
 		}
 	}()
 	work()
 	ok = true
 	end(true)
+}
+
+// DialogStepIn runs work for a known Session while marking that its host owns
+// WorkProcess. The host has already taken the mutex; this only records that
+// ownership so an in-step yield can give the work process up selectively.
+func DialogStepIn(s *Session, work func()) {
+	if s == nil {
+		DialogStep(work)
+		return
+	}
+	s.HoldsWorkProcess = true
+	defer func() { s.HoldsWorkProcess = false }()
+	DialogStep(work)
+}
+
+func (s *Session) YieldSleep(d time.Duration) {
+	if s == nil {
+		time.Sleep(d)
+		return
+	}
+	if !s.HoldsWorkProcess {
+		CommitWork(s)
+		time.Sleep(d)
+		return
+	}
+	// End the database step before handing the work process to another
+	// session. COMMIT WORK alone immediately opens another transaction.
+	end(true)
+	s.Sy.Subrc = 0
+	s.HoldsWorkProcess = false
+	WorkProcess.Unlock()
+	time.Sleep(d)
+	WorkProcess.Lock()
+	s.HoldsWorkProcess = true
+	begin()
 }
 
 // BeginUnitLUW opens the LUW a unit run works in, which is how the Node

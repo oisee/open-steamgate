@@ -1466,6 +1466,22 @@ function stmtLines(st, ctx, d) {
       return [`${t}func() {`, `${t}\tdefer abap.Classic(s, ${JSON.stringify(st.name)}, map[string]int32{${m}}, ${st.exceptions.others})`,
         `${t}\tdefer abap.MessageCallScope(s, ${JSON.stringify(st.name)}, map[string]int32{${m}}, ${st.exceptions.others})()`, `${t}\t${call}`, `${t}\ts.Sy.Subrc = 0`, `${t}}()`];
     }
+    case "call_enq": {
+      HELPER_IMPORTS.add("enqseam");
+      const fn = st.kind === "enqueue" ? "Enqueue" : st.kind === "dequeue" ? "Dequeue" : "DequeueAll";
+      const fields = (st.fields ?? []).map((field) => `{Name: ${JSON.stringify(field.name)}, Kind: '${field.kind}', Length: ${field.length}}`).join(", ");
+      const table = `hEnqseam.Table{Name: ${JSON.stringify(st.table)}, Key: []hEnqseam.Field{${fields}}}`;
+      const map = `hEnqseam.Args{${st.args.map((x) => `${JSON.stringify(x.name)}: abap.FmtData(${expr(x.value, ctx)})`).join(", ")}}`;
+      const call = st.kind === "enqueue"
+        ? `hEnqseam.${fn}(s, ${table}, ${JSON.stringify(st.object)}, ${map}, hHostclass.KERNEL_LOCK.Enqueue)`
+        : st.kind === "dequeue"
+          ? `hEnqseam.${fn}(s, ${table}, ${JSON.stringify(st.object)}, ${map}, hHostclass.KERNEL_LOCK.Dequeue)`
+          : `hEnqseam.${fn}(s, hHostclass.KERNEL_LOCK.DequeueAll)`;
+      if (!st.exceptions) return [`${t}func() { defer abap.MessageCallScope(s, ${JSON.stringify(st.name)}, nil, -1)(); ${call} }()`];
+      const exceptionMap = Object.entries(st.exceptions.map).map(([key, value]) => `${JSON.stringify(key)}: ${value}`).join(", ");
+      return [`${t}func() {`, `${t}\tdefer abap.Classic(s, ${JSON.stringify(st.name)}, map[string]int32{${exceptionMap}}, ${st.exceptions.others})`,
+        `${t}\tdefer abap.MessageCallScope(s, ${JSON.stringify(st.name)}, map[string]int32{${exceptionMap}}, ${st.exceptions.others})()`, `${t}\t${call}`, `${t}}()`];
+    }
     case "native": {
       const m = ctx.method;
       if (ctx.valueOutputs?.size && m.returning && !st.stmt)
