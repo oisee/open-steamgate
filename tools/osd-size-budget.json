@@ -207,16 +207,16 @@
       "reason": "lowered 2026-10-02: the YAML line index went to tools/dsl-yaml-lines.mjs; holds the range: of L3 slice 3a"
     },
     "tools/gogen/emit-go.mjs": {
-      "lines": 2410,
-      "reason": "#36: generated host-class hook dispatch and ABAP Raise/error bridging on top of the merged emitter baseline. #38/#39 add lock-call emission and trim the arithmetic string result only for arithmetic sources. Rebased on #675 (step-first host hooks). #43: emit update-task marking and explicit-statement LUW bindings."
+      "lines": 2418,
+      "reason": "#36: generated host-class hook dispatch and ABAP Raise/error bridging on top of the merged emitter baseline. #38/#39 add lock-call emission and trim the arithmetic string result only for arithmetic sources. Rebased on #675 (step-first host hooks). #43: emit update-task marking and explicit-statement LUW bindings. ADT 10-08: DELETE TABLE itab FROM wa on a keyed table (ADT request XML namespace bindings)."
     },
     "tools/gogen/emit-js.mjs": {
       "lines": 1206,
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/frontend.mjs": {
-      "lines": 6998,
-      "reason": "#34/#36: packed DEC comparisons and the host-replaced class signature registry on top of the merged frontend baseline. #36 round 2: shared omitted-argument lowering for host exception factories, including OPTIONAL, DEFAULT and IS SUPPLIED; no second emitter call path. #36 critic r2: a host-replaced method whose signature does not compile, or is untyped, is refused instead of dropped. abapiti 037: cl_http_utility=>decode_base64 beside its encode_base64 sibling (the @KERNEL text decode). #38/#39 add numeric-text/string calculation targets and the ENQUEUE/DEQUEUE lock-object registry; round 2: size all supported lock key kinds as Node request() does and refuse unsized keys by table and field. #43: read UPDATE_TASK presence per module from function group XML and mark compiled calls before execution. #43: update-task modules from the function group XML mark the LUW on module entry."
+      "lines": 7012,
+      "reason": "#34/#36: packed DEC comparisons and the host-replaced class signature registry on top of the merged frontend baseline. #36 round 2: shared omitted-argument lowering for host exception factories, including OPTIONAL, DEFAULT and IS SUPPLIED; no second emitter call path. #36 critic r2: a host-replaced method whose signature does not compile, or is untyped, is refused instead of dropped. abapiti 037: cl_http_utility=>decode_base64 beside its encode_base64 sibling (the @KERNEL text decode). #38/#39 add numeric-text/string calculation targets and the ENQUEUE/DEQUEUE lock-object registry; round 2: size all supported lock key kinds as Node request() does and refuse unsized keys by table and field. #43: read UPDATE_TASK presence per module from function group XML and mark compiled calls before execution. #43: update-task modules from the function group XML mark the LUW on module entry. ADT 10-08: DELETE TABLE itab FROM wa on a HASHED or SORTED table by its primary key fields."
     },
     "tools/gogen/go/abap/abap.go": {
       "lines": 278,

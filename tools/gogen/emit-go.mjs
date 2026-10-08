@@ -2038,6 +2038,14 @@ ${t}	}`));
         `${t}\t\t\t${tb} = append(${tb}[:i${n}], ${tb}[i${n}+1:]...)`, `${t}\t\t\tabap.BumpTable(&${tb})`,
         `${t}\t\t\ts.Sy.Subrc = 0`, `${t}\t\t\tbreak`, `${t}\t\t}`, `${t}\t}`, `${t}}`];
     }
+    case "delete_from": {
+      const n = ctx.loop++;
+      const tb = place(st.table, ctx);
+      return [`${t}{`, `${t}\twa${n} := ${expr(st.value, ctx)}`, `${t}\ts.Sy.Subrc = 4`,
+        `${t}\tfor i${n}, r${n} := range ${tb} {`, `${t}\t\tif ${st.keys.map((k) => `r${n}.${ident(k)} == wa${n}.${ident(k)}`).join(" && ")} {`,
+        `${t}\t\t\t${tb} = append(${tb}[:i${n}], ${tb}[i${n}+1:]...)`, `${t}\t\t\tabap.BumpTable(&${tb})`,
+        `${t}\t\t\ts.Sy.Subrc = 0`, `${t}\t\t\tbreak`, `${t}\t\t}`, `${t}\t}`, `${t}}`];
+    }
     // ultra/itab: DELETE itab inside LOOP AT itab: the current row goes and
     // the loop index steps back, so the next pass reads the row after it
     case "delete_current": {

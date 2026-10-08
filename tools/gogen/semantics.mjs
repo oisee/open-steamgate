@@ -74,6 +74,10 @@ const EXPECT = {
   ZCL_GOGEN_T_COPYINSERT: "1",
   ZCL_GOGEN_T_COPYDATA: "1",
   ZCL_GOGEN_T_COPYHASH: "1",
+  // Unmeasured (ABAP keyword documentation: DELETE TABLE itab FROM wa matches
+  // the primary table key only): hashed one-field key, hashed two-field key,
+  // sorted unique key; the ADT front needs the hashed form (adt-i5, 10-08).
+  ZCL_GOGEN_T_DELFROM: "0/1/4/1/b/0/21a2a/0/ac",
   ZCL_GOGEN_T_COPYDREF: {Go: "ERROR NOT_COMPILED in ZCL_GOGEN_T_COPYDREF=>RUN (zcl_gogen_t_copydref.clas.abap:19): target lr->* at zcl_gogen_t_copydref.clas.abap:19", JS: "ERROR NOT_COMPILED in ZCL_GOGEN_T_COPYDREF=>RUN (zcl_gogen_t_copydref.clas.abap:19): target lr->*"},
   ZCL_GOGEN_T_SCALARBIND: {Go: "ERROR GETWA_NOT_ASSIGNED in table row binding after structural mutation at zcl_gogen_t_scalarbind.clas.abap:18", JS: "ERROR GETWA_NOT_ASSIGNED in table row binding after structural mutation"},
   ZCL_GOGEN_T_REBIND: {Go: "ERROR GETWA_NOT_ASSIGNED in table row binding after structural mutation at zcl_gogen_t_rebind.clas.abap:18", JS: "ERROR GETWA_NOT_ASSIGNED in table row binding after structural mutation"},
