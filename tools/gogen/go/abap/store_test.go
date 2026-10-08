@@ -55,3 +55,32 @@ func TestStoreRevisionFullSubject(t *testing.T) {
 		t.Fatalf("old backend: %#v", got)
 	}
 }
+
+// A host answers ZOSD_STORE for the calling step first (adt-i5's SYSTEM
+// facts are per session); handled=false or no hook keeps the store's answer.
+func TestStoreHookSeesTheStep(t *testing.T) {
+	defer func() { StoreHook = nil }()
+	s := &Session{}
+	command, state := "SYSTEM", ""
+	args := map[string]Data{"IV_COMMAND": {P: &command, T: TString}, "EV_STATE": {P: &state, T: TString}}
+	var seen any
+	StoreHook = func(step any, in map[string]*string) (StoreAnswer, bool) {
+		seen = step
+		if *in["IV_COMMAND"] != "SYSTEM" {
+			return StoreAnswer{}, false
+		}
+		return StoreAnswer{Scalars: map[string]string{"EV_STATE": "from the host"}}, true
+	}
+	ZOSD_STORE(s, args)
+	if seen != any(s) || state != "from the host" {
+		t.Fatalf("hook step %v, EV_STATE %q", seen, state)
+	}
+	// a declined call is the store's answer: an unknown command's EV_ERROR
+	command, failure := "PING", ""
+	args["EV_ERROR"] = Data{P: &failure, T: TString}
+	StoreHook = func(step any, in map[string]*string) (StoreAnswer, bool) { return StoreAnswer{}, false }
+	ZOSD_STORE(s, args)
+	if want := StoreCall(storeInputs(args)).Scalars["EV_ERROR"]; failure == "" || failure != want {
+		t.Fatalf("a declined hook changed the answer: %q, store says %q", failure, want)
+	}
+}
