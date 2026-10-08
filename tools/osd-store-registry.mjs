@@ -1,6 +1,7 @@
 import {layers} from "./osd-inputs.mjs";
 // Registry construction, diagnostics and temporary source borrowing.
-import {readFileSync, readdirSync, statSync} from "node:fs";
+import {readdirSync, statSync} from "node:fs";
+import {trackedRead} from "./osd-input-audit.mjs";
 import {join} from "node:path";
 import * as abaplint from "@abaplint/core";
 import {ddlsIssues} from "./osd-store-ddls.mjs";
@@ -135,7 +136,7 @@ export function buildRegistry(store, configPath = "abaplint.jsonc") {
     if (files?.size) {
       updateRegistryFiles(shared, [...files].filter(file => /\.(abap|xml|asddls)$/.test(file)).map(file => {
         let source;
-        try {source = readFileSync(join(store.root, file), "utf8");}
+        try {source = trackedRead(store.inputAudit, store.root, file, "utf8");}
         catch (error) {if (error.code !== "ENOENT") throw error;}
         return ["/" + file, source];
       }));
@@ -144,7 +145,7 @@ export function buildRegistry(store, configPath = "abaplint.jsonc") {
     store.parsed = shared;
     return shared;
   }
-  const text = readFileSync(join(store.root, configPath), "utf8").split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
+  const text = trackedRead(store.inputAudit, store.root, configPath, "utf8").split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
   const config = JSON.parse(text);
   // The publication validator owns these rules. Keep identifier and
   // structural checks identical for saved includes and compiled includes.
@@ -168,7 +169,7 @@ export function buildRegistry(store, configPath = "abaplint.jsonc") {
       if (hidden.has(file) || /\.(abap|xml|asddls)$/.test(file) === false) {
         continue;
       }
-      registry.addFile(new abaplint.MemoryFile("/" + file, readFileSync(join(store.root, file), "utf8")));
+      registry.addFile(new abaplint.MemoryFile("/" + file, trackedRead(store.inputAudit, store.root, file, "utf8")));
     }
   }
   registry.parse();
@@ -190,7 +191,7 @@ export function registryDependents(registry, type, name) {
 }
 
 // the issues of one object, in the shape the façade returns
-export function registryIssues(registry, type, name) {
+export function registryIssues(registry, type, name, {endCoordinates = false} = {}) {
   // an include is a program to abaplint: the registry files it as PROG,
   // and asking for INCL finds nothing and calls a clean include broken
   const object = registry.getObject(TYPES[type]?.sameFileAs ?? type, name);
@@ -217,8 +218,10 @@ export function registryIssues(registry, type, name) {
     file: issue.getFilename(),
     line: issue.getStart().getRow(),
     column: issue.getStart().getCol(),
-    endLine: issue.getEnd().getRow(),
-    endColumn: issue.getEnd().getCol(),
+    ...(endCoordinates ? {
+      endLine: issue.getEnd().getRow(),
+      endColumn: issue.getEnd().getCol(),
+    } : {}),
   }))];
   return {type, name, issues};
 }

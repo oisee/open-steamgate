@@ -169,6 +169,8 @@ export function rootsOf(root, env = process.env) {
 export class ObjectStore {
   constructor(options = {}) {
     this.root = options.root ?? process.cwd();
+    this.inputAudit = options.inputAudit;
+    this.registryIssueOptions = options.registryIssueOptions;
     // test seams: beforeWrite(file) runs between a create's check and its write
     this.hooks = options.hooks ?? {};
     this.explicitRoots = options.roots !== undefined;
@@ -1390,10 +1392,10 @@ export class ObjectStore {
       throw new NotFound(type, name);
     }
     if (options.source === undefined) {
-      return registryIssues(this.registry(), type, entry.name);
+      return registryIssues(this.registry(), type, entry.name, this.registryIssueOptions);
     }
     const target = this.#fileFor(type, name, entry, options.include ?? "main");
-    return withSource(this, target.file, options.source, (registry) => registryIssues(registry, type, target.name));
+    return withSource(this, target.file, options.source, (registry) => registryIssues(registry, type, target.name, this.registryIssueOptions));
   }
 
   // The Node store owns compiler IPC; browser check runners remain portable.
@@ -1469,7 +1471,7 @@ export class ObjectStore {
       // straight off the registry, not through find(): a dependent may be of
       // a type the store does not index (an IWPR naming the class it maps),
       // and it is in the registry by construction, so it is checked there
-      const checked = registryIssues(this.registry(), dependent.type, dependent.name);
+      const checked = registryIssues(this.registry(), dependent.type, dependent.name, this.registryIssueOptions);
       if (checked.issues.length > 0) {
         broken.push(checked);
       }

@@ -19,11 +19,11 @@ export function declaredPackage(folder) {
 export function rootPackage(folder, fallback) {
   const named = declaredPackage(folder);
   if (named) return named;
-  const devc = readdirSync(folder).find(n => n !== 'package.devc.xml' && n.endsWith('.devc.xml'));
+  const devc = readdirSync(folder).sort().find(n => n !== 'package.devc.xml' && n.endsWith('.devc.xml'));
   if (devc) return devc.slice(0, -9).toUpperCase();
   // abapGit omits the root name: SAP asks the importing user. For a standalone
   // one-prefix repository use that prefix; ambiguous repositories need a setting.
-  const names = readdirSync(folder).filter(n => /\.(clas|intf|prog)\.(abap|xml)$/.test(n));
+  const names = readdirSync(folder).sort().filter(n => /\.(clas|intf|prog)\.(abap|xml)$/.test(n));
   const prefixes = new Set(names.map(n => /^(?:zcl_|zif_|z)?([a-z0-9]+)_/i.exec(n)?.[1]?.toUpperCase()).filter(Boolean));
   if (prefixes.size === 1) return '$Z' + [...prefixes][0];
   return fallback;
@@ -93,7 +93,7 @@ export function userLayersOf(root, env = process.env) {
     // Copying these on first save otherwise introduces a new DEVC input and
     // forces a cold publication, disconnecting existing APC sessions.
     const headers = folder => {
-      for (const entry of readdirSync(folder, {withFileTypes: true})) {
+      for (const entry of readdirSync(folder, {withFileTypes: true}).sort((left, right) => left.name.localeCompare(right.name))) {
         const from = join(folder, entry.name);
         if (entry.isDirectory()) headers(from);
         else if (entry.name.endsWith('.devc.xml')) {

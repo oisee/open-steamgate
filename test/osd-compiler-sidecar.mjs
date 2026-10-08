@@ -1,7 +1,7 @@
 import {expect} from "chai";
 import {spawn} from "node:child_process";
 import {createHash} from "node:crypto";
-import {mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync} from "node:fs";
+import {mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join, resolve} from "node:path";
 import {createInterface} from "node:readline";
@@ -11,6 +11,7 @@ import {compilerCommand} from "../tools/osd-host.mjs";
 describe("osd compiler --stdio", function () {
   this.timeout(15000);
   let child, root, stderr = "", nextId = 0;
+  let outside;
   const pending = [];
   const replies = [];
   function send(request) {
@@ -62,6 +63,7 @@ describe("osd compiler --stdio", function () {
       expect(code, stderr).to.equal(0);
     }
     rmSync(root, {recursive: true, force: true});
+    if (outside) rmSync(outside, {recursive: true, force: true});
   });
 
   it("advertises contract, version, pin, check and limits", async () => {
@@ -75,7 +77,13 @@ describe("osd compiler --stdio", function () {
     expect(hello.limits.maxSnapshotBytes).to.be.greaterThan(0);
   });
   it("checks a clean class without diagnostics", async () => {
-    expect(await check(snapshot("ZCL_SC_CLEAN", source("ZCL_SC_CLEAN")))).to.deep.equal([]);
+    const response = await send({id: ++nextId, op: "check", snapshot: snapshot("ZCL_SC_CLEAN", source("ZCL_SC_CLEAN"))});
+    expect(response.id).to.equal(nextId);
+    expect(response.diagnostics).to.deep.equal([]);
+    const paths = response.inputs.map(input => input.path);
+    expect(paths).to.include.members(["abap_transpile.json", "abaplint.jsonc", "src/zcl_sc_clean.clas.abap"]);
+    expect(paths).to.deep.equal([...paths].sort((left, right) => left.localeCompare(right)));
+    for (const input of response.inputs) expect(input.sha256).to.match(/^[0-9a-f]{64}$/);
   });
   it("rejects a 31-character method name with A4H coordinates", async () => {
     const method = "a".repeat(31);
@@ -99,6 +107,35 @@ describe("osd compiler --stdio", function () {
     expect((await send({id: "hash", op: "check", snapshot: snap}))).to.include({id: "hash"}).and.have.nested.property("error.code", "SNAPSHOT_MISMATCH");
     rmSync(join(root, snap.objects[0].files[0].path));
     expect((await send({id: "missing", op: "check", snapshot: snap})).error.code).to.equal("SNAPSHOT_MISMATCH");
+  });
+  it("refuses a snapshot file symlink outside the root", async () => {
+    outside = mkdtempSync(join(tmpdir(), "osd-sidecar-outside-"));
+    const text = source("ZCL_SC_LINK");
+    writeFileSync(join(outside, "zcl_sc_link.clas.abap"), text);
+    symlinkSync(join(outside, "zcl_sc_link.clas.abap"), join(root, "src/zcl_sc_link.clas.abap"));
+    const response = await send({id: "file-link", op: "check", snapshot: {
+      root, generation: "fixture-generation", objects: [{type: "CLAS", name: "ZCL_SC_LINK", version: "inactive",
+        files: [{path: "src/zcl_sc_link.clas.abap", sha256: createHash("sha256").update(text).digest("hex")}]}],
+    }});
+    expect(response.error).to.include({code: "BAD_REQUEST", text: "file resolves outside snapshot root: src/zcl_sc_link.clas.abap"});
+    rmSync(join(root, "src/zcl_sc_link.clas.abap"));
+    rmSync(outside, {recursive: true, force: true});
+    outside = undefined;
+  });
+  it("refuses a snapshot directory symlink outside the root", async () => {
+    outside = mkdtempSync(join(tmpdir(), "osd-sidecar-outside-"));
+    mkdirSync(join(outside, "src"), {recursive: true});
+    const text = source("ZCL_SC_DIR");
+    writeFileSync(join(outside, "src/zcl_sc_dir.clas.abap"), text);
+    symlinkSync(join(outside, "src"), join(root, "linked"));
+    const response = await send({id: "dir-link", op: "check", snapshot: {
+      root, generation: "fixture-generation", objects: [{type: "CLAS", name: "ZCL_SC_DIR", version: "inactive",
+        files: [{path: "linked/zcl_sc_dir.clas.abap", sha256: createHash("sha256").update(text).digest("hex")}]}],
+    }});
+    expect(response.error).to.include({code: "BAD_REQUEST", text: "file resolves outside snapshot root: linked/zcl_sc_dir.clas.abap"});
+    rmSync(join(root, "linked"));
+    rmSync(outside, {recursive: true, force: true});
+    outside = undefined;
   });
   it("checks transitive readers using the publication validator", async () => {
     const snap = snapshot("ZCL_SC_BASE", source("ZCL_SC_BASE"));

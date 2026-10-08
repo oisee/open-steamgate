@@ -4,6 +4,7 @@ import {existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync}
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {NotFound, ObjectStore, ReadOnly, fileOf, nameOf} from "../tools/osd-store.mjs";
+import {rootPackage} from "../tools/osd-source-layers.mjs";
 
 // The object store behind the ADT façade: what a client reads, writes,
 // checks and activates when it talks to OSD. The repository itself is the
@@ -459,11 +460,25 @@ METHOD run. DATA probe TYPE REF TO zcl_osd_probe. CREATE OBJECT probe. probe->ru
     const asked = store.check("CLAS", "ZCL_OSD_PROBE", {source: CLASS.replace("rv_text = 'hello'.", "rv_text = lv_missing.")});
     expect(asked.issues.length).to.be.greaterThan(0);
     expect(asked.issues[0]).to.include.keys(["severity", "rule", "message", "file", "line", "column"]);
+    expect(asked.issues[0]).to.not.have.property("endLine");
+    expect(asked.issues[0]).to.not.have.property("endColumn");
+    expect(JSON.stringify(asked)).to.not.contain("\"endLine\"").and.not.contain("\"endColumn\"");
     expect(asked.issues[0].message).to.contain("lv_missing");
 
     // what was asked about is gone; what is stored is what answers again
     expect(store.read("CLAS", "ZCL_OSD_PROBE").source).to.equal(stored);
     expect(store.check("CLAS", "ZCL_OSD_PROBE").issues).to.deep.equal([]);
+  });
+
+  it("discovers an abapGit root package in lexical order", () => {
+    const tree = mkdtempSync(join(tmpdir(), "osd-root-package-"));
+    try {
+      writeFileSync(join(tree, "z_created_first.devc.xml"), "");
+      writeFileSync(join(tree, "a_created_second.devc.xml"), "");
+      expect(rootPackage(tree, "$FALLBACK")).to.equal("A_CREATED_SECOND");
+    } finally {
+      rmSync(tree, {recursive: true, force: true});
+    }
   });
 
   it("source in the request goes to the include the caller named", () => {

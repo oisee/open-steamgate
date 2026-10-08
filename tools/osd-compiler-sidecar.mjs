@@ -1,11 +1,12 @@
 // Compiler-provider contract v1. Validation only: no publication or execution.
 import {createHash} from "node:crypto";
-import {readFileSync} from "node:fs";
+import {existsSync, readFileSync} from "node:fs";
 import {isAbsolute, join, relative, resolve} from "node:path";
 import {createInterface} from "node:readline";
 import {once} from "node:events";
 import lock from "../libs.lock.json" with {type: "json"};
 import {runsAs} from "./osd-main.mjs";
+import {InputAudit, realContainedPath, trackedRead} from "./osd-input-audit.mjs";
 
 const limits = {maxSnapshotBytes: 16 * 1024 * 1024, maxConcurrentRequests: 1};
 const digest = bytes => createHash("sha256").update(bytes).digest("hex");
@@ -16,7 +17,8 @@ function snapshotFiles(snapshot) {
       || typeof snapshot.generation !== "string" || !Array.isArray(snapshot.objects) || !snapshot.objects.length) {
     throw refusal("BAD_REQUEST", "snapshot needs root, generation and objects");
   }
-  const root = resolve(snapshot.root), files = new Map();
+  const root = realContainedPath(snapshot.root, ".").realRoot, files = new Map();
+  const audit = new InputAudit();
   let size = 0;
   for (const object of snapshot.objects) {
     if (!object || typeof object.type !== "string" || typeof object.name !== "string"
@@ -28,18 +30,21 @@ function snapshotFiles(snapshot) {
           || typeof file.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(file.sha256)) {
         throw refusal("BAD_REQUEST", "invalid snapshot file");
       }
-      const path = resolve(root, file.path), local = relative(root, path);
-      if (local === ".." || local.startsWith("../") || isAbsolute(local)) throw refusal("BAD_REQUEST", "file is outside snapshot root");
       let bytes;
-      try { bytes = readFileSync(path); }
-      catch { throw refusal("SNAPSHOT_MISMATCH", `cannot read ${file.path}`); }
+      try { bytes = trackedRead(audit, root, file.path); }
+      catch (error) {
+        if (error.protocolCode === "BAD_REQUEST") throw error;
+        throw refusal("SNAPSHOT_MISMATCH", `cannot read ${file.path}`);
+      }
+      const local = relative(root, resolve(root, file.path));
+      if (files.has(local)) throw refusal("BAD_REQUEST", `duplicate snapshot file: ${file.path}`);
       if (digest(bytes) !== file.sha256) throw refusal("SNAPSHOT_MISMATCH", `hash differs: ${file.path}`);
-      if (!files.has(local)) size += bytes.length;
+      size += bytes.length;
       if (size > limits.maxSnapshotBytes) throw refusal("BAD_REQUEST", "snapshot exceeds maxSnapshotBytes");
       files.set(local, {bytes, sha256: file.sha256});
     }
   }
-  return {root, files};
+  return {root, files, audit};
 }
 
 function diagnostic(issue) {
@@ -83,17 +88,18 @@ export async function main(args = process.argv.slice(2)) {
           if (request.contract !== 1) throw refusal("CONTRACT_MISMATCH", "expected contract 1");
           response = {contract: 1, osd, transpiler: lock.transpiler.ref, capabilities: ["check"], limits};
         } else if (request.op === "check") {
-          const {root, files} = snapshotFiles(request.snapshot);
-          const store = new ObjectStore({root});
+          const {root, files, audit} = snapshotFiles(request.snapshot);
+          if (existsSync(join(root, "abap_transpile.json"))) trackedRead(audit, root, "abap_transpile.json", "utf8");
+          const store = new ObjectStore({root, inputAudit: audit, registryIssueOptions: {endCoordinates: true}});
           // External writers are not store mutations. Start from today's
           // dependency tree, then check the exact bytes whose hashes passed.
           forgetRegistry(store);
           updateRegistryFiles(store.registry(), [...files].map(([path, file]) => ["/" + path, file.bytes.toString("utf8")]));
           const checked = prepareActivation(store, request.snapshot.objects, {transpile: false});
           // Refuse a file that moved while the registry read its dependencies.
-          snapshotFiles(request.snapshot);
+          const inputs = audit.verified(root);
           const diagnostics = activationIssues(checked).map(diagnostic);
-          response = {diagnostics: [...new Map(diagnostics.map(d => [JSON.stringify(d), d])).values()]};
+          response = {diagnostics: [...new Map(diagnostics.map(d => [JSON.stringify(d), d])).values()], inputs};
         } else {
           throw refusal("UNSUPPORTED_OP", `unsupported operation: ${request.op}`);
         }
