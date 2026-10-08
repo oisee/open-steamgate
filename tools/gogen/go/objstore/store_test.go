@@ -99,7 +99,7 @@ func TestSearchLimitMatchesJavaScriptNumber(t *testing.T) {
 		{float64(0.5), 0.5}, {"Infinity", math.Inf(1)}, {"NaN", -1}, {"junk", -1},
 	} {
 		if got := storeSearchLimit(test.input); got != test.want {
-			t.Errorf("limit(%#v) = %d, want %d", test.input, got, test.want)
+			t.Errorf("limit(%#v) = %v, want %v", test.input, got, test.want)
 		}
 	}
 }
