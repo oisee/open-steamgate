@@ -97,11 +97,11 @@ The osgo default omits `write`: source save is absent, and a failed restore
 aborts the harness for safety. All other groups still run. The omitted write
 expectation is documented as unexercised; re-enable it when save is available.
 An explicit `--only write` overrides the target defaults for diagnosis.
-Measured at `16b999ad`, after PR #689 merged: **21 PASS, 1 FAIL, 24 MISSING**
-of 46 exercised scenarios; one write scenario omitted. #689 fixed the XML
-declaration POST parsing gap. The exercised FAIL is `debugger.coreDiscovery`
-(the client cannot parse core discovery), and CHECKRUN is still missing. The
-omitted write scenario retains its FAIL expectation until it is exercised.
+Measured at `bc2ab5b5`, after PR #691 (CHECKRUN on osgo) merged: **22 PASS,
+1 FAIL, 23 MISSING** of 46 exercised scenarios; one write scenario omitted.
+The exercised FAIL is `debugger.coreDiscovery` (the client cannot parse core
+discovery; it fails on the Node host too). The omitted write scenario retains
+its FAIL expectation until it is exercised.
 
 ## The client, and why it is pinned this way
 

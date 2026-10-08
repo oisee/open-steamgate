@@ -95,9 +95,8 @@
       "reason": "Not exercised: osgo has no source save; a failed restore is fatal. Omitted from the default groups so reads still run. Re-enable write when save is implemented."
     },
     "check.syntax": {
-      "status": "MISSING",
-      "feature": "Syntax check (checkruns)",
-      "reason": "CHECKRUN has no osgo host implementation yet (501 unknown store command); branch feat/osgo-adt-checkrun."
+      "status": "PASS",
+      "feature": "Syntax check (checkruns)"
     },
     "activate.object": {
       "status": "MISSING",
@@ -241,12 +240,12 @@
     "create"
   ],
   "measured": {
-    "revision": "16b999ad72b1e5b4b6eb0753d8fdcc3d4ae07abe",
+    "revision": "bc2ab5b534446346907b594691c4e9ea0d6fa998",
     "build": "osgo-host fixture staging, npm run transpile, node tools/gogen/osgo.mjs; -adt",
     "counts": {
-      "PASS": 21,
+      "PASS": 22,
       "FAIL": 1,
-      "MISSING": 24
+      "MISSING": 23
     },
     "exercised": 46,
     "omitted": [
