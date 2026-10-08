@@ -3,6 +3,7 @@ import * as core from "@abaplint/core";
 import {createRequire} from "node:module";
 import {UnitRun} from "../tools/osd-unit.mjs";
 import {UnitRisk} from "../tools/osd-unit-risk.mjs";
+import {updateRegistryFiles} from "../tools/osd-store-registry.mjs";
 import {STATEMENT_KINDS, statementKindOf} from "../tools/osd-unit-risk-statements.mjs";
 import {CrossReference} from "../tools/osd-xref.mjs";
 const {riskWarning} = createRequire(import.meta.url)("../editors/vscode/lib.js");
@@ -40,6 +41,18 @@ function fixture(body = "zcl_report=>read( ).", implementations = {}) {
 const warning = (result) => riskWarning(harmless, {object: {name: "ZCL_TEST"}, writesTotal: result.total, ...result});
 
 describe("ABAP Unit executable call closure", () => {
+  it("sees a newly added COMMIT WORK in the retained registry", async () => {
+    const {store, risk} = fixture("");
+    const registry = store.registry();
+    expect((await risk.writesReached("ZCL_TEST")).total).to.equal(0);
+    const file = registry.getFileByName("zcl_test.clas.testclasses.abap");
+    updateRegistryFiles(registry, [[file.getFilename(), file.getRaw().replace("METHOD run.", "METHOD run. COMMIT WORK.")]]);
+    expect(store.registry()).to.equal(registry);
+    const result = await risk.writesReached("ZCL_TEST");
+    expect(result.total).to.equal(1);
+    expect(result.writes[0]).to.include({kind: "COMMIT WORK", method: "LTCL_TEST=>RUN"});
+  });
+
   const staticWriter = {
     "zcl_writer.clas.abap": `CLASS zcl_writer DEFINITION PUBLIC. PUBLIC SECTION.
       CLASS-DATA value TYPE i. CLASS-METHODS class_constructor. ENDCLASS.

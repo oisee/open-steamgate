@@ -1,14 +1,13 @@
 import {join} from "node:path";
+import {activationJournal, recordBaselineGeneration} from "./osd-activation-journal.mjs";
+import {liveHash} from "./osd-build.mjs";
 import {warmVerdict} from "./osd-hot.mjs";
 
-// ADT and local STORE take the same revision and let the warm compiler check
-// its affected closure. Eligibility remains the compiler's rule; a refused
-// optimization builds cold, with full validation, before anything is promoted.
+// Validation is synchronous, even when publication is deferred to after the
+// calling step. The store checks every include in the activation's source view;
+// compiler availability must never turn that verdict into a promise.
 export function prepareActivation(store, named, {transpile = true, forced = false} = {}) {
-  const warm = store.warm?.();
-  const compilerCheck = transpile && (forced || warm?.on && !warm.disabled && !warm.closed &&
-    warm.compiler?.primed === true && named.every(o => ["CLAS", "INTF", "PROG", "INCL"].includes(o.type)));
-  return named.map(o => ({...o, ...(compilerCheck ? store.warmActivation(o.type, o.name)
+  return named.map(o => ({...o, ...(transpile && forced ? store.warmActivation(o.type, o.name)
     : store.activate(o.type, o.name, {activating: named}))}));
 }
 
@@ -32,4 +31,33 @@ export async function publishActivation(store, checked) {
   const live = committed && (runtime?.running === true || result.hot === true || result.recycled === true);
   const verified = committed && warmVerdict(join(store.root, "build/by-input", result.generation)) !== false;
   return {...result, committed: Boolean(committed), live: Boolean(live), verified: Boolean(verified), failureStage};
+}
+
+// STORE and ADT own different response formats, but every activation attempt
+// must leave the same per-object publication outcome for RUN_TESTS.
+export function beginActivation(store, named) {
+  const journal = activationJournal(store);
+  recordBaselineGeneration(store, () => store.served?.generation ?? liveHash(store.root));
+  const operations = named.map(({type, name}) => journal.create(type, String(name).toUpperCase()));
+  const update = fields => operations.map(op => journal.update(op.op_id, fields));
+  return {
+    operations,
+    update,
+    lookup: () => operations.map(op => journal.lookup(op.op_id)),
+    fail: (stage, fields = {}) => update({state: "failed", active: false, live: false, failure_stage: stage, ...fields}),
+    finish(result, issues = []) {
+      return update({state: result.committed && result.generation ? "published" : "failed",
+        generation_id: result.committed ? result.generation : "",
+        active: result.committed, live: result.live, verified: result.verified,
+        failure_stage: result.failureStage,
+        note: !result.committed ? result.error ?? result.transpile?.error ?? "publication failed or checked source changed"
+          : result.verified ? "published" : "published; warm-unverified",
+        issues});
+    },
+  };
+}
+
+export function activationIssues(entries) {
+  return entries.flatMap(entry => [entry, ...(entry.dependents ?? [])]).flatMap(entry =>
+    (entry.issues ?? []).map(issue => ({type: entry.type, name: entry.name, ...issue})));
 }

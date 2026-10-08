@@ -2,6 +2,7 @@
 import {existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync, rmdirSync} from "node:fs";
 import {join, resolve} from "node:path";
 import {randomUUID} from "node:crypto";
+import {mkdirDurable, writeDurable, renameDurable} from "./osd-durable.mjs";
 import {warmVerdict} from "./osd-hot.mjs";
 
 const journals = new Map();
@@ -39,15 +40,39 @@ export class ActivationJournal {
     this.now = now;
     this.directory = join(root, ".local", "activation", host);
     this.file = join(this.directory, "operations.json");
+    this.outcomeFile = join(this.directory, "last-outcomes.json");
+    this.attemptFile = join(this.directory, "attempt-sequences.json");
     this.generationFile = join(this.directory, "published-generation.json");
     try { this.entries = JSON.parse(readFileSync(this.file, "utf8")); }
     catch (e) { if (e.code !== "ENOENT") throw e; this.entries = {}; }
+    let migrate = false;
+    try { this.outcomes = JSON.parse(readFileSync(this.outcomeFile, "utf8")); }
+    catch (e) { if (e.code !== "ENOENT") throw e; this.outcomes = {}; migrate = true; }
+    try { this.attempts = JSON.parse(readFileSync(this.attemptFile, "utf8")); }
+    catch (e) { if (e.code !== "ENOENT") throw e; this.attempts = {}; }
+    // Legacy tickets are in start order. Keep counters beyond ticket expiry.
+    for (const entry of Object.values(this.entries)) {
+      const key = `${entry.type} ${entry.name}`;
+      const counter = this.attempts[key] ??= {sequence: 0};
+      entry.attempt_seq ??= counter.sequence + 1;
+      counter.sequence = Math.max(counter.sequence, entry.attempt_seq);
+    }
+    for (const [key, outcome] of Object.entries(this.outcomes)) {
+      outcome.attempt_seq ??= this.entries[outcome.op_id]?.attempt_seq ?? 0;
+      const counter = this.attempts[key] ??= {sequence: 0};
+      counter.sequence = Math.max(counter.sequence, outcome.attempt_seq);
+      if ((counter.deleted_through ?? -1) >= outcome.attempt_seq) delete this.outcomes[key];
+    }
+    this.saveAttempts();
     for (const entry of Object.values(this.entries)) {
       if (!["published", "failed"].includes(entry.state)) {
         Object.assign(entry, {state: "failed", active: false, live: false, failure_stage: "recovery",
           note: "source host restarted before completion", updated_at: this.time(), completed_at: this.time()});
-      }
+        this.rememberOutcome(entry);
+      } else if (migrate) this.rememberOutcome(entry);
     }
+    // Migrate before pruning expired history, including a failed old ticket.
+    this.saveOutcomes();
     this.save();
   }
   time() { return new Date(this.now()).toISOString(); }
@@ -69,6 +94,46 @@ export class ActivationJournal {
       this.generationRecordingFailed = false;
     } catch (error) { checkpointFailure(this, error); }
   }
+  rememberOutcome(entry) {
+    const key = `${entry.type} ${entry.name}`;
+    if ((this.attempts[key]?.deleted_through ?? -1) >= entry.attempt_seq) return;
+    if ((this.outcomes[key]?.attempt_seq ?? -1) > entry.attempt_seq) return;
+    this.outcomes[key] = {
+      op_id: entry.op_id, attempt_seq: entry.attempt_seq, outcome: entry.state, generation: entry.generation_id,
+      diagnostics: {failure_stage: entry.failure_stage, note: entry.note, issues: entry.issues,
+        ...(entry.error ? {error: entry.error} : {})},
+    };
+  }
+  saveAttempts() {
+    mkdirDurable(this.directory);
+    const temporary = `${this.attemptFile}.${process.pid}.tmp`;
+    writeDurable(temporary, JSON.stringify(this.attempts));
+    renameDurable(temporary, this.attemptFile);
+  }
+  saveOutcomes() {
+    mkdirDurable(this.directory);
+    const temporary = `${this.outcomeFile}.${process.pid}.tmp`;
+    writeDurable(temporary, JSON.stringify(this.outcomes));
+    renameDurable(temporary, this.outcomeFile);
+  }
+  lastOutcome(type, name) { return this.outcomes[`${type} ${String(name).toUpperCase()}`]; }
+  forgetObject(type, name) {
+    const key = `${type} ${String(name).toUpperCase()}`;
+    const counter = this.attempts[key] ??= {sequence: 0};
+    counter.deleted_through = ++counter.sequence;
+    // Persist the fence first: a restart cannot recover an old pending ticket
+    // into an outcome for the removed object.
+    this.saveAttempts();
+    delete this.outcomes[key];
+    this.saveOutcomes();
+  }
+  forgetMissingObjects(exists) {
+    for (const [key, counter] of Object.entries(this.attempts)) {
+      const [type, name] = key.split(" ");
+      if (counter.deleted_through === counter.sequence && !this.outcomes[key]) continue;
+      if (!exists(type, name)) this.forgetObject(type, name);
+    }
+  }
   save() {
     for (const [id, entry] of Object.entries(this.entries)) {
       if (entry.completed_at && this.now() - Date.parse(entry.completed_at) >= DAY) delete this.entries[id];
@@ -79,7 +144,11 @@ export class ActivationJournal {
     renameSync(temporary, this.file);
   }
   create(type, name) {
-    const entry = {state: "checked", op_id: randomUUID(), generation_id: "", type, name,
+    name = String(name).toUpperCase();
+    const counter = this.attempts[`${type} ${name}`] ??= {sequence: 0};
+    const attempt_seq = ++counter.sequence;
+    this.saveAttempts();
+    const entry = {state: "checked", op_id: randomUUID(), attempt_seq, generation_id: "", type, name,
       created_at: this.time(), updated_at: this.time(), completed_at: "", failure_stage: "",
       active: false, live: false, note: "", issues: []};
     this.entries[entry.op_id] = entry;
@@ -91,7 +160,11 @@ export class ActivationJournal {
     if (!entry) throw error("NOT_FOUND", "activation operation not found");
     if (entry.completed_at) return {...entry};
     Object.assign(entry, fields, {updated_at: this.time()});
-    if (["published", "failed"].includes(entry.state)) entry.completed_at = entry.updated_at;
+    if (["published", "failed"].includes(entry.state)) {
+      entry.completed_at = entry.updated_at;
+      this.rememberOutcome(entry);
+      this.saveOutcomes();
+    }
     this.save();
     if (entry.state === "published") this.recordGenerationBestEffort(entry.generation_id);
     return {...entry};
@@ -149,4 +222,25 @@ export function activationJournal(store) {
     journals.set(key, new ActivationJournal(root, {host}));
   }
   return journals.get(key);
+}
+
+// Removal by Git/editor has no delete() call. Reconcile existing journals
+// when the source host reloads its inactive set, without creating a journal
+// for every transient generator or source-only store.
+export function forgetMissingObjectOutcomes(store) {
+  const host = `http-${process.env.STG_PORT ?? `process-${process.pid}`}`;
+  const directory = join(store.root, ".local", "activation", host);
+  if (store.activationJournal === undefined) {
+    if (!existsSync(join(directory, "attempt-sequences.json")) && !existsSync(join(directory, "last-outcomes.json"))) return;
+    // Detached runners and serving children read the source host's tree. They
+    // must not claim its journal just because they construct a read-only store.
+    try {
+      const owner = Number(readFileSync(join(directory, "owner.pid"), "utf8"));
+      if (owner > 0 && owner !== process.pid) {
+        try {process.kill(owner, 0); return;}
+        catch (error) {if (error.code !== "ESRCH") return;}
+      }
+    } catch (error) {if (error.code !== "ENOENT") throw error;}
+  }
+  activationJournal(store).forgetMissingObjects((type, name) => store.exists(type, name));
 }

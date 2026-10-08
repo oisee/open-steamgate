@@ -1,6 +1,8 @@
 import {transpileIssues, withoutHostPaths} from "./osd-build-issues.mjs";
 import {acceptView, captureView} from "./osd-store-compile-view.mjs";
-import {liveHash} from "./osd-build.mjs";
+import {genHash, liveHash} from "./osd-build.mjs";
+import {forgetRegistry} from "./osd-store-registry.mjs";
+import {relative, sep} from "node:path";
 import {warmOperation} from "./osd-store-warm.mjs";
 const WARM_REPRIME_MS = Number(process.env.OSD_WARM_REPRIME_MS ?? 5000);
 
@@ -51,9 +53,23 @@ export async function transpileStore(store, options, activating, built) {
         }
       }
     }
+    let generatedRefreshed = false;
     try {
       const {build} = await import("./osd-build.mjs");
       const r = await build({...store.buildOptions, root: store.root, force: options.force === true, replace: options.replace === true, overlay, switch: false, expectedHash: view.hash});
+      let updated;
+      if (genHash(store.root) !== view.gen || w.on === true && !w.disabled && w.compiler?.primed) {
+        updated = await captureView(store, activating);
+        const before = new Map(view.digests), after = new Map(updated.digests);
+        const changed = [...new Set([...before.keys(), ...after.keys()])]
+          .filter(file => before.get(file) !== after.get(file))
+          .map(file => relative(store.root, file))
+          .filter(file => file.startsWith("gen" + sep));
+        // gen/ is not watched. Queue its exact delta for the synchronous
+        // validator, using the same post-generator view as the compiler.
+        if (changed.length) forgetRegistry(store, changed);
+      }
+      generatedRefreshed = true;
       await acceptView(store, view, activating, r);
       // only a build that made a generation live is one to prime on: after
       // a failed one the tree is not the live generation, and a prime on
@@ -61,7 +77,6 @@ export async function transpileStore(store, options, activating, built) {
       if (w.on === true && !w.disabled && w.compiler?.primed) {
         try {
           // Generators may have rewritten gen/ during cold compilation.
-          const updated = await captureView(store, activating);
           if (updated.hash !== r.hash) throw new Error("inputs moved after cold publication");
           await warmOperation(store, () => w.compiler.update(activating, updated));
         } catch (error) {
@@ -76,6 +91,9 @@ export async function transpileStore(store, options, activating, built) {
       if (["CHANGED", "INPUT_CHANGED"].includes(error.code)) { superseded++; continue; }
       return failedBuild(store, error, started);
     } finally {
+      // Generators can rewrite files even when compilation/publication fails.
+      // Without a completed delta, the next validation must parse afresh.
+      if (!generatedRefreshed && genHash(store.root) !== view.gen) forgetRegistry(store);
       // a cold build is a new start for the warm registry, primed once the
       // saves have stopped for a while; coalesce a burst of cold saves
       if (w.on === true && !w.disabled && w.compiler?.primed !== true) {

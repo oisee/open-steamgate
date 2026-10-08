@@ -1,8 +1,8 @@
 import {expect} from "chai";
 import express from "express";
-import {mkdtempSync,mkdirSync,writeFileSync,rmSync} from "node:fs";
+import {mkdtempSync,mkdirSync,writeFileSync,rmSync,symlinkSync,renameSync} from "node:fs";
 import {tmpdir} from "node:os";
-import {join} from "node:path";
+import {join,resolve} from "node:path";
 import "./start.mjs";
 import {adtRouter} from "../tools/adt-facade.mjs";
 import {structureOf,objectStructureDocument} from "../tools/adt-documents.mjs";
@@ -14,11 +14,42 @@ import {box,answerOf} from "./helpers/destination.mjs";
 const base="/sap/bc/adt/";
 const fixtures={
   "zi_outline.intf.abap":"INTERFACE zi_outline PUBLIC. METHODS run. ENDINTERFACE.",
+  "zif_edge.intf.abap":"INTERFACE zif_edge PUBLIC. ENDINTERFACE.",
   "zcl_outline.clas.abap":`CLASS zcl_outline DEFINITION PUBLIC. PUBLIC SECTION. CLASS-METHODS execute. METHODS run. DATA value TYPE i. ENDCLASS.
 CLASS zcl_outline IMPLEMENTATION. METHOD execute. ENDMETHOD. METHOD run. value = 1. ENDMETHOD. ENDCLASS.`,
   "zcl_outline.clas.testclasses.abap":"CLASS ltcl_test DEFINITION FOR TESTING. PRIVATE SECTION. METHODS check FOR TESTING. ENDCLASS. CLASS ltcl_test IMPLEMENTATION. METHOD check. ENDMETHOD. ENDCLASS.",
   "zcl_interface.clas.abap":"CLASS zcl_interface DEFINITION PUBLIC. PUBLIC SECTION. INTERFACES zi_outline. ENDCLASS. CLASS zcl_interface IMPLEMENTATION. METHOD zi_outline~run. ENDMETHOD. ENDCLASS.",
   "zcl_empty.clas.abap":"CLASS zcl_empty DEFINITION PUBLIC. ENDCLASS. CLASS zcl_empty IMPLEMENTATION. ENDCLASS.",
+  "zcl_structures.clas.abap":`CLASS zcl_structures DEFINITION PUBLIC.
+PUBLIC SECTION.
+DATA: BEGIN OF row,
+        field TYPE i,
+        BEGIN OF nested,
+          item TYPE i,
+        END OF nested,
+      END OF row,
+      tail TYPE i.
+PROTECTED SECTION.
+CONSTANTS: answer TYPE i VALUE 42,
+           BEGIN OF settings,
+             enabled TYPE i VALUE 1,
+             BEGIN OF nested,
+               flag TYPE i VALUE 2,
+             END OF nested,
+           END OF settings.
+PRIVATE SECTION.
+CLASS-DATA: BEGIN OF shared,
+              field TYPE i,
+              BEGIN OF nested,
+                item TYPE i,
+              END OF nested,
+            END OF shared.
+ENDCLASS.
+CLASS zcl_structures IMPLEMENTATION. ENDCLASS.`,
+  "zcl_structures.clas.locals_def.abap":`CLASS lcl_structures DEFINITION.
+PUBLIC SECTION.
+DATA: BEGIN OF row, field TYPE i, END OF row.
+ENDCLASS.`,
   "zoutline.prog.abap":`REPORT zoutline.
 CLASS lcl_local DEFINITION. PUBLIC SECTION. METHODS run. ENDCLASS.
 CLASS lcl_local IMPLEMENTATION. METHOD run. ENDMETHOD. ENDCLASS.
@@ -30,9 +61,16 @@ START-OF-SELECTION. PERFORM do_it.`,
   "zsrv.srvd.srvdsrv":"define service ZSrv { expose ZEntity; }",
 };
 const routes=[["CLAS","oo/classes","zcl_outline"],["INTF","oo/interfaces","zi_outline"],
+  ["INTF","oo/interfaces","zif_edge"],["CLAS","oo/classes","zcl_empty"],["CLAS","oo/classes","zcl_structures"],
   ["PROG","programs/programs","zoutline"],["DDLS","ddic/ddl/sources","zddl"],
   ["SRVD","ddic/srvd/sources","zsrv"],["INCL","programs/includes","zinclude"]];
 const clean=(s) => s.replace(/\?$/,"");
+const slice=(source,href) => {
+  const [,firstLine,firstCol,lastLine,lastCol] = /#start=(\d+),(\d+);end=(\d+),(\d+)/.exec(href).map(Number);
+  const lines=source.split("\n");
+  return lines.slice(firstLine-1,lastLine).map((line,index) => line.slice(index === 0 ? firstCol : 0,
+    firstLine+index === lastLine ? lastCol+1 : undefined)).join("\n");
+};
 describe("B2b objectstructure live Node byte diff",function () {
   this.timeout(120000);
   let root,store,node,ported,restore;
@@ -51,9 +89,13 @@ describe("B2b objectstructure live Node byte diff",function () {
   }
   before(async () => {
     root=mkdtempSync(join(tmpdir(),"osd-b2b-"));mkdirSync(join(root,"src"));
-    writeFileSync(join(root,"abaplint.jsonc"),JSON.stringify({syntax:{version:"v702"},rules:{}}));
+    symlinkSync(join(resolve("."),"node_modules"),join(root,"node_modules"));
+    writeFileSync(join(root,"package.json"),"{}");
+    writeFileSync(join(root,"abaplint.jsonc"),JSON.stringify({syntax:{version:"v702"},rules:{allowed_object_types:false}}));
+    writeFileSync(join(root,"abap_transpile.json"),JSON.stringify({input_folder:["src"],output_folder:"output",libs:[],
+      options:{ignoreSyntaxCheck:false,addCommonJS:true,unknownTypes:"compileError"}}));
     for (const [file,source] of Object.entries(fixtures)) writeFileSync(join(root,"src",file),source);
-    store=new ObjectStore({root,libs:[],roots:[{path:"src",package:"$TMP",writable:true}]});
+    store=new ObjectStore({root,libs:[],roots:[{path:"src",package:"$TMP",writable:true}],build:{generators:false}});
     const klass=abap.Classes.ZCL_OSD_ADT_STRUCTURE,original=klass.document;
     if(process.env.OSD_ADT_RED) {
       klass.document=async (...args) => {const r=await original.apply(klass,args);let s=r.get();
@@ -84,7 +126,32 @@ describe("B2b objectstructure live Node byte diff",function () {
         const key=`object GET ${p}`;expect(ported.facade.missed.get(key)?.count).to.equal(node.facade.missed.get(key)?.count);expect(ported.facade.missed.get(key)).to.be.an("object");});
     }
   }
-  for(const name of ["zcl_interface","zcl_empty"]) it(name,async () => {expect((await diff(base+"oo/classes/"+name+"/objectstructure")).status).to.equal(200);});
+  it("zcl_interface",async () => {expect((await diff(base+"oo/classes/zcl_interface/objectstructure")).status).to.equal(200);});
+  it("structured attributes own their entire blocks in both fronts and STORE OUTLINE",async () => {
+    const attribute=(name,visibility,level,identifier,block) => ({name,type:"CLAS/OA",visibility,level,links:[
+      {rel:"definitionIdentifier",href:"./source/main#"+identifier},
+      {rel:"definitionBlock",href:"./source/main#"+block},
+    ]});
+    const members=[
+      attribute("ROW","public","instance","start=3,15;end=3,18","start=3,0;end=8,16"),
+      attribute("TAIL","public","instance","start=9,6;end=9,10","start=3,0;end=9,17"),
+      attribute("ANSWER","protected","static","start=11,11;end=11,17","start=11,0;end=11,33"),
+      attribute("SETTINGS","protected","static","start=12,20;end=12,28","start=11,0;end=17,26"),
+      attribute("SHARED","private","static","start=19,21;end=19,27","start=19,0;end=24,25"),
+    ];
+    const outline=structureOf(store,"CLAS","zcl_structures");
+    expect(outline.children.slice(0,5)).to.deep.equal(members);
+    const local=outline.children[5];
+    expect(local.name).to.equal("LCL_STRUCTURES");
+    expect(local.children).to.deep.equal([attribute("ROW","public","instance","start=3,15;end=3,18","start=3,0;end=3,44")
+      ].map(e => ({...e,links:e.links.map(l => ({...l,href:l.href.replace("./source/main","./includes/definitions")}))})));
+    const answer=await new StoreDestination({store}).execute({iv_command:"PARSE",iv_json:JSON.stringify({kind:"OUTLINE",type:"CLAS",name:"zcl_structures"})});
+    expect(answer.EV_ERROR).to.equal("");
+    const ordered=e => ({...e,extra:Object.entries(e.extra ?? {}).map(([name,value]) => ({name,value})),links:e.links ?? [],children:(e.children ?? []).map(ordered)});
+    expect(JSON.parse(answer.EV_JSON)).to.deep.equal({found:true,...ordered(outline)});
+    const actual=await diff(base+"oo/classes/zcl_structures/objectstructure");
+    expect(actual.body.toString()).to.equal(objectStructureDocument(outline,{base:base+"oo/classes/zcl_structures/objectstructure"}));
+  });
   it("DDLS has no entity fallback",async () => {expect((await diff(base+"ddic/ddl/sources/ZEntity/objectstructure")).status).to.equal(404);});
   it("PARSE refusal has Node's 500 document",async () => {
     const original=store.registry;store.registry=() => {throw new Error('outline <failure> & "message"');};
@@ -100,7 +167,7 @@ describe("B2b objectstructure live Node byte diff",function () {
     }
     expect(results.Node).to.equal(results.ABAP);delete results.Node;delete results.ABAP;console.log("B2b latency ms",JSON.stringify(results));
   });
-  it("host save defers parsing to the next outline; activation primes the registry",async () => {
+  it("host save updates the kept registry without parsing; activation checks it",async () => {
     const url=node.origin+base+"oo/classes/zcl_empty";
     const warm=await fetch(url,{headers:{"x-csrf-token":"fetch"}});await warm.arrayBuffer();
     const headers={cookie:warm.headers.getSetCookie().map((c) => c.split(";")[0]).join("; "),"x-csrf-token":warm.headers.get("x-csrf-token"),"x-sap-adt-sessiontype":"stateful","content-type":"text/plain"};
@@ -109,18 +176,19 @@ describe("B2b objectstructure live Node byte diff",function () {
     try {
       const source=store.read("CLAS","ZCL_EMPTY").source;
       const registry=store.registry;
+      const kept=store.registry();
       store.registry=() => {throw new Error("SAVE must not parse the project");};
       try {
         const saved=await fetch(url+"/source/main?lockHandle="+encodeURIComponent(handle),{method:"PUT",headers,body:source});
-        await saved.arrayBuffer();expect(saved.status).to.equal(200);expect(store.parsed).to.equal(undefined);
+        await saved.arrayBuffer();expect(saved.status).to.equal(200);expect(store.parsed).to.equal(kept);
       } finally {store.registry=registry;}
       await diff(base+"oo/classes/zcl_empty/objectstructure");
-      expect(store.parsed).not.to.equal(undefined);
+      expect(store.parsed).to.equal(kept);
       let calls=0;const original=store.registry;store.registry=function (...args) {calls++;return original.apply(this,args);};
       try {
         const activated=await fetch(node.origin+base+"activation?method=activate",{method:"POST",headers:{...headers,"content-type":"application/xml"},body:`<adtcore:objectReference xmlns:adtcore="http://www.sap.com/adt/core" adtcore:uri="${base}oo/classes/zcl_empty"/>`});
         expect(await activated.text()).to.include("activationExecuted");expect(calls).to.be.greaterThan(0);
-        expect(store.parsed).not.to.equal(undefined);
+        expect(store.parsed).to.equal(kept);
       } finally {store.registry=original;}
     } finally {await fetch(url+"?_action=UNLOCK&lockHandle="+encodeURIComponent(handle),{method:"POST",headers});}
   });
@@ -133,7 +201,73 @@ describe("B2b objectstructure live Node byte diff",function () {
     expect(r.children[0].links).to.be.an("array");
     expect(objectStructureDocument(structureOf(store,"CLAS","zcl_outline"))).to.include('isExternalRef="true" description="Text Elements"');
   });
+  it("OUTLINE and objectstructure ranges follow the requested source version on both fronts",async () => {
+    const active=store.read("CLAS","ZCL_OUTLINE").source;
+    const activation=store.activate("CLAS","ZCL_OUTLINE");
+    expect(activation.active,JSON.stringify(activation)).to.equal(true);
+    const ddls=join(root,"src/zddl.ddls.asddls"),srvd=join(root,"src/zsrv.srvd.srvdsrv");
+    renameSync(ddls,join(root,"zddl.off"));renameSync(srvd,join(root,"zsrv.off"));
+    let built;
+    try {built=await store.transpile({force:true,activating:new Set(["CLAS ZCL_OUTLINE"])});}
+    finally {renameSync(join(root,"zddl.off"),ddls);renameSync(join(root,"zsrv.off"),srvd);}
+    expect(built.ok,built.output).to.equal(true);
+    expect(store.completeActivation(activation,built.built)).to.equal(true);
+    const activeTests=store.read("CLAS","ZCL_OUTLINE","testclasses","active").source;
+    const inactive=`* inactive outline shift\n${active}`;
+    const inactiveTests=`* external include shift\n\n${activeTests}`;
+    const baseline=structureOf(store,"CLAS","zcl_outline","active");
+    const selections=(outline,main,tests) => {
+      const result=[];
+      const visit=e => {
+        for(const link of e.links ?? []) if(link.href.includes("#start="))
+          result.push([e.name,link.rel,slice(link.href.startsWith("./includes/testclasses") ? tests : main,link.href)]);
+        for(const child of e.children ?? []) visit(child);
+      };
+      visit(outline);return result;
+    };
+    const expectedSelections=selections(baseline,active,activeTests);
+    // No STORE save or publication: another editor shifts both physical files.
+    writeFileSync(join(root,"src/zcl_outline.clas.abap"),inactive);
+    writeFileSync(join(root,"src/zcl_outline.clas.testclasses.abap"),inactiveTests);
+    store.build(); // notice the external edit, without inactive STORE intent
+    expect(store.inactive.has("CLAS ZCL_OUTLINE")).to.equal(false);
+    const structurePath=`${base}oo/classes/zcl_outline/objectstructure`;
+    const ordered=e => ({...e,extra:Object.entries(e.extra ?? {}).map(([name,value]) => ({name,value})),links:e.links ?? [],children:(e.children ?? []).map(ordered)});
+    for(const edit of ["external","STORE"]) {
+      if(edit === "STORE") store.write("CLAS","ZCL_OUTLINE",inactive);
+      for(const [version,source] of [["active",active],["inactive",inactive]]) {
+        const outline=structureOf(store,"CLAS","zcl_outline",version);
+        const tests=version === "active" ? activeTests : inactiveTests;
+        expect(selections(outline,source,tests),`${edit} ${version} ranges`).to.deep.equal(expectedSelections);
+        const answer=await new StoreDestination({store}).execute({iv_command:"PARSE",iv_json:JSON.stringify({kind:"OUTLINE",type:"CLAS",name:"zcl_outline",version})});
+        expect(answer.EV_ERROR).to.equal("");
+        expect(JSON.parse(answer.EV_JSON)).to.deep.equal({found:true,...ordered(outline)});
+        const bodies=[];
+        for(const front of [node,ported]) {
+          const structure=await wire(front,`${structurePath}?version=${version}`);
+          const text=await wire(front,`${base}oo/classes/zcl_outline/source/main?version=${version}`);
+          expect(structure.status).to.equal(200);
+          expect(text.status,`${front === node ? "Node" : "ABAP"} source ${version}`).to.equal(200);
+          expect(text.body.toString()).to.equal(source);
+          const testText=await wire(front,`${base}oo/classes/zcl_outline/includes/testclasses/source/main?version=${version}`);
+          expect(testText.status).to.equal(200);
+          expect(testText.body.toString()).to.equal(tests);
+          bodies.push(structure.body.toString());
+        }
+        expect(bodies[0]).to.equal(objectStructureDocument(outline,{base:`${structurePath}?version=${version}`}));
+        expect(bodies[1]).to.equal(bodies[0]);
+        const execute=outline.children.find(child => child.name === "EXECUTE");
+        for(const link of execute.links.filter(link => link.rel.endsWith("Identifier") || link.rel.endsWith("Block"))) {
+          const selected=slice(source,link.href);
+          if(link.rel === "implementationIdentifier") expect(selected).to.match(/^execute\.?$/);
+          if(link.rel === "implementationBlock") expect(selected).to.match(/^METHOD execute\.[\s\S]*ENDMETHOD\.$/);
+        }
+      }
+    }
+    const defaultAnswer=await new StoreDestination({store}).execute({iv_command:"PARSE",iv_json:JSON.stringify({kind:"OUTLINE",type:"CLAS",name:"zcl_outline"})});
+    expect(JSON.parse(defaultAnswer.EV_JSON)).to.deep.equal({found:true,...ordered(structureOf(store,"CLAS","zcl_outline"))});
+  });
 });
 describe("B2b focused ABAP Unit",() => {
-  for(const method of ["empty","nested"]) it(method,async () => {const {ltcl_structure}=await import("../output/zcl_osd_adt_structure.clas.testclasses.mjs");const o=new ltcl_structure();await o.constructor_();await o.FRIENDS_ACCESS_INSTANCE[method]();});
+  for(const method of ["empty","root_links","nested"]) it(method,async () => {const {ltcl_structure}=await import("../output/zcl_osd_adt_structure.clas.testclasses.mjs");const o=new ltcl_structure();await o.constructor_();await o.FRIENDS_ACCESS_INSTANCE[method]();});
 });

@@ -4,16 +4,99 @@ import {readFileSync, readdirSync, statSync} from "node:fs";
 import {join} from "node:path";
 import * as abaplint from "@abaplint/core";
 import {ddlsIssues} from "./osd-store-ddls.mjs";
+import {config as publicationValidation} from "@abaplint/transpiler/build/src/validation.js";
 import {TYPES} from "./osd-store-types.mjs";
+import {OBJECT_NAME_PATTERN} from "./osd-object-name.mjs";
 
-// Parsing the system costs seconds and every store of the same tree parses
-// the same thing, so the answer is kept per root and dropped the moment
-// anything is written. A façade that makes a store per request pays once.
+// The parse is shared per root. Known source mutations queue only their files;
+// configuration/root changes invalidate the whole registry.
 const PARSED = new Map();
+const PENDING = new Map();
+const REFERENCES = new WeakMap();
+const REVISIONS = new WeakMap();
+export const registryRevision = registry => REVISIONS.get(registry) ?? 0;
 
-export function forgetRegistry(store) {
-  store.parsed = undefined;
-  PARSED.delete(store.root);
+export function forgetRegistry(store, files) {
+  if (files !== undefined && PARSED.has(store.root)) {
+    const dirty = PENDING.get(store.root) ?? new Set();
+    for (const file of files) dirty.add(file);
+    PENDING.set(store.root, dirty);
+  } else {
+    store.parsed = undefined;
+    PARSED.delete(store.root);
+    PENDING.delete(store.root);
+  }
+}
+
+// A lexical reverse index deliberately includes comments and strings. Extra
+// candidates cost a check; missed readers would reuse stale syntax results.
+function indexObject(index, object) {
+  for (const word of index.words.get(object) ?? []) {
+    const readers = index.readers.get(word);
+    readers?.delete(object);
+    if (!readers?.size) index.readers.delete(word);
+  }
+  const words = new Set(object.getFiles().flatMap(file =>
+    file.getRaw().toUpperCase().match(new RegExp(OBJECT_NAME_PATTERN, "g")) ?? []));
+  index.words.set(object, words);
+  for (const word of words) {
+    if (!index.readers.has(word)) index.readers.set(word, new Set());
+    index.readers.get(word).add(object);
+  }
+}
+function referenceIndex(registry) {
+  let index = REFERENCES.get(registry);
+  if (!index) {
+    index = {words: new Map(), readers: new Map()};
+    for (const object of registry.getObjects()) indexObject(index, object);
+    REFERENCES.set(registry, index);
+  }
+  return index;
+}
+// One closure for cache invalidation and activation checking. Stop collecting
+// candidates at the check limit; its caller then checks the full registry.
+function readerClosure(index, names, limit = Infinity) {
+  const reached = new Set(names);
+  const queue = [...reached];
+  const affected = new Set();
+  for (const name of queue) {
+    for (const reader of index.readers.get(name) ?? []) {
+      if (affected.has(reader)) continue;
+      affected.add(reader);
+      if (affected.size > limit) return undefined;
+      const key = reader.getName().toUpperCase();
+      if (!reached.has(key)) {reached.add(key); queue.push(key);}
+    }
+  }
+  return affected;
+}
+
+// Update/add/remove only the changed object's files and dirty its transitive
+// readers before parsing. Both sides of temporary overlays use this too, so
+// a cached caller cannot survive either the substitution or its restoration.
+export function updateRegistryFiles(registry, replacements) {
+  const index = referenceIndex(registry);
+  const changed = new Set();
+  for (const [filename, source] of replacements) {
+    const before = registry.getFileByName(filename);
+    if (before?.getRaw() === source || before === undefined && source === undefined) continue;
+    const file = source === undefined ? before : new abaplint.MemoryFile(filename, source);
+    const previousObject = registry.getObject(file.getObjectType(), file.getObjectName());
+    changed.add(file.getObjectName().toUpperCase());
+    if (source === undefined) registry.removeFile(before);
+    else if (before === undefined) registry.addFile(file);
+    else registry.updateFile(file);
+    const object = registry.getObject(file.getObjectType(), file.getObjectName());
+    if (previousObject && previousObject !== object) {
+      for (const word of index.words.get(previousObject) ?? []) index.readers.get(word)?.delete(previousObject);
+      index.words.delete(previousObject);
+    }
+    if (object) indexObject(index, object);
+  }
+  const affected = readerClosure(index, changed);
+  if (changed.size) REVISIONS.set(registry, registryRevision(registry) + 1);
+  for (const object of affected) object.setDirty();
+  registry.parse();
 }
 
 export function walkStoreFiles(store, dir, out) {
@@ -43,40 +126,38 @@ export function walkStoreFiles(store, dir, out) {
   return out;
 }
 
-// Why a write throws the whole parse away, when abaplint can be told what
-// changed instead.
-//
-// The fast path works and is wrong. Telling the registry about the file
-// and parsing again takes twenty milliseconds where a full parse takes
-// four seconds, and the object that changed is checked correctly
-// afterwards. Its callers are not: abaplint reparses the object whose
-// file moved and leaves the results it already has for everything else,
-// so a class that renames a method its callers use comes back clean from
-// a caller's check that a full parse fails. Measured on exactly the case
-// activation exists to catch, the one that used to answer with an empty
-// success.
-//
-// So a write costs four seconds of reparse at the next check, and an
-// activation pays it once. That is the honest price of knowing what the
-// system contains, and the transpile after it costs more anyway.
-// the parsed system, for whoever needs more than an object: the
-// cross-reference derives from the same parse the check runs on
-// the whole registry, so a check sees the system and not one file
+// Keep publication validation synchronous without rereading the system on
+// WRITE -> ACTIVATE. Initial parsing is cold; subsequent known edits are not.
 export function buildRegistry(store, configPath = "abaplint.jsonc") {
-  if (store.parsed !== undefined) {
-    return store.parsed;
-  }
   const shared = PARSED.get(store.root);
   if (shared !== undefined) {
+    const files = PENDING.get(store.root);
+    if (files?.size) {
+      updateRegistryFiles(shared, [...files].filter(file => /\.(abap|xml|asddls)$/.test(file)).map(file => {
+        let source;
+        try {source = readFileSync(join(store.root, file), "utf8");}
+        catch (error) {if (error.code !== "ENOENT") throw error;}
+        return ["/" + file, source];
+      }));
+      PENDING.delete(store.root);
+    }
     store.parsed = shared;
     return shared;
   }
   const text = readFileSync(join(store.root, configPath), "utf8").split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
   const config = JSON.parse(text);
+  // The publication validator owns these rules. Keep identifier and
+  // structural checks identical for saved includes and compiled includes.
+  const validation = structuredClone(publicationValidation);
+  validation.rules.check_syntax = true;
+  validation.rules.forbidden_identifier.check = ["^unique\\d+$"];
   const registry = new abaplint.Registry(new abaplint.Config(JSON.stringify({
     global: {files: "/**/*.*"},
     syntax: config.syntax,
-    rules: {parser_error: true, check_syntax: true, unknown_types: true, implement_methods: true},
+    // DDLS/SRVD are generator inputs excluded from the transpiler; their
+    // dedicated checks below remain authoritative for those source types.
+    rules: {...validation.rules, allowed_object_types: {...validation.rules.allowed_object_types,
+      allowed: [...validation.rules.allowed_object_types.allowed, "DDLS", "SRVD", "SAPC", "SAMC"]}},
   })));
   // everything, not only what the index calls an object: a class needs its
   // local includes, and a type pool is not an ADT object but the check
@@ -91,9 +172,21 @@ export function buildRegistry(store, configPath = "abaplint.jsonc") {
     }
   }
   registry.parse();
+  referenceIndex(registry);
   store.parsed = registry;
   PARSED.set(store.root, registry);
   return registry;
+}
+
+export function registryDependents(registry, type, name) {
+  const index = referenceIndex(registry);
+  const self = registry.getObject(TYPES[type]?.sameFileAs ?? type, name);
+  const limit = 256;
+  const closure = readerClosure(index, [String(name).toUpperCase()], limit);
+  if (!closure) console.warn(`activation ${type} ${name}: dirty reader closure exceeds ${limit} objects; falling back to a full registry check`);
+  return [...(closure ?? registry.getObjects())]
+    .filter(object => object !== self)
+    .map(object => ({type: object.getType(), name: object.getName()}));
 }
 
 // the issues of one object, in the shape the façade returns
@@ -137,21 +230,10 @@ export function withSource(store, file, source, fn) {
   const registry = store.registry();
   const filename = "/" + file;
   const before = registry.getFileByName(filename);
-  const replacement = new abaplint.MemoryFile(filename, source);
   try {
-    if (before === undefined) {
-      registry.addFile(replacement);
-    } else {
-      registry.updateFile(replacement);
-    }
-    registry.parse();
+    updateRegistryFiles(registry, [[filename, source]]);
     return fn(registry);
   } finally {
-    if (before === undefined) {
-      registry.removeFile(replacement);
-    } else {
-      registry.updateFile(before);
-    }
-    registry.parse();
+    updateRegistryFiles(registry, [[filename, before?.getRaw()]]);
   }
 }
