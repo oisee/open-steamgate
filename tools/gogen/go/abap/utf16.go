@@ -396,3 +396,17 @@ func runesWTF8(v string) []rune {
 	}
 	return out
 }
+
+// Text16 is go/abap's character runtime for packages that take a narrow
+// interface instead of importing go/abap (charsection.Text): lengths and
+// sections in UTF-16 units, fitting and padding, joining with the
+// surrogate-half invariant.
+var Text16 text16
+
+type text16 struct{}
+
+func (text16) Len(s string) int32                     { return Strlen(s) }
+func (text16) Sub(s string, off, length int32) string { return SubS(s, off, length) }
+func (text16) Fit(s string, n int) string             { return CFit(s, n) }
+func (text16) Pad(s string, n int) string             { return PadC(s, n) }
+func (text16) Join(parts ...string) string            { return JoinUTF16(parts...) }
