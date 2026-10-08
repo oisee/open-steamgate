@@ -437,28 +437,45 @@ func ToMixed(v, sep string, hasCase bool, cs string, min int32) string {
 	if min < 1 {
 		panic(NotCompiled("to_mixed( )", "a min below 1 is not measured"))
 	}
-	sepUnit := UTF16Units(sep)[0]
-	r := UTF16Units(v)
-	out := make([]uint16, 0, len(r))
-	for i := 0; i < len(r); i++ {
+	sepRune, _ := decode16(sep)
+	var out strings.Builder
+	// Fold complete Unicode scalars; only lone WTF-8 halves pass through.
+	// The separator threshold still counts ABAP's UTF-16 units.
+	units := int32(0)
+	for i := 0; i < len(v); {
+		r, width := decode16(v[i:])
+		upper, fold := false, true
 		switch {
-		case i == 0 && hasCase:
-			c, _ := decode16(cs)
-			if unicode.IsUpper(c) {
-				out = append(out, uint16(unicode.ToUpper(rune(r[0]))))
-			} else {
-				out = append(out, uint16(unicode.ToLower(rune(r[0]))))
-			}
 		case i == 0:
-			out = append(out, r[0])
-		case r[i] == sepUnit && int32(i) >= min && i+1 < len(r):
-			i++
-			out = append(out, uint16(unicode.ToUpper(rune(r[i]))))
-		default:
-			out = append(out, uint16(unicode.ToLower(rune(r[i]))))
+			fold = hasCase
+			c, _ := decode16(cs)
+			upper = unicode.IsUpper(c)
+		case r == sepRune && units >= min && i+width < len(v):
+			i += width
+			units++
+			r, width = decode16(v[i:])
+			upper = true
 		}
+		if r >= 0xd800 && r <= 0xdfff {
+			out.WriteString(v[i : i+width])
+		} else {
+			c := r
+			if fold {
+				if upper {
+					c = unicode.ToUpper(r)
+				} else {
+					c = unicode.ToLower(r)
+				}
+			}
+			out.WriteRune(c)
+		}
+		units++
+		if r > 0xffff {
+			units++
+		}
+		i += width
 	}
-	return UTF16String(out)
+	return Canon(out.String())
 }
 
 // ConcatFit puts the result of CONCATENATE into its target (ultra/events,

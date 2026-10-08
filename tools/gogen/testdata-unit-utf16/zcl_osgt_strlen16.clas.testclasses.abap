@@ -25,6 +25,7 @@ METHODS half_ignore_case FOR TESTING.
 METHODS json_half_parse FOR TESTING.
 METHODS egress_apc FOR TESTING.
 METHODS condense_no_gaps FOR TESTING.
+METHODS mixed_scalar FOR TESTING.
 ENDCLASS.
 CLASS ltcl_test IMPLEMENTATION.
 METHOD len.
@@ -291,5 +292,14 @@ DATA(emoji) = s+0(2).
 IF r <> emoji.
   cl_abap_unit_assert=>fail( ).
 ENDIF.
+ENDMETHOD.
+METHOD mixed_scalar.
+DATA(upper) = cl_abap_codepage=>convert_from( CONV xstring( 'F0909080' ) ).
+DATA(lower) = cl_abap_codepage=>convert_from( CONV xstring( 'F09090A8' ) ).
+cl_abap_unit_assert=>assert_equals( act = to_mixed( `a` && upper ) exp = `a` && lower ).
+cl_abap_unit_assert=>assert_equals( act = to_mixed( `a_` && lower ) exp = `a` && upper ).
+DATA(s) = zcl_osgt_strlen16=>emoji( ).
+DATA(hi) = s+0(1).
+cl_abap_unit_assert=>assert_equals( act = to_mixed( hi && `_A` ) exp = hi && `A` ).
 ENDMETHOD.
 ENDCLASS.
