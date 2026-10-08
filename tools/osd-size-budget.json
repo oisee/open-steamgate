@@ -15,8 +15,8 @@
   ],
   "budgets": {
     "go:abap": {
-      "lines": 11802,
-      "reason": "osgo 026/029 (#658, #659, 2026-10-08): UTF-16 units with the surrogate-half invariant and class statics per Session; carving utf16/statics out of go/abap is queued (stoker QUEUE #33); ADT batch 1 (adt-i5 cases 1-7): Session message fields, classic exception binding, date/time and signed MOVE adapters, object-wrapper identity, STORE answer projection and conservative ADT host answers; timestamp conversion lives in go/timestamp. Includes the merged main baseline and the narrow UTF-16 adapter required to remove charsection dependency on abap. Critic round 1: immediate caller MESSAGE RAISING assignments and scoped restoration, including calls without EXCEPTIONS. Critic round 1: shared fixed-character comparison conversion and CP escaped/trailing blank binding semantics. ADT batch 1 (round 5 finding 4): normalize zero session message-number storage on typed NUMC(3) reads."
+      "lines": 11807,
+      "reason": "osgo 026/029 (#658, #659): UTF-16 units and class statics per Session (carve-out queued, stoker QUEUE #33). ADT batch 1 (adt-i5 cases 1-7): Session message fields (sy-msgno as NUMC 3), MESSAGE RAISING binding with scoped restoration, classic exceptions keyed by the resolved interface method, date/time and signed MOVE adapters, object-wrapper identity, STORE answer projection and conservative ADT host answers; timestamp conversion lives in go/timestamp."
     },
     "go:abaperr": {
       "lines": 13,
