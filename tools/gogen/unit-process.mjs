@@ -6,7 +6,7 @@ import {performance} from "node:perf_hooks";
 
 // One test process (and the seed image) gets this long before it is killed;
 // a long benchmark raises it through the environment.
-function processTimeout() {
+export function processTimeout() {
   const raw = process.env.GOGEN_UNIT_TIMEOUT_MS;
   if (raw === undefined) return 120000;
   // setTimeout fires at once above 2^31-1 ms (about 24.8 days)
