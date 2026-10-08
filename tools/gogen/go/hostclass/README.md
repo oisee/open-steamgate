@@ -10,6 +10,12 @@ and use only scalar Go types. The first seam is `ZCL_OSD_ENQ_KERNEL`; add a
 neighboring class-named variable when another host replacement is needed.
 
 A callback returns `*Raise` to ask the generated method to raise an ABAP
-exception. `Class` is the ABAP class name, `Factory` optionally names its static
-factory method, and `Text` is the fallback message. Every other non-nil error is
+exception. `Class` is the ABAP class name, `Factory` is required and names a compiled static
+factory returning a reference, with every parameter OPTIONAL or DEFAULT. The
+factory is called with those parameters omitted, just like an ordinary ABAP
+call. `Text` is diagnostic text for `Error()` only; it never builds an exception.
+A missing class, missing or misspelled factory, a factory not compiled into the
+program, or one outside the replaced class package's visible layers panics with
+`abap.NotCompiled` naming `Class=>Factory`. A plain exception without a factory
+therefore fails loudly. Every other non-nil error is
 a host failure and panics; it is never converted to an initial ABAP result.

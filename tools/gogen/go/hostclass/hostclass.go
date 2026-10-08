@@ -3,9 +3,9 @@
 // hooks when a host installs one.
 package hostclass
 
-// Raise asks generated code to raise an ABAP exception. Factory, when set,
-// names a static factory method on Class; otherwise Text is used as far as
-// the generated class supports.
+// Raise asks generated code to raise an ABAP exception via the required
+// static Factory on Class. Text is only diagnostic text for Error(); it is
+// never used to construct the exception.
 type Raise struct {
 	Class   string
 	Factory string
