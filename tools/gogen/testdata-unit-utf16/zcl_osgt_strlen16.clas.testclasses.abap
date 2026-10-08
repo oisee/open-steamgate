@@ -20,6 +20,7 @@ METHODS join_replace FOR TESTING.
 METHODS egress_pair FOR TESTING.
 METHODS binary_body FOR TESTING.
 METHODS half_operators FOR TESTING.
+METHODS half_ignore_case FOR TESTING.
 ENDCLASS.
 CLASS ltcl_test IMPLEMENTATION.
 METHOD len.
@@ -219,5 +220,22 @@ IF r CP `+a`.
 ELSE.
  cl_abap_unit_assert=>fail( msg = `CP half wildcard` ).
 ENDIF.
+ENDMETHOD.
+METHOD half_ignore_case.
+DATA(s) = zcl_osgt_strlen16=>emoji( ).
+DATA(hi) = s+0(1).
+DATA(lo) = s+1(1).
+DATA(emoji) = s+0(2).
+DATA(count) = 0.
+FIND ALL OCCURRENCES OF lo IN s IGNORING CASE MATCH COUNT count.
+cl_abap_unit_assert=>assert_equals( act = count exp = 1 ).
+DATA results TYPE match_result_tab.
+FIND ALL OCCURRENCES OF lo IN s IGNORING CASE RESULTS results.
+cl_abap_unit_assert=>assert_equals( act = lines( results ) exp = 1 ).
+READ TABLE results INDEX 1 INTO DATA(result).
+cl_abap_unit_assert=>assert_equals( act = result-offset exp = 1 ).
+REPLACE lo IN s WITH `X` IGNORING CASE.
+cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 0 ).
+cl_abap_unit_assert=>assert_equals( act = s exp = hi && `XA` ).
 ENDMETHOD.
 ENDCLASS.

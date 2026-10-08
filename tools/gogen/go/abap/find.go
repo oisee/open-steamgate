@@ -190,6 +190,16 @@ func FindResults(s, p string, kind byte, icase, all bool) [][]int32 {
 	var re, after *regexp.Regexp
 	switch kind {
 	case 0:
+		if hasHalf(s) || hasHalf(p) {
+			split := splitSupplementary(s)
+			matches := plainAllWTF(split, p, icase, !all)
+			out := make([][]int32, 0, len(matches))
+			for _, m := range matches {
+				off := Strlen(split[:m[0]])
+				out = append(out, []int32{off, Strlen(split[m[0]:m[1]])})
+			}
+			return out
+		}
 		if !icase {
 			return plainResults(s, p, all)
 		}

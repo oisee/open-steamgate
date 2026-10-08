@@ -137,12 +137,13 @@ func compileABAPAfter(p string, icase bool) *regexp.Regexp {
 // plainAll is every occurrence of sub in s, left to right, not overlapping,
 // as [start end] byte pairs; icase compares case-insensitively.
 func plainAll(s, sub string, icase, first bool) [][]int {
+	if hasHalf(s) || hasHalf(sub) {
+		return plainAllWTF(s, sub, icase, first)
+	}
 	if icase {
 		return rxAll(s, regexp.QuoteMeta(sub), true, first)
 	}
-	if hasHalf(s) || hasHalf(sub) {
-		return plainAllWTF(s, sub, first)
-	}
+
 	var out [][]int
 	for pos := 0; pos <= len(s); {
 		i := strings.Index(s[pos:], sub)
@@ -158,10 +159,16 @@ func plainAll(s, sub string, icase, first bool) [][]int {
 	return out
 }
 
-func plainAllWTF(s, sub string, first bool) [][]int {
+func plainAllWTF(s, sub string, icase, first bool) [][]int {
 	s = splitSupplementary(s)
 	hay, bounds := wtf16View(s)
 	needle := UTF16Units(sub)
+	if icase {
+		// Fold scalars before splitting them; keep byte boundaries on the
+		// original split subject (case mappings can change UTF-8 byte widths).
+		hay = UTF16Units(ToUpper(Canon(s)))
+		needle = UTF16Units(ToUpper(sub))
+	}
 	var out [][]int
 	for pos := 0; pos+len(needle) <= len(hay); {
 		i := 0
@@ -267,7 +274,7 @@ func ReplaceStmt(v, p, with string, regex, all, icase bool, off, ln int32, cLen 
 		if p == "" && all {
 			panic(ArithmeticError{Class: "CX_SY_REPLACE_INFINITE_LOOP", Op: "REPLACE ALL OCCURRENCES OF ''"})
 		}
-		if !icase && (hasHalf(sec) || hasHalf(p)) {
+		if hasHalf(sec) || hasHalf(p) {
 			sec = splitSupplementary(sec)
 		}
 		ms = plainAll(sec, p, icase, !all)
