@@ -3,7 +3,7 @@ export function emitByteStatement(st, ctx, t, {expr, place}) {
   const val = (x, fallback) => x ? expr(x, ctx) : fallback;
   if (st.s === "replace_bytes" || st.s === "replace_chars") {
     const target = place(st.target, ctx);
-    return [`${t}${target}, s.Sy.Subrc = ${st.s === "replace_bytes" ? "abap.ReplaceBytes" : "hCharsection.Replace"}(${target}, ${expr(st.with, ctx)}, ${val(st.off, "0")}, ${val(st.len, "abap.NoLength")}, ${["x", "c"].includes(st.target.type.k) ? st.target.type.len : -1})`];
+    return [`${t}${target}, s.Sy.Subrc = ${st.s === "replace_bytes" ? "abap.ReplaceBytes" : "hCharsection.Replace"}(${st.s === "replace_chars" ? "abap.Text16, " : ""}${target}, ${expr(st.with, ctx)}, ${val(st.off, "0")}, ${val(st.len, "abap.NoLength")}, ${["x", "c"].includes(st.target.type.k) ? st.target.type.len : -1})`];
   }
   // P2 ALL C3 reuses the same byte results for MATCH COUNT alone.
   if (st.s === "find_bytes_all") {
