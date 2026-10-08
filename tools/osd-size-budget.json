@@ -67,8 +67,8 @@
       "reason": "re-taken after #418 (metrics) merged after the baseline was recorded; a cmd, not runtime code"
     },
     "go:cmd/o4dserve": {
-      "lines": 83,
-      "reason": "baseline 2026-10-01"
+      "lines": 95,
+      "reason": "baseline 2026-10-01; 95 as measured on main 2026-10-08 (grown there before this record); the APC step adapter now passes the channel session"
     },
     "go:cmd/osabap": {
       "lines": 1120,
