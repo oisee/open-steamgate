@@ -273,7 +273,12 @@ func wtf16View(v string) ([]uint16, []int) {
 }
 
 func containsSupplementary(v string) bool {
-	return strings.IndexByte(v, 0xf0) >= 0
+	for i := 0; i < len(v); i++ {
+		if v[i] >= 0xf0 && v[i] <= 0xf4 {
+			return true
+		}
+	}
+	return false
 }
 
 func splitSupplementary(v string) string {
