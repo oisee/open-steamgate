@@ -14,7 +14,7 @@ for (const layered of bench ? [false] : [false, true]) test(`generated class sta
   const fixture = join(here, "fixtures", "session-statics");
   const dir = mkdtempSync(join(here, "go", "cmd", "session-statics-"));
   try {
-    const program = compileProgram({folders: [fixture], objects: ["ZCL_RACE_INIT", "ZCL_RACE_COUNTER", "ZCL_RACE_READER", "ZCL_RACE_CHILD", "ZCL_RACE_BASE"]});
+    const program = compileProgram({folders: [fixture], objects: ["ZCL_RACE_INIT", "ZCL_RACE_COUNTER", "ZCL_RACE_READER", "ZCL_RACE_CHILD", "ZCL_RACE_BASE", ...(layered ? [] : ["ZCL_PROBE"])]});
     assert.deepEqual(program.partial, []);
     assert.deepEqual(program.broken, []);
     if (layered) {
@@ -32,6 +32,9 @@ for (const layered of bench ? [false] : [false, true]) test(`generated class sta
       }));
     } else writeFileSync(join(dir, "zz_generated.go"), emitGo(program));
     copyFileSync(join(fixture, "statics_test.go"), join(dir, "statics_test.go"));
+    // The original layered fixture still checks inheritance across packages;
+    // event registrations are exercised by the single-package generated probe.
+    if (!layered) copyFileSync(join(fixture, "events_test.go"), join(dir, "events_test.go"));
     const args = bench ? ["-run", "^$", "-bench", "BenchmarkSessionStaticIncrement", `-benchtime=${process.env.GOGEN_STATICS_BENCHTIME ?? "10000000x"}`, "-count=5"] : ["-race", "-count=3"];
     const run = spawnSync("go", ["test", ...args, `./cmd/${basename(dir)}`], {
       cwd: join(here, "go"), encoding: "utf8", timeout: 180000,

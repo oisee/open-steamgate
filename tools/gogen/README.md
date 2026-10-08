@@ -797,7 +797,10 @@ private state; serialized hosts select `abap.ProcessStatics` to retain caches an
 constructor state across requests, with concurrent hosts taking `abap.WorkProcess`. ABAP Unit keeps a
 fresh private store per test class. Inherited statics use the declaring class's
 slot, and references and method-cached pointers stay valid because slot values
-never move. Only one goroutine may use a Session or its shared store at a time.
+never move. `CLASS-EVENTS` and `SET HANDLER ... FOR ALL INSTANCES` registrations
+use the same store, so private sessions are isolated and ProcessStatics hosts
+retain registrations across requests. Registrations `FOR` an object stay on
+that sender object. Only one goroutine may use a Session or its shared store at a time.
 
 Against OSG on Node (`STG_DB=sqlite node test/run.mjs`), in Chromium and on
 the sockets: the three pages are byte for byte equal; Zork boots from

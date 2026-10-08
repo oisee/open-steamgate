@@ -3,8 +3,6 @@ package abap
 import (
 	"reflect"
 	"sync"
-
-	"osg/gogen/session"
 )
 
 // Class events: EVENTS / CLASS-EVENTS, SET HANDLER and RAISE EVENT, as A4H
@@ -88,23 +86,26 @@ type EventSender interface {
 	EventsOf() *Events
 }
 
-var (
-	eventMu sync.Mutex
-	// FOR ALL INSTANCES, per instance event; the registrations of static
-	// events. These runtime stores remain process-wide; generated class
-	// attributes and constructor flags belong to each Session.
-	allHandlers    = map[string]*handlerTable{}
-	staticHandlers = map[string]*handlerTable{}
-)
-
-func init() {
-	session.Register(func() {
-		eventMu.Lock()
-		defer eventMu.Unlock()
-		allHandlers = map[string]*handlerTable{}
-		staticHandlers = map[string]*handlerTable{}
-	})
+// The same store as CLASS-DATA owns session-wide event registrations.
+// ProcessStatics hosts share this slot; private stores never share its tables.
+type eventRegistrations struct {
+	allHandlers    map[string]*handlerTable
+	staticHandlers map[string]*handlerTable
 }
+
+var eventSlot = RegisterStatics(func() any {
+	return &eventRegistrations{
+		allHandlers:    map[string]*handlerTable{},
+		staticHandlers: map[string]*handlerTable{},
+	}
+})
+
+func eventsOf(s *Session) *eventRegistrations {
+	return s.Static(eventSlot).(*eventRegistrations)
+}
+
+// Protect object-held tables too; an object's registrations remain on the sender.
+var eventMu sync.Mutex
 
 // IsInitialRef: an initial object reference, typed pointer or interface.
 func IsInitialRef(v any) bool {
@@ -140,9 +141,10 @@ func SetHandler(s *Session, event string, forObj any, all, static bool, obj any,
 	switch {
 	case static || all:
 		eventMu.Lock()
-		m := allHandlers
+		registrations := eventsOf(s)
+		m := registrations.allHandlers
 		if static {
-			m = staticHandlers
+			m = registrations.staticHandlers
 		}
 		t = m[event]
 		if t == nil {
@@ -194,7 +196,7 @@ func RaiseEvent(s *Session, event string, sender any, static bool, args func() a
 	var lists [][]*handlerEntry
 	if static {
 		eventMu.Lock()
-		t := staticHandlers[event]
+		t := eventsOf(s).staticHandlers[event]
 		eventMu.Unlock()
 		lists = append(lists, snapshot(t))
 	} else {
@@ -202,7 +204,7 @@ func RaiseEvent(s *Session, event string, sender any, static bool, args func() a
 			lists = append(lists, snapshot(es.EventsOf().tables[event]))
 		}
 		eventMu.Lock()
-		t := allHandlers[event]
+		t := eventsOf(s).allHandlers[event]
 		eventMu.Unlock()
 		lists = append(lists, snapshot(t))
 	}
