@@ -22,6 +22,10 @@
       "lines": 13,
       "reason": "recorded by --update"
     },
+    "go:adtenq": {
+      "lines": 174,
+      "reason": "ADT ENQ owner and session-kernel bridge over enq public API; no generated ABAP dependency"
+    },
     "go:amc": {
       "lines": 506,
       "reason": "baseline 2026-10-01"
