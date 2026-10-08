@@ -170,10 +170,11 @@ export class AbapSessions {
   // {ended} when the caller's session is gone by the time the delete runs:
   // its logoff can run between the front's verdict and this step, and a
   // session that is gone holds nothing and may delete nothing
-  deleteObject(session, type, name, store) {
+  deleteObject(session, type, name, store, requiredHandle) {
     return this.#run(async (obj) => {
       if ((await this.#call(obj, "alive", {iv_id: session.id})).get() !== "X") return {ended: true};
       const holder = await this.#holder(obj, type, (await store.find(type, name))?.name ?? name);
+      if (requiredHandle != null && (holder?.session.id !== session.id || holder?.handle !== requiredHandle)) return {invalidHandle: true};
       if (holder !== undefined && holder.session.id !== session.id) return {holder};
       const gone = await store.delete(type, name);
       if (holder !== undefined && holder.handle !== undefined) {

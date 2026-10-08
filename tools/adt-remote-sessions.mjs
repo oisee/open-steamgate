@@ -48,10 +48,10 @@ export class RemoteSessions extends AbapSessions {
       return {};
     });
   }
-  async deleteObject(session, type, name, store) {
+  async deleteObject(session, type, name, store, requiredHandle) {
     let deleted = false;
     try {
-      return await this.call("deleteObject", [session, type, name], async ({action, type, name}) => {
+      return await this.call("deleteObject", [session, type, name, requiredHandle ?? null], async ({action, type, name}) => {
         if (action === "find") return store.find(type, name) ?? null;
         const gone = await store.delete(type, name);
         deleted = true;

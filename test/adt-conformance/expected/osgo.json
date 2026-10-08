@@ -22,5 +22,10 @@
   "O2-local-class-methods": "pass",
   "O3-test-class-methods": "pass",
   "O4-source-coordinates": "pass",
-  "O5-active-structure": "pass"
+  "O5-active-structure": "pass",
+  "W1-write-inactive": "known-gap: class CREATE returns 500 at request XML RESTORE: DELETE TABLE binding removal is not compiled; write scenario not reached",
+  "W2-write-unlocked": "known-gap: class CREATE returns 500 at request XML RESTORE: DELETE TABLE binding removal is not compiled; write scenario not reached",
+  "W3-write-foreign": "known-gap: class CREATE returns 500 at request XML RESTORE: DELETE TABLE binding removal is not compiled; write scenario not reached",
+  "W4-create-delete": "known-gap: class CREATE returns 500 at request XML RESTORE: DELETE TABLE binding removal is not compiled; write scenario not reached",
+  "W5-check-inactive": "known-gap: class CREATE returns 500 at request XML RESTORE: DELETE TABLE binding removal is not compiled; write scenario not reached"
 }

@@ -8,11 +8,11 @@ import {adtRouter} from "../tools/adt-facade.mjs";
 import {ObjectStore} from "../tools/osd-store.mjs";
 
 describe("ADT editor follows typed property documents to their sources", () => {
-  let server, base, fixtureRoot;
+  let server, base, fixtureRoot, store;
   before(async () => {
     fixtureRoot = mkdtempSync(join(tmpdir(), "osd-adt-editor-"));
     cpSync(fileURLToPath(new URL("./fixtures/adt-editor/", import.meta.url)), fixtureRoot, {recursive: true});
-    const store = new ObjectStore({
+    store = new ObjectStore({
       root: fixtureRoot,
       roots: [{path: ".", package: "$EDITOR", writable: true}], libs: [],
     });
@@ -127,6 +127,22 @@ describe("ADT editor follows typed property documents to their sources", () => {
     await fetch(url + "?_action=UNLOCK&lockHandle=" + encodeURIComponent(handle), {method: "POST", headers});
   });
 
+  it("creates a testclasses include with the parent handle and Location", async () => {
+    store.create("CLAS", "ZCL_INCLUDE_EDITOR", {package: "$TMP"});
+    const url = base + "/sap/bc/adt/oo/classes/zcl_include_editor";
+    const seed = await fetch(base + "/sap/bc/adt/core/discovery", {method: "HEAD"});
+    const headers = {cookie: seed.headers.getSetCookie().map(c => c.split(";")[0]).join("; "),
+      "x-csrf-token": seed.headers.get("x-csrf-token"), "x-sap-adt-sessiontype": "stateful"};
+    const locked = await fetch(url + "?_action=LOCK&accessMode=MODIFY", {method: "POST", headers});
+    const handle = /<LOCK_HANDLE>([^<]+)<\/LOCK_HANDLE>/.exec(await locked.text())?.[1];
+    // Measured include POST with a valid handle returns 201 and the include Location.
+    const created = await fetch(url + "/includes?lockHandle=" + handle, {method: "POST", headers,
+      body: '<class:abapClassInclude xmlns:class="http://www.sap.com/adt/oo/classes" class:includeType="testclasses"/>'});
+    expect(created.status).to.equal(201);
+    expect(created.headers.get("location")).to.equal("/sap/bc/adt/oo/classes/zcl_include_editor/includes/testclasses");
+    await fetch(url + "?_action=UNLOCK&lockHandle=" + handle, {method: "POST", headers});
+  });
+
   it("writes the include using its parent lock without overwriting main source", async () => {
     const url = base + "/sap/bc/adt/oo/classes/zcl_editor";
     const seed = await fetch(base + "/sap/bc/adt/core/discovery", {method: "HEAD"});
@@ -139,15 +155,26 @@ describe("ADT editor follows typed property documents to their sources", () => {
     expect(locked.status).to.equal(200);
     const handle = /<LOCK_HANDLE>([^<]+)<\/LOCK_HANDLE>/.exec(await locked.text())?.[1];
     expect(handle).to.be.a("string").with.length.greaterThan(0);
+    // Measured locked-class include POST: missing 403 NoAccess, bogus 423.
+    const includeBody = '<class:abapClassInclude xmlns:class="http://www.sap.com/adt/oo/classes" class:includeType="testclasses"/>';
+    for (const [query, status, type] of [["", 403, "ExceptionResourceNoAccess"], ["?lockHandle=wrong", 423, "ExceptionResourceInvalidLockHandle"]]) {
+      const denied = await fetch(url + "/includes" + query, {method: "POST", headers, body: includeBody});
+      expect(denied.status).to.equal(status); expect(await denied.text()).to.contain(type);
+    }
     const source = "CLASS ltcl_editor DEFINITION FOR TESTING. ENDCLASS.\nCLASS ltcl_editor IMPLEMENTATION. ENDCLASS.\n";
     const put = (suffix, token) => fetch(url + suffix + "?lockHandle=" + encodeURIComponent(token), {method: "PUT", headers, body: source});
-    expect((await put("/includes/testclasses", "wrong")).status).to.equal(409);
+    // Measured testclasses PUT: missing handle 400 ParameterNotFound, bogus 423.
+    const missing = await fetch(url + "/includes/testclasses", {method: "PUT", headers, body: source});
+    expect(missing.status).to.equal(400);
+    expect(await missing.text()).to.contain("ExceptionParameterNotFound");
+    expect((await put("/includes/testclasses", "wrong")).status).to.equal(423);
     expect((await put("/includes/testclasses", handle)).status).to.equal(200);
     expect(await (await fetch(url + "/includes/testclasses")).text()).to.equal(source);
     expect(await (await fetch(url + "/source/main")).text()).to.contain("CLASS zcl_editor DEFINITION");
     expect((await put("/includes/not-an-include", handle)).status).to.equal(404);
     const unlock = await fetch(url + "?_action=UNLOCK&lockHandle=" + encodeURIComponent(handle), {method: "POST", headers});
     expect(unlock.status).to.equal(200);
-    expect((await put("/includes/testclasses", handle)).status).to.equal(409);
+    // Invalid handles return 423 for measured testclasses PUT.
+    expect((await put("/includes/testclasses", handle)).status).to.equal(423);
   });
 });

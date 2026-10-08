@@ -637,7 +637,7 @@ export class ObjectStore {
     // the intent first: a crash before the files leaves a set naming files
     // that are all absent, which the next start drops (#loadInactive)
     if (type !== "DEVC") {
-      this.#versions.markInactive(entry, new Map(writes.map(([target, content]) => [target, Buffer.from(String(content), "utf8")])));
+      this.#versions.markInactive(entry, new Map(writes.map(([target, content]) => [target, Buffer.from(String(content), "utf8")])), options.activeSkeleton === true);
     }
     for (const [target, content] of writes) writeChecked(this.root, target, content, safe, this.hooks);
     this.#entries().set(`${type} ${upper}`, entry);

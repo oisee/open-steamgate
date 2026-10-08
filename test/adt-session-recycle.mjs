@@ -83,8 +83,8 @@ for (const profile of ["file", "sqlite"]) describe(`ADT editing session across c
     for (const [collection, name, element] of [["programs/programs", "ZOSD_RECYCLE", "program:program"], ["oo/classes", "ZOSD_RECYCLE_PEER", "class:class"]]) {
       const created = await request("POST", BASE + "/" + collection, {...headers, "content-type": "application/xml"},
         `<${element} xmlns:program="http://www.sap.com/adt/programs/programs" xmlns:class="http://www.sap.com/adt/oo/classes" xmlns:adtcore="http://www.sap.com/adt/core" adtcore:name="${name}"><adtcore:packageRef adtcore:name="$TMP"/></${element}>`);
-      // a program create answers 200 with an empty body (as observed on a system, #580); other types 201
-      expect(created.status, created.body).to.equal(collection === "programs/programs" ? 200 : 201);
+      // a program create answers 200 with an empty body (as observed on a system, #580); classes also answer 200
+      expect(created.status, created.body).to.equal(200);
     }
     const handle = await lock(headers);
     const source = SOURCE.replace("before", next.toLowerCase());
@@ -135,7 +135,10 @@ for (const profile of ["file", "sqlite"]) describe(`ADT editing session across c
     const taken = await lock(fresh);
     expect((await put(fresh, taken, source)).status).to.equal(200);
     expect((await request("DELETE", OBJECT, fresh)).status).to.equal(200);
-    expect((await request("DELETE", BASE + "/oo/classes/zosd_recycle_peer", fresh)).status).to.equal(200);
+    const peerObject = BASE + "/oo/classes/zosd_recycle_peer";
+    const peerLock = await request("POST", peerObject + "?_action=LOCK&accessMode=MODIFY", fresh);
+    const peerHandle = /<LOCK_HANDLE>([^<]+)<\/LOCK_HANDLE>/.exec(peerLock.body)[1];
+    expect((await request("DELETE", peerObject + "?lockHandle=" + peerHandle, fresh)).status).to.equal(200);
     await request("GET", "/sap/public/bc/icf/logoff", fresh);
   });
 

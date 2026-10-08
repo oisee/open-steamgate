@@ -78,7 +78,7 @@ export class StoreVersions {
       const digest = this.#digestOf(files);
       const outside = record.outside === true || (record.digest !== undefined && digest !== record.digest);
       if (outside !== (record.outside === true) || digest !== record.digest) changed = true;
-      const restored = {files, digest, ...(outside ? {outside: true} : {})};
+      const restored = {files, digest, ...(record.createdActive ? {createdActive: true} : {}), ...(outside ? {outside: true} : {})};
       // Archive drafts and active copies belong to their overlay revision.
       // Keep an unmounted draft durable without excluding a replacement's object.
       const owner = files.map(f => /^local\/overlays\/[a-f0-9]{64}(?=\/)/.exec(f.replaceAll("\\", "/"))?.[0]).find(Boolean);
@@ -276,11 +276,19 @@ export class StoreVersions {
 
   // the intent, before the bytes: the set says the object is inactive and
   // what its files will hold once `pending` (file -> text) is written
-  markInactive(entry, pending = new Map()) {
+  markInactive(entry, pending = new Map(), createdActive = false) {
     const key = `${entry.type} ${entry.name}`;
     const files = this.#filesOfEntry(entry);
     this.#store.inactive.add(key);
-    this.#saved.set(key, {files, digest: this.#digestOf(files, pending)});
+    if (createdActive) {
+      // ADT class creation supplies an active skeleton independently of a build.
+      for (const [file, bytes] of pending) {
+        const copy = join(this.#store.root, this.#snapshotOf(file));
+        mkdirDurable(dirname(copy)); writeDurable(copy, bytes);
+      }
+    }
+    this.#saved.set(key, {files, digest: this.#digestOf(files, pending),
+      ...((createdActive || this.#saved.get(key)?.createdActive) ? {createdActive: true} : {})});
     this.saveInactive();
   }
 
@@ -445,12 +453,12 @@ export class StoreVersions {
     const generation = hash && join(this.#store.root, "build", "by-input", hash);
     const complete = generation && existsSync(join(generation, "source", ".complete"));
     const snapshot = generation && join(generation, "source", sourceSnapshotPath(file));
-    if (complete && existsSync(snapshot)) return snapshot;
+    if (complete && existsSync(snapshot) && !this.#saved.get(`${entry.type} ${entry.name}`)?.createdActive) return snapshot;
     // Pre-save copies retain proven active input, including genuinely empty
     // bytes. keepActive leaves unavailable input absent, never a placeholder.
     const copy = join(this.#store.root, this.#snapshotOf(file));
     const layer = this.#store.roots.find(root => root.path === entry.root);
-    if ((!complete || layer?.overlayOf) && existsSync(copy)) return copy;
+    if ((!complete || layer?.overlayOf || this.#saved.get(`${entry.type} ${entry.name}`)?.createdActive) && existsSync(copy)) return copy;
     // A freshly copied overlay still runs the archive's proven active bytes
     // until it has been published. Never infer activity from the working copy.
     if (complete && layer?.overlayOf) {

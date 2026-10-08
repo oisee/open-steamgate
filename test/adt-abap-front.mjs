@@ -57,6 +57,7 @@ describe("ADT front in ABAP: every request enters the handler (slice 3, option B
     root = mkdtempSync(join(tmpdir(), "osd-adt-front-"));
     mkdirSync(join(root, "src"));
     writeFileSync(join(root, "src", "zcl_osd_front.clas.abap"), SOURCE);
+    writeFileSync(join(root, "src", "zcl_osd_doomed.clas.abap"), SOURCE.replaceAll("zcl_osd_front", "zcl_osd_doomed"));
     const runner = abapRunner({handler, step: dialogStep});
     const app = express();
     app.use(express.raw({type: "*/*"}));
@@ -212,7 +213,7 @@ describe("ADT front in ABAP: every request enters the handler (slice 3, option B
     await fetch(`${url}/sap/public/bc/icf/logoff`, {headers: {cookie: `sap-contextid=${id}`}});
   });
 
-  it("B0 carry excludes a dead handle and rebuild keeps its write at 409", async () => {
+  it("B0 carry excludes a dead handle and rebuild keeps its write at 423", async () => {
     const one = await logon();
     const locked = await as(one, "POST", `/oo/classes/${LOCKED}?_action=LOCK&accessMode=MODIFY`);
     const handle = /<LOCK_HANDLE>([^<]+)<\/LOCK_HANDLE>/.exec(await locked.text())?.[1];
@@ -226,17 +227,17 @@ describe("ADT front in ABAP: every request enters the handler (slice 3, option B
     await rebuildAdtLocks(db);
     const put = await as(one, "PUT", `/oo/classes/${LOCKED}/source/main?lockHandle=${handle}`,
       {headers: {"content-type": "text/plain"}, body: SOURCE});
-    expect(put.status, await put.clone().text()).to.equal(409);
+    expect(put.status, await put.clone().text()).to.equal(423);
     expect(put.headers.get("x-csrf-token")).to.equal(one.token);
     await fetch(`${url}/sap/public/bc/icf/logoff`, {headers: {cookie: `sap-contextid=${one.id}`}});
   });
 
   // The acceptance test of this branch and of #471 together: an ENQ context
   // the lock server ended is not a session that ended. The session and its
-  // token stay; the dead handle writes nothing (409, as on main), and a read
+  // token stay; the dead handle writes nothing (423, the measured class refusal), and a read
   // just works. It needs #471 (BIND revives an ended key, ZCL_OSD_ENQ_KERNEL=>REVIVE)
   // and is pending until that is in the tree.
-  it("an ENQ context ended behind the session: the old handle is 409, a GET is 200, a relock a new handle", async function () {
+  it("an ENQ context ended behind the session: the old handle is 423, a GET is 200, a relock a new handle", async function () {
     if (readFileSync(new URL("../output/zcl_osd_enq_kernel.clas.mjs", import.meta.url), "utf8").includes("async revive(") === false) {
       this.skip();
     }
@@ -247,8 +248,8 @@ describe("ADT front in ABAP: every request enters the handler (slice 3, option B
     endEnqSession(adtEnqOwner.key(one.id));
     const put = await as(one, "PUT", `/oo/classes/${LOCKED}/source/main?lockHandle=${handle}`,
       {headers: {"content-type": "text/plain"}, body: SOURCE + "* not written\n"});
-    expect(put.status).to.equal(409);
-    expect(await put.text()).to.contain("ExceptionResourceNotLocked");
+    expect(put.status).to.equal(423);
+    expect(await put.text()).to.contain("ExceptionResourceInvalidLockHandle");
     const get = await as(one, "GET", `/oo/classes/${LOCKED}/source/main`);
     expect(get.status).to.equal(200);
     expect(await get.text()).to.not.contain("not written");
@@ -262,7 +263,7 @@ describe("ADT front in ABAP: every request enters the handler (slice 3, option B
     expect(fresh, "a relock returns a new handle").to.not.equal(handle);
     const late = await as(one, "PUT", `/oo/classes/${LOCKED}/source/main?lockHandle=${handle}`,
       {headers: {"content-type": "text/plain"}, body: SOURCE + "* not written\n"});
-    expect(late.status, "the old handle is still 409").to.equal(409);
+    expect(late.status, "the old handle is still 423").to.equal(423);
     expect((await as(one, "POST", `/oo/classes/${LOCKED}?_action=UNLOCK&lockHandle=${fresh}`)).status).to.equal(200);
     await fetch(`${url}/sap/public/bc/icf/logoff`, {headers: {cookie: `sap-contextid=${one.id}`}});
   });
@@ -272,12 +273,14 @@ describe("ADT front in ABAP: every request enters the handler (slice 3, option B
     // runs before the Node route, and a session that is gone may not delete
     writeFileSync(join(root, "src", "zcl_osd_doomed.clas.abap"), SOURCE.replaceAll("zcl_osd_front", "zcl_osd_doomed"));
     const one = await logon();
+    const doomedLock = await as(one, "POST", "/oo/classes/zcl_osd_doomed?_action=LOCK&accessMode=MODIFY");
+    const doomedHandle = /<LOCK_HANDLE>([^<]+)<\/LOCK_HANDLE>/.exec(await doomedLock.text())[1];
     let free;
     let started;
     const running = new Promise((resolve) => { started = resolve; });
     const held = dialogStep(() => new Promise((resolve) => { free = resolve; started(); }), "test: the work process is busy");
     await running;
-    const deleted = as(one, "DELETE", "/oo/classes/zcl_osd_doomed");
+    const deleted = as(one, "DELETE", "/oo/classes/zcl_osd_doomed?lockHandle=" + doomedHandle);
     await new Promise((resolve) => setTimeout(resolve, 50));
     const off = fetch(`${url}/sap/public/bc/icf/logoff`, {headers: {cookie: `sap-contextid=${one.id}`}});
     await new Promise((resolve) => setTimeout(resolve, 50));

@@ -495,6 +495,11 @@ jobs:
             import {mkdirSync, writeFileSync, readFileSync} from "node:fs";
             import {join} from "node:path";
             import {files} from "./test/adt-conformance/fixtures/source.mjs";
+            const packageXml = `<abapGit><asx:abap xmlns:asx="http://www.sap.com/abapxml"><asx:values><DEVC><DEVCLASS>$ADT_WRITES</DEVCLASS><CTEXT>Disposable write cases</CTEXT></DEVC></asx:values></asx:abap></abapGit>`;
+            for (const root of ["src/adt-writes", "build/live/source/adt-writes/src"]) {
+              mkdirSync(root, {recursive: true});
+              writeFileSync(join(root, "package.devc.xml"), packageXml);
+            }
             for (const [name, source] of Object.entries(files)) {
               for (const root of ["src/conformance-fixture", "build/live/source/conformance-fixture/src"]) {
                 mkdirSync(root, {recursive: true});
@@ -517,7 +522,7 @@ jobs:
           pid=$!
           for _ in $(seq 1 60); do curl -fsS "http://127.0.0.1:$STG_PORT/health" >/dev/null 2>&1 && break; sleep 1; done
           curl -fsS "http://127.0.0.1:$STG_PORT/health" >/dev/null 2>&1 || { kill "$pid" 2>/dev/null; tail -20 "$RUNNER_TEMP/osgo-adt.log"; infra "osgo did not answer /health"; }
-          node test/adt-conformance/run.mjs --target osgo --base "http://127.0.0.1:$STG_PORT" --expected "$expected"
+          node test/adt-conformance/run.mjs --target osgo --base "http://127.0.0.1:$STG_PORT" --expected "$expected" --write-package '$ADT_WRITES'
           rc=$?
           kill "$pid" 2>/dev/null
           case "$rc" in

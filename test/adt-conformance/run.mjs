@@ -38,7 +38,7 @@ function writeReport(target, results, output, extra = {}) {
   writeFileSync(join(output, `adt-conformance-${target}.json`), JSON.stringify(report, null, 2) + '\n');
   return {...report, exitCode: summary.fail || (extra.runErrors?.length && !extra.missingEvidenceAdvisory) ? 1 : 0};
 }
-export async function run({target, base, expectedFile, only, output = 'suite-results', say = console.log}) {
+export async function run({target, base, expectedFile, only, output = 'suite-results', writePackage = process.env.ADT_WRITE_PACKAGE, say = console.log}) {
   assert.ok(['js', 'osgo', 'a4h'].includes(target), 'unknown target');
   assert.ok(base, '--base is required');
   assert.ok(target !== 'js' || !expectedFile, 'JS cannot use an expected-gap file');
@@ -55,7 +55,7 @@ export async function run({target, base, expectedFile, only, output = 'suite-res
     const wants = expected[c.id] ?? 'pass';
     let status, detail, actual, stage = 'login';
     const sessions = [];
-    const ctx = {newSession: async () => {
+    const ctx = {writePackage, newSession: async () => {
       const s = new Session(base); sessions.push(s);
       try {return await s.login();}
       finally {
@@ -92,7 +92,7 @@ export async function run({target, base, expectedFile, only, output = 'suite-res
       // reacquired, a lock surviving a read): it is case evidence like the
       // request's assertions. Anything else there is cleanup.
       try {if (ctx.session) await c.after?.(ctx, response);} catch (e) {
-        if (e.code === 'ERR_ASSERTION') {if (!error) {error = e; stage = 'after';}} else cleanupError = e;
+        if (e.code === 'ERR_ASSERTION' && !e.cleanupFailure) {if (!error) {error = e; stage = 'after';}} else cleanupError = e;
       }
       for (const s of sessions.reverse()) try {await s.close();} catch (e) {cleanupError ??= e;}
       if (!ctx.session && sessions.length) targetResponse ??= sessions.at(-1).handshakeResponse;
@@ -136,9 +136,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
   try {
     const args = process.argv.slice(2), opts = {};
     while (args.length) {
-      const key = args.shift(); assert.ok(['--target', '--base', '--expected', '--only', '--output', '--unavailable'].includes(key), `unknown option ${key}`);
+      const key = args.shift(); assert.ok(['--target', '--base', '--expected', '--only', '--output', '--unavailable', '--write-package'].includes(key), `unknown option ${key}`);
       const value = args.shift(); assert.ok(value && !value.startsWith('--'), `${key} needs a value`);
-      opts[{'--target': 'target', '--base': 'base', '--expected': 'expectedFile', '--only': 'only', '--output': 'output', '--unavailable': 'reason'}[key]] = value;
+      opts[{'--target': 'target', '--base': 'base', '--expected': 'expectedFile', '--only': 'only', '--output': 'output', '--unavailable': 'reason', '--write-package': 'writePackage'}[key]] = value;
     }
     if (opts.only) opts.only = opts.only.split(',');
     opts.expectedFile ??= opts.target === 'osgo' ? new URL('./expected/osgo.json', import.meta.url) : undefined;

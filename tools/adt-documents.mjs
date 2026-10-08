@@ -1069,14 +1069,15 @@ export function checkObjectsIn(body, collections) {
   const elements = requestElements(body), out = [];
   for (const element of elementsNamed(elements,namespaces.chkrun,"checkObject")) {
     const uri = attributeValue(element,namespaces.adtcore,"uri");
-    const object = uri === undefined ? undefined : objectFromUri(uri,collections);
+    const objectUri = uri?.replace(/^(\/sap\/bc\/adt\/oo\/classes\/[^/]+)\/includes\/.*$/, "$1");
+    const object = uri === undefined ? undefined : objectFromUri(objectUri,collections);
     if (object === undefined) continue;
     const id = elements.indexOf(element)+1;
     const children = descendantsOf(elements,id);
     const content = elementsNamed(children,namespaces.chkrun,"content")[0];
     const artifact = elementsNamed(children,namespaces.chkrun,"artifact")[0];
     const includeUri = attributeValue(artifact,namespaces.chkrun,"uri") ?? "";
-    out.push({...object,uri,include:includeUri.match(/\/includes\/([^/]+)\//)?.[1],
+    out.push({...object,uri,include:(includeUri || uri).match(/^\/sap\/bc\/adt\/oo\/classes\/[^/]+\/includes\/([^/?#]+)/)?.[1],
       source:content === undefined ? undefined : decodeContent(content.text)});
   }
   if (out.length === 0) return objectReferencesIn(body,collections).map(o => ({...o,uri:uriOf(o.type,o.name)}));
