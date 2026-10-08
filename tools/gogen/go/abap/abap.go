@@ -41,6 +41,34 @@ func (sy *Sy) MessageNumber() *string {
 	return &sy.Msgno
 }
 
+func (s *Session) EnqClient() string {
+	if s == nil {
+		return Mandt
+	}
+	return Mandt
+}
+
+func (s *Session) EnqSetSubrc(value int32) {
+	if s == nil {
+		return
+	}
+	s.Sy.Subrc = value
+}
+
+func (s *Session) EnqRefuse(call, why string) {
+	panic(NotCompiled(call, why))
+}
+
+func (s *Session) EnqRaise(object, name, msgno, holder string) {
+	if s != nil && msgno != "" {
+		s.Sy.Msgid = "MC"
+		s.Sy.Msgty = "E"
+		s.Sy.Msgno = CToN(msgno, 3)
+		s.Sy.Msgv1 = CFit(holder, 50)
+	}
+	panic(ClassicException{Name: name, Method: "ENQUEUE_" + strings.ToUpper(object)})
+}
+
 // Session is what a dialog step runs in. A goroutine picks one up, runs, and
 // puts it down: nothing ties a Session to the goroutine that ran it last.
 // Only one goroutine may use a Session at a time. Its zero value is ready to use.

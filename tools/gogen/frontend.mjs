@@ -378,7 +378,14 @@ export function lockObjectRegistry(reg, program) {
     const tableObject = reg.getObject("TABL", table);
     if (tableObject === undefined) continue;
     try {
-      out.set(name, {name, table, key: (tableObject.listKeys?.(reg) ?? []).map(upper)});
+      const key = (tableObject.listKeys?.(reg) ?? []).map(upper);
+      const structure = tableObject.parseType(reg);
+      const columns = new Map(structure.getComponents().map((column) => {
+        const kind = typeKindOf(column.type);
+        return [upper(column.name), {kind, length: ["C", "N", "X"].includes(kind) ? column.type.getLength() : 0}];
+      }));
+      out.set(name, {name, table, key,
+        fields: key.map((field) => ({name: field, kind: columns.get(field)?.kind ?? 0, length: columns.get(field)?.length ?? 0}))});
     } catch {
       // an unreadable table is named by the call's normal dictionary refusal
     }
@@ -1062,7 +1069,7 @@ function lockFunctionCall(node, ctx, text, name) {
     params.add(`X_${key}`);
   }
   const {args, exceptions} = lockArguments(node, ctx, name, params);
-  return {s: "call_enq", kind: name.startsWith("ENQUEUE_") ? "enqueue" : "dequeue", name, table: lock.table, object, args, exceptions};
+  return {s: "call_enq", kind: name.startsWith("ENQUEUE_") ? "enqueue" : "dequeue", name, table: lock.table, fields: lock.fields, object, args, exceptions};
 }
 
 function rejectParameters(node, name, params) {
