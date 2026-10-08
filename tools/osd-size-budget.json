@@ -39,8 +39,8 @@
       "reason": "byte REPLACE/FIND section spans; independent of go/abap"
     },
     "go:charsearch": {
-      "lines": 58,
-      "reason": "baseline 2026-10-01"
+      "lines": 85,
+      "reason": "ADT batch 1 (round 5 finding 1): CS preserves the initial fixed-character subject rule alongside padding and fdpos."
     },
     "go:classname": {
       "lines": 31,
@@ -443,8 +443,8 @@
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/js/abap.mjs": {
-      "lines": 1667,
-      "reason": "baseline 2026-10-01 Critic round 1: JS time operand conversion mirrors Go TToI; exception wrappers retain their class during re-raise and reference comparison unwraps their original object."
+      "lines": 1671,
+      "reason": "ADT batch 1 (round 5 finding 1): CS preserves the initial fixed-character subject rule alongside padding and fdpos."
     },
     "tools/lift.mjs": {
       "lines": 1225,

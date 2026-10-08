@@ -349,7 +349,11 @@ export function DateAdd(date, days) {
   if (out < "15821015" || out > "99991231") throw notCompiled("date arithmetic: a result outside the measured range");
   return out;
 }
-export function CSWithPos(s, a, b) {
+export function CSWithPos(s, a, b, fixed = false) {
+  if ((a === "" || (fixed && a.replace(/ +$/, "") === "")) && b !== "") {
+    s.sy.fdpos = a.length;
+    return false;
+  }
   const upper = a.toUpperCase();
   const pos = upper.indexOf(b.toUpperCase());
   s.sy.fdpos = pos < 0 ? upper.length : pos;

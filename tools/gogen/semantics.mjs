@@ -15,6 +15,8 @@ import {home} from "./home.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const EXPECT = {
+  // TASK5 supplied CS oracle; other operators follow SAP character comparison rules.
+  ZCL_GOGEN_T_INITIALCS: "ok",
   // TASK4 supplied oracles; fixed blanks and re-raise are documented regressions.
   ZCL_GOGEN_T_ADT4: "83700/20733/20733/[    83700 ]/1/2/X",
   // Unmeasured: private static buffer snapshots across an in-place store.
