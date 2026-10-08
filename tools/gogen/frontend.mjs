@@ -2111,6 +2111,14 @@ function uniqueGuard(tableType, what) {
   if (unique.length) throw new Unsupported(`${what} on a table with the unique secondary key ${unique[0].name}`);
 }
 
+/** String operators share exactly the logical-expression semantics. */
+function stringComparison(op, l, r) {
+  const kinds = {CP: "cp", NP: "cp", CA: "ca", NA: "ca", CS: "cs", NS: "cs", CO: "co", CN: "co"};
+  if (!kinds[op]) return null;
+  const c = {c: kinds[op], l: convert(l, S), r: convert(r, S), cpat: r.type.k === "c"};
+  return ["NP", "NA", "NS", "CN"].includes(op) ? {c: "not", x: c} : c;
+}
+
 /** WHERE comp op value [AND ...] over the rows of a table of structures */
 function whereOf(cc, rowType, ctx, text) {
   const where = [];
@@ -2132,6 +2140,8 @@ function whereOf(cc, rowType, ctx, text) {
       }
       const opT = upper(kids[1].concatTokens());
       const op = OPS[opT] ?? opT;
+      const sc = stringComparison(op, fx, source(kids[2], ctx));
+      if (sc) { where.push({cond: sc}); continue; }
       if (!["=", "<>", "<", "<=", ">", ">="].includes(op)) throw new Unsupported(`WHERE table_line operator ${op}`);
       const v = source(kids[2], ctx, rowType);
       const calc = numeric(rowType) || numeric(v.type) ? (rowType.k === "f" || v.type.k === "f" ? F : I) : S;
@@ -2156,6 +2166,8 @@ function whereOf(cc, rowType, ctx, text) {
     const f = fx !== null ? {name: fx.name, type: fx.type} : fieldOf(ctx, rowType, comp.concatTokens(), text);
     const opT = upper(opN.concatTokens());
     const op = OPS[opT] ?? opT;
+    const sc = stringComparison(op, fx ?? {e: "field", base: {e: "lrow", type: rowType}, name: f.name, type: f.type}, source(src, ctx));
+    if (sc) { where.push({cond: sc}); continue; }
     if (!["=", "<>", "<", "<=", ">", ">="].includes(op)) throw new Unsupported(`WHERE operator ${op}`);
     const v = source(src, ctx, f.type);
     const calc = numeric(f.type) || numeric(v.type) ? (f.type.k === "f" || v.type.k === "f" ? F : I) : S;
@@ -6569,26 +6581,8 @@ function compare(node, ctx) {
     const result = {c: "in_range", value, range};
     return not ? {c: "not", x: result} : result;
   }
-  if (op === "CO" || op === "CS" || op === "CN" || op === "NS") {
-    // measured on A4H: CO is true for an empty operand; CS ignores case and
-    // an empty pattern is always found; trailing blanks count in a string,
-    // a c operand has none stored. CN and NS are the negations of CO and CS
-    // (ultra/itab: NS in the demo DPC's search; A4H ZCL_GOGEN_T_NSCN)
-    const neg = op === "CN" || op === "NS";
-    const r = {c: op === "CO" || op === "CN" ? "co" : "cs", l: convert(source(sources[0], ctx), S), r: convert(source(sources[1], ctx), S)};
-    return neg !== not ? {c: "not", x: r} : r;
-  }
-  if (["CP", "NP", "CA", "NA"].includes(op)) {
-    // measured on A4H (2026-09-23): CP ignores case except after #, + is one
-    // character, #* #+ ## are literal; trailing blanks count in a string and
-    // not in a c, and a c pattern that is all blanks is one blank ('' CP ''
-    // is false). CA is case-sensitive. sy-fdpos is not set (not read on
-    // any path compiled so far; reading it is refused)
-    const rs = source(sources[1], ctx);
-    const r = {c: op === "CP" || op === "NP" ? "cp" : "ca", l: convert(source(sources[0], ctx), S), r: convert(rs, S), cpat: rs.type.k === "c"};
-    const neg = (op === "NP" || op === "NA") !== not;
-    return neg ? {c: "not", x: r} : r;
-  }
+  const stringCond = ["CP", "NP", "CA", "NA", "CS", "NS", "CO", "CN"].includes(op) ? stringComparison(op, source(sources[0], ctx), source(sources[1], ctx)) : null;
+  if (stringCond) return not ? {c: "not", x: stringCond} : stringCond;
   if (!["=", "<>", "<", "<=", ">", ">="].includes(op)) throw new Unsupported(`comparison operator ${op}`);
   const types = [...leafTypes(sources[0], ctx), ...leafTypes(sources[1], ctx)];
   let r;

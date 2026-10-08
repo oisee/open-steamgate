@@ -146,6 +146,7 @@ function whereItem(w, row, ctx) {
   const saved = ctx.lrow;
   ctx.lrow = row;
   try {
+    if (w.cond) return cond(w.cond, ctx);
     if (w.op === "initial" || w.op === "notinitial") {
       const c = cond({c: "initial", x: w.fx}, ctx);
       return w.op === "initial" ? c : `!(${c})`;
