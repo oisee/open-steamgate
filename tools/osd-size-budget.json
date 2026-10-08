@@ -15,8 +15,8 @@
   ],
   "budgets": {
     "go:abap": {
-      "lines": 11807,
-      "reason": "osgo 026/029 (#658, #659): UTF-16 units and class statics per Session (carve-out queued, stoker QUEUE #33). ADT batch 1 (adt-i5 cases 1-7): Session message fields (sy-msgno as NUMC 3), MESSAGE RAISING binding with scoped restoration, classic exceptions keyed by the resolved interface method, date/time and signed MOVE adapters, object-wrapper identity, STORE answer projection and conservative ADT host answers; timestamp conversion lives in go/timestamp."
+      "lines": 11817,
+      "reason": "osgo 026/029 (#658, #659): UTF-16 units and class statics per Session (carve-out queued, stoker QUEUE #33). ADT batch 1 (adt-i5 cases 1-7): Session message fields (sy-msgno as NUMC 3), MESSAGE RAISING binding with scoped restoration, classic exceptions keyed by the resolved interface method, date/time and signed MOVE adapters, object-wrapper identity, STORE answer projection and conservative ADT host answers; timestamp conversion lives in go/timestamp. abapiti 037: cl_http_utility=>decode_base64 beside its encode_base64 sibling (the @KERNEL text decode)."
     },
     "go:abaperr": {
       "lines": 13,
@@ -203,8 +203,8 @@
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/frontend.mjs": {
-      "lines": 6890,
-      "reason": "#34/#36: packed DEC comparisons and the host-replaced class signature registry on top of the merged frontend baseline. #36 round 2: shared omitted-argument lowering for host exception factories, including OPTIONAL, DEFAULT and IS SUPPLIED; no second emitter call path. #36 critic r2: a host-replaced method whose signature does not compile is refused instead of dropped."
+      "lines": 6891,
+      "reason": "#34/#36: packed DEC comparisons and the host-replaced class signature registry on top of the merged frontend baseline. #36 round 2: shared omitted-argument lowering for host exception factories, including OPTIONAL, DEFAULT and IS SUPPLIED; no second emitter call path. #36 critic r2: a host-replaced method whose signature does not compile is refused instead of dropped. abapiti 037: cl_http_utility=>decode_base64 beside its encode_base64 sibling (the @KERNEL text decode)."
     },
     "tools/gogen/go/abap/abap.go": {
       "lines": 246,
@@ -315,8 +315,8 @@
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/go/abap/http_utility.go": {
-      "lines": 9,
-      "reason": "wave 0 of docs/gogen-go-packages.md (#411): helper moved within go/abap as core glue, per the plan"
+      "lines": 19,
+      "reason": "wave 0 of docs/gogen-go-packages.md (#411): helper moved within go/abap as core glue, per the plan abapiti 037: cl_http_utility=>decode_base64 beside its encode_base64 sibling (the @KERNEL text decode)."
     },
     "tools/gogen/go/abap/httpc.go": {
       "lines": 615,
