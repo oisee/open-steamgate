@@ -63,7 +63,8 @@
       "test/osg-support.mjs",
       "test/osgjs-unit.mjs",
       "test/osgjs-int8.mjs",
-      "test/xstring-buffer.mjs"
+      "test/xstring-buffer.mjs",
+      "test/osgo-compiler.mjs"
     ]
   }
 }

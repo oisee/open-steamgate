@@ -18,6 +18,7 @@
 package main
 
 import (
+	"context"
 	_ "embed"
 	"encoding/json"
 	"flag"
@@ -40,6 +41,7 @@ import (
 
 	"osg/gogen/abap"
 	"osg/gogen/apc"
+	"osg/gogen/compiler"
 	"osg/gogen/osdbind"
 	"osg/gogen/sysid"
 )
@@ -392,6 +394,7 @@ func main() {
 	addr := flag.String("addr", "", "address to listen on (default OSD_BIND, else loopback: 127.0.0.1 and ::1)")
 	dbFile := flag.String("db", "", "an SQLite file (WAL) instead of the in-memory database; seeded once, when it has no tables, and refused when another build seeded it")
 	homeDir := flag.String("home", "", "data directory; defaults -db to <home>/osgo.sqlite and makes a fresh directory a full database reset")
+	compilerStatus := flag.Bool("compiler-status", false, "print compiler sidecar status as JSON")
 	version := flag.Bool("version", false, "print release tag and commit")
 	root := flag.String("root", osgRoot, "the checkout whose webapp/ is served")
 	media := flag.String("media", "", "the SMW0 media directory (w3mi.json and the data files); default media/ beside the binary when it is there")
@@ -402,6 +405,13 @@ func main() {
 	tlsCert := flag.String("tls-cert", "", "the certificate (PEM) for -tls-port")
 	tlsKey := flag.String("tls-key", "", "its private key (PEM)")
 	flag.Parse()
+	if *compilerStatus {
+		client := compiler.New(compiler.Options{Root: *root, Version: releaseTag})
+		defer client.Close()
+		_ = client.Hello(context.Background())
+		_ = json.NewEncoder(os.Stdout).Encode(client.Status())
+		return
+	}
 	if *version {
 		fmt.Printf("osgo %s (%s)\n", releaseTag, releaseCommit)
 		return

@@ -71,8 +71,8 @@
       "reason": "sy-sysid from the one system id (go/sysid, tools/osd-identity.mjs), 2026-10-02; rebased over #453"
     },
     "go:cmd/osgo": {
-      "lines": 1178,
-      "reason": "baseline 2026-10-01"
+      "lines": 1194,
+      "reason": "Round 1: ten lines for the compiler status flag and imports; includes six existing lines above the inherited 1178-line ceiling. No serving or generation changes."
     },
     "go:cmd/storecmp": {
       "lines": 41,
@@ -501,6 +501,10 @@
     "tools/osd-build.mjs": {
       "lines": 1006,
       "reason": "#641 zip layers: user source layers (zip cache + overlay) enter the build inputs and the generation hash"
+    },
+    "go:compiler": {
+      "lines": 390,
+      "reason": "Round 1 compiler-provider client: discovery, NDJSON lifecycle, typed refusals and contained snapshot hashing, independent of ABAP bindings."
     }
   },
   "readmeMissing": [

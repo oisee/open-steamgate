@@ -59,3 +59,26 @@ Light verification:
 ```sh
 node node_modules/mocha/bin/mocha.js test/osd-compiler-sidecar.mjs
 ```
+
+## Go client (round 1)
+
+`tools/gogen/go/compiler` provides a lazy client with one child per Client and
+serialized requests. Discovery tries `OSGO_SIDECAR`, then `osd` beside the osgo
+executable, and never searches PATH. `BuildSnapshot` hashes raw files relative
+to the root and refuses lexical or symlink escapes. `Check` returns diagnostics
+and the registry identity, or a typed refusal preserving the protocol code.
+The default check deadline is 30 seconds and can be configured. A timeout or
+crash stops the process group; the next request restarts after backoff.
+
+`osgo -compiler-status [-root <tree>]` performs hello and prints JSON containing
+discovery, versions, contract, capabilities, limits, restarts and the last error.
+It exits successfully even when the sidecar is absent (`found:false`).
+`Status()` itself only reads state; `Hello` starts the child. Call `Close` when
+the client is no longer needed. No ADT or serving path uses this client yet.
+Round 2 will connect ZOSD_STORE CHECK on osgo through the client after PR #653
+merges.
+
+The Go unit tests re-execute their own test binary as a fake sidecar and need
+no Node. The gogen suite registers `test/osgo-compiler.mjs`, which drives the
+real Node CLI through the Go client on a single-class fixture. It checks a
+clean verdict, syntax coordinates and a false snapshot hash.
