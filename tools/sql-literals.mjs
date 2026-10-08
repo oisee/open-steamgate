@@ -26,7 +26,26 @@
  *  touched: a column name, a keyword and the spacing of the statement mean
  *  what they meant. */
 export function trimLiterals(sql) {
-  return sql.replace(/'((?:[^']|'')*)'/g, (m, inner) => "'" + inner.replace(/ +$/, "") + "'");
+  // A scan, not a regular expression: /'((?:[^']|'')*)'/ recursed once per
+  // character of a literal and overflowed the stack on a long one (a class
+  // source written into a table, abapiti case 038).
+  let out = "";
+  let from = 0;
+  for (let i = sql.indexOf("'"); i >= 0; i = sql.indexOf("'", from)) {
+    let j = i + 1;
+    for (;;) {
+      j = sql.indexOf("'", j);
+      if (j < 0 || sql[j + 1] !== "'") break;
+      j += 2;
+    }
+    // an unterminated literal is left as it is
+    if (j < 0) break;
+    let end = j;
+    while (end > i + 1 && sql[end - 1] === " ") end--;
+    out += sql.slice(from, end) + "'";
+    from = j + 1;
+  }
+  return out + sql.slice(from);
 }
 
 /**

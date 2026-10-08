@@ -4,7 +4,19 @@ import {existsSync, mkdirSync, readFileSync, renameSync, rmSync, rmdirSync, unli
 import {join} from "node:path";
 import {performance} from "node:perf_hooks";
 
+// One test process (and the seed image) gets this long before it is killed;
+// a long benchmark raises it through the environment.
+export function processTimeout() {
+  const raw = process.env.GOGEN_UNIT_TIMEOUT_MS;
+  if (raw === undefined) return 120000;
+  // setTimeout fires at once above 2^31-1 ms (about 24.8 days)
+  if (!/^[1-9][0-9]*$/.test(raw) || Number(raw) > 2147483647)
+    throw new Error(`GOGEN_UNIT_TIMEOUT_MS must be a whole number of milliseconds from 1 to 2147483647, got '${raw}'`);
+  return Number(raw);
+}
+
 export async function runUnit({bin, groups, ready, jobs, out, runDir}) {
+  const timeoutMs = processTimeout();
   const runStarted = performance.now();
   const runDetail = {seedImageMs: 0, shards: [], mergeMs: 0};
   // One class is the scheduling unit: its hooks and methods stay in one Go
@@ -87,7 +99,7 @@ export async function runUnit({bin, groups, ready, jobs, out, runDir}) {
     };
     const onSignal = () => { interrupted = true; kill("interrupted"); };
     process.on("SIGINT", onSignal); process.on("SIGTERM", onSignal);
-    const timer = setTimeout(() => kill("timeout after 120000 ms"), 120000);
+    const timer = setTimeout(() => kill(`timeout after ${timeoutMs} ms`), timeoutMs);
     child.stdout.on("data", (chunk) => { stdout += chunk; if (stdout.length > 20e6) kill("stdout limit exceeded (20 MB)"); });
     child.stderr.on("data", (chunk) => { stderr += chunk; if (stderr.length > 20e6) kill("stderr limit exceeded (20 MB)"); });
     child.on("error", (e) => { error = e; });
@@ -190,7 +202,7 @@ export async function runUnit({bin, groups, ready, jobs, out, runDir}) {
     mkdirSync(scratchDir);
     const seedFile = join(scratchDir, "seed.sqlite");
     const seed = spawnSync(runner, ["--seed-image-out", seedFile], {
-      encoding: "utf8", timeout: 120000, maxBuffer: 20e6, cwd: scratchDir, env: {...process.env, GOGEN_UNIT_BINARY: bin, GOGEN_UNIT_MEDIA_DIR: join(runDir, "media")},
+      encoding: "utf8", timeout: timeoutMs, maxBuffer: 20e6, cwd: scratchDir, env: {...process.env, GOGEN_UNIT_BINARY: bin, GOGEN_UNIT_MEDIA_DIR: join(runDir, "media")},
     });
     runDetail.seedImageMs = Math.round(performance.now() - seedStarted);
     const seedHeader = existsSync(seedFile) ? readFileSync(seedFile).subarray(0, 16).toString("utf8") : "";

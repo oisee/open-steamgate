@@ -15,8 +15,8 @@
   ],
   "budgets": {
     "go:abap": {
-      "lines": 11889,
-      "reason": "osgo 026/029 (#658, #659): UTF-16 units and class statics per Session (carve-out queued, stoker QUEUE #33). ADT batch 1 (adt-i5 cases 1-7): Session message fields (sy-msgno as NUMC 3), MESSAGE RAISING binding with scoped restoration, classic exceptions keyed by the resolved interface method, date/time and signed MOVE adapters, object-wrapper identity, STORE answer projection and conservative ADT host answers; timestamp conversion lives in go/timestamp. #39 records WorkProcess ownership and exposes only the narrow Session methods needed by the abap-free lock/yield packages. #39 round 2: end and reopen the database transaction across yield, and mark APC step Session ownership. StoreHook: a host answers ZOSD_STORE for the calling step first (per-session SYSTEM facts), replacing a text substitution of emitter output."
+      "lines": 11899,
+      "reason": "osgo 026/029 (#658, #659): UTF-16 units and class statics per Session (carve-out queued, stoker QUEUE #33). ADT batch 1 (adt-i5 cases 1-7): Session message fields (sy-msgno as NUMC 3), MESSAGE RAISING binding with scoped restoration, classic exceptions keyed by the resolved interface method, date/time and signed MOVE adapters, object-wrapper identity, STORE answer projection and conservative ADT host answers; timestamp conversion lives in go/timestamp. abapiti 037: cl_http_utility=>decode_base64 beside its encode_base64 sibling (the @KERNEL text decode). StoreHook: a host answers ZOSD_STORE for the calling step first (adt-i5's per-session SYSTEM facts), replacing a text substitution of emitter output. #39 records WorkProcess ownership and exposes only the narrow Session methods needed by the abap-free lock/yield packages; round 2: end and reopen the database transaction across yield, and mark APC step Session ownership."
     },
     "go:abaperr": {
       "lines": 13,
@@ -32,7 +32,7 @@
     },
     "go:apc": {
       "lines": 444,
-      "reason": "baseline 2026-10-01 #39 round 2: pass channel Session to the default step and mark ownership inside custom Step callbacks."
+      "reason": "baseline 2026-10-01. #39 round 2: pass channel Session to the default step and mark ownership inside custom Step callbacks."
     },
     "go:byteops": {
       "lines": 37,
@@ -76,7 +76,7 @@
     },
     "go:cmd/osgo": {
       "lines": 1366,
-      "reason": "OSGo STORE adapter keeps the calling Session and projects SYSTEM scalars; generated bindings and session adapters remain outside handwritten host code. Locks fix 1 rethrows dialog dumps after cleanup and gives APC entries the same lock lifecycle."
+      "reason": "ADT on osgo: /sap/bc/adt mount behind -adt, compiler sidecar status and storecompiler wiring, the ADT session bound per request (adt_session.go: USE_SESSION around the dialog step; generated symbols keep it in cmd/osgo), SYSTEM IDENTITY from the selected SID with Node's ADT client/user/full-name/language derivation; the ADT logoff route and the ENQ kernel hooks over go/adtenq (adt_enq.go) Fix critic findings: generated-only ADT session binding fallback for echo builds, and request-local ENQ handle retention with Pin/Unpin/DropContext around the complete dialog step.; ADT steps keyed by their *abap.Session for the ENQ hooks (carving the ADT host glue into its own package is queued) Sidecar round 2 injects the lazy storecompiler adapter beside the existing compiler status wiring; six lines in cmd/osgo are the only host-lifecycle growth. #39 round 2: bind the status refresh Session to DialogStepIn.; ADT steps: KERNEL_LOCK host lifecycle (go/adtlock) around HTTP and APC steps, the dump re-panicked after cleanup, SYSTEM facts through abap.StoreHook (go/adtsystem)"
     },
     "go:cmd/storecmp": {
       "lines": 220,
@@ -105,6 +105,10 @@
     "go:enqseam": {
       "lines": 160,
       "reason": "#39 builds the lock request from generated DDIC metadata, maps classic results through a narrow Session interface, and keeps go/abap out of the package."
+    },
+    "go:enqseam": {
+      "lines": 170,
+      "reason": "#39 builds the lock request from generated DDIC metadata, maps classic results through a narrow Session interface, and keeps go/abap out of the package. #39 critic r2: the client from the key's own parameter and packed keys formatted as Node does."
     },
     "go:filepick": {
       "lines": 504,
@@ -211,8 +215,8 @@
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/frontend.mjs": {
-      "lines": 6992,
-      "reason": "#34/#36: packed DEC comparisons and the host-replaced class signature registry on top of the merged frontend baseline. #36 round 2: shared omitted-argument lowering for host exception factories, including OPTIONAL, DEFAULT and IS SUPPLIED; no second emitter call path. #38/#39 add numeric-text/string calculation targets and the ENQUEUE/DEQUEUE lock-object registry. #36 critic r2: an untyped host-replaced method is refused instead of dropped. #39 round 2: size all supported lock key kinds as Node request() does and refuse unsized keys by table and field."
+      "lines": 6993,
+      "reason": "#34/#36: packed DEC comparisons and the host-replaced class signature registry on top of the merged frontend baseline. #36 round 2: shared omitted-argument lowering for host exception factories, including OPTIONAL, DEFAULT and IS SUPPLIED; no second emitter call path. #36 critic r2: a host-replaced method whose signature does not compile, or is untyped, is refused instead of dropped. abapiti 037: cl_http_utility=>decode_base64 beside its encode_base64 sibling (the @KERNEL text decode). #38/#39 add numeric-text/string calculation targets and the ENQUEUE/DEQUEUE lock-object registry; round 2: size all supported lock key kinds as Node request() does and refuse unsized keys by table and field."
     },
     "tools/gogen/go/abap/abap.go": {
       "lines": 276,
@@ -220,7 +224,7 @@
     },
     "tools/gogen/go/abap/apc.go": {
       "lines": 44,
-      "reason": "baseline 2026-10-01 #39 round 2: APCStep accepts an optional Session and uses DialogStepIn."
+      "reason": "baseline 2026-10-01. #39 round 2: APCStep accepts an optional Session and uses DialogStepIn."
     },
     "tools/gogen/go/abap/appendbytes.go": {
       "lines": 62,
@@ -323,8 +327,8 @@
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/go/abap/http_utility.go": {
-      "lines": 9,
-      "reason": "wave 0 of docs/gogen-go-packages.md (#411): helper moved within go/abap as core glue, per the plan"
+      "lines": 19,
+      "reason": "wave 0 of docs/gogen-go-packages.md (#411): helper moved within go/abap as core glue, per the plan abapiti 037: cl_http_utility=>decode_base64 beside its encode_base64 sibling (the @KERNEL text decode)."
     },
     "tools/gogen/go/abap/httpc.go": {
       "lines": 615,
@@ -526,6 +530,10 @@
       "lines": 276,
       "reason": "The ADT host side of stoker's KERNEL_LOCK seam: ENQUEUE/DEQUEUE over the osd lock server keyed by the calling step, holder per step, retry with the yielding sleep, as tools/osd-enq-host.mjs. Locks fix 1 preserves non-error retry panics, cleans up rebinding/pre-bind holders, and bounds ended keys."
     },
+    "go:adtsystem": {
+      "lines": 103,
+      "reason": "SYSTEM SESSION, LOCK_HANDLE, LOCK_RELEASE and LOCK_HOLDER of an ADT request answered as tools/osd-store-destination.mjs, bound per calling step, no go/abap import"
+    },
     "go:compiler": {
       "lines": 935,
       "reason": "Fix1: optional logicalPath per snapshot file and optional saved CHECK mode preserve contract v1; per-occurrence mappings permit multiple logical includes backed by one shared digest file."
@@ -538,13 +546,13 @@
       "lines": 52,
       "reason": "ADT batch 1 (adt-i5 cases 1-7): Independent UTC/initial-zone timestamp conversion with validation, subrc results and explicit unsupported-zone errors; no runtime imports."
     },
+    "go:nodeutf8": {
+      "lines": 47,
+      "reason": "abapiti 037: Node's UTF-8 decode (WHATWG maximal subparts) for @KERNEL Buffer.toString(); no go/abap import"
+    },
     "go:yieldsleep": {
       "lines": 18,
       "reason": "#39 dispatches yield sleep through a narrow Session interface so the package does not import go/abap."
-    },
-    "go:adtsystem": {
-      "lines": 103,
-      "reason": "Request-bound SYSTEM facts and ENQ holder lookup through narrow session interfaces; providers are keyed by the calling step, with no ABAP import."
     }
   },
   "readmeMissing": [
