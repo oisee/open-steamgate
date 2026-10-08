@@ -44,6 +44,8 @@ export const cases = [
 // live in the same fixture repository, with a real active generation.
 export const compilerCases = [
   ["check-clean", {IV_COMMAND:"CHECK", IV_TYPE:"CLAS", IV_NAME:"ZCL_VALID"}, "EV_JSON"],
+  ["check-saved-dependency", {IV_COMMAND:"CHECK", IV_TYPE:"CLAS", IV_NAME:"ZCL_DRAFT_READER"}, "EV_JSON"],
+  ["outline-unproven", {IV_COMMAND:"PARSE", IV_JSON:JSON.stringify({kind:"OUTLINE",type:"CLAS",name:"ZCL_VALID",version:"active"})}, "EV_JSON"],
   ["check-syntax", {IV_COMMAND:"CHECK", IV_TYPE:"CLAS", IV_NAME:"ZCL_BAD"}, "EV_JSON"],
   ["check-include", {IV_COMMAND:"CHECK", IV_TYPE:"CLAS", IV_NAME:"ZCLASS"}, "EV_JSON"],
   ...["active", "inactive"].flatMap(version => [
@@ -65,6 +67,9 @@ export async function prepareCompilerFixture(root) {
   await symlink("by-input/test",resolve(root,"build/live"));
   const source = method => `CLASS zcl_valid DEFINITION PUBLIC.\n PUBLIC SECTION.\n METHODS ${method}.\nENDCLASS.\nCLASS zcl_valid IMPLEMENTATION.\n METHOD ${method}.\n ENDMETHOD.\nENDCLASS.\n`;
   await writeFile(resolve(root,"src/zcl_valid.clas.abap"),source("run"));
+  const store = new ObjectStore({root});
+  store.write("CLAS", "ZCL_DRAFT_DEP", source("run").replaceAll("zcl_valid", "zcl_draft_dep").replace("METHODS run", "CLASS-METHODS run"));
+  store.write("CLAS", "ZCL_DRAFT_READER", source("run").replaceAll("zcl_valid", "zcl_draft_reader").replace(" METHOD run.", " METHOD run.\n zcl_draft_dep=>run( )."));
   await writeFile(resolve(root,"src/zcl_bad.clas.abap"),source("a".repeat(31)).replaceAll("zcl_valid","zcl_bad"));
   await writeFile(resolve(root,"src/osd/zclass.clas.abap"), source("edited").replaceAll("zcl_valid","zclass"));
 }

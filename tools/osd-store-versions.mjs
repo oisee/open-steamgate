@@ -436,6 +436,8 @@ export class StoreVersions {
     return this.#revisionOf(entry, (file) => digests.get(normalPath(join(this.#store.root, file))) ?? "");
   }
 
+  activeSourceFile(file, entry) { return this.#activeFile(file, entry); }
+
   #activeInputs;
 
   #activeFile(file, entry) {

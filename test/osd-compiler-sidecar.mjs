@@ -298,6 +298,64 @@ describe("osd compiler --stdio", function () {
       expect(baseline.registryHash).to.equal(expectedHash);
     });
   }
+  for (const resolver of ["generation", "pre-save", "shared-digest", "overlay-pre-save", "overlay-archive", "legacy-snapshot", "legacy-working"]) {
+    it(`maps the store's ${resolver} physical source to its logical filename`, async () => {
+      const {storeConfig} = await import("../tools/gogen/store.mjs");
+      const fixture = mkdtempSync(join(tmpdir(), "osd-mapping-"));
+      const sha = text => createHash("sha256").update(text).digest("hex");
+      const logical = "src/zcl_mapping.clas.abap", archive = "archive/zcl_mapping.clas.abap";
+      const active = source("ZCL_MAPPING", "original"), working = source("ZCL_MAPPING", "changed");
+      const put = (path, text) => { mkdirSync(join(fixture, path, ".."), {recursive: true}); writeFileSync(join(fixture, path), text); };
+      try {
+        put("abap_transpile.json", JSON.stringify({input_folder:["src"], libs:[]}));
+        put("abaplint.jsonc", JSON.stringify({syntax:{version:"v702"}}));
+        put(logical, working);
+        mkdirSync(join(fixture, "build/by-input/test"), {recursive:true});
+        symlinkSync("by-input/test", join(fixture, "build/live"));
+        const generation = "build/by-input/test/source/";
+        let physical;
+        if (resolver === "generation" || resolver === "overlay-archive" || resolver === "overlay-pre-save") {
+          put(generation + ".complete", "1");
+          physical = resolver === "overlay-pre-save" ? "build/inactive/active/" + logical : generation + (resolver === "overlay-archive" ? archive : logical);
+        } else if (resolver === "pre-save") {
+          physical = "build/inactive/active/" + logical;
+        } else if (resolver === "shared-digest") {
+          put("build/by-input/test/source-shared", "1");
+          physical = "build/source-by-digest/" + sha(active);
+        } else {
+          physical = generation + logical;
+          if (resolver === "legacy-working") put(logical, active);
+        }
+        const inputs = {[logical]:sha(active)};
+        if (resolver === "shared-digest") {
+          for (const include of ["locals_imp", "macros"]) {
+            const path = logical.replace(".clas.abap", `.clas.${include}.abap`);
+            put(path, "");
+            inputs[path] = sha("");
+          }
+          put("build/source-by-digest/"+sha(""), "");
+        }
+        put("build/by-input/test/source-inputs.json", JSON.stringify(inputs));
+        if (resolver !== "legacy-working") put(physical, active);
+        const roots = resolver.startsWith("overlay-") ? [{path:"src", writable:true, overlayOf:"archive"}] : undefined;
+        const store = new ObjectStore({root:fixture, ...(roots ? {roots} : {})});
+        const facts = await storeConfig(fixture, {store, storeModule:resolve("tools/osd-store.mjs")});
+        expect(facts.active[logical]).to.equal(physical);
+        const object = {type:"CLAS", name:"ZCL_MAPPING", version:"active"};
+        const snap = {root:fixture, generation:"test", objects:[{...object,
+          files:Object.entries(facts.active).map(([logicalPath,path]) => ({path,logicalPath,sha256:facts.built[logicalPath]}))}]};
+        const response = await send({id:++nextId, op:"outline", snapshot:snap, object});
+        const expected = await new StoreDestination({store}).execute({IV_COMMAND:"PARSE", IV_JSON:JSON.stringify({kind:"OUTLINE", ...object})});
+        expect(response.error, JSON.stringify(response)).to.equal(undefined);
+        expect(JSON.stringify(response.outline)).to.equal(expected.EV_JSON);
+        expect(response.registryHash).to.equal(sha(JSON.stringify(Object.entries(inputs).map(([path,hash]) => ["/"+path,hash]).sort(([a],[b]) => a < b ? -1 : a > b ? 1 : 0))));
+        const check = await send({id:++nextId, op:"check", snapshot:{...snap, checkMode:"saved"}});
+        expect(check.error, JSON.stringify(check)).to.equal(undefined);
+        expect(check.diagnostics).to.deep.equal([]);
+      } finally { rmSync(fixture, {recursive:true, force:true}); }
+    });
+  }
+
   it("covers library sources in the registry identity and verdict", async () => {
     const fixture = mkdtempSync(join(tmpdir(), "osd-sidecar-library-"));
     try {

@@ -27,7 +27,7 @@ by `registryHash` (+ `configSha`); every on-disk member is re-verified before
 the answer. `snapshot` pins the named objects by SHA-256 and realpath containment
 and is also reverified before answering.
 
-After applying the inactive overlay, `registryHash` is SHA-256 of the JSON
+For the default activation mode, after applying the inactive overlay, `registryHash` is SHA-256 of the JSON
 encoded sorted list of `[filename, sha256(raw)]` for every registry file:
 sources, includes, `gen/`, resolved libraries (including `OSD_LIB_*` overrides)
 and active copies of inactive dependencies. Filenames sort by code unit order.
@@ -44,14 +44,19 @@ generation = transpile output, keyed by abap_transpile.json + sources + transpil
 lint config is not an input of the output, but is an input of every check verdict,
 so verdict caches key on its sha.
 
-Checks use the store's existing ACTIVATE validation, including publication
-rules, active dependency overlays and the transitive reader closure. The
+By default (or with `snapshot.checkMode: "activation"`), checks use the store's
+existing ACTIVATE validation, including publication rules, active dependency
+overlays and the transitive reader closure. The optional `snapshot.checkMode:
+"saved"` instead calls `ObjectStore.check`, the same code Node STORE CHECK uses:
+all other saved inactive drafts remain in the registry, without activation's
+active dependency overlay or dependent diagnostics. The Go store adapter always
+selects this saved mode. The
 registry is built on demand; no transpile, publication, serving database or
 ABAP execution is involved.
 
 Results contain `diagnostics` with severity, `ABAP_SYNTAX` code, text, object
 identity, include path, and A4H coordinates: lines start at 1, columns at 0,
-and the end points to the last character. All other operations receive
+and the end points to the last character. Unknown operations receive
 `UNSUPPORTED_OP`; future capabilities remain unimplemented.
 
 | op | request | response |
@@ -66,6 +71,9 @@ same handler and `structureOf` over a store view of a fresh snapshot-only
 abaplint registry. Both active and inactive requests read the files the snapshot
 names; the object identity and version must match the snapshot object. Active
 copies and the working tree outside that snapshot cannot supply coordinates.
+The root store index supplies object existence: an indexed object with no
+proven active files uses an empty `files` array and still returns `found:true`
+with Node's outline skeleton. Unavailable includes are likewise absent.
 The same hash checks, realpath containment and final snapshot verification as
 `check` apply. Outline also reads `abaplint.jsonc` through the same configured
 registry construction used by the Node store, because syntax settings can
@@ -117,8 +125,8 @@ updating the last error.
 discovery, versions, contract, capabilities, limits, restarts and the last error.
 It exits successfully even when the sidecar is absent (`found:false`).
 `Status()` itself only reads state; `Hello` starts the child. Call `Close` when
-the client is no longer needed. No ADT or serving path uses this client yet.
-Round 2 connects ZOSD_STORE through that client.
+the client is no longer needed. The osgo serving host injects this client into ZOSD_STORE through the
+storecompiler adapter for CHECK and PARSE OUTLINE.
 
 The Go unit tests re-execute their own test binary as a fake sidecar and need
 no Node. The gogen suite registers `test/osgo-compiler.mjs`, which drives the
@@ -129,16 +137,20 @@ clean verdict, syntax coordinates and a false snapshot hash.
 
 `cmd/osgo` injects `storecompiler.Adapter` into objstore. The adapter starts the
 lazy client on the first CHECK or PARSE kind OUTLINE, builds a snapshot from the
-version the store itself resolves (normally inactive after WRITE, otherwise
-active), and requests the advertised operation. Active snapshot files are read
+saved working files for CHECK or the explicitly requested version for OUTLINE,
+and requests the advertised operation. Active snapshot files are read
 from the physical generation paths, but their logical source paths produce the
 same object/include names and coordinates Node reports. Their digests are also
 compared with the generation's built hashes before the sidecar is called.
 
-CHECK maps sidecar diagnostics to the Node destination's issue rows and JSON,
+storecompiler.Adapter.Check filters diagnostics to the requested object, maps
+include paths to FILE and zero-based columns to legacy one-based COL, and
+returns objstore.Issue rows. CHECK maps these to the Node destination's issue rows and JSON,
 scalars and tables. A successful outline response is passed through byte for
-byte. An absent sidecar keeps the standalone CHECK refusal and the standalone
-unknown-PARSE refusal. Other sidecar refusals—including `SNAPSHOT_MISMATCH`,
+byte. Provider availability is resolved before object lookup or active-source
+selection. An absent sidecar keeps the standalone CHECK answer (including
+NOT_FOUND for missing objects) and the standalone `unknown store command PARSE`
+refusal, even for missing or unproven-active objects. Other sidecar refusals—including `SNAPSHOT_MISMATCH`,
 `TIMEOUT`, `BAD_REQUEST`, `CONTRACT_MISMATCH` and `UNSUPPORTED_OP`—return clear
 store errors and a `NOT_SUPPORTED` JSON refusal rather than hanging.
 
@@ -147,17 +159,44 @@ retained when present and omitted when absent, so an older sidecar's responses
 remain valid. Operation discovery still depends on `hello` capabilities: an
 older child that advertises only `check` receives no outline request.
 
-Contract-v1 snapshots have only relative on-disk file paths and SHA-256 hashes;
+Contract-v1 snapshots identify on-disk files by relative paths and SHA-256 hashes;
 they cannot carry Node's in-memory CHECK `IV_SOURCE` buffer. Round 2 therefore
 returns `UNSUPPORTED_OP` for a present sidecar rather than checking stale saved
 text or mutating the object. This is the sole compiler parity gap expected by
 `tools/gogen/storecmp.mjs`; if Node and Go ever agree on that path, the ratchet
 fails so the expected-gap entry must be removed rather than silently widening.
 
+Each snapshot file may additionally carry `logicalPath`, a nonempty root-relative
+parser filename without parent traversal. `path` still identifies the physical
+bytes for containment, size limits, hashing and final verification. When omitted,
+`logicalPath` defaults to `path`; the sidecar does no generation-path rewriting.
+The store supplies this mapping explicitly, using its own active-source resolver
+for complete generation sources, pre-save copies (also overlay copies), shared
+digest storage, archive sources backing overlays, legacy retained snapshots and
+legacy working sources copied after digest proof. Thus a digest-only physical
+filename or an archive filename never substitutes for the overlay's ABAP name.
+For example: `{"path":"build/source-by-digest/<digest>",
+"logicalPath":"src/zcl_example.clas.abap","sha256":"<digest>"}`.
+
+`test/osgo-storecmp.mjs` compares ten direct Go store answers with Node execute,
+including saved inactive dependency CHECK, syntax issues, class includes,
+active/inactive class and program outlines, missing objects, and an indexed class
+without proven active sources. The same ten calls run through Node destination
+call and Go ZOSD_STORE with a complete RFC caller signature; issue rows use the
+existing DDIC structure (which has no FILE field), while EV_JSON remains byte
+exact. This adapter proof supplies IV_JSON/EV_JSON explicitly: the generated
+ABAP front's narrower signature still omits them, and its existing gap ratchets
+are unchanged. It does not prove those commands through that generated front.
+Absent-sidecar comparisons cover existing, missing and unproven-active CHECK and
+PARSE against standalone Go. The Node sidecar suite separately compares explicit
+physical/logical mapping across each active-source resolver path, with parser
+registry hashes and byte-equal outline JSON. The unsaved IV_SOURCE gap remains
+ratcheted. Frozen goldens record the ten Node execute answers, not RFC responses.
+
 The focused proof is:
 
 ```sh
-GOCACHE=/tmp/osgo-gocache go test ./objstore ./compiler
+GOCACHE=/tmp/osgo-gocache go test ./objstore ./storecompiler ./compiler
 GOCACHE=/tmp/osgo-gocache go test -race ./compiler
 OSD_HEAVY_RANGE=90-99 OSD_HEAVY_SLOTS=4 tools/osd-heavy.sh node node_modules/mocha/bin/mocha.js --require tools/osd-test-isolation.cjs test/osgo-storecmp.mjs test/osgo-store-goldens.mjs test/osgo-compiler.mjs test/store-destination.mjs test/osd-compiler-sidecar.mjs
 ```

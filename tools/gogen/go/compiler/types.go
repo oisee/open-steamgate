@@ -25,8 +25,9 @@ type AbsentError struct{ Paths []string }
 func (e *AbsentError) Error() string { return fmt.Sprintf("sidecar absent; tried %v", e.Paths) }
 
 type File struct {
-	Path   string `json:"path"`
-	SHA256 string `json:"sha256"`
+	Path        string `json:"path"`
+	LogicalPath string `json:"logicalPath,omitempty"`
+	SHA256      string `json:"sha256"`
 }
 type Object struct {
 	Type    string `json:"type"`
@@ -37,8 +38,10 @@ type Object struct {
 type ObjectFiles struct {
 	Type, Name, Version string
 	Files               []string
+	Logical             []string
 }
 type Snapshot struct {
+	CheckMode  string   `json:"checkMode,omitempty"`
 	Root       string   `json:"root"`
 	Generation string   `json:"generation"`
 	Objects    []Object `json:"objects"`

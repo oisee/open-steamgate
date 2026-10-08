@@ -14,20 +14,16 @@ import (
 
 // Compiler owns validation, not its process. The host supplies an adapter.
 type Compiler interface {
-	Check(context.Context, CompilerInput) ([]Diagnostic, error)
+	Available(context.Context) error
+	Check(context.Context, CompilerInput) ([]Issue, error)
 	Outline(context.Context, CompilerInput) (json.RawMessage, error)
 }
 type CompilerInput struct {
 	Root, Generation, Type, Name, Version string
 	Files                                 []string
 	Expected                              map[string]string
+	Logical                               []string
 	Source                                *string
-}
-
-// Diagnostic uses the sidecar's A4H coordinates (column zero based).
-type Diagnostic struct {
-	Severity, Code, Rule, Text, Type, Name, Include string
-	Line, Col                                       int
 }
 
 var ErrCompilerAbsent = errors.New("compiler absent")
@@ -45,7 +41,7 @@ func SetCompiler(provider Compiler, generation string) {
 }
 
 func compilerInput(ix *storeIndex, typ, name, version string) (CompilerInput, error) {
-	in := CompilerInput{Root: storeState.root, Generation: compilerState.generation, Type: typ, Name: name, Version: version, Files: []string{}, Expected: map[string]string{}}
+	in := CompilerInput{Root: storeState.root, Generation: compilerState.generation, Type: typ, Name: name, Version: version, Files: []string{}, Expected: map[string]string{}, Logical: []string{}}
 	e := ix.find(typ, name)
 	if e == nil {
 		return in, storeNotFound(typ, name)
@@ -56,17 +52,14 @@ func compilerInput(ix *storeIndex, typ, name, version string) (CompilerInput, er
 			if _, proven := storeActiveBytes(file); proven {
 				in.Files = append(in.Files, storeState.cfg.Active[file])
 				in.Expected[storeState.cfg.Active[file]] = storeState.cfg.Built[file]
-			} else if file == e.File {
-				return in, storeNotFound(typ, name+" active version (main)")
+				in.Logical = append(in.Logical, file)
 			}
 		} else if _, err := os.Stat(filepath.Join(storeState.root, file)); err == nil {
 			in.Files = append(in.Files, file)
+			in.Logical = append(in.Logical, file)
 		} else if !os.IsNotExist(err) {
 			return in, err
 		}
-	}
-	if len(in.Files) == 0 {
-		return in, storeNotFound(typ, name)
 	}
 	return in, nil
 }
@@ -77,38 +70,31 @@ func compilerRefusal(a *Answer, err error) error {
 }
 
 func storeCheck(ix *storeIndex, a *Answer, typ, name string, source *string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 	if compilerState.provider == nil {
 		return storeNoCompiler(ix, a, "CHECK", typ, name)
 	}
-	version := "inactive"
-	if e := ix.find(typ, name); e != nil {
-		version, _ = storeStateOf(e, e.File)
+	if err := compilerState.provider.Available(ctx); err != nil {
+		if errors.Is(err, ErrCompilerAbsent) {
+			return storeNoCompiler(ix, a, "CHECK", typ, name)
+		}
+		return compilerRefusal(a, err)
 	}
+	version := "inactive" // Node CHECK always reads the saved registry.
 	in, err := compilerInput(ix, typ, name, version)
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
 	in.Source = source
-	diagnostics, err := compilerState.provider.Check(ctx, in)
+	issues, err := compilerState.provider.Check(ctx, in)
 	if errors.Is(err, ErrCompilerAbsent) {
 		return storeNoCompiler(ix, a, "CHECK", typ, name)
 	}
 	if err != nil {
 		return compilerRefusal(a, err)
 	}
-	for _, d := range diagnostics {
-		// Node CHECK reports the requested object's issues, not activation's dependents.
-		if d.Type != in.Type || d.Name != in.Name {
-			continue
-		}
-		file := ""
-		if d.Include != "" {
-			file = "/" + strings.TrimPrefix(d.Include, "/")
-		}
-		a.Issues = append(a.Issues, Issue{OBJ_TYPE: d.Type, OBJ_NAME: d.Name, FILE: file, LINE: int32(d.Line), COL: int32(d.Col + 1), RULE: d.Rule, MESSAGE: d.Text})
-	}
+	a.Issues = append(a.Issues, issues...)
 	a.Scalars["EV_COUNT"] = strconv.Itoa(len(a.Issues))
 	if len(a.Issues) == 0 {
 		a.Scalars["EV_ACTIVE"] = "X"
@@ -124,15 +110,23 @@ func storeCheck(ix *storeIndex, a *Answer, typ, name string, source *string) err
 }
 
 func storeParse(ix *storeIndex, a *Answer, raw string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if compilerState.provider == nil {
+		return compilerRefusal(a, fmt.Errorf("unknown store command PARSE"))
+	}
+	if err := compilerState.provider.Available(ctx); err != nil {
+		if errors.Is(err, ErrCompilerAbsent) {
+			err = fmt.Errorf("unknown store command PARSE")
+		}
+		return compilerRefusal(a, err)
+	}
 	var input struct{ Kind, Type, Name, Version string }
 	if err := json.Unmarshal([]byte(raw), &input); err != nil {
 		return err
 	}
 	if input.Kind != "OUTLINE" {
 		return compilerRefusal(a, fmt.Errorf("parse kind %s is not supported", input.Kind))
-	}
-	if compilerState.provider == nil {
-		return compilerRefusal(a, fmt.Errorf("unknown store command PARSE"))
 	}
 	if input.Version == "" {
 		input.Version = "inactive"
@@ -149,8 +143,6 @@ func storeParse(ix *storeIndex, a *Answer, raw string) error {
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
 	value, err := compilerState.provider.Outline(ctx, in)
 	if errors.Is(err, ErrCompilerAbsent) {
 		err = fmt.Errorf("unknown store command PARSE")

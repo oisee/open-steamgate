@@ -123,8 +123,8 @@
       "reason": "recorded by --update"
     },
     "go:objstore": {
-      "lines": 1944,
-      "reason": "Sidecar round 2 adds only the narrow injectable CHECK/OUTLINE boundary, diagnostic mapping, and active-snapshot inputs; process ownership and concrete snapshot construction stay in storecompiler"
+      "lines": 1936,
+      "reason": "Fix1: diagnostic filtering, Include-to-FILE conversion and legacy columns moved to storecompiler; objstore retains provider availability, version selection, refusals and answer JSON. Ceiling reduced from 1944."
     },
     "go:reportargs": {
       "lines": 209,
@@ -511,12 +511,12 @@
       "reason": "osgo 026/029 (#658, #659, 2026-10-08): UTF-16 units with the surrogate-half invariant and class statics per Session; carving utf16/statics out of go/abap is queued (stoker QUEUE #33)"
     },
     "go:compiler": {
-      "lines": 928,
-      "reason": "Sidecar round 2 shares Check's bounded admission/transport/lifecycle path with Outline, validates the outline envelope, and retains the optional rule field; no ABAP bindings"
+      "lines": 935,
+      "reason": "Fix1: optional logicalPath per snapshot file and optional saved CHECK mode preserve contract v1; per-occurrence mappings permit multiple logical includes backed by one shared digest file."
     },
     "go:storecompiler": {
-      "lines": 62,
-      "reason": "New adapter owns compiler-client snapshots and active hash checks so objstore gains no process-lifecycle dependency"
+      "lines": 77,
+      "reason": "Fix1: adapter owns availability, saved-registry CHECK mode, explicit per-file logical mappings, active hash proof and all diagnostic-to-Issue conversion outside objstore."
     }
   },
   "readmeMissing": [

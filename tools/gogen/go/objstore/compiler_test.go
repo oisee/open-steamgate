@@ -12,11 +12,12 @@ import (
 
 type testCompiler struct {
 	request     CompilerInput
-	diagnostics []Diagnostic
+	diagnostics []Issue
 	err         error
 }
 
-func (c *testCompiler) Check(ctx context.Context, in CompilerInput) ([]Diagnostic, error) {
+func (c *testCompiler) Available(context.Context) error { return c.err }
+func (c *testCompiler) Check(ctx context.Context, in CompilerInput) ([]Issue, error) {
 	c.request = in
 	return c.diagnostics, c.err
 }
@@ -34,7 +35,7 @@ func TestCompilerStore(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer SetStore("", nil, "")
-	c := &testCompiler{diagnostics: []Diagnostic{{Type: "PROG", Name: "ZTEST", Include: "src/ztest.prog.abap", Line: 2, Col: 3, Rule: "syntax", Code: "ABAP_SYNTAX", Text: "bad", Severity: "E"}}}
+	c := &testCompiler{diagnostics: []Issue{{OBJ_TYPE: "PROG", OBJ_NAME: "ZTEST", FILE: "/src/ztest.prog.abap", LINE: 2, COL: 4, RULE: "syntax", MESSAGE: "bad"}}}
 	SetCompiler(c, "live-generation")
 	defer SetCompiler(nil, "")
 	str := func(s string) *string { return &s }
@@ -51,8 +52,8 @@ func TestCompilerStore(t *testing.T) {
 	}
 	call = map[string]*string{"IV_COMMAND": str("PARSE"), "IV_JSON": str(`{"kind":"OUTLINE","type":"PROG","name":"ZTEST","version":"active"}`)}
 	a = Call(call)
-	if a.Scalars["EV_ERROR"] == "" {
-		t.Fatal("unproven active source was accepted")
+	if a.Scalars["EV_ERROR"] != "" || len(c.request.Files) != 0 {
+		t.Fatal("unproven active outline must pass an empty source list")
 	}
 	call["IV_JSON"] = str(`{"kind":"OUTLINE","type":"PROG","name":"ZTEST"}`)
 	a = Call(call)

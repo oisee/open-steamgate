@@ -40,7 +40,7 @@ func BuildSnapshot(ctx context.Context, root, generation string, objects []Objec
 			return Snapshot{}, err
 		}
 		object := Object{Type: input.Type, Name: input.Name, Version: input.Version, Files: []File{}}
-		for _, path := range input.Files {
+		for index, path := range input.Files {
 			if err := ctx.Err(); err != nil {
 				return Snapshot{}, err
 			}
@@ -100,7 +100,11 @@ func BuildSnapshot(ctx context.Context, root, generation string, objects []Objec
 				return Snapshot{}, &SnapshotPathError{Path: path, Reason: "too-large"}
 			}
 			total += read
-			object.Files = append(object.Files, File{Path: filepath.ToSlash(clean), SHA256: fmt.Sprintf("%x", hash.Sum(nil))})
+			logical := ""
+			if index < len(input.Logical) {
+				logical = input.Logical[index]
+			}
+			object.Files = append(object.Files, File{Path: filepath.ToSlash(clean), LogicalPath: logical, SHA256: fmt.Sprintf("%x", hash.Sum(nil))})
 		}
 		snapshot.Objects = append(snapshot.Objects, object)
 	}

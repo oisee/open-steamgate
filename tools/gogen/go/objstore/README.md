@@ -7,9 +7,9 @@ supplies CHECK and PARSE kind OUTLINE snapshots; ACTIVATE and TOKENS are still r
 `SetStore`, `StoreCall`, the `Store*` type aliases and the
 session-first `ZOSD_STORE` adapter (Data in, tables filled).
 
-The compiler boundary is the small `Compiler` interface in `compiler.go`: objstore chooses active versus
-inactive files and maps diagnostics, but owns no process lifecycle. A nil provider preserves the standalone
-CHECK refusal and unknown-PARSE behavior. `storecompiler.Adapter` supplies the concrete snapshot/client
+The compiler boundary is the small `Compiler` interface in `compiler.go`: objstore chooses saved CHECK files or the OUTLINE version and builds answer
+JSON/scalars, but owns no process lifecycle or diagnostic conversion. Provider availability is resolved before object shortcuts; nil or absent providers preserve standalone
+CHECK and unknown-PARSE behavior. Indexed objects without active proof still receive an OUTLINE skeleton. `storecompiler.Adapter` supplies the concrete snapshot/client
 adapter. CHECK with `IV_SOURCE` is deliberately unsupported in round 2 because contract-v1 snapshots can
 pin only on-disk files, not Node's in-memory unsaved buffer; the gap is ratcheted in `tools/gogen/storecmp.mjs`.
 

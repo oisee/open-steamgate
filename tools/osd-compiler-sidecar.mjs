@@ -32,13 +32,17 @@ function snapshotFiles(snapshot) {
   let size = 0;
   for (const object of snapshot.objects) {
     if (!object || typeof object.type !== "string" || typeof object.name !== "string"
-        || !["active", "inactive"].includes(object.version) || !Array.isArray(object.files) || !object.files.length) {
+        || !["active", "inactive"].includes(object.version) || !Array.isArray(object.files)) {
       throw refusal("BAD_REQUEST", "invalid snapshot object");
     }
     for (const file of object.files) {
       if (!file || typeof file.path !== "string" || !file.path || isAbsolute(file.path)
           || typeof file.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(file.sha256)) {
         throw refusal("BAD_REQUEST", "invalid snapshot file");
+      }
+      if (file.logicalPath !== undefined && (typeof file.logicalPath !== "string" || !file.logicalPath
+          || isAbsolute(file.logicalPath) || file.logicalPath.split(/[\\/]/).includes(".."))) {
+        throw refusal("BAD_REQUEST", "invalid logical snapshot path");
       }
       let bytes;
       try { bytes = readFileSync(realContainedPath(root, file.path).realPath); }
@@ -47,18 +51,15 @@ function snapshotFiles(snapshot) {
         throw refusal("SNAPSHOT_MISMATCH", `cannot read ${file.path}`);
       }
       const local = relative(root, resolve(root, file.path));
-      if (files.has(local)) throw refusal("BAD_REQUEST", `duplicate snapshot file: ${file.path}`);
+      const logical = file.logicalPath ?? local;
+      if (files.has(logical)) throw refusal("BAD_REQUEST", `duplicate snapshot file: ${file.path}`);
       if (digest(bytes) !== file.sha256) throw refusal("SNAPSHOT_MISMATCH", `hash differs: ${file.path}`);
       size += bytes.length;
       if (size > limits.maxSnapshotBytes) throw refusal("BAD_REQUEST", "snapshot exceeds maxSnapshotBytes");
-      files.set(local, {bytes, sha256: file.sha256, parserPath: object.version === "active" ? parserPath(local) : local});
+      files.set(logical, {bytes, sha256: file.sha256, parserPath: logical, physicalPath: local});
     }
   }
   return {root, files};
-}
-
-function parserPath(path) {
-  return path.replace(/^build\/by-input\/[^/]+\/source\//, "");
 }
 
 function diagnostic(issue) {
@@ -90,9 +91,9 @@ export async function checkSnapshot(snapshot, {beforeAnswer} = {}) {
   forgetRegistry(store);
   const registry = store.registry();
   updateRegistryFiles(registry, [...files].map(([path, file]) => ["/" + file.parserPath, file.bytes.toString("utf8")]));
-  for (const [path, file] of files) registryInputs(registry).paths.set("/" + file.parserPath, join(root, path));
+  for (const [path, file] of files) registryInputs(registry).paths.set("/" + file.parserPath, join(root, file.physicalPath));
   let frozen;
-  const checked = prepareActivation(store, snapshot.objects, {transpile: false, beforeCheck(registry, overlayPaths) {
+  const freeze = (registry, overlayPaths = new Map()) => {
     const inputs = registryInputs(registry);
     const members = [...registry.getFiles()].map(file => {
       const filename = file.getFilename(), sha256 = digest(file.getRaw());
@@ -102,8 +103,21 @@ export async function checkSnapshot(snapshot, {beforeAnswer} = {}) {
     const registryHash = digest(JSON.stringify(members.map(({filename, sha256}) => [filename, sha256])));
     if (frozen && frozen.registryHash !== registryHash) throw refusal("SNAPSHOT_MISMATCH", "inputs moved during check");
     frozen = {members, registryHash, configSha: inputs.configSha, configPath: realpathSync(inputs.configFile)};
-  }});
-  const diagnostics = activationIssues(checked).map(diagnostic);
+  };
+  let issues;
+  if (snapshot.checkMode === "saved") {
+    freeze(registry);
+    issues = snapshot.objects.flatMap(object => {
+      const result = store.check(object.type, object.name);
+      return result.issues.map(issue => ({...issue, type:result.type, name:result.name}));
+    });
+  } else if (snapshot.checkMode === undefined || snapshot.checkMode === "activation") {
+    const checked = prepareActivation(store, snapshot.objects, {transpile:false, beforeCheck:freeze});
+    issues = activationIssues(checked);
+  } else {
+    throw refusal("BAD_REQUEST", "invalid checkMode");
+  }
+  const diagnostics = issues.map(diagnostic);
   const response = {diagnostics: [...new Map(diagnostics.map(d => [JSON.stringify(d), d])).values()],
     registryHash: frozen.registryHash, configSha: frozen.configSha, inputCount: frozen.members.length,
     virtualFiles: frozen.members.filter(m => m.realPath === undefined).map(m => m.filename)};
@@ -142,10 +156,11 @@ export async function outlineSnapshot(snapshot, object, {beforeAnswer} = {}) {
   const registry = configured.registry;
   for (const [path, file] of files) registry.addFile(new abaplint.MemoryFile("/" + file.parserPath, file.bytes.toString("utf8")));
   registry.parse();
+  const indexed = new ObjectStore({root});
   const store = {
     find(type, name) {
       const entry = registry.getObject(type === "INCL" ? "PROG" : type, String(name).toUpperCase());
-      return entry === undefined ? undefined : {name: entry.getName()};
+      return entry === undefined ? indexed.find(type, name) : {name: entry.getName()};
     },
     registry: () => registry,
     withActiveSources: (_entry, work) => work(registry),

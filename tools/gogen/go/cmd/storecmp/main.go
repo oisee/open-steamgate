@@ -65,23 +65,20 @@ func adapterTableType(rowType *abap.Type) *abap.Type {
 
 func adapterAnswer(args map[string]abap.Data, imports map[string]bool) map[string]any {
 	abap.ZOSD_STORE(new(abap.Session), args)
-	out := map[string]any{"Scalars": map[string]string{}, "Objects": []map[string]string{}, "Revisions": []map[string]string{}}
+	out := map[string]any{"Scalars": map[string]string{}, "Objects": []map[string]string{}, "Revisions": []map[string]string{}, "Issues": []map[string]string{}, "Types": []map[string]string{}}
 	for name := range imports {
 		if value, ok := args[name].P.(*string); ok {
 			scalars := out["Scalars"].(map[string]string)
 			scalars[name] = *value
 		}
 	}
-	for _, name := range []string{"ET_OBJECT", "ET_REVISION"} {
+	for _, name := range []string{"ET_OBJECT", "ET_REVISION", "ET_ISSUE", "ET_TYPE"} {
 		tableData, ok := args[name]
 		if !ok {
 			continue
 		}
 		table, _ := tableData.P.(*adapterTable)
-		key := "Revisions"
-		if name == "ET_OBJECT" {
-			key = "Objects"
-		}
+		key := map[string]string{"ET_OBJECT": "Objects", "ET_REVISION": "Revisions", "ET_ISSUE": "Issues", "ET_TYPE": "Types"}[name]
 		rows := out[key].([]map[string]string)
 		for _, row := range *table {
 			values := map[string]string{}
