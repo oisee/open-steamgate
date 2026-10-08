@@ -15,8 +15,8 @@
   ],
   "budgets": {
     "go:abap": {
-      "lines": 11793,
-      "reason": "ADT batch 1 (adt-i5 cases 1-7): Session message fields, classic exception binding, date/time and signed MOVE adapters, object-wrapper identity, STORE answer projection and conservative ADT host answers; timestamp conversion lives in go/timestamp. Includes the merged main baseline and the narrow UTF-16 adapter required to remove charsection dependency on abap. Critic round 1: immediate caller MESSAGE RAISING assignments and scoped restoration, including calls without EXCEPTIONS. Critic round 1: shared fixed-character comparison conversion and CP escaped/trailing blank binding semantics."
+      "lines": 11802,
+      "reason": "ADT batch 1 (adt-i5 cases 1-7): Session message fields, classic exception binding, date/time and signed MOVE adapters, object-wrapper identity, STORE answer projection and conservative ADT host answers; timestamp conversion lives in go/timestamp. Includes the merged main baseline and the narrow UTF-16 adapter required to remove charsection dependency on abap. Critic round 1: immediate caller MESSAGE RAISING assignments and scoped restoration, including calls without EXCEPTIONS. Critic round 1: shared fixed-character comparison conversion and CP escaped/trailing blank binding semantics. ADT batch 1 (round 5 finding 4): normalize zero session message-number storage on typed NUMC(3) reads."
     },
     "go:abaperr": {
       "lines": 13,
@@ -192,7 +192,7 @@
     },
     "tools/gogen/emit-go.mjs": {
       "lines": 2349,
-      "reason": "ADT batch 1 (adt-i5 cases 1-7): Emit t2i through the runtime binding and pass the narrow UTF-16 host adapter to charsection; includes the merged main emitter baseline. Critic round 1: immediate caller MESSAGE RAISING assignments and scoped restoration, including calls without EXCEPTIONS."
+      "reason": "ADT batch 1 (adt-i5 cases 1-7): Emit t2i through the runtime binding and pass the narrow UTF-16 host adapter to charsection; includes the merged main emitter baseline. Critic round 1: immediate caller MESSAGE RAISING assignments and scoped restoration, including calls without EXCEPTIONS. ADT batch 1 (round 5 finding 4): normalize zero session message-number storage on typed NUMC(3) reads."
     },
     "tools/gogen/emit-js.mjs": {
       "lines": 1206,
@@ -203,8 +203,8 @@
       "reason": "ADT batch 1 (adt-i5 cases 1-7): Lower string WHERE predicates through existing logical IR; bind CONVERT, MESSAGE RAISING, sy-msg fields, STORE parameters, date/time calculation types, object re-raise and conservative ADT kernel answers. Critic round 1: shared fixed-character comparison conversion and CP escaped/trailing blank binding semantics."
     },
     "tools/gogen/go/abap/abap.go": {
-      "lines": 237,
-      "reason": "ADT batch 1 (adt-i5 cases 1-7): Keep sy-msgid/msgno/msgty/msgv1-4 in the session alongside existing system fields. Critic round 1: immediate caller MESSAGE RAISING assignments and scoped restoration, including calls without EXCEPTIONS."
+      "lines": 246,
+      "reason": "ADT batch 1 (adt-i5 cases 1-7): Keep sy-msgid/msgno/msgty/msgv1-4 in the session alongside existing system fields. Critic round 1: immediate caller MESSAGE RAISING assignments and scoped restoration, including calls without EXCEPTIONS. ADT batch 1 (round 5 finding 4): normalize zero session message-number storage on typed NUMC(3) reads."
     },
     "tools/gogen/go/abap/apc.go": {
       "lines": 39,
@@ -444,7 +444,7 @@
     },
     "tools/gogen/js/abap.mjs": {
       "lines": 1671,
-      "reason": "ADT batch 1 (round 5 finding 1): CS preserves the initial fixed-character subject rule alongside padding and fdpos."
+      "reason": "baseline 2026-10-01; critic round 1: JS time conversion and exception identity. ADT batch 1 (round 5 finding 1): preserve initial c subject CS semantics."
     },
     "tools/lift.mjs": {
       "lines": 1225,

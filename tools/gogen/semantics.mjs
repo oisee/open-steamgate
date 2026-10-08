@@ -15,6 +15,8 @@ import {home} from "./home.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const EXPECT = {
+  // TASK5: initial NUMC(3) and character message fields.
+  ZCL_GOGEN_T_MSGINITIAL: "000//////",
   // TASK5 supplied CS oracle; other operators follow SAP character comparison rules.
   ZCL_GOGEN_T_INITIALCS: "ok",
   // TASK4 supplied oracles; fixed blanks and re-raise are documented regressions.

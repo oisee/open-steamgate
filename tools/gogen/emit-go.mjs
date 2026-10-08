@@ -1052,7 +1052,7 @@ function place(p, ctx) {
         ? `(*func() *${type} { Ensure_${typeName(owner)}(s); return &${field} }())` : field;
     }
     case "const": return p.go;
-    case "sy": return `s.Sy.${p.field}`;
+    case "sy": return p.field === "Msgno" ? `(*s.Sy.MessageNumber())` : `s.Sy.${p.field}`;
     case "field": return `${PLACES.has(p.base.e) || p.base.e === "const" ? place(p.base, ctx) : `(${expr(p.base, ctx)})`}.${ident(p.name)}`;
     case "dref_field": return `abap.DerefAs[${goType(p.struct)}](${expr(p.base, ctx)}, ${JSON.stringify(`->${p.name}`)}).${ident(p.name)}`;
     case "fs": return p.type.k === "data" ? ident(p.name) : p.type.k === "struct" ? `(*${ident(p.name)})` : `(*abap.CheckedRowPtr(${ident(p.name)}))`;
@@ -2051,7 +2051,7 @@ function expr(e, ctx) {
     case "padc": return `abap.PadC(${expr(e.x, ctx)}, ${e.n})`;
     case "flag": return String(e.value);
     case "str_fn": return `abap.${e.fn}(${e.args.map((a) => expr(a, ctx)).join(", ")})`;
-    case "sy": return `s.Sy.${e.field}`;
+    case "sy": return place(e, ctx);
     case "sy_mandt": return "abap.Mandt";
     case "sy_host": return `abap.${e.name}`;
     case "int": return `int32(${e.value})`;
