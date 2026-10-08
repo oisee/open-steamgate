@@ -198,10 +198,10 @@ func (s *session) owns(w *row) bool {
 func shared(mode string) bool { return mode == "S" || mode == "O" }
 
 func scopeOf(r Request) int {
-	if r.Scope == 0 {
-		return 2
+	if r.Scope == 1 || r.Scope == 3 {
+		return r.Scope
 	}
-	return r.Scope
+	return 2
 }
 
 func (st *state) enqueue(sid int64, r Request) Result {
