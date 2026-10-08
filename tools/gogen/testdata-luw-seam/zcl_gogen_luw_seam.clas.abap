@@ -8,8 +8,17 @@ CLASS zcl_gogen_luw_seam DEFINITION PUBLIC FINAL CREATE PUBLIC.
  CLASS-METHODS update.
  CLASS-METHODS ordinary.
  CLASS-METHODS raising.
+ CLASS-METHODS committed_zero RETURNING VALUE(rv) TYPE i.
+ CLASS-METHODS update_arg.
 ENDCLASS.
 CLASS zcl_gogen_luw_seam IMPLEMENTATION.
+ METHOD committed_zero.
+ COMMIT WORK.
+ rv = 0.
+ ENDMETHOD.
+ METHOD update_arg.
+ CALL FUNCTION 'ZGOGEN_LUW_UPDATE' EXPORTING iv_boom = committed_zero( ).
+ ENDMETHOD.
  METHOD put.
  DATA row TYPE zgogen_luw_tab.
  row-id = 1.

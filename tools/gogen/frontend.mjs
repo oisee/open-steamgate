@@ -659,6 +659,9 @@ function functionGroupIr(ctx0, g) {
       ctx.inits = [];
       const compiled = body === undefined ? [] : block(body, ctx);
       compiled.unshift(...ctx.inits);
+      // an update-task module marks the LUW on entry, after its caller's
+      // arguments are evaluated, like Node's wrapper (osd-enq-host.mjs)
+      if (x.updateTask) compiled.unshift({s: "note_update_task"});
       cls.methods.push({...sig, fieldSymbols: [...ctx.fieldSymbols].map(([n, t]) => ({name: n, type: t})), locals: [...ctx.locals].map(([n, t]) => ({name: n, type: t})).sort((a, b) => a.name.localeCompare(b.name)),
         body: compiled, calls: ctx.calls ?? [], pos: {file: file.getFilename().split("/").pop(), row: node.getFirstToken().getStart().getRow()}});
     } catch (e) {
@@ -1133,7 +1136,7 @@ function lockArguments(node, ctx, name, params) {
  * values, a TABLES table keeps what the module appended). Without
  * EXCEPTIONS sy-subrc is 0 afterwards and a RAISE dumps. */
 function compiledFunctionCall(node, ctx, text, name) {
-  const {owner, sig, updateTask} = ctx.program.functionModules.get(name);
+  const {owner, sig} = ctx.program.functionModules.get(name);
   if (/\b(IN\s+UPDATE\s+TASK|STARTING\s+NEW\s+TASK|IN\s+BACKGROUND|DESTINATION|PARAMETER-TABLE|EXCEPTION-TABLE)\b/i.test(text)) throw new Unsupported(`CALL FUNCTION '${name}' form: ${text}`);
   if (sig.unsupported) throw new Unsupported(`CALL FUNCTION '${name}': ${sig.unsupported}`);
   const fp = node.findDirectExpression(Expressions.FunctionParameters);
@@ -1209,7 +1212,7 @@ function compiledFunctionCall(node, ctx, text, name) {
   const tail = exceptions
     ? (after.length ? [{s: "if", branches: [{cond: {c: "cmp", op: "=", l: subrc, r: {e: "int", value: 0, type: I}, type: I}, body: after}], else: null}] : [])
     : [...after, {s: "assign", target: subrc, value: {e: "int", value: 0, type: I}}];
-  return {s: "seq", body: [...(updateTask ? [{s: "note_update_task"}] : []), ...before, call, ...tail]};
+  return {s: "seq", body: [...before, call, ...tail]};
 }
 
 /**

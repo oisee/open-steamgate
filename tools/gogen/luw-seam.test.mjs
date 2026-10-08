@@ -58,6 +58,12 @@ func TestLUWSeam(t *testing.T) {
  if len(flags)!=len(want)||rollbacks!=1 {t.Fatal("yield or step end notified LUW")}
  ZCL_GOGEN_LUW_SEAM_COMMIT(s)
  if !flags[len(flags)-1] {t.Fatal("yield cleared update state")}
+ // the argument commits before the update module is entered: false for
+ // that commit, true for the one after the module ran (Node's order)
+ n:=len(flags)
+ ZCL_GOGEN_LUW_SEAM_UPDATE_ARG(s)
+ ZCL_GOGEN_LUW_SEAM_COMMIT(s)
+ if len(flags)!=n+2||flags[n]||!flags[n+1] {t.Fatalf("argument commit order: %v",flags[n:])}
  for _,finish:=range []func(*abap.Session){ZCL_GOGEN_LUW_SEAM_COMMIT,ZCL_GOGEN_LUW_SEAM_ROLLBACK} {
   h.Commit=nil; h.Rollback=nil
   ZCL_GOGEN_LUW_SEAM_UPDATE(s); finish(s)
