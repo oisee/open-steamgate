@@ -1002,7 +1002,7 @@ function callFunction(node, ctx, text) {
           args.push({name: pname, value: convert(target, {k: "data"})});
         }
       } else if (isExpr(k, Expressions.ParameterListExceptions)) {
-        exceptions = {map: {}, others: 0};
+        exceptions = {map: {}, others: -1};
         for (const x of k.findDirectExpressions(Expressions.ParameterException)) {
           const v = x.findDirectExpression(Expressions.Integer);
           if (!v) throw new Unsupported(`EXCEPTIONS with a value that is not a number: ${x.concatTokens()}`);
@@ -1049,10 +1049,10 @@ function compiledFunctionCall(node, ctx, text, name) {
           targets.set(upper(p.findDirectExpression(Expressions.ParameterName).concatTokens()), {kw, target: lvalue(p.findDirectExpression(Expressions.Target), ctx)});
         }
       } else if (isExpr(k, Expressions.ParameterListExceptions)) {
-        exceptions = {map: {}, others: 0};
+        exceptions = {map: {}, others: -1};
         for (const x of k.findDirectExpressions(Expressions.ParameterException)) {
           const v = x.findDirectExpression(Expressions.Integer);
-          if (!v || Number(v.concatTokens()) === 0) throw new Unsupported(`EXCEPTIONS with a value that is not a number other than 0: ${x.concatTokens()}`);
+          if (!v) throw new Unsupported(`EXCEPTIONS with a value that is not a number: ${x.concatTokens()}`);
           const nm = x.findDirectExpression(Expressions.ParameterName);
           if (nm) exceptions.map[upper(nm.concatTokens())] = Number(v.concatTokens());
           else exceptions.others = Number(v.concatTokens());
@@ -6136,7 +6136,7 @@ function call(chain, ctx, statement, hint) {
     // called ends it, and sy-subrc says which
     const exl = full.findDirectExpression(Expressions.ParameterListExceptions);
     if (exl) {
-      exceptions = {map: {}, others: 0};
+      exceptions = {map: {}, others: -1};
       for (const x of exl.findDirectExpressions(Expressions.ParameterException)) {
         const v = x.findDirectExpression(Expressions.Integer);
         if (!v) throw new Unsupported(`EXCEPTIONS with a value that is not a number: ${x.concatTokens()}`);

@@ -500,7 +500,7 @@ export class ClassicException extends Error {
 export function classic(s, e, method, map, others) {
   if (e instanceof ClassicException && e.method === method) {
     if (map[e.exName] !== undefined) { s.sy.subrc = map[e.exName]; return; }
-    if (others !== 0) { s.sy.subrc = others; return; }
+    if (others >= 0) { s.sy.subrc = others; return; }
   }
   throw e;
 }

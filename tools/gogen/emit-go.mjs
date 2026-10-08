@@ -1417,7 +1417,7 @@ function stmtLines(st, ctx, d) {
       // CALL FUNCTION of a module the host implements (frontend NATIVE_FM):
       // every actual as generic data, the module's classic exceptions by name
       const call = `${helperFn(st.fn)}(s, map[string]abap.Data{${st.args.map((x) => `${JSON.stringify(x.name)}: ${expr(x.value, ctx)}`).join(", ")}})`;
-      if (!st.exceptions) return [`${t}func() { defer abap.MessageCallScope(s, ${JSON.stringify(st.name)}, nil, 0)(); ${call} }()`];
+      if (!st.exceptions) return [`${t}func() { defer abap.MessageCallScope(s, ${JSON.stringify(st.name)}, nil, -1)(); ${call} }()`];
       const m = Object.entries(st.exceptions.map).map(([k, v]) => `${JSON.stringify(k)}: ${v}`).join(", ");
       return [`${t}func() {`, `${t}\tdefer abap.Classic(s, ${JSON.stringify(st.name)}, map[string]int32{${m}}, ${st.exceptions.others})`,
         `${t}\tdefer abap.MessageCallScope(s, ${JSON.stringify(st.name)}, map[string]int32{${m}}, ${st.exceptions.others})()`, `${t}\t${call}`, `${t}\ts.Sy.Subrc = 0`, `${t}}()`];
@@ -2121,7 +2121,7 @@ function expr(e, ctx) {
       else call = `${self(ctx, e.method)}.${typeName(e.method)}(${args.join(", ")})`;
       const codes = Object.entries(e.exceptions?.map ?? {}).map(([k, v]) => `${JSON.stringify(k)}: ${v}`).join(", ");
       const result = e.type.k === "void" ? "" : goType(e.type);
-      return `func() ${result} { defer abap.MessageCallScope(s, ${JSON.stringify(e.callee)}, map[string]int32{${codes}}, ${e.exceptions?.others ?? 0})(); ${result ? "return " : ""}${call} }()`;
+      return `func() ${result} { defer abap.MessageCallScope(s, ${JSON.stringify(e.callee)}, map[string]int32{${codes}}, ${e.exceptions?.others ?? -1})(); ${result ? "return " : ""}${call} }()`;
     }
     case "nop_call": return "";
     case "xbytes": return constLiteral({type: e.type, value: e.value});

@@ -70,7 +70,7 @@ type ClassicException struct {
 func (c ClassicException) Error() string { return "RAISE_EXCEPTION " + c.Name + " in " + c.Method }
 
 // Classic is deferred around a call with EXCEPTIONS: the exception named, or
-// OTHERS, sets sy-subrc; anything else goes on.
+// OTHERS, sets sy-subrc; -1 means absent, so an assigned zero is handled.
 func Classic(s *Session, method string, m map[string]int32, others int32) {
 	r := recover()
 	if r == nil {
@@ -81,7 +81,7 @@ func Classic(s *Session, method string, m map[string]int32, others int32) {
 			s.Sy.Subrc = v
 			return
 		}
-		if others != 0 {
+		if others >= 0 {
 			s.Sy.Subrc = others
 			return
 		}
@@ -179,7 +179,7 @@ func MessageRaise(s *Session, id, ty, no, name, method string, values ...string)
 		}
 	}
 	if c := s.messageCall; c != nil && c.method == method {
-		if _, assigned := c.codes[name]; assigned || c.others != 0 {
+		if _, assigned := c.codes[name]; assigned || c.others >= 0 {
 			panic(ClassicException{Name: name, Method: method})
 		}
 	}
