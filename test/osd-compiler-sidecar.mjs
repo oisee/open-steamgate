@@ -6,7 +6,11 @@ import {tmpdir} from "node:os";
 import {join, resolve} from "node:path";
 import {createInterface} from "node:readline";
 import {once} from "node:events";
-import {checkSnapshot} from "../tools/osd-compiler-sidecar.mjs";
+import {checkSnapshot, outlineSnapshot} from "../tools/osd-compiler-sidecar.mjs";
+import {ObjectStore} from "../tools/osd-store.mjs";
+import {StoreDestination} from "../tools/osd-store-destination.mjs";
+import {files as outlineFiles, name as outlineName} from "./adt-conformance/fixtures/source.mjs";
+import {expected as outlineFacts} from "./adt-conformance/fixtures/outline.mjs";
 import {compilerCommand} from "../tools/osd-host.mjs";
 
 describe("osd compiler --stdio", function () {
@@ -67,15 +71,111 @@ describe("osd compiler --stdio", function () {
     if (outside) rmSync(outside, {recursive: true, force: true});
   });
 
-  it("advertises contract, version, pin, check and limits", async () => {
+  it("advertises contract, version, pin, check, outline and limits", async () => {
     const hello = await send({id: 0, op: "hello", contract: 1, osgo: "fixture", root});
     let version = "source";
     try { version = JSON.parse(readFileSync("osd-version.json", "utf8")).version; } catch (error) { if (error.code !== "ENOENT") throw error; }
     expect(hello).to.include({id: 0, contract: 1, osd: version,
       transpiler: JSON.parse(readFileSync("libs.lock.json", "utf8")).transpiler.ref});
-    expect(hello.capabilities).to.deep.equal(["check"]);
+    expect(hello.capabilities).to.deep.equal(["check", "outline"]);
     expect(hello.limits.maxConcurrentRequests).to.equal(1);
     expect(hello.limits.maxSnapshotBytes).to.be.greaterThan(0);
+  });
+  describe("outline", () => {
+    let fixture, snap, object, store, destination;
+    const sha = text => createHash("sha256").update(text).digest("hex");
+    const rows = node => ({...node, extra: Object.entries(node.extra ?? {}).map(([name, value]) => ({name, value})),
+      links: node.links ?? [], children: (node.children ?? []).map(rows)});
+    const request = () => send({id: ++nextId, op: "outline", snapshot: snap, object});
+    const nodeOutline = async () => (await destination.execute({IV_COMMAND: "PARSE",
+      IV_JSON: JSON.stringify({kind: "OUTLINE", ...object})})).EV_JSON;
+    beforeEach(() => {
+      fixture = mkdtempSync(join(tmpdir(), "osd-sidecar-outline-"));
+      mkdirSync(join(fixture, "src"));
+      writeFileSync(join(fixture, "abap_transpile.json"), JSON.stringify({input_folder: ["src"], libs: []}));
+      writeFileSync(join(fixture, "abaplint.jsonc"), JSON.stringify({syntax: {version: "v702"}}));
+      object = {type: "CLAS", name: outlineName, version: "inactive"};
+      snap = {root: fixture, generation: "outline-fixture", objects: [{...object,
+        files: Object.entries(outlineFiles).map(([name, text]) => {
+          const path = "src/" + name;
+          writeFileSync(join(fixture, path), text);
+          return {path, sha256: sha(text)};
+        })}]};
+      store = new ObjectStore({root: fixture});
+      destination = new StoreDestination({store});
+    });
+    afterEach(() => rmSync(fixture, {recursive: true, force: true}));
+    for (const part of ["main", "testclasses", "implementations"]) {
+      it(`returns byte-equal Node PARSE OUTLINE with measured ${part} coordinates`, async () => {
+        const response = await request();
+        expect(response.error, JSON.stringify(response)).to.equal(undefined);
+        expect(JSON.stringify(response.outline)).to.equal(await nodeOutline());
+        expect(response.outline).to.deep.equal({found: true, ...rows(outlineFacts)});
+        const node = part === "main" ? response.outline : response.outline.children.find(n =>
+          n.name === (part === "testclasses" ? "LTCL_PROBE" : "LCL_HELPER"));
+        expect(node.links.some(l => l.href.includes(part === "main" ? "source/main#" : `includes/${part}#`))).to.equal(true);
+        const pairs = snap.objects[0].files.map(f => ["/" + f.path, f.sha256]).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
+        expect(response.registryHash).to.equal(sha(JSON.stringify(pairs)));
+        expect(response.inputCount).to.equal(3);
+        expect(response.virtualFiles).to.deep.equal([]);
+        expect(response).not.to.have.property("configSha");
+      });
+    }
+    it("uses an inactive edit's shifted coordinates rather than active copies", async () => {
+      const baseline = await request();
+      store.write("CLAS", outlineName, "\n\n" + outlineFiles[`${outlineName.toLowerCase()}.clas.abap`]);
+      const file = snap.objects[0].files[0];
+      file.sha256 = sha(readFileSync(join(fixture, file.path)));
+      const response = await request();
+      expect(JSON.stringify(response.outline)).to.equal(await nodeOutline());
+      expect(response.outline.links[0].href).to.include("start=4,6;end=4,28");
+      expect(response.outline.links[0].href).not.to.equal(baseline.outline.links[0].href);
+      expect(response.registryHash).not.to.equal(baseline.registryHash);
+    });
+    it("uses the active snapshot's named text despite stale active copies", async () => {
+      store.write("CLAS", outlineName, "\n\n" + outlineFiles[`${outlineName.toLowerCase()}.clas.abap`]);
+      snap.objects[0].files[0].sha256 = sha(readFileSync(join(fixture, snap.objects[0].files[0].path)));
+      mkdirSync(join(fixture, "build/inactive/active/src"), {recursive: true});
+      for (const [name, text] of Object.entries(outlineFiles)) writeFileSync(join(fixture, "build/inactive/active/src", name), text);
+      object.version = snap.objects[0].version = "active";
+      const response = await request();
+      expect(response.error).to.equal(undefined);
+      expect(response.outline.links[0].href).to.include("start=4,6;end=4,28");
+      expect(JSON.parse(await nodeOutline()).links[0].href).to.include("start=2,6;end=2,28");
+    });
+    it("refuses an outline snapshot hash lie", async () => {
+      snap.objects[0].files[1].sha256 = "0".repeat(64);
+      expect((await request()).error.code).to.equal("SNAPSHOT_MISMATCH");
+    });
+    it("returns found:false for an unknown outline object", async () => {
+      object.name = snap.objects[0].name = "ZCL_OUTLINE_ABSENT";
+      const response = await request();
+      expect(response.error).to.equal(undefined);
+      expect(response.outline).to.deep.equal({found: false});
+      expect(JSON.stringify(response.outline)).to.equal(await nodeOutline());
+    });
+    it("re-verifies outline inputs before answering", async () => {
+      let error;
+      try {
+        await outlineSnapshot(snap, object, {beforeAnswer() {
+          writeFileSync(join(fixture, snap.objects[0].files[2].path), "changed");
+        }});
+      } catch (caught) {error = caught;}
+      expect(error).to.have.property("protocolCode", "SNAPSHOT_MISMATCH");
+    });
+    it("enforces outline realpath containment", async () => {
+      const file = snap.objects[0].files[0];
+      rmSync(join(fixture, file.path));
+      symlinkSync(join(root, "abaplint.jsonc"), join(fixture, file.path));
+      expect((await request()).error.code).to.equal("BAD_REQUEST");
+    });
+    it("requires one matching outline object and version", async () => {
+      object.version = "active";
+      expect((await request()).error.code).to.equal("BAD_REQUEST");
+      object.version = "inactive";
+      snap.objects.push({...snap.objects[0], files: [{path: "abaplint.jsonc", sha256: sha(readFileSync(join(fixture, "abaplint.jsonc")))}]});
+      expect((await request()).error.code).to.equal("BAD_REQUEST");
+    });
   });
   it("checks a clean class without diagnostics", async () => {
     const response = await send({id: ++nextId, op: "check", snapshot: snapshot("ZCL_SC_CLEAN", source("ZCL_SC_CLEAN"))});
@@ -257,7 +357,7 @@ describe("osd compiler --stdio", function () {
     rmSync(join(root, path));
   });
   it("refuses unsupported operations", async () => {
-    const response = await send({id: "outline", op: "outline"});
+    const response = await send({id: "outline", op: "activate"});
     expect(response.id).to.equal("outline");
     expect(response.error.code).to.equal("UNSUPPORTED_OP");
   });

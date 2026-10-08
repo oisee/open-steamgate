@@ -1,4 +1,4 @@
-// Compiler-provider contract v1. Validation only: no publication or execution.
+// Compiler-provider contract v1. Check and outline: no publication or execution.
 import {createHash} from "node:crypto";
 import {readFileSync, realpathSync} from "node:fs";
 import {isAbsolute, join, relative, resolve} from "node:path";
@@ -117,6 +117,42 @@ export async function checkSnapshot(snapshot, {beforeAnswer} = {}) {
   return response;
 }
 
+// Outline is a parse of exactly the supplied files, not a validation of the
+// system tree. Active and inactive both use the version's named snapshot text.
+export async function outlineSnapshot(snapshot, object, {beforeAnswer} = {}) {
+  const {root, files} = snapshotFiles(snapshot);
+  if (snapshot.objects.length !== 1 || !object || typeof object.type !== "string"
+      || typeof object.name !== "string" || !["active", "inactive"].includes(object.version)) {
+    throw refusal("BAD_REQUEST", "outline needs one snapshot object and object {type, name, version}");
+  }
+  const named = snapshot.objects[0];
+  if (named.type.toUpperCase() !== object.type.toUpperCase()
+      || named.name.toUpperCase() !== object.name.toUpperCase() || named.version !== object.version) {
+    throw refusal("BAD_REQUEST", "outline object must match snapshot object");
+  }
+  const abaplint = await import("@abaplint/core");
+  const {PARSE_KINDS} = await import("./osd-store-destination.mjs");
+  const registry = new abaplint.Registry();
+  for (const [path, file] of files) registry.addFile(new abaplint.MemoryFile("/" + path, file.bytes.toString("utf8")));
+  registry.parse();
+  const store = {
+    find(type, name) {
+      const entry = registry.getObject(type === "INCL" ? "PROG" : type, String(name).toUpperCase());
+      return entry === undefined ? undefined : {name: entry.getName()};
+    },
+    registry: () => registry,
+    withActiveSources: (_entry, work) => work(registry),
+  };
+  const outline = await PARSE_KINDS.OUTLINE(store, object);
+  const members = [...registry.getFiles()].map(file => [file.getFilename(), digest(file.getRaw())])
+    .sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
+  const response = {outline, registryHash: digest(JSON.stringify(members)),
+    inputCount: members.length, virtualFiles: []};
+  await beforeAnswer?.();
+  snapshotFiles({...snapshot, root});
+  return response;
+}
+
 export async function main(args = process.argv.slice(2)) {
   if (args.length !== 1 || args[0] !== "--stdio") {
     console.error("usage: osd compiler --stdio");
@@ -142,9 +178,11 @@ export async function main(args = process.argv.slice(2)) {
         }
         if (request.op === "hello") {
           if (request.contract !== 1) throw refusal("CONTRACT_MISMATCH", "expected contract 1");
-          response = {contract: 1, osd, transpiler: lock.transpiler.ref, capabilities: ["check"], limits};
+          response = {contract: 1, osd, transpiler: lock.transpiler.ref, capabilities: ["check", "outline"], limits};
         } else if (request.op === "check") {
           response = await checkSnapshot(request.snapshot);
+        } else if (request.op === "outline") {
+          response = await outlineSnapshot(request.snapshot, request.object);
         } else {
           throw refusal("UNSUPPORTED_OP", `unsupported operation: ${request.op}`);
         }
