@@ -6,7 +6,8 @@ ordinary Go callbacks, and generated ABAP classes convert values at their method
 boundary.
 
 Each replaced class is one exported variable. Its fields are named after methods
-and use only scalar Go types. The first seam is `ZCL_OSD_ENQ_KERNEL`; add a
+and use only scalar Go types, after a first `step any` argument: the calling
+step's `*abap.Session`, the key for a host's per-step state. The first seam is `ZCL_OSD_ENQ_KERNEL`; add a
 neighboring class-named variable when another host replacement is needed.
 
 A callback returns `*Raise` to ask the generated method to raise an ABAP

@@ -22,13 +22,15 @@ func (e *Raise) Error() string {
 	return e.Class + ": " + e.Text
 }
 
-// ZCL_OSD_ENQ_KERNEL contains one field per replaced method. A second
+// ZCL_OSD_ENQ_KERNEL contains one field per replaced method. step is the
+// calling step's *abap.Session (as any): the host keys its per-step state
+// on it, since a yield inside a step lets another step run meanwhile. A second
 // replaced class gets its own named variable beside this one.
 var ZCL_OSD_ENQ_KERNEL = struct {
-	Bind         func(id, user string) (bool, error)
-	End          func(id string) error
-	Revive       func(id string) error
-	ContextAlive func(id string) (bool, error)
-	Owns         func(id string) (bool, error)
-	SessionID    func(id string) (string, error)
+	Bind         func(step any, id, user string) (bool, error)
+	End          func(step any, id string) error
+	Revive       func(step any, id string) error
+	ContextAlive func(step any, id string) (bool, error)
+	Owns         func(step any, id string) (bool, error)
+	SessionID    func(step any, id string) (string, error)
 }{}

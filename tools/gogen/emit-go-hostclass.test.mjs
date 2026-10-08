@@ -103,16 +103,19 @@ func TestHooks(t *testing.T) {
  var fallback any
  func() { defer func() { fallback = recover() }(); ZCL_GOGEN_HOST_COMPARE_STUB(&abap.Session{}) }()
  if fmt.Sprint(nilEnd) != fmt.Sprint(fallback) { t.Fatalf("nil End hook differs from ABAP fallback: %#v vs %#v", nilEnd, fallback) }
- h.Bind = func(id, user string) (bool, error) { return id == "id" && user == "user", nil }
- h.ContextAlive = func(string) (bool, error) { return false, nil }
- h.Owns = func(string) (bool, error) { return true, nil }
- h.SessionID = func(string) (string, error) { return "session-id", nil }
+ var seen any
+ step := &abap.Session{}
+ h.Bind = func(st any, id, user string) (bool, error) { seen = st; return id == "id" && user == "user", nil }
+ h.ContextAlive = func(any, string) (bool, error) { return false, nil }
+ h.Owns = func(any, string) (bool, error) { return true, nil }
+ h.SessionID = func(any, string) (string, error) { return "session-id", nil }
  defer func() { h.Bind, h.End, h.Revive, h.ContextAlive, h.Owns, h.SessionID = nil, nil, nil, nil, nil, nil }()
- if got := ZCL_OSD_ENQ_KERNEL_BIND(&abap.Session{}, "id", "user"); got != "X" { t.Fatal(got) }
+ if got := ZCL_OSD_ENQ_KERNEL_BIND(step, "id", "user"); got != "X" { t.Fatal(got) }
+ if seen != any(step) { t.Fatal("the hook did not get the calling step's Session") }
  if got := ZCL_OSD_ENQ_KERNEL_CONTEXT_ALIVE(&abap.Session{}, "id"); got != " " { t.Fatal(got) }
  if got := ZCL_OSD_ENQ_KERNEL_OWNS(&abap.Session{}, "id"); got != "X" { t.Fatal(got) }
  if got := ZCL_OSD_ENQ_KERNEL_SESSION_ID(&abap.Session{}, "id"); got != "session-id" { t.Fatal(got) }
- h.Bind = func(string, string) (bool, error) { return false, &hostclass.Raise{Class: "ZCX_OSD_ADT", Factory: "SYSTEM_NOT_SUPPORTED"} }
+ h.Bind = func(any, string, string) (bool, error) { return false, &hostclass.Raise{Class: "ZCX_OSD_ADT", Factory: "SYSTEM_NOT_SUPPORTED"} }
  if got := ZCL_GOGEN_HOST_CALLER_BIND_CATCH(&abap.Session{}); got != "caught" { t.Fatal(got) }
  for _, request := range []*hostclass.Raise{
   {Class: "ZCX_OSD_ADT", Text: "host refused"},
@@ -122,7 +125,7 @@ func TestHooks(t *testing.T) {
   {Class: "ZCX_OSD_ADT", Factory: "NOT_COMPILED"},
  } {
   t.Run(request.Class+"=>"+request.Factory, func(t *testing.T) {
-  h.End = func(string) error { return request }
+  h.End = func(any, string) error { return request }
   var failure any
   func() { defer func() { failure = recover() }(); ZCL_OSD_ENQ_KERNEL_END(&abap.Session{}, "id") }()
   text := fmt.Sprint(failure)
@@ -130,7 +133,7 @@ func TestHooks(t *testing.T) {
   })
  }
  t.Run("optional factory", func(t *testing.T) {
- h.End = func(string) error { return &hostclass.Raise{Class: "ZCX_OPTIONAL", Factory: "make"} }
+ h.End = func(any, string) error { return &hostclass.Raise{Class: "ZCX_OPTIONAL", Factory: "make"} }
  var optional any
  func() { defer func() { optional = recover() }(); ZCL_OSD_ENQ_KERNEL_END(&abap.Session{}, "id") }()
  raised, ok := optional.(*abap.Raised)
@@ -138,13 +141,13 @@ func TestHooks(t *testing.T) {
  object, ok := raised.Obj.(*ZCX_OPTIONAL)
  if !ok || object.marker != "default ran optional ran" { t.Fatalf("factory body/default omitted args: %#v", raised.Obj) }
  })
- h.End = func(string) error { return &hostclass.Raise{Class: "ZCX_OSD_ADT", Factory: "SYSTEM_NOT_SUPPORTED"} }
+ h.End = func(any, string) error { return &hostclass.Raise{Class: "ZCX_OSD_ADT", Factory: "SYSTEM_NOT_SUPPORTED"} }
  var hook any
  func() { defer func() { hook = recover() }(); ZCL_OSD_ENQ_KERNEL_END(&abap.Session{}, "id") }()
  var stub any
  func() { defer func() { stub = recover() }(); ZCL_GOGEN_HOST_COMPARE_STUB(&abap.Session{}) }()
  if fmt.Sprint(hook) != fmt.Sprint(stub) { t.Fatalf("undeclared Raise differs: %#v vs %#v", hook, stub) }
- h.End = func(string) error { return errors.New("host down") }
+ h.End = func(any, string) error { return errors.New("host down") }
  var plain any
  func() { defer func() { plain = recover() }(); ZCL_OSD_ENQ_KERNEL_END(&abap.Session{}, "id") }()
  if plain == nil { t.Fatal("ordinary host error was swallowed") }
@@ -222,7 +225,7 @@ test("an OPTIONAL host parameter reaches the hook without its IS SUPPLIED flag",
     .replace(/(METHOD session_id\.)/, "$1\n    IF iv_id IS SUPPLIED.\n    ENDIF."));
   try {
     const generated = emitGo(compileProgram({folders: [core, join(home, "src/adt"), sourceDir], objects: ["ZCL_OSD_ENQ_KERNEL", "ZCX_OSD_ADT"]}));
-    const call = generated.match(/hHostclass\.ZCL_OSD_ENQ_KERNEL\.SessionID\(([^)]*)\)/);
+    const call = generated.match(/hHostclass\.ZCL_OSD_ENQ_KERNEL\.SessionID\(s, ([^)]*)\)/);
     assert.ok(call, "the SessionID hook is called");
     assert.equal(call[1].split(",").length, 1, `one argument, got ${call[1]}`);
   } finally { rmSync(sourceDir, {recursive: true, force: true}); }
