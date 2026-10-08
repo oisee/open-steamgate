@@ -15,8 +15,8 @@ import (
 // Revision is one version of an object: a commit that changed its file
 // (ZOSD_REVISION_S), as tools/osd-store-destination.mjs answers HISTORY.
 type Revision struct {
-	REVISION, SHORT, AUTHOR, DATE, TIME, SUBJECT string
-	path                                         string
+	REVISION, SHORT, AUTHOR, DATE, TIME, SUBJECT, SUBJECT_FULL string
+	path                                                       string
 }
 
 func storeGit(root string, args ...string) (string, error) {
@@ -97,7 +97,7 @@ func storeHistory(root, file string, limit int) ([]Revision, string) {
 		if len(change) > 1 {
 			path = change[len(change)-1]
 		}
-		r := Revision{REVISION: f[0], SHORT: f[0][:12], AUTHOR: storeSapUser(f[2]), SUBJECT: f[4], DATE: "00000000", TIME: "000000", path: path}
+		r := Revision{REVISION: f[0], SHORT: f[0][:12], AUTHOR: storeSapUser(f[2]), SUBJECT: f[4], SUBJECT_FULL: f[4], DATE: "00000000", TIME: "000000", path: path}
 		if len([]rune(r.SUBJECT)) > 80 {
 			r.SUBJECT = string([]rune(r.SUBJECT)[:80])
 		}

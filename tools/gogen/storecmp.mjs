@@ -17,6 +17,7 @@ import {cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, symlin
 import {join, resolve} from "node:path";
 import {home} from "./home.mjs";
 import {storeConfig} from "./store.mjs";
+import {ADT_SCALARS, adtStoreSignature} from "./storecmp-signature.mjs";
 
 const here = import.meta.dirname;
 const arg = (name) => { const i = process.argv.indexOf(name); return i < 0 ? undefined : process.argv[i + 1]; };
@@ -42,7 +43,7 @@ const rowsOf = (signature, name) => signature.tables[name.toLowerCase()].rows
 async function nodeCall(destination, call) {
   const answer = await destination.execute(call);
   const scalars = Object.fromEntries(Object.entries(answer).filter(([key]) => key.startsWith("EV_")));
-  return {scalars, objects: answer.ET_OBJECT, issues: answer.ET_ISSUE, types: answer.ET_TYPE};
+  return {scalars, objects: answer.ET_OBJECT, issues: answer.ET_ISSUE, types: answer.ET_TYPE, revisions: answer.ET_REVISION};
 }
 
 async function nodeAdapterCall(destination, call) {
@@ -67,7 +68,7 @@ function goCalls(tree, config, calls, signature = null) {
     {cwd: join(here, "go"), input: JSON.stringify(input), maxBuffer: 1 << 30}).toString();
   if (signature !== null) return JSON.parse(raw).map((answer) => ({scalars: answer.Scalars, objects: answer.Objects, revisions: answer.Revisions}));
   return JSON.parse(raw).map((a) => ({scalars: a.Scalars, objects: a.Objects ?? [], issues: a.Issues ?? [],
-    types: (a.Types ?? []).map((t) => ({TYPE: t.TYPE, COUNT: t.COUNT}))}));
+    revisions: a.Revisions ?? [], types: (a.Types ?? []).map((t) => ({TYPE: t.TYPE, COUNT: t.COUNT}))}));
 }
 
 // what the two must agree on
@@ -76,7 +77,7 @@ function comparable(answer, touched = new Set()) {
   const objects = answer.objects.map((o) => ({...o, CHANGED_AT: touched.has(o.FILE) ? "(written)" : o.CHANGED_AT}));
   const issues = answer.issues.map((i) => ({...i, LINE: Number(i.LINE), COL: Number(i.COL)}));
   const types = answer.types.map((t) => ({TYPE: t.TYPE, COUNT: Number(t.COUNT)}));
-  return JSON.stringify({scalars, objects, issues, types});
+  return JSON.stringify({scalars, objects, issues, types, revisions: answer.revisions});
 }
 
 let bad = 0;
@@ -93,11 +94,7 @@ function compare(label, node, go, touched) {
 
 // exactly the importing parameters the ADT front declares at its
 // CALL FUNCTION 'ZOSD_STORE' sites, not the wider function-module signature
-const ADT_SCALARS = ["EV_SOURCE", "EV_FILE", "EV_STATE", "EV_CHANGED", "EV_PACKAGE", "EV_VERSION", "EV_NOTE", "EV_JSON", "EV_ERROR"];
-const ADT_TABLES = {
-  ET_OBJECT: ["type", "name", "package", "file", "writable", "version", "changed_at"],
-  ET_REVISION: ["revision", "author", "short", "date", "time", "subject"],
-};
+const ADT_TABLES = adtStoreSignature(tools);
 
 const frontend = readFileSync(join(here, "frontend.mjs"), "utf8");
 const frontendStart = frontend.indexOf('["STORE ZOSD_STORE"');
@@ -116,27 +113,35 @@ for (const field of KNOWN_GAPS.keys()) {
     console.log(`FAIL ratchet ${field}: the gogen host signature now carries it; remove its expected gap`);
   }
 }
+const ROW_GAPS = new Map([["ET_REVISION-SUBJECT_FULL", "core: adapter row mapping"]]);
+const adapterMapping = readFileSync(join(here, "go/abap/store.go"), "utf8");
+if (/set\("SUBJECT_FULL",/.test(adapterMapping)) {
+  bad += 1;
+  console.log("FAIL ratchet ET_REVISION-SUBJECT_FULL: adapter now maps it; remove its expected gap");
+}
 const adapterSignature = {
   inputs: Object.fromEntries([...goHostParams].filter(([, kind]) => kind === "exporting").map(([key]) => [key, true])),
   imports: Object.fromEntries([...goHostParams].filter(([, kind]) => kind === "importing").map(([key]) => [key, true])),
-  tables: Object.fromEntries([...goHostParams].filter(([, kind]) => kind === "tables").map(([key]) => [key, true])),
+  tables: Object.fromEntries(Object.keys(ADT_TABLES).map((key) => [key, true])),
+  tableFields: Object.fromEntries(Object.entries(ADT_TABLES).map(([key, fields]) => [key, fields.map((f) => f.toUpperCase())])),
 };
 const adapterInput = (call) => Object.fromEntries(Object.entries(call)
   .filter(([key]) => adapterSignature.inputs[key] === true));
 
 function adapterComparable(answer, touched = new Set()) {
-  const stable = (row) => Object.fromEntries(Object.keys(row).sort()
+  const stable = (row, table) => Object.fromEntries(Object.keys(row).filter((key) => !ROW_GAPS.has(`${table}-${key}`)).sort()
     .map((key) => [key, touched.has(row.FILE) && key === "CHANGED_AT" ? "(written)" : row[key]]));
   return JSON.stringify({
     scalars: Object.fromEntries(ADT_SCALARS.filter((key) => !KNOWN_GAPS.has(key)).sort()
       .map((key) => [key, answer.scalars[key] ?? ""])),
-    objects: answer.objects.map(stable),
-    revisions: answer.revisions.map(stable),
+    objects: answer.objects.map((r) => stable(r, "ET_OBJECT")),
+    revisions: answer.revisions.map((r) => stable(r, "ET_REVISION")),
   });
 }
 
 function expectedGaps(call, node) {
   const gaps = [];
+  if (node.revisions.some((r) => r.SUBJECT_FULL !== "")) gaps.push("ET_REVISION-SUBJECT_FULL");
   if (call.IV_JSON !== undefined && !goHostParams.has("IV_JSON")) gaps.push("IV_JSON");
   if (node.scalars.EV_JSON !== "" && !goHostParams.has("EV_JSON")) gaps.push("EV_JSON");
   if (call.IV_COMMAND?.toUpperCase() === "HISTORY") {
@@ -147,6 +152,10 @@ function expectedGaps(call, node) {
 }
 
 function compareAdapter(label, node, go, call, touched = new Set()) {
+  if (go.revisions.some((r) => r.SUBJECT_FULL !== "")) {
+    bad += 1;
+    console.log(`FAIL ratchet ${label}: ET_REVISION-SUBJECT_FULL now reaches the caller; remove its expected gap`);
+  }
   const n = adapterComparable(node, touched);
   const g = adapterComparable(go, touched);
   if (n !== g) {
@@ -156,7 +165,7 @@ function compareAdapter(label, node, go, call, touched = new Set()) {
     console.log(`FAIL adapter ${label}\n     node: ...${n.slice(Math.max(0, at - 120), at + 200)}\n     go:   ...${g.slice(Math.max(0, at - 120), at + 200)}`);
     return false;
   }
-  for (const field of expectedGaps(call, node)) console.log(`KNOWN adapter gap ${label}: ${field} (${KNOWN_GAPS.get(field)})`);
+  for (const field of expectedGaps(call, node)) console.log(`KNOWN adapter gap ${label}: ${field} (${KNOWN_GAPS.get(field) ?? ROW_GAPS.get(field)})`);
   return true;
 }
 
@@ -209,6 +218,36 @@ for (let i = 0; i < reads.length; i += 1) {
 }
 console.log(`execute reads: ${same} of ${reads.length} answers the same (${all.length} objects in the tree)`);
 console.log(`adapter reads: ${adapterSame} of ${reads.length} answers the same`);
+
+// A private repository gives HISTORY real rows even when the input fixture
+// has no history. Long subjects distinguish the Atom title from SUBJECT(80).
+const historyTree = join(out, "history");
+rmSync(historyTree, {recursive: true, force: true});
+mkdirSync(join(historyTree, "src"), {recursive: true});
+writeFileSync(join(historyTree, "abap_transpile.json"), JSON.stringify({input_folder: ["src"]}));
+const git = (...args) => execFileSync("git", args, {cwd: historyTree});
+git("init", "-q");
+git("config", "user.name", "Test Author");
+git("config", "user.email", "test@example.invalid");
+for (const subject of ["short title", "Full Atom title " + "x".repeat(100)]) {
+  writeFileSync(join(historyTree, "src/zst_history.prog.abap"), `REPORT zst_history.\n* ${subject}\n`);
+  git("add", ".");
+  git("commit", "-q", "-m", subject);
+}
+const historyCalls = [{IV_COMMAND: "HISTORY", IV_TYPE: "PROG", IV_NAME: "ZST_HISTORY"}];
+const historyConfig = await storeConfig(historyTree, {storeModule: `${tools}/tools/osd-store.mjs`});
+const historyDest = new StoreDestination({store: () => new ObjectStore({root: historyTree})});
+const nodeHistory = await nodeCall(historyDest, historyCalls[0]);
+const goHistory = goCalls(historyTree, historyConfig, historyCalls)[0];
+compare("history full title", nodeHistory, goHistory);
+const nodeHistoryAdapter = await nodeAdapterCall(historyDest, historyCalls[0]);
+const goHistoryAdapter = goCalls(historyTree, historyConfig, historyCalls.map(adapterInput), adapterSignature)[0];
+compareAdapter("history full title", nodeHistoryAdapter, goHistoryAdapter, historyCalls[0]);
+if (nodeHistory.revisions.length !== 2 || nodeHistory.revisions[0].SUBJECT_FULL.length <= 80) {
+  bad += 1;
+  console.log("FAIL history fixture: expected two revisions and an untruncated title");
+}
+console.log(`history: ${nodeHistory.revisions.length} revisions compared through execute and adapter`);
 
 // ----------------------------------------------------------------- writes
 // two scratch trees: src/ copied, the rest linked, so the writes land in a

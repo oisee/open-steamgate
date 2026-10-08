@@ -16,10 +16,11 @@ import (
 )
 
 type adapterRequest struct {
-	Calls   []map[string]*string `json:"calls"`
-	Inputs  map[string]bool      `json:"inputs"`
-	Imports map[string]bool      `json:"imports"`
-	Tables  map[string]bool      `json:"tables"`
+	TableFields map[string][]string  `json:"tableFields"`
+	Calls       []map[string]*string `json:"calls"`
+	Inputs      map[string]bool      `json:"inputs"`
+	Imports     map[string]bool      `json:"imports"`
+	Tables      map[string]bool      `json:"tables"`
 }
 
 type adapterRow struct {
@@ -57,22 +58,6 @@ func adapterTableType(rowType *abap.Type) *abap.Type {
 		},
 		Zero: func(p any) { *p.(*adapterTable) = nil },
 	}
-}
-
-func adapterFields(name string) []string {
-	switch name {
-	case "ET_OBJECT":
-		return []string{"TYPE", "NAME", "PACKAGE", "FILE", "WRITABLE", "VERSION", "CHANGED_AT"}
-	case "ET_ISSUE":
-		return []string{"OBJ_TYPE", "OBJ_NAME", "LINE", "COL", "RULE", "MESSAGE"}
-	case "ET_TYPE":
-		return []string{"TYPE", "COUNT"}
-	case "ET_TOKEN":
-		return []string{"LINE", "COL", "LEN", "KIND"}
-	case "ET_REVISION":
-		return []string{"REVISION", "AUTHOR", "SHORT", "DATE", "TIME", "SUBJECT"}
-	}
-	return nil
 }
 
 func adapterAnswer(args map[string]abap.Data, imports map[string]bool) map[string]any {
@@ -121,9 +106,11 @@ func adapterCalls(calls []map[string]*string, request adapterRequest) []map[stri
 			args[name] = stringData(value)
 		}
 		for name := range request.Tables {
-			if fields := adapterFields(name); fields != nil {
+			if fields := request.TableFields[name]; len(fields) > 0 {
 				values := adapterTable{}
 				args[name] = abap.Data{P: &values, T: adapterTableType(adapterRowType(fields...))}
+			} else {
+				log.Fatalf("missing harness row fields for %s", name)
 			}
 		}
 		answers[i] = adapterAnswer(args, request.Imports)
