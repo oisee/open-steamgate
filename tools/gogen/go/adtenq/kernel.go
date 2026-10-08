@@ -162,22 +162,30 @@ func (k *Kernel) Unpin(sid int64) {
 	k.pins[sid]--
 }
 
-// DropContext is the host's dump cleanup, unlike logoff: the key may bind
-// again without Revive while a pinned old context is retired. Its last Unpin
-// finally ends the old ENQ context and releases its locks.
-func (k *Kernel) DropContext(id string) {
+// DropContext is the host's dump cleanup for the step that dumped, unlike
+// logoff: sid is that step's own handle (from Pin), never looked up by key, so
+// a dump of an old step cannot retire the key's replacement (Node's retire,
+// tools/osd-enq-host.mjs). The key loses its mapping only while it still
+// points at sid; a pinned sid is retired and ends with its last Unpin.
+func (k *Kernel) DropContext(id string, sid int64) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
-	key := k.owner.Key(text(id))
-	sid := k.sessions[key]
-	if sid != 0 {
-		delete(k.sessions, key)
-		if k.pins[sid] > 0 {
-			k.retired[sid] = key
-			return
-		}
-		k.retireNow(sid, key)
+	if sid == 0 {
+		return
 	}
+	key := k.owner.Key(text(id))
+	_, doomed := k.retired[sid]
+	if k.sessions[key] != sid && !doomed {
+		return
+	}
+	if k.sessions[key] == sid {
+		delete(k.sessions, key)
+	}
+	if k.pins[sid] > 0 {
+		k.retired[sid] = key
+		return
+	}
+	k.retireNow(sid, key)
 }
 
 func (k *Kernel) drop(key string) {

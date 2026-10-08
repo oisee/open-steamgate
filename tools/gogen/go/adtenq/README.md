@@ -21,7 +21,7 @@ order, with repeated ends refreshing that order, as on Node.
 `Handle(id)` exposes the current lock-server handle for request-local ENQUEUE,
 COMMIT and ROLLBACK calls. `Pin(id, user)` atomically opens or reuses a context
 and counts a step pinned to its returned handle; `Unpin(sid)` releases that pin.
-`DropContext(id)` immediately retires the key's current handle without marking
+`DropContext(id, sid)` retires the dumping step's own handle (the key loses it only while it still maps to it) without marking
 the key ended: `ContextAlive` becomes false, the next bind opens a replacement,
 and the old handle—and only its locks—ends when its last pin leaves. A host
 `End` ends both the current and retired handles for that key. These operations

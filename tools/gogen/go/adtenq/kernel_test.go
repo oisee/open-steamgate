@@ -161,8 +161,8 @@ func TestDropContext(t *testing.T) {
 	k, srv := fixture(t)
 	sid := bind(t, k, "id", "U")
 	lock(t, srv, sid, 1)
-	k.DropContext("id")
-	k.DropContext("missing")
+	k.DropContext("id", sid)
+	k.DropContext("missing", sid)
 	if k.ContextAlive("id") || len(srv.Read(enq.Filter{})) != 0 {
 		t.Fatal("dump left context/locks")
 	}
@@ -181,7 +181,7 @@ func TestDropContextWhilePinned(t *testing.T) {
 		t.Fatalf("Pin: %d, %v, %v", pinned, bound, err)
 	}
 	lock(t, srv, sid, 1)
-	k.DropContext("id")
+	k.DropContext("id", sid)
 	if k.ContextAlive("id") {
 		t.Fatal("dumped key remained alive")
 	}
@@ -294,8 +294,9 @@ func TestConcurrentLifecycle(t *testing.T) {
 					t.Error(err)
 				}
 				k.ContextAlive(id)
-				k.Handle(id)
-				k.DropContext(id)
+				if sid, ok := k.Handle(id); ok {
+					k.DropContext(id, sid)
+				}
 				k.End(id)
 			}
 		}(i)
@@ -336,7 +337,7 @@ func TestConcurrentPinRetirement(t *testing.T) {
 			}
 			ready.Done()
 			<-start
-			k.DropContext("shared")
+			k.DropContext("shared", sid)
 			if replacement, bound, err := k.Pin("shared", "U"); !bound || err != nil || replacement == sid {
 				t.Errorf("dump reused retired handle %d", sid)
 			} else {
@@ -352,5 +353,41 @@ func TestConcurrentPinRetirement(t *testing.T) {
 	if len(k.sessions) != 0 || len(k.pins) != 0 || len(k.retired) != 0 ||
 		len(srv.Read(enq.Filter{})) != 0 {
 		t.Fatal("concurrent pin retirement leaked state")
+	}
+}
+
+// Node's retire takes the dumping step's handle: a second dump from a step
+// still pinned to the retired context must not retire the key's replacement
+// (also after End -> Revive -> a new bind).
+func TestDumpOfOldStepKeepsReplacement(t *testing.T) {
+	for _, viaEnd := range []bool{false, true} {
+		k, srv := fixture(t)
+		old := bind(t, k, "id", "OLD")
+		for i := 0; i < 2; i++ {
+			if pinned, bound, err := k.Pin("id", "OLD"); !bound || err != nil || pinned != old {
+				t.Fatalf("Pin: %d %v %v", pinned, bound, err)
+			}
+		}
+		if viaEnd {
+			k.End("id")
+			k.Revive("id")
+		} else {
+			k.DropContext("id", old)
+			k.Unpin(old)
+		}
+		next := bind(t, k, "id", "NEW")
+		if next == old {
+			t.Fatal("replacement reused the old context")
+		}
+		lock(t, srv, next, 2)
+		k.DropContext("id", old)
+		k.Unpin(old)
+		if !k.ContextAlive("id") {
+			t.Fatalf("viaEnd=%v: the old step's dump retired the replacement", viaEnd)
+		}
+		rows := srv.Read(enq.Filter{})
+		if len(rows) != 1 || rows[0].Session != next {
+			t.Fatalf("viaEnd=%v: replacement lost its locks: %+v", viaEnd, rows)
+		}
 	}
 }
