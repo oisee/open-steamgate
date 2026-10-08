@@ -10,6 +10,7 @@ METHODS numofchar_units FOR TESTING.
 METHODS concat_pair FOR TESTING.
 METHODS search_half FOR TESTING.
 METHODS case_find FOR TESTING.
+METHODS json_escape FOR TESTING.
 ENDCLASS.
 CLASS ltcl_test IMPLEMENTATION.
 METHOD len.
@@ -85,5 +86,18 @@ CONCATENATE hi `A` INTO s.
 DATA(off) = -1.
 FIND `a` IN s IGNORING CASE MATCH OFFSET off.
 cl_abap_unit_assert=>assert_equals( act = off exp = 1 ).
+ENDMETHOD.
+METHOD json_escape.
+DATA(s) = zcl_osgt_strlen16=>emoji( ).
+DATA(hi) = s+0(1).
+DATA(lo) = s+1(1).
+CONCATENATE hi lo INTO DATA(pair).
+cl_abap_unit_assert=>assert_equals(
+  act = escape( val = hi format = cl_abap_format=>e_json_string )
+  exp = `\uD83D` ).
+cl_abap_unit_assert=>assert_equals(
+  act = escape( val = pair format = cl_abap_format=>e_json_string )
+  exp = cl_abap_codepage=>convert_from( source = CONV xstring( 'F09F9880' )
+    codepage = `UTF-8` ) ).
 ENDMETHOD.
 ENDCLASS.

@@ -503,7 +503,7 @@ func EscapeHTMLAttr(v string) string {
 // in upper-case hex; / ' U+007F and everything beyond ASCII unchanged.
 func EscapeJSONString(v string) string {
 	var b strings.Builder
-	for _, r := range v {
+	write := func(r rune) {
 		switch r {
 		case '\\':
 			b.WriteString(`\\`)
@@ -524,10 +524,28 @@ func EscapeJSONString(v string) string {
 				b.WriteString(`\u00`)
 				b.WriteByte("0123456789ABCDEF"[r>>4])
 				b.WriteByte("0123456789ABCDEF"[r&15])
+			} else if r >= 0xd800 && r < 0xe000 {
+				b.WriteString(`\u`)
+				b.WriteByte("0123456789ABCDEF"[r>>12])
+				b.WriteByte("0123456789ABCDEF"[(r>>8)&15])
+				b.WriteByte("0123456789ABCDEF"[(r>>4)&15])
+				b.WriteByte("0123456789ABCDEF"[r&15])
 			} else {
 				b.WriteRune(r)
 			}
 		}
+	}
+	if strings.IndexByte(v, 0xed) < 0 {
+		for _, r := range v {
+			write(r)
+		}
+		return b.String()
+	}
+	v = JoinSurrogates(v)
+	for i := 0; i < len(v); {
+		r, width := decode16(v[i:])
+		write(r)
+		i += width
 	}
 	return b.String()
 }

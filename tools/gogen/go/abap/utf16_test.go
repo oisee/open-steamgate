@@ -152,6 +152,17 @@ func TestUTF16CaseInsensitiveFindOffset(t *testing.T) {
 	}
 }
 
+func TestUTF16EscapeJSONSurrogates(t *testing.T) {
+	hi := SubS("😀", 0, 1)
+	lo := SubS("😀", 1, 1)
+	if got := EscapeJSONString(hi); got != `\uD83D` {
+		t.Fatalf("half: %q", got)
+	}
+	if got := EscapeJSONString(hi + lo); got != "😀" {
+		t.Fatalf("pair: %q", got)
+	}
+}
+
 func TestUTF16ConcatenationEgress(t *testing.T) {
 	emoji := "😀"
 	hi := SubS(emoji, 0, 1)
