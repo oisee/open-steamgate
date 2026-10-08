@@ -14,6 +14,12 @@ OSD_HEAVY_RANGE=90-99 OSD_HEAVY_SLOTS=4 tools/osd-heavy.sh node test/adt-conform
 OSD_HEAVY_RANGE=90-99 OSD_HEAVY_SLOTS=4 tools/osd-heavy.sh node tools/osd-suites.mjs --group adt-conformance-only
 ```
 
+Measured on the 2026-10-08 machine, the JS run takes about 14 seconds. An
+OSGo conformance run takes under one second after an OSGo build of about
+30 seconds and an ABAP/JavaScript transpile of about 19 seconds; those build
+costs are why OSGo remains a separate advisory CI job rather than part of the
+required JS fragment.
+
 `js.mjs` starts the existing `test/start.mjs` server helper and places the
 synthetic #642 outline fixture in a disposable repository view with an additional
 source layer and matching active-source snapshots. The view links the existing
@@ -42,7 +48,14 @@ Each case gets a fresh cookie jar and CSRF-fetch handshake. Cookies are updated
 from every repeated Set-Cookie header. All requests have a timeout and stateful
 session affinity unless a case explicitly requests stateless behavior. Additional
 sessions exercise contention. Cleanup runs after assertion and setup failures;
-all opened sessions log off. Transport, login and cleanup errors fail the suite.
+all opened sessions log off. Transport and cleanup errors fail the suite. A
+complete HTTP response from the target is a **target answer**, whatever its
+status. If the mandatory
+CSRF `HEAD`, mandatory discovery `GET`, or a case request returns 501, 500,
+404 or another complete status, the runner records that status and the failed
+assertion on the case as an observation. A known gap may therefore be observed
+through the failed handshake. Connection refused, timeout, DNS, TLS and
+malformed-HTTP errors remain infrastructure failures with no observation.
 
 Case modules export arrays of `{id, point, title, setup?, request, expect, after?}`.
 IDs remain stable; `point` groups the parity square. Requests take `method`
@@ -78,19 +91,36 @@ entry is reported as not-applicable without running it. The suite writes
 `suite-results/adt-conformance-<target>.json`; reports retain only status,
 content type, byte count and assertion messages, never payloads, cookies,
 credentials, tokens or handles. Exit codes: 0 expectations satisfied, 1 failed
-cases (including unexpected passes) or missing execution/discovery evidence,
-2 invalid invocation or harness startup. Every HTTP run requires at least one
-completed case request and a successful GET `/core/discovery`, after the CSRF
-handshake. All-n/a runs, unreachable servers and zero-observation runs fail.
-Reports include `executedCases`, `discoverySucceeded` and `runErrors`; a case is
-observed only when its case request produced a response. The explicit unavailable
-inventory below is distinct from an HTTP run.
+cases (including unexpected passes) or blocking missing execution/discovery
+evidence, and 2 invalid invocation or harness startup.
 
-At base main `0de1f89b`, osgo has no `-adt` flag or ADT mount. The 2026-10-07
-measurement found host route 404s; stoker case #5 identifies the router trap.
-The expected file records those route gaps and the missing host commands or
-adapters underneath them. Do not pretend an absent mounting flag is a successful
-HTTP test. Record the inventory explicitly:
+`discoverySucceeded` continues to mean specifically that `GET /core/discovery`
+returned 200. `targetAnswered` is broader: at least one complete HTTP response
+arrived from the target during the run. `handshakeStatus` is the first CSRF
+`HEAD` response status, including a failed status such as 501. `executedCases`
+counts only completed case requests, so an observed failed handshake can
+legitimately report zero. Each observed row carries `observed: true`, its
+response `actual`, and the assertion `detail`; an unobserved row carries neither
+an `actual` response nor an observation claim.
+
+Missing discovery and zero executed cases block a run whenever the expected file
+holds at least one `pass` (or the target is JS, where every case is implicitly
+expected to pass). While no expectation is `pass`, those
+missing-evidence errors are advisory only when every eligible case was observed
+through the handshake; otherwise they retain the old failure. Consequently, an
+all-known-gap OSGo run whose every case observes the same 501 handshake exits 0:
+its expectations are satisfied and every unexpected pass would still exit 1. A
+JS run has no gap file, so it always requires the full successful handshake and
+fails every non-2xx response. All-n/a runs, unreachable servers and
+zero-observation runs fail.
+
+The explicit unavailable inventory below is distinct from an HTTP run.
+
+At main `b2190c1e`, osgo accepts `-adt` and mounts `/sap/bc/adt`. Every measured
+endpoint reaches `ZCL_OSD_ADT_HANDLER`, which returns 501 at its first
+`WHERE NP` trap; the expected file records that first trap plus the next known
+gap behind it. Do not substitute the explicit inventory for this HTTP evidence.
+It remains only for an OSGo build that cannot mount ADT:
 
 ```sh
 node test/adt-conformance/run.mjs --target osgo \
@@ -98,10 +128,10 @@ node test/adt-conformance/run.mjs --target osgo \
 ```
 
 Every resulting row is a known gap with `observed: false`; the square labels it
-unobserved. Once slice 1a provides `-adt`, build the osgo binary from the tested
-tree using `tools/gogen/osgo.mjs`, start it with that flag and the wrapper's
-`STG_PORT`, and run the same case list by URL. Promote expectations individually
-with each implementation change. No osgo build is claimed for this base.
+unobserved. Build the osgo binary from the tested tree using
+`tools/gogen/osgo.mjs`, start it with `-adt`, the wrapper's `STG_PORT`, and a
+repository root, then run the same case list by URL. Promote expectations
+individually with each implementation change.
 
 O1–O5 reuse PR #642's synthetic source and hand-entered A4H 7.58 coordinates,
 attributes and links. `fixtures/bytes.mjs` deterministically serializes those
@@ -125,12 +155,16 @@ CI wiring belongs to dell's separate PR; this slice changes no workflows.
 That PR must keep required checks exactly `test` and `scan`, and implement
 Alice's ratchet as follows:
 
-- Keep the JS integration fragment in required `test`, after transpile; any JS
-  case failure fails `test`.
-- Add an osgo job that builds the tested tree, starts its binary with `-adt`
-  and the assigned `STG_PORT` once mounting is available, and runs the common
-  cases with `expected/osgo.json`. Until then, publish the explicit unavailable
-  inventory with all cases unobserved; never substitute it for an HTTP run.
+- For the CI wiring, the required JS command is
+  `node test/adt-conformance/js.mjs` after transpile. It must not receive an
+  expected-gap file; any JS case failure or non-2xx handshake/discovery response
+  fails the required verdict.
+- The advisory osgo job must build the tested tree, start
+  `tools/gogen/.out/osgo -adt -port "$STG_PORT" -root "$PWD"`, wait for health,
+  and run
+  `node test/adt-conformance/run.mjs --target osgo --base "http://127.0.0.1:$STG_PORT" --expected test/adt-conformance/expected/osgo.json`.
+  If this main lacks mounting, publish the explicit unavailable inventory with
+  all cases unobserved; never substitute it for an HTTP run when `-adt` exists.
 - Keep known-gap results advisory. Promote each implemented case to expected
   `pass` in the expected file, alongside its implementation change.
 - Propagate any failure of an osgo case whose expectation is `pass` into the
@@ -138,18 +172,24 @@ Alice's ratchet as follows:
   `continue-on-error` alone is insufficient: `test` must consume its report
   (and captured exit status) before completing, and fail on those regressions.
   Missing/malformed reports, HTTP infrastructure failures, unsuccessful
-  discovery and zero executed cases fail `test` only while `expected/osgo.json`
-  holds at least one `pass` (then they cannot prove the expected passes were
-  retained). While every osgo expectation is `known-gap` or `n/a`, they stay
-  advisory like the known gaps themselves: known-gap never blocks (Alice,
-  2026-10-07).
+  discovery and zero executed cases fail `test` only while any entry
+  in `expected/osgo.json` is `pass` (then they cannot prove the
+  expected passes were retained). While every osgo expectation is
+  `known-gap` or `n/a`, transport failures stay advisory; observed gaps satisfy
+  expectations.
 - Preserve the runner's non-zero status for an unexpected known-gap pass and
   surface it in the advisory osgo result until its expectation is updated.
-  Upload both target reports even on failure and print the merged square;
-  artifact upload or advisory handling must not erase the required verdict.
+  Read outcomes from exit code plus JSON: `pass` is `cases[].status === "pass"`,
+  `known-gap` is `cases[].status === "known-gap"` with `observed: true`, `n/a`
+  is `cases[].status === "not-applicable"`, and an unexpected pass is
+  `cases[].status === "fail"` with `detail` naming the stale expected entry.
+  Upload `suite-results/adt-conformance-js.json` and
+  `suite-results/adt-conformance-osgo.json` even on failure and print the merged
+  square; artifact upload or advisory handling must not erase the required
+  verdict.
 
 Round-1 verification on this branch: JS passes all 23 read/lock cases,
-including O1–O5 against #642's fixture and exact request URL. osgo remains
-not mountable on this main: all 23 inventory cases are unobserved known gaps.
-The focused fragment checks the harness and the same JS HTTP cases. No
-six-shard run or workflow edit is part of this slice.
+including O1–O5 against #642's fixture and exact request URL. The measured
+OSGo run answers 501 at every case's CSRF handshake; those are 23 observed
+known gaps. The focused fragment checks the harness and the same JS HTTP cases.
+No six-shard run or workflow edit is part of this slice.
