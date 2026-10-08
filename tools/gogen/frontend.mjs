@@ -932,10 +932,10 @@ const NATIVE_FM = new Map([
 const DESTINATION_FM = new Map([
   ["STORE ZOSD_STORE", {fn: "abap.ZOSD_STORE", params: {
     IV_COMMAND: "exporting", IV_TYPE: "exporting", IV_NAME: "exporting", IV_INCLUDE: "exporting",
-    IV_SOURCE: "exporting", IV_FILTER: "exporting", IV_LIMIT: "exporting", IV_REVISION: "exporting",
+    IV_SOURCE: "exporting", IV_FILTER: "exporting", IV_LIMIT: "exporting", IV_REVISION: "exporting", IV_JSON: "exporting",
     EV_SOURCE: "importing", EV_FILE: "importing", EV_PACKAGE: "importing", EV_VERSION: "importing",
     EV_WRITABLE: "importing", EV_ACTIVE: "importing", EV_LIVE: "importing", EV_NOTE: "importing",
-    EV_COUNT: "importing", EV_MS: "importing", EV_ERROR: "importing",
+    EV_COUNT: "importing", EV_MS: "importing", EV_ERROR: "importing", EV_JSON: "importing", EV_STATE: "importing",
     ET_OBJECT: "tables", ET_ISSUE: "tables", ET_TYPE: "tables", ET_TOKEN: "tables", ET_REVISION: "tables"}}],
 ]);
 

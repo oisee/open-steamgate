@@ -44,6 +44,10 @@ func storeInputs(args map[string]Data) map[string]*string {
 // ZOSD_STORE adapts DESTINATION 'STORE': inputs in, scalars and tables out.
 func ZOSD_STORE(s *Session, args map[string]Data) {
 	a := StoreCall(storeInputs(args))
+	// IV_JSON is forwarded by storeInputs; EV_JSON and EV_STATE use this
+	// same scalar copy-back, without interpreting or recreating backend data.
+	// TODO(go/objstore): produce EV_STATE for commands which return state.
+	// The backend currently supplies EV_JSON, but has no EV_STATE answer.
 	for k, v := range a.Scalars {
 		if d, ok := fmArg(args, k); ok {
 			v := v
