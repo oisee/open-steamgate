@@ -1,0 +1,6 @@
+{
+  "files": ["test/adt-conformance/suite.mjs"],
+  "groups": {
+    "adt-conformance-only": ["test/adt-conformance/focused.mjs"]
+  }
+}

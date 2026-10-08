@@ -290,9 +290,13 @@ export function runGenerators(root, log = () => {}, overlay = undefined) {
  */
 let binaryIdentity;
 export function generatorIdentity(root = process.cwd()) {
-  if (hosted()) {
+  // Source dispatch hashes tools; embedded dispatch (including Node bundles) hashes its entry.
+  const dispatch = hosted() ? JSON.parse(process.env.OSD_SELF) : undefined;
+  const embedded = typeof __OSD_TOOLCHAIN_IDENTITY__ !== "undefined";
+  if (dispatch && (embedded || dispatch.length === 1)) {
     if (binaryIdentity === undefined) {
-      binaryIdentity = "binary:" + createHash("sha256").update(readFileSync(process.execPath)).digest("hex").slice(0, 16);
+      const executable = dispatch.length === 1 ? dispatch[0] : dispatch[1];
+      binaryIdentity = "binary:" + createHash("sha256").update(readFileSync(executable)).digest("hex").slice(0, 16);
     }
     return binaryIdentity;
   }

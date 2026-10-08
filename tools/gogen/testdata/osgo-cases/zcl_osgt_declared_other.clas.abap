@@ -1,0 +1,4 @@
+CLASS zcl_osgt_declared_other DEFINITION PUBLIC CREATE PUBLIC.
+ENDCLASS.
+CLASS zcl_osgt_declared_other IMPLEMENTATION.
+ENDCLASS.

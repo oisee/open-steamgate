@@ -1,7 +1,7 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
 import {spawnSync} from "node:child_process";
-import {copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
+import {copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {dirname, join, basename} from "node:path";
 import {fileURLToPath} from "node:url";
@@ -357,4 +357,78 @@ ENDCLASS.`;
     const refused = compileProgram({folders: [sourceDir], objects: ["ZCL_RUNTIME"], tolerant: true});
     assert.match(refused.partial.join("\n"), /GET RUN TIME FIELD into a string/);
   } finally { rmSync(sourceDir, {recursive: true, force: true}); }
+});
+
+
+test("declared interface membership works across core and app layers", () => {
+  const sourceDir = mkdtempSync(join(tmpdir(), "gogen-interface-source-"));
+  const goDir = mkdtempSync(join(here, "go", "cmd", "gogen-interface-layers-"));
+  try {
+    writeFileSync(join(sourceDir, "zif_layer.intf.abap"), `
+INTERFACE zif_layer PUBLIC.
+ENDINTERFACE.
+`);
+    writeFileSync(join(sourceDir, "zcl_layer_core.clas.abap"), `
+CLASS zcl_layer_core DEFINITION PUBLIC FINAL CREATE PUBLIC.
+PUBLIC SECTION.
+CLASS-METHODS accepts IMPORTING value TYPE REF TO zif_layer RETURNING VALUE(rv) TYPE abap_bool.
+ENDCLASS.
+CLASS zcl_layer_core IMPLEMENTATION.
+METHOD accepts.
+rv = xsdbool( value IS INSTANCE OF zif_layer ).
+ENDMETHOD.
+ENDCLASS.
+`);
+    writeFileSync(join(sourceDir, "zcl_layer_app.clas.abap"), `
+CLASS zcl_layer_app DEFINITION PUBLIC FINAL CREATE PUBLIC.
+PUBLIC SECTION.
+INTERFACES zif_layer.
+CLASS-METHODS run RETURNING VALUE(rv) TYPE i.
+ENDCLASS.
+CLASS zcl_layer_app IMPLEMENTATION.
+METHOD run.
+DATA concrete TYPE REF TO zcl_layer_app.
+DATA generic TYPE REF TO object.
+DATA assigned TYPE REF TO zif_layer.
+DATA narrowed TYPE REF TO zif_layer.
+concrete = NEW zcl_layer_app( ).
+generic = concrete.
+assigned = concrete.
+IF assigned IS BOUND. rv = rv + 1. ENDIF.
+narrowed ?= generic.
+IF narrowed = assigned. rv = rv + 1. ENDIF.
+DATA(casted) = CAST zif_layer( generic ).
+IF casted = assigned. rv = rv + 1. ENDIF.
+IF zcl_layer_core=>accepts( concrete ) = abap_true. rv = rv + 1. ENDIF.
+IF generic IS INSTANCE OF zif_layer. rv = rv + 1. ENDIF.
+ENDMETHOD.
+ENDCLASS.
+`);
+    const program = compileProgram({folders: [sourceDir], objects: ["ZCL_LAYER_CORE", "ZCL_LAYER_APP"]});
+    const core = join(goDir, "core"), app = join(goDir, "app");
+    mkdirSync(core); mkdirSync(app);
+    const layer = (name) => ({classes: program.classes.filter((c) => c.name === name),
+      externalClasses: new Set(program.classes.filter((c) => c.name !== name).map((c) => c.name))});
+    writeFileSync(join(core, "zz_generated.go"), emitGo(program, "core", {
+      ...layer("ZCL_LAYER_CORE"), interfaces: new Set(["ZIF_LAYER"]), marker: "GogenCoreLayer",
+    }));
+    writeFileSync(join(app, "zz_generated.go"), emitGo(program, "app", {
+      ...layer("ZCL_LAYER_APP"), interfaces: new Set(),
+      imports: [`osg/gogen/cmd/${basename(goDir)}/core`], importMarkers: ["GogenCoreLayer"],
+    }));
+    writeFileSync(join(app, "layer_test.go"), `package app
+import ("testing"; "osg/gogen/abap")
+func TestMembership(t *testing.T) {
+  if got := ZCL_LAYER_APP_RUN(&abap.Session{}); got != 5 { t.Fatalf("membership checks: got %v, want 5", got) }
+}
+`);
+    const run = spawnSync("go", ["test", `./cmd/${basename(goDir)}/...`], {
+      cwd: join(here, "go"), encoding: "utf8", timeout: 120000,
+    });
+    assert.equal(run.error, undefined, run.stderr);
+    assert.equal(run.status, 0, run.stderr || run.stdout);
+  } finally {
+    rmSync(sourceDir, {recursive: true, force: true});
+    rmSync(goDir, {recursive: true, force: true});
+  }
 });

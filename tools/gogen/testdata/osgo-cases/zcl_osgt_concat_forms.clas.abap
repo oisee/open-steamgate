@@ -1,0 +1,26 @@
+CLASS zcl_osgt_concat_forms DEFINITION PUBLIC FINAL CREATE PUBLIC.
+PUBLIC SECTION.
+CLASS-METHODS:
+  byte_words_in_literal RETURNING VALUE(rv) TYPE string,
+  char_words_in_literal RETURNING VALUE(rv) TYPE string,
+  separator_words_in_literal RETURNING VALUE(rv) TYPE string,
+  real_respecting RETURNING VALUE(rv) TYPE string.
+ENDCLASS.
+CLASS zcl_osgt_concat_forms IMPLEMENTATION.
+METHOD byte_words_in_literal.
+DATA c TYPE c LENGTH 3 VALUE 'A'.
+CONCATENATE c `IN BYTE MODE RESPECTING BLANKS` INTO rv.
+ENDMETHOD.
+METHOD char_words_in_literal.
+DATA c TYPE c LENGTH 3 VALUE 'A'.
+CONCATENATE c `IN CHARACTER MODE` INTO rv.
+ENDMETHOD.
+METHOD separator_words_in_literal.
+DATA c TYPE c LENGTH 3 VALUE 'A'.
+CONCATENATE c `SEPARATED BY` INTO rv SEPARATED BY space.
+ENDMETHOD.
+METHOD real_respecting.
+DATA c TYPE c LENGTH 3 VALUE 'A'.
+CONCATENATE c 'B' INTO rv RESPECTING BLANKS.
+ENDMETHOD.
+ENDCLASS.

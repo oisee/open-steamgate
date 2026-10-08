@@ -31,6 +31,12 @@ export function warmUp(store) {
         try {
           const r = await warmOperation(store, () => w.compiler.prime(view));
           await acceptView(store, view, new Set(), undefined, true);
+          // The synchronous activation validator keeps its own publication
+          // registry in the source host. Prime it before admitting hot edits;
+          // it is also built on demand by the first activation, so a tree it
+          // cannot read yet (no abaplint.jsonc) defers it, never the compiler.
+          try { store.registry(); }
+          catch (error) { console.log(`warm: activation validator deferred: ${error.message}`); }
           w.reason = undefined;
           return r;
         } catch (error) {

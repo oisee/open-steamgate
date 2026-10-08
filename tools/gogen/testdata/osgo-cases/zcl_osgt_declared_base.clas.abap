@@ -1,0 +1,6 @@
+CLASS zcl_osgt_declared_base DEFINITION PUBLIC CREATE PUBLIC.
+PUBLIC SECTION.
+INTERFACES zif_osgt_declared.
+ENDCLASS.
+CLASS zcl_osgt_declared_base IMPLEMENTATION.
+ENDCLASS.
