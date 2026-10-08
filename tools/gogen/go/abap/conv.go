@@ -612,10 +612,7 @@ func CO(a, b string) bool {
 }
 
 // CS: a contains b, ignoring case; an empty b is always found.
-func CS(a, b string) bool {
-	b = JoinSurrogates(b)
-	return b == "" || strings.Contains(ToUpper(JoinSurrogates(a)), ToUpper(b))
-}
+func CS(a, b string) bool { return b == "" || strings.Contains(ToUpper(a), ToUpper(b)) }
 
 // nFit is k places of digits: right-aligned, zeros in front, the last k
 // kept
