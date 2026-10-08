@@ -21,10 +21,13 @@ import (
 // the roll area; here they belong to the Session, so two sessions on two
 // goroutines never see each other's sy-index.
 type Sy struct {
-	Index int32
-	Tabix int32
-	Subrc int32
-	Fdpos int32
+	// Message fields belong to the dialog session, including classic FM exceptions.
+	Msgid, Msgno, Msgty        string
+	Msgv1, Msgv2, Msgv3, Msgv4 string
+	Index                      int32
+	Tabix                      int32
+	Subrc                      int32
+	Fdpos                      int32
 	// Dbcnt: the rows the last Open SQL statement read or wrote
 	Dbcnt int32
 }

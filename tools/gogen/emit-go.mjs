@@ -1456,6 +1456,8 @@ function stmtLines(st, ctx, d) {
         ...st.body.flatMap((x) => stmt(x, ctx, d + 1)), `${t}}`];
     case "raise":
       return [`${t}panic(abap.Raise(${expr(st.value, ctx)}, ${JSON.stringify(st.cls ?? "")}))`];
+    case "message_raise":
+      return [`${t}abap.MessageRaise(s, ${expr(st.id, ctx)}, ${expr(st.ty, ctx)}, ${expr(st.no, ctx)}, []string{${st.values.map((v) => expr(v, ctx)).join(", ")}}, ${JSON.stringify(st.name)}, ${JSON.stringify(st.method)})`];
     case "raise_classic":
       return [`${t}panic(abap.ClassicException{Name: ${JSON.stringify(st.name)}, Method: ${JSON.stringify(st.method)}})`];
     case "if": {

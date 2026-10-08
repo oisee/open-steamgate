@@ -2833,6 +2833,34 @@ function statement(node, ctx) {
   if (isStmt(node, Statements.RaiseEvent)) return raiseEvent(node, ctx, text);
   // RAISE EXCEPTION TYPE cls [EXPORTING ...] / RAISE EXCEPTION obj
   if (isStmt(node, Statements.Raise) && /^RAISE\s+(EXCEPTION|RESUMABLE|SHORTDUMP)\b/i.test(text)) return raiseException(node, ctx, text);
+  if (isStmt(node, Statements.Message)) {
+    const raising = node.findDirectExpression(Expressions.ExceptionName);
+    const msg = node.findDirectExpression(Expressions.MessageSource);
+    if (!raising || !msg || /DISPLAY LIKE|INTO/i.test(text)) throw new Unsupported(`MESSAGE form: ${text}`);
+    let id, ty, no;
+    const short = msg.findDirectExpression(Expressions.MessageTypeAndNumber);
+    if (short) {
+      const m = /^([a-z])(\d{3})$/i.exec(short.concatTokens());
+      const cls = msg.findDirectExpression(Expressions.MessageClass);
+      if (!m || !cls) throw new Unsupported(`MESSAGE without explicit class: ${text}`);
+      id = {e: "str", value: upper(cls.concatTokens()), type: S};
+      ty = {e: "str", value: upper(m[1]), type: S};
+      no = {e: "str", value: m[2], type: S};
+    } else {
+      const kids = msg.getChildren();
+      const read = (key) => {
+        const i = kids.findIndex((k) => isTok(k, key));
+        if (i < 0) throw new Unsupported(`MESSAGE missing ${key}`);
+        return source(kids[i + 1], ctx);
+      };
+      id = convert(read("ID"), S);
+      ty = convert(read("TYPE"), S);
+      no = convert(read("NUMBER"), {k: "n", len: 3});
+    }
+    const values = node.findDirectExpressions(Expressions.MessageSourceSource).map((x) => convert(source(x, ctx), C(50)));
+    if (values.length > 4) throw new Unsupported(`MESSAGE WITH more than four values: ${text}`);
+    return {s: "message_raise", id, ty, no, values, name: upper(raising.concatTokens()), method: ctx.method.includes("~") ? ctx.method.split("~")[1] : ctx.method};
+  }
   // RAISE name: a classic exception, for the caller's EXCEPTIONS list
   if (isStmt(node, Statements.Raise) && !/^RAISE\s+(EXCEPTION|RESUMABLE)\b/i.test(text)) {
     const n = node.findDirectExpression(Expressions.ExceptionName);
@@ -3597,6 +3625,11 @@ function classRefIntfAttribute(base, name, ctx, write) {
 /* --------------------------------------------------------------- expressions */
 
 const SY = {"SY-INDEX": "Index", "SY-TABIX": "Tabix", "SY-SUBRC": "Subrc", "SY-DBCNT": "Dbcnt", "SY-FDPOS": "Fdpos"};
+const SY_MESSAGES = {
+  "SY-MSGID": {field: "Msgid", type: C(20)}, "SY-MSGNO": {field: "Msgno", type: {k: "n", len: 3}},
+  "SY-MSGTY": {field: "Msgty", type: C(1)},
+  ...Object.fromEntries([1, 2, 3, 4].map((i) => [`SY-MSGV${i}`, {field: `Msgv${i}`, type: C(50)}])),
+};
 const CONSTRUCTORS = new Set(["VALUE", "CONV", "NEW", "REF", "COND", "SWITCH", "EXACT", "CORRESPONDING", "REDUCE", "FILTER", "CAST", "BOOLC", "XSDBOOL"]);
 
 /**
@@ -3933,6 +3966,7 @@ function sourceOperand(n, ctx, hint) {
 function fieldChain(n, ctx) {
   const kids = isExpr(n, Expressions.SourceField) ? [n] : n.getChildren();
   const text = upper(n.concatTokens());
+  if (SY_MESSAGES[text]) return {e: "sy", ...SY_MESSAGES[text]};
   if (SY[text] !== undefined) return {e: "sy", field: SY[text], type: I};
   // the logon client: the transpiler runtime's constant (abap.Mandt)
   if (text === "SY-MANDT") return {e: "sy_mandt", type: C(3)};
@@ -6152,6 +6186,7 @@ function defaultValue(p, ctx) {
   let t = p.default;
   // A system field in a signature default is read when the call is made.
   // ASSERT_SUBRC's ACT defaults to sy-subrc.
+  if (SY_MESSAGES[upper(t)]) return convert({e: "sy", ...SY_MESSAGES[upper(t)]}, p.type);
   if (SY[upper(t)] !== undefined) return convert({e: "sy", field: SY[upper(t)], type: I}, p.type);
   // SPACE is a built-in value, not an attribute of the class which declares
   // the method. GUI_UPLOAD's optional CODEPAGE uses exactly this default.
