@@ -16,7 +16,7 @@
   "budgets": {
     "go:abap": {
       "lines": 11828,
-      "reason": "osgo 026/029 (#658, #659): UTF-16 units and class statics per Session (carve-out queued, stoker QUEUE #33). ADT batch 1 (adt-i5 cases 1-7): Session message fields (sy-msgno as NUMC 3), MESSAGE RAISING binding with scoped restoration, classic exceptions keyed by the resolved interface method, date/time and signed MOVE adapters, object-wrapper identity, STORE answer projection and conservative ADT host answers; timestamp conversion lives in go/timestamp. abapiti 037: cl_http_utility=>decode_base64 beside its encode_base64 sibling (the @KERNEL text decode). StoreHook: a host answers ZOSD_STORE for the calling step first (adt-i5's per-session SYSTEM facts), replacing a text substitution of emitter output."
+      "reason": "osgo 026/029 (#658, #659): UTF-16 units and class statics per Session (carve-out queued, stoker QUEUE #33). ADT batch 1 (adt-i5 cases 1-7): Session message fields (sy-msgno as NUMC 3), MESSAGE RAISING binding with scoped restoration, classic exceptions keyed by the resolved interface method, date/time and signed MOVE adapters, object-wrapper identity, STORE answer projection and conservative ADT host answers; timestamp conversion lives in go/timestamp. abapiti 037: cl_http_utility=>decode_base64 beside its encode_base64 sibling (the @KERNEL text decode). StoreHook: a host answers ZOSD_STORE for the calling step first (adt-i5's per-session SYSTEM facts), replacing a text substitution of emitter output. #39 records the Session's current WorkProcess ownership for yield sleep."
     },
     "go:abaperr": {
       "lines": 13,
@@ -115,8 +115,8 @@
       "reason": "baseline 2026-10-01"
     },
     "go:hostclass": {
-      "lines": 36,
-      "reason": "#36: dependency-free host callbacks and Raise values for generated class replacements. Hooks take the calling step (*abap.Session as any) first, agreed with adt-i5 for per-step host state."
+      "lines": 48,
+      "reason": "#36: dependency-free host callbacks and Raise values for generated class replacements. #39 adds the agreed KERNEL_LOCK callbacks while keeping this package free of go/abap. Hooks take the calling step (*abap.Session as any) first, agreed with adt-i5."
     },
     "go:inflate": {
       "lines": 499,
@@ -199,20 +199,20 @@
       "reason": "lowered 2026-10-02: the YAML line index went to tools/dsl-yaml-lines.mjs; holds the range: of L3 slice 3a"
     },
     "tools/gogen/emit-go.mjs": {
-      "lines": 2398,
-      "reason": "#36: generated host-class hook dispatch and ABAP Raise/error bridging on top of the merged emitter baseline."
+      "lines": 2406,
+      "reason": "#36: generated host-class hook dispatch and ABAP Raise/error bridging on top of the merged emitter baseline. #38/#39 add lock-call emission and trim the arithmetic string result only for arithmetic sources."
     },
     "tools/gogen/emit-js.mjs": {
       "lines": 1206,
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/frontend.mjs": {
-      "lines": 6891,
-      "reason": "#34/#36: packed DEC comparisons and the host-replaced class signature registry on top of the merged frontend baseline. #36 round 2: shared omitted-argument lowering for host exception factories, including OPTIONAL, DEFAULT and IS SUPPLIED; no second emitter call path. #36 critic r2: a host-replaced method whose signature does not compile is refused instead of dropped. abapiti 037: cl_http_utility=>decode_base64 beside its encode_base64 sibling (the @KERNEL text decode)."
+      "lines": 6985,
+      "reason": "#34/#36: packed DEC comparisons and the host-replaced class signature registry on top of the merged frontend baseline. #36 round 2: shared omitted-argument lowering for host exception factories, including OPTIONAL, DEFAULT and IS SUPPLIED; no second emitter call path. #36 critic r2: a host-replaced method whose signature does not compile is refused instead of dropped. abapiti 037: cl_http_utility=>decode_base64 beside its encode_base64 sibling (the @KERNEL text decode). 8/#39 add numeric-text/string calculation targets and the ENQUEUE/DEQUEUE lock-object registry. #36 critic r2: an untyped host-replaced method is refused instead of dropped."
     },
     "tools/gogen/go/abap/abap.go": {
-      "lines": 246,
-      "reason": "osgo 026/029 (#658, #659, 2026-10-08): UTF-16 units with the surrogate-half invariant and class statics per Session; carving utf16/statics out of go/abap is queued (stoker QUEUE #33); ADT batch 1 (adt-i5 cases 1-7): Keep sy-msgid/msgno/msgty/msgv1-4 in the session alongside existing system fields. Critic round 1: immediate caller MESSAGE RAISING assignments and scoped restoration, including calls without EXCEPTIONS. ADT batch 1 (round 5 finding 4): normalize zero session message-number storage on typed NUMC(3) reads."
+      "lines": 248,
+      "reason": "osgo 026/029 (#658, #659, 2026-10-08): UTF-16 units with the surrogate-half invariant and class statics per Session; carving utf16/statics out of go/abap is queued (stoker QUEUE #33); ADT batch 1 (adt-i5 cases 1-7): Keep sy-msgid/msgno/msgty/msgv1-4 in the session alongside existing system fields. Critic round 1: immediate caller MESSAGE RAISING assignments and scoped restoration, including calls without EXCEPTIONS. ADT batch 1 (round 5 finding 4): normalize zero session message-number storage on typed NUMC(3) reads. #39 names the Session's WorkProcess ownership flag."
     },
     "tools/gogen/go/abap/apc.go": {
       "lines": 39,
@@ -347,8 +347,8 @@
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/go/abap/luw.go": {
-      "lines": 251,
-      "reason": "baseline 2026-10-01"
+      "lines": 264,
+      "reason": "#39: DialogStepIn records the known Session as owning the already-held WorkProcess so an ENQUEUE _WAIT sleep can yield and reacquire it selectively."
     },
     "tools/gogen/go/abap/move.go": {
       "lines": 214,

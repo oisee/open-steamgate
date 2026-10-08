@@ -55,7 +55,9 @@ type Session struct {
 	Handlers []func(any) bool
 	// httpc: what Node keeps on each CL_HTTP_CLIENT object (its socket, the
 	// headers and the answer of a SEND), by the object (httpc.go)
-	httpc map[any]*httpcClient
+	// HoldsWorkProcess says this session's current dialog step owns WorkProcess.
+	HoldsWorkProcess bool
+	httpc            map[any]*httpcClient
 	// inflate: the decoders of ZCL_OSD_INFLATE=>HOST_* by handle (inflate.go)
 	inflate           *inflate.Registry
 	localDestinations map[string]bool

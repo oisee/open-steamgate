@@ -20,3 +20,10 @@ program, or one outside the replaced class package's visible layers panics with
 `abap.NotCompiled` naming `Class=>Factory`. A plain exception without a factory
 therefore fails loudly. Every other non-nil error is
 a host failure and panics; it is never converted to an initial ABAP result.
+
+`KERNEL_LOCK` is deliberately different: it is the host seam behind every
+`ENQUEUE_<object>`, `DEQUEUE_<object>` and `DEQUEUE_ALL` call, not a compiled
+ABAP class. Its callbacks use `osg/gogen/enq` values and the current dialog
+step as `any`; the generated call wrapper builds requests and maps classic
+exceptions. A nil callback preserves the generated caller's `NotCompiled`
+refusal, as before this seam existed.
