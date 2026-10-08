@@ -16,7 +16,7 @@
   "R3-source-inactive": "pass",
   "R4-include-testclasses": "pass",
   "R5-include-implementations": "pass",
-  "V1-versions": "known-gap: 200 but /atom:feed/atom:entry/atom:id differs; the integer-to-string move keeps the sign place (0003 space), a gogen emitter/runtime divergence",
+  "V1-versions": "pass",
   "O1-global-members": "pass",
   "O2-local-class-methods": "pass",
   "O3-test-class-methods": "pass",
