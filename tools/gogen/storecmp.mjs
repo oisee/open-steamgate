@@ -104,13 +104,25 @@ const frontendStart = frontend.indexOf('["STORE ZOSD_STORE"');
 const frontendSignature = frontend.slice(frontendStart, frontend.indexOf("}],", frontendStart) + 3);
 const goHostParams = new Map([...frontendSignature.matchAll(/\b([A-Z][A-Z0-9_]+):\s*"(exporting|importing|tables)"/g)]
   .map((match) => [match[1], match[2]]));
+// batch 1 (#672) closed IV_JSON, EV_JSON, EV_STATE and EV_CHANGED: no
+// scalar of the ADT front is an expected gap any more
 const KNOWN_GAPS = new Map();
+// and they stay closed: IV_JSON reaches no read or write call of this
+// harness (only the compiler cases, which build their own signature), so a
+// frontend that dropped one of them would otherwise pass unnoticed
+for (const field of ["IV_JSON", "EV_JSON", "EV_STATE", "EV_CHANGED"]) {
+  if (!goHostParams.has(field)) {
+    bad += 1;
+    console.log(`FAIL ${field}: the gogen host signature (frontend.mjs STORE ZOSD_STORE) no longer carries it`);
+  }
+}
 for (const field of KNOWN_GAPS.keys()) {
   if (goHostParams.has(field)) {
     bad += 1;
     console.log(`FAIL ratchet ${field}: the gogen host signature now carries it; remove its expected gap`);
   }
 }
+// batch 1 (#672) maps ET_REVISION-SUBJECT_FULL (go/abap storeRevisionRow)
 const ROW_GAPS = new Map();
 const adapterSignature = {
   inputs: Object.fromEntries([...goHostParams].filter(([, kind]) => kind === "exporting").map(([key]) => [key, true])),
