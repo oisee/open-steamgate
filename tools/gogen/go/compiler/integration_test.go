@@ -65,6 +65,20 @@ func TestRealSidecar(t *testing.T) {
 		}
 		t.Fatalf("syntax coordinates: %+v", result.Diagnostics)
 	})
+	t.Run("outline", func(t *testing.T) {
+		snap := fixture("run")
+		raw, err := c.Outline(context.Background(), snap, snap.Objects[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(raw), `"found":true`) || !strings.Contains(string(raw), `"name":"RUN"`) {
+			t.Fatalf("outline: %s", raw)
+		}
+		snap.Objects[0].Files[0].SHA256 = strings.Repeat("0", 64)
+		_, err = c.Outline(context.Background(), snap, snap.Objects[0])
+		code(t, err, "SNAPSHOT_MISMATCH")
+	})
+
 	t.Run("hash-lie", func(t *testing.T) {
 		snap := fixture("run")
 		snap.Objects[0].Files[0].SHA256 = strings.Repeat("0", 64)

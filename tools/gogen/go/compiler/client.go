@@ -104,28 +104,43 @@ func (c *Client) Hello(ctx context.Context) error {
 }
 
 func (c *Client) Check(ctx context.Context, snapshot Snapshot) (CheckResult, error) {
+	var result CheckResult
+	err := c.operation(ctx, "check", snapshot, nil, &result)
+	return result, err
+}
+
+// Outline returns the Node PARSE OUTLINE JSON verbatim after validating the envelope.
+func (c *Client) Outline(ctx context.Context, snapshot Snapshot, object Object) (json.RawMessage, error) {
+	var result outlineResult
+	err := c.operation(ctx, "outline", snapshot, map[string]string{"type": object.Type, "name": object.Name, "version": object.Version}, &result)
+	return result.Outline, err
+}
+
+func (c *Client) operation(ctx context.Context, op string, snapshot Snapshot, object any, result any) error {
 	ctx, cancel := context.WithTimeout(ctx, c.options.CheckTimeout)
 	defer cancel()
 	select {
 	case c.admission <- struct{}{}:
 		defer func() { <-c.admission }()
 	case <-ctx.Done():
-		return CheckResult{}, &Refusal{Code: "TIMEOUT", Text: ctx.Err().Error()}
+		return &Refusal{Code: "TIMEOUT", Text: ctx.Err().Error()}
 	}
 	if err := c.lock(ctx); err != nil {
-		return CheckResult{}, err
+		return err
 	}
 	defer c.mu.Unlock()
 	if err := c.ensure(ctx); err != nil {
-		return CheckResult{}, err
+		return err
 	}
-	if !slices.Contains(c.status.Capabilities, "check") {
-		return CheckResult{}, c.record(&Refusal{Code: "UNSUPPORTED_OP", Text: "check not advertised"})
+	if !slices.Contains(c.status.Capabilities, op) {
+		return c.record(&Refusal{Code: "UNSUPPORTED_OP", Text: op + " not advertised"})
 	}
 	c.nextID++
-	var result CheckResult
-	err := c.exchange(ctx, c.nextID, map[string]any{"id": c.nextID, "op": "check", "snapshot": snapshot}, &result)
-	return result, err
+	request := map[string]any{"id": c.nextID, "op": op, "snapshot": snapshot}
+	if object != nil {
+		request["object"] = object
+	}
+	return c.exchange(ctx, c.nextID, request, result)
 }
 
 // A concurrent Close may own mu during bounded cleanup. Admission still honors ctx.

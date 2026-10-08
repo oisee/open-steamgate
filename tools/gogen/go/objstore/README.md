@@ -2,9 +2,16 @@
 
 What: the object store of the Go host, `CALL FUNCTION 'ZOSD_STORE' DESTINATION 'STORE'` answered over the
 files the Node host answers it over (tools/osd-store.mjs, tools/osd-store-destination.mjs); filesystem reads
-(LIST, READ, OBJECT, PACKAGE, PACKAGES, SEARCH), history from git, and writes; CHECK/ACTIVATE/TOKENS refused
-(this binary carries no compiler). go/abap keeps `SetStore`, `StoreCall`, the `Store*` type aliases and the
+(LIST, READ, OBJECT, PACKAGE, PACKAGES, SEARCH), history from git, and writes. An injected `Compiler`
+supplies CHECK and PARSE kind OUTLINE snapshots; ACTIVATE and TOKENS are still refused. go/abap keeps
+`SetStore`, `StoreCall`, the `Store*` type aliases and the
 session-first `ZOSD_STORE` adapter (Data in, tables filled).
+
+The compiler boundary is the small `Compiler` interface in `compiler.go`: objstore chooses active versus
+inactive files and maps diagnostics, but owns no process lifecycle. A nil provider preserves the standalone
+CHECK refusal and unknown-PARSE behavior. `storecompiler.Adapter` supplies the concrete snapshot/client
+adapter. CHECK with `IV_SOURCE` is deliberately unsupported in round 2 because contract-v1 snapshots can
+pin only on-disk files, not Node's in-memory unsaved buffer; the gap is ratcheted in `tools/gogen/storecmp.mjs`.
 
 API: `SetStore(root string, cfg []byte, reason string) error`; `Call(in map[string]*string) Answer`;
 `Config`/`Root` (the build's facts), `Answer` with `Row`, `Issue`, `Tally`, `Revision`; `Capabilities`.

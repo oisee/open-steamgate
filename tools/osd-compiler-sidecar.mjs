@@ -51,16 +51,20 @@ function snapshotFiles(snapshot) {
       if (digest(bytes) !== file.sha256) throw refusal("SNAPSHOT_MISMATCH", `hash differs: ${file.path}`);
       size += bytes.length;
       if (size > limits.maxSnapshotBytes) throw refusal("BAD_REQUEST", "snapshot exceeds maxSnapshotBytes");
-      files.set(local, {bytes, sha256: file.sha256});
+      files.set(local, {bytes, sha256: file.sha256, parserPath: object.version === "active" ? parserPath(local) : local});
     }
   }
   return {root, files};
 }
 
+function parserPath(path) {
+  return path.replace(/^build\/by-input\/[^/]+\/source\//, "");
+}
+
 function diagnostic(issue) {
   const col = Math.max(0, (issue.column ?? 1) - 1);
   return {
-    severity: issue.severity ?? "E", code: "ABAP_SYNTAX", text: issue.message,
+    severity: issue.severity ?? "E", code: "ABAP_SYNTAX", text: issue.message, rule: issue.rule ?? "",
     object: {type: issue.type, name: issue.name}, include: (issue.file ?? "").replace(/^\//, ""),
     line: issue.line ?? 1, col, endLine: issue.endLine ?? issue.line ?? 1,
     // abaplint columns are 1-based and its end is exclusive.
@@ -85,8 +89,8 @@ export async function checkSnapshot(snapshot, {beforeAnswer} = {}) {
   // using the exact snapshot bytes whose hashes passed.
   forgetRegistry(store);
   const registry = store.registry();
-  updateRegistryFiles(registry, [...files].map(([path, file]) => ["/" + path, file.bytes.toString("utf8")]));
-  for (const path of files.keys()) registryInputs(registry).paths.set("/" + path, join(root, path));
+  updateRegistryFiles(registry, [...files].map(([path, file]) => ["/" + file.parserPath, file.bytes.toString("utf8")]));
+  for (const [path, file] of files) registryInputs(registry).paths.set("/" + file.parserPath, join(root, path));
   let frozen;
   const checked = prepareActivation(store, snapshot.objects, {transpile: false, beforeCheck(registry, overlayPaths) {
     const inputs = registryInputs(registry);
@@ -136,7 +140,7 @@ export async function outlineSnapshot(snapshot, object, {beforeAnswer} = {}) {
   const {PARSE_KINDS} = await import("./osd-store-destination.mjs");
   const configured = configuredRegistry(new ObjectStore({root, registryInputs: true}));
   const registry = configured.registry;
-  for (const [path, file] of files) registry.addFile(new abaplint.MemoryFile("/" + path, file.bytes.toString("utf8")));
+  for (const [path, file] of files) registry.addFile(new abaplint.MemoryFile("/" + file.parserPath, file.bytes.toString("utf8")));
   registry.parse();
   const store = {
     find(type, name) {

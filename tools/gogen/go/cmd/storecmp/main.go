@@ -11,8 +11,11 @@ import (
 	"flag"
 	"log"
 	"os"
+	"osg/gogen/compiler"
 
 	"osg/gogen/abap"
+	"osg/gogen/objstore"
+	"osg/gogen/storecompiler"
 )
 
 type adapterRequest struct {
@@ -121,6 +124,7 @@ func adapterCalls(calls []map[string]*string, request adapterRequest) []map[stri
 func main() {
 	root := flag.String("root", "", "the tree")
 	config := flag.String("config", "", "the build's facts about it (tools/gogen/store.mjs)")
+	sidecar := flag.Bool("compiler", false, "enable the lazy compiler provider")
 	flag.Parse()
 	cfg, err := os.ReadFile(*config)
 	if err != nil {
@@ -128,6 +132,11 @@ func main() {
 	}
 	if err := abap.SetStore(*root, cfg, ""); err != nil {
 		log.Fatal(err)
+	}
+	if *sidecar {
+		client := compiler.New(compiler.Options{Root: *root})
+		defer client.Close()
+		objstore.SetCompiler(storecompiler.Adapter{Client: client}, "test")
 	}
 	var input json.RawMessage
 	if err := json.NewDecoder(os.Stdin).Decode(&input); err != nil {

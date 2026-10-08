@@ -42,7 +42,9 @@ import (
 	"osg/gogen/abap"
 	"osg/gogen/apc"
 	"osg/gogen/compiler"
+	"osg/gogen/objstore"
 	"osg/gogen/osdbind"
+	"osg/gogen/storecompiler"
 	"osg/gogen/sysid"
 )
 
@@ -504,6 +506,10 @@ func main() {
 	if err := abap.SetStore(*root, storeConfig, ""); err != nil {
 		log.Fatalf("store: %v", err)
 	}
+
+	compilerClient := compiler.New(compiler.Options{Root: *root, Version: releaseTag})
+	defer compilerClient.Close()
+	objstore.SetCompiler(storecompiler.Adapter{Client: compilerClient}, liveGeneration(*root))
 
 	if *dbFile == "" {
 		if err := abap.OpenDB(dbScript); err != nil {

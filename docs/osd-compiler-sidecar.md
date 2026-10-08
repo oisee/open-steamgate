@@ -118,10 +118,46 @@ discovery, versions, contract, capabilities, limits, restarts and the last error
 It exits successfully even when the sidecar is absent (`found:false`).
 `Status()` itself only reads state; `Hello` starts the child. Call `Close` when
 the client is no longer needed. No ADT or serving path uses this client yet.
-Round 2 will connect ZOSD_STORE CHECK on osgo through the client after PR #653
-merges.
+Round 2 connects ZOSD_STORE through that client.
 
 The Go unit tests re-execute their own test binary as a fake sidecar and need
 no Node. The gogen suite registers `test/osgo-compiler.mjs`, which drives the
 real Node CLI through the Go client on a single-class fixture. It checks a
 clean verdict, syntax coordinates and a false snapshot hash.
+
+## ZOSD_STORE round 2
+
+`cmd/osgo` injects `storecompiler.Adapter` into objstore. The adapter starts the
+lazy client on the first CHECK or PARSE kind OUTLINE, builds a snapshot from the
+version the store itself resolves (normally inactive after WRITE, otherwise
+active), and requests the advertised operation. Active snapshot files are read
+from the physical generation paths, but their logical source paths produce the
+same object/include names and coordinates Node reports. Their digests are also
+compared with the generation's built hashes before the sidecar is called.
+
+CHECK maps sidecar diagnostics to the Node destination's issue rows and JSON,
+scalars and tables. A successful outline response is passed through byte for
+byte. An absent sidecar keeps the standalone CHECK refusal and the standalone
+unknown-PARSE refusal. Other sidecar refusals—including `SNAPSHOT_MISMATCH`,
+`TIMEOUT`, `BAD_REQUEST`, `CONTRACT_MISMATCH` and `UNSUPPORTED_OP`—return clear
+store errors and a `NOT_SUPPORTED` JSON refusal rather than hanging.
+
+Diagnostics may carry an optional `rule` field from a newer sidecar. It is
+retained when present and omitted when absent, so an older sidecar's responses
+remain valid. Operation discovery still depends on `hello` capabilities: an
+older child that advertises only `check` receives no outline request.
+
+Contract-v1 snapshots have only relative on-disk file paths and SHA-256 hashes;
+they cannot carry Node's in-memory CHECK `IV_SOURCE` buffer. Round 2 therefore
+returns `UNSUPPORTED_OP` for a present sidecar rather than checking stale saved
+text or mutating the object. This is the sole compiler parity gap expected by
+`tools/gogen/storecmp.mjs`; if Node and Go ever agree on that path, the ratchet
+fails so the expected-gap entry must be removed rather than silently widening.
+
+The focused proof is:
+
+```sh
+GOCACHE=/tmp/osgo-gocache go test ./objstore ./compiler
+GOCACHE=/tmp/osgo-gocache go test -race ./compiler
+OSD_HEAVY_RANGE=90-99 OSD_HEAVY_SLOTS=4 tools/osd-heavy.sh node node_modules/mocha/bin/mocha.js --require tools/osd-test-isolation.cjs test/osgo-storecmp.mjs test/osgo-store-goldens.mjs test/osgo-compiler.mjs test/store-destination.mjs test/osd-compiler-sidecar.mjs
+```

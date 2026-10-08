@@ -15,6 +15,8 @@
 import {execFileSync} from "node:child_process";
 import {cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {join, resolve} from "node:path";
+import {buildFixture} from "../osgo-store-fixture.mjs";
+import {compilerCases, compilerAnswers, compilerGapCases, prepareCompilerFixture} from "../osgo-store-goldens.mjs";
 import {home} from "./home.mjs";
 import {storeConfig} from "./store.mjs";
 import {ADT_SCALARS, adtStoreSignature} from "./storecmp-signature.mjs";
@@ -60,12 +62,12 @@ async function nodeAdapterCall(destination, call) {
   };
 }
 
-function goCalls(tree, config, calls, signature = null) {
+function goCalls(tree, config, calls, signature = null, sidecar = null) {
   const configFile = join(out, `config-${Date.now()}.json`);
   writeFileSync(configFile, JSON.stringify(config));
   const input = signature === null ? calls : {calls, ...signature};
-  const raw = execFileSync("go", ["run", "./cmd/storecmp", "-root", tree, "-config", configFile],
-    {cwd: join(here, "go"), input: JSON.stringify(input), maxBuffer: 1 << 30}).toString();
+  const raw = execFileSync("go", ["run", "./cmd/storecmp", "-root", tree, "-config", configFile, ...(sidecar === null ? [] : ["-compiler"])],
+    {cwd: join(here, "go"), input: JSON.stringify(input), env: {...process.env, OSGO_SIDECAR:sidecar ?? "/nonexistent/osgo-sidecar"}, timeout:120000, maxBuffer: 1 << 30}).toString();
   if (signature !== null) return JSON.parse(raw).map((answer) => ({scalars: answer.Scalars, objects: answer.Objects, revisions: answer.Revisions}));
   return JSON.parse(raw).map((a) => ({scalars: a.Scalars, objects: a.Objects ?? [], issues: a.Issues ?? [],
     revisions: a.Revisions ?? [], types: (a.Types ?? []).map((t) => ({TYPE: t.TYPE, COUNT: t.COUNT}))}));
@@ -332,4 +334,49 @@ for (const file of [...touched, "../ZOSD_ESCAPE", "src/osd/..#..#zosd_escape.pro
   if (!ok) bad += 1;
   console.log(`${ok ? "ok  " : "FAIL"} file ${file}: ${n === undefined ? "absent" : `${n.length} bytes`} / ${g === undefined ? "absent" : `${g.length} bytes`}`);
 }
+
+// CHECK and OUTLINE compare every exporting field and table, including the
+// byte-exact EV_JSON. The adapter's existing expected gaps remain ratcheted.
+const compilerTree = await buildFixture();
+try {
+  await prepareCompilerFixture(compilerTree);
+  const launcher = join(compilerTree,"osd");
+  const quote = value => "'" + value.replaceAll("'", "'\\''") + "'";
+  writeFileSync(launcher, `#!/bin/sh\nexec ${quote(process.execPath)} ${quote(join(tools,"bin/osd.mjs"))} "$@"\n`,{mode:0o700});
+  const facts = await storeConfig(compilerTree,{storeModule:`${tools}/tools/osd-store.mjs`});
+  const calls = compilerCases.map(([,call])=>call);
+  const nodeAnswers = await compilerAnswers(compilerTree);
+  const goAnswers = goCalls(compilerTree,facts,calls,null,launcher);
+  for (let i=0;i<calls.length;i++) {
+    const [name]=compilerCases[i];
+    const answer=nodeAnswers[name];
+    compare(name,{scalars:Object.fromEntries(Object.entries(answer).filter(([k])=>k.startsWith("EV_"))),objects:answer.ET_OBJECT,issues:answer.ET_ISSUE,types:answer.ET_TYPE,revisions:answer.ET_REVISION},goAnswers[i]);
+  }
+  const gapCalls = compilerGapCases.map(([,call])=>call);
+  const nodeGapAnswers = await Promise.all(gapCalls.map(call => {
+    const destination = new StoreDestination({store:new ObjectStore({root:compilerTree})});
+    return destination.execute(call);
+  }));
+  const goGapAnswers = goCalls(compilerTree,facts,gapCalls,null,launcher);
+  for (let i=0;i<gapCalls.length;i++) {
+    const [name] = compilerGapCases[i];
+    const node = nodeGapAnswers[i], go = goGapAnswers[i];
+    if (!Array.isArray(node.ET_ISSUE) || node.ET_ISSUE.length === 0 || !go.scalars.EV_ERROR.includes("UNSUPPORTED_OP: CHECK with IV_SOURCE")) {
+      bad++;console.log(`FAIL compiler gap ${name}: node issues ${node.ET_ISSUE?.length ?? "none"}, go ${go.scalars.EV_ERROR || "(none)"}`);
+    } else {
+      console.log(`compiler gap (ratcheted): ${name}`);
+    }
+  }
+  const absentCalls = [calls[0],calls[3]];
+  const standalone = goCalls(compilerTree,facts,absentCalls);
+  const absent = goCalls(compilerTree,facts,absentCalls,null,"/nonexistent/osgo-sidecar");
+  for (let i=0;i<absent.length;i++) {
+    if (comparable(absent[i])!==comparable(standalone[i]) || !absent[i].scalars.EV_ERROR) {
+      bad++;console.log(`FAIL compiler absent #${i}: ${JSON.stringify(absent[i])}`);
+    }
+  }
+  if (!absent[0].scalars.EV_ERROR.includes("check needs the compiler") || absent[1].scalars.EV_ERROR!=="unknown store command PARSE") {bad++;console.log("FAIL original compiler refusal text");}
+  console.log(`compiler: ${calls.length} CHECK and OUTLINE answers compared with real sidecar`);
+  console.log("compiler absent: original CHECK and PARSE refusals");
+} finally {rmSync(compilerTree,{recursive:true,force:true});}
 process.exit(bad ? 1 : 0);

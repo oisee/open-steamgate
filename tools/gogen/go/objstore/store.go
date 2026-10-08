@@ -1,5 +1,5 @@
 // Package objstore is the object store for the Go host: ZOSD_STORE over
-// abapGit-named files, history from git, CHECK/ACTIVATE refused. It does not
+// abapGit-named files, history from git, optional compiler validation. It does not
 // import go/abap; go/abap keeps the ZOSD_STORE adapter and the Store* names.
 package objstore
 
@@ -31,12 +31,10 @@ import (
 // active. Inactive is a working file that differs, or one this process
 // wrote, which is what the Node store calls inactive after a WRITE.
 //
-// What it cannot do. CHECK and ACTIVATE are abaplint over the whole registry
-// and then a build, and this binary carries neither: it IS a build. They
-// answer that, as an error and as an issue that stands, so a screen that
-// only reads the issue table does not call an activation that did not
-// happen a success. TOKENS (the parser's keyword colouring) is refused the
-// same way and a screen falls back to plain text.
+// Compiler validation is injected by the host: CHECK and PARSE OUTLINE
+// use a snapshot provider when available. ACTIVATE still requires publication
+// of a new generation and TOKENS still requires a parser operation not offered
+// by that provider. A standalone store preserves its compiler refusals.
 //
 // Shapes are the Node destination's, field for field, including the answer
 // of every scalar on every call (its EMPTY), the tally of what the filter
@@ -140,6 +138,7 @@ type Row struct {
 // Issue is one issue (ZOSD_ISSUE_S).
 type Issue struct {
 	OBJ_TYPE, OBJ_NAME string
+	FILE               string
 	LINE, COL          int32
 	RULE, MESSAGE      string
 }
@@ -189,7 +188,7 @@ func storeNotFound(typ, name string) error { return storeRefusal(typ + " " + nam
 var Capabilities = []string{"LIST", "READ", "WRITE", "HISTORY", "REVISION", "OBJECT", "PACKAGE", "PACKAGES", "SEARCH"}
 
 // Commands lists the implemented protocol commands, including discovery.
-// CHECK, ACTIVATE and TOKENS answer a compiler refusal on this host.
+// ACTIVATE and TOKENS remain refused; PARSE supports OUTLINE with a provider.
 var Commands = []string{"LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "TOKENS", "CAPABILITIES", "HISTORY", "REVISION", "OBJECT", "PACKAGE", "PACKAGES", "SEARCH", "COMMANDS"}
 
 // Call answers one call of ZOSD_STORE. in holds the importing values
@@ -207,7 +206,7 @@ func Call(in map[string]*string) Answer {
 	command := strings.ToUpper(text("IV_COMMAND", "LIST"))
 
 	switch command {
-	case "LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "TOKENS", "HISTORY", "REVISION", "OBJECT", "PACKAGE", "PACKAGES", "SEARCH":
+	case "LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "TOKENS", "HISTORY", "REVISION", "OBJECT", "PACKAGE", "PACKAGES", "SEARCH", "PARSE":
 	case "COMMANDS":
 		value, _ := json.Marshal(map[string]any{"commands": Commands})
 		a.Scalars["EV_JSON"] = string(value)
@@ -224,6 +223,11 @@ func Call(in map[string]*string) Answer {
 		a.Scalars["EV_ERROR"] = "unknown store command " + command
 		value, _ := json.Marshal(map[string]any{"error": map[string]string{"code": "NOT_SUPPORTED", "message": a.Scalars["EV_ERROR"]}})
 		a.Scalars["EV_JSON"] = string(value)
+		return a
+	}
+	if command == "PARSE" && compilerState.provider == nil {
+		a.Scalars["EV_ERROR"] = "unknown store command PARSE"
+		a.Scalars["EV_JSON"] = storeJSONRefusal(a.Scalars["EV_ERROR"], "NOT_SUPPORTED")
 		return a
 	}
 	if storeState.cfg == nil {
@@ -313,7 +317,12 @@ func Call(in map[string]*string) Answer {
 				a.Scalars["EV_VERSION"] = strings.ToLower(rev[:12])
 			}
 		}
-	case "CHECK", "ACTIVATE", "TOKENS":
+	case "CHECK":
+		err = storeCheck(ix, &a, typ, name, in["IV_SOURCE"])
+		a.Scalars["EV_MS"] = ms()
+	case "PARSE":
+		err = storeParse(ix, &a, text("IV_JSON", ""))
+	case "ACTIVATE", "TOKENS":
 		err = storeNoCompiler(ix, &a, command, typ, name)
 		if err == nil {
 			a.Scalars["EV_MS"] = ms()
