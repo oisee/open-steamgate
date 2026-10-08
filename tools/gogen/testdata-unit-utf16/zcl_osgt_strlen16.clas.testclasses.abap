@@ -13,6 +13,11 @@ METHODS search_half FOR TESTING.
 METHODS case_find FOR TESTING.
 METHODS json_escape FOR TESTING.
 METHODS supplementary_fold FOR TESTING.
+METHODS join_keys FOR TESTING.
+METHODS join_template FOR TESTING.
+METHODS join_loop FOR TESTING.
+METHODS join_replace FOR TESTING.
+METHODS egress_pair FOR TESTING.
 ENDCLASS.
 CLASS ltcl_test IMPLEMENTATION.
 METHOD len.
@@ -120,5 +125,69 @@ METHOD supplementary_fold.
 DATA(s) = cl_abap_codepage=>convert_from( source = CONV xstring( 'F09090A8ED8080' ) ).
 DATA(expected) = cl_abap_codepage=>convert_from( source = CONV xstring( 'F0909080ED8080' ) ).
 cl_abap_unit_assert=>assert_equals( act = to_upper( s ) exp = expected ).
+ENDMETHOD.
+METHOD join_keys.
+DATA(s) = zcl_osgt_strlen16=>emoji( ).
+DATA(hi) = s+0(1).
+DATA(lo) = s+1(1).
+DATA(emoji) = s+0(2).
+DATA(r) = hi && lo.
+IF r <> emoji.
+ cl_abap_unit_assert=>fail( msg = `raw equality after &&` ).
+ENDIF.
+TYPES: BEGIN OF ty_row, value TYPE string, END OF ty_row.
+DATA keys TYPE HASHED TABLE OF ty_row WITH UNIQUE KEY value.
+DATA row TYPE ty_row.
+row-value = r.
+INSERT row INTO TABLE keys.
+row-value = emoji.
+INSERT row INTO TABLE keys.
+cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 4 ).
+cl_abap_unit_assert=>assert_equals( act = lines( keys ) exp = 1 ).
+ENDMETHOD.
+METHOD join_template.
+DATA(s) = zcl_osgt_strlen16=>emoji( ).
+DATA(hi) = s+0(1).
+DATA(lo) = s+1(1).
+DATA(emoji) = s+0(2).
+DATA(r) = |{ hi }{ lo }|.
+cl_abap_unit_assert=>assert_equals( act = r exp = emoji ).
+DATA lines TYPE STANDARD TABLE OF string WITH DEFAULT KEY.
+APPEND hi TO lines.
+APPEND lo TO lines.
+r = concat_lines_of( table = lines ).
+cl_abap_unit_assert=>assert_equals( act = r exp = emoji ).
+ENDMETHOD.
+METHOD join_loop.
+DATA(s) = zcl_osgt_strlen16=>emoji( ).
+DATA(hi) = s+0(1).
+DATA(lo) = s+1(1).
+DATA(emoji) = s+0(2).
+DATA r TYPE string.
+r = hi.
+DO 1 TIMES.
+ r = r && lo.
+ENDDO.
+cl_abap_unit_assert=>assert_equals( act = r exp = emoji ).
+ENDMETHOD.
+METHOD join_replace.
+DATA(s) = zcl_osgt_strlen16=>emoji( ).
+DATA(hi) = s+0(1).
+DATA(lo) = s+1(1).
+DATA(emoji) = s+0(2).
+DATA(r) = hi && `X` && lo.
+r = replace( val = r sub = `X` with = `` ).
+cl_abap_unit_assert=>assert_equals( act = r exp = emoji ).
+ENDMETHOD.
+METHOD egress_pair.
+DATA(s) = zcl_osgt_strlen16=>emoji( ).
+DATA(hi) = s+0(1).
+DATA(lo) = s+1(1).
+DATA(emoji) = s+0(2).
+DATA(r) = hi && lo.
+DATA entity TYPE REF TO if_http_response.
+CREATE OBJECT entity TYPE cl_http_entity.
+entity->set_cdata( r ).
+cl_abap_unit_assert=>assert_equals( act = entity->get_data( ) exp = CONV xstring( 'F09F9880' ) ).
 ENDMETHOD.
 ENDCLASS.

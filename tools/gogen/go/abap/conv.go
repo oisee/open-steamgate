@@ -387,11 +387,11 @@ func Pad(v string, width int, align, pad string) string {
 	fill := width - n
 	switch align {
 	case "RIGHT":
-		return strings.Repeat(pad, fill) + v
+		return Canon(strings.Repeat(pad, fill) + v)
 	case "CENTER":
-		return strings.Repeat(pad, fill/2) + v + strings.Repeat(pad, fill-fill/2)
+		return Canon(strings.Repeat(pad, fill/2) + v + strings.Repeat(pad, fill-fill/2))
 	}
-	return v + strings.Repeat(pad, fill)
+	return Canon(v + strings.Repeat(pad, fill))
 }
 
 // FmtFDec is DECIMALS = n of an f in a template, as measured on A4H: the

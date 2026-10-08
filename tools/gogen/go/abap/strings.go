@@ -217,7 +217,7 @@ func rxWith(s, with string, m []int) string {
 			b.WriteRune(r[i])
 		}
 	}
-	return b.String()
+	return Canon(b.String())
 }
 
 // splice replaces the given matches of s (byte ranges, in order) with the
@@ -231,7 +231,7 @@ func splice(s string, ms [][]int, with func(m []int) string) string {
 		last = m[1]
 	}
 	b.WriteString(s[last:])
-	return b.String()
+	return Canon(b.String())
 }
 
 // ReplaceStmt is REPLACE [FIRST OCCURRENCE | ALL OCCURRENCES] OF [REGEX] p
@@ -339,7 +339,7 @@ func Repeat(v string, occ int32) string {
 	if occ < 0 {
 		panic(ArithmeticError{Class: "CX_SY_STRG_PAR_VAL", Op: "repeat"})
 	}
-	return strings.Repeat(v, int(occ))
+	return Canon(strings.Repeat(v, int(occ)))
 }
 
 // CondenseFn is condense( val del from to ), measured: the characters of
@@ -369,7 +369,7 @@ func CondenseFn(v, del, from, to string) string {
 		in = false
 		b.WriteRune(r)
 	}
-	return b.String()
+	return Canon(b.String())
 }
 
 // ShiftFn is shift_left / shift_right( val [places | circular | sub] ),
@@ -459,7 +459,7 @@ func ToMixed(v, sep string, hasCase bool, cs string, min int32) string {
 // characters takes the first n and sy-subrc is 4 when something was cut;
 // n < 0 is a string. A c is held without trailing blanks.
 func ConcatFit(v string, n int) (string, int32) {
-	v = JoinSurrogates(v)
+	v = Canon(v)
 	if n < 0 {
 		return v, 0
 	}
@@ -539,15 +539,15 @@ func EscapeJSONString(v string) string {
 		for _, r := range v {
 			write(r)
 		}
-		return b.String()
+		return Canon(b.String())
 	}
-	v = JoinSurrogates(v)
+	v = Canon(v)
 	for i := 0; i < len(v); {
 		r, width := decode16(v[i:])
 		write(r)
 		i += width
 	}
-	return b.String()
+	return Canon(b.String())
 }
 
 // SubstringBefore / SubstringAfter are substring_before / _after( val sub )
@@ -578,5 +578,5 @@ func SubstringAfter(v, sub string) string {
 // by sep, an empty table the empty string. The front end admits string rows
 // only.
 func ConcatLinesOf(t []string, sep string) string {
-	return strings.Join(t, sep)
+	return Canon(strings.Join(t, sep))
 }

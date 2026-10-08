@@ -1160,7 +1160,7 @@ function withBuilders(body, ctx, t, emitLoop, outside = []) {
   ctx.loopLevel = (ctx.loopLevel ?? 0) + 1;
   const lines = emitLoop();
   ctx.loopLevel -= 1;
-  const post = names.map((n) => `${t}${ident(n)} = ${ctx.builders.get(n)}.String()`);
+  const post = names.map((n) => `${t}${ident(n)} = abap.Canon(${ctx.builders.get(n)}.String())`);
   for (const n of names) ctx.builders.delete(n);
   return [...pre, ...lines, ...post];
 }
@@ -1999,7 +1999,7 @@ ${t}	}`));
     // strings back first (parity-wave1: ZCL_STG_JSON=>READ_STRING appended a
     // 750 KB value a character at a time and returned from inside the loop,
     // which kept it off the builder and made the append quadratic)
-    case "return": return [...[...(ctx.builders ?? new Map())].map(([n, sb]) => `${t}${ident(n)} = ${sb}.String()`), `${t}${leave(ctx, 1)}`];
+    case "return": return [...[...(ctx.builders ?? new Map())].map(([n, sb]) => `${t}${ident(n)} = abap.Canon(${sb}.String())`), `${t}${leave(ctx, 1)}`];
     default: throw new Error(`no Go for statement ${st.s}`);
   }
 }
@@ -2039,9 +2039,9 @@ function expr(e, ctx) {
     case "chars": case "str": return JSON.stringify(e.value);
     case "template": {
       const parts = e.parts.map((p) => (p.text !== undefined ? JSON.stringify(p.text) : templatePart(p.value, ctx, p.opts ?? {})));
-      return parts.length === 0 ? `""` : `(${parts.join(" + ")})`;
+      return parts.length === 0 ? `""` : parts.reduce((a, b) => `abap.Concat(${a}, ${b})`);
     }
-    case "concat": return `(${e.l.e === "conv" && ["i2s", "i82s"].includes(e.l.kind) ? `strings.TrimRight(${expr(e.l, ctx)}, " ")` : expr(e.l, ctx)} + ${e.r.e === "conv" && ["i2s", "i82s"].includes(e.r.kind) ? `strings.TrimRight(${expr(e.r, ctx)}, " ")` : expr(e.r, ctx)})`;
+    case "concat": return `abap.Concat(${e.l.e === "conv" && ["i2s", "i82s"].includes(e.l.kind) ? `strings.TrimRight(${expr(e.l, ctx)}, " ")` : expr(e.l, ctx)}, ${e.r.e === "conv" && ["i2s", "i82s"].includes(e.r.kind) ? `strings.TrimRight(${expr(e.r, ctx)}, " ")` : expr(e.r, ctx)})`;
     // CORRESPONDING type( itab ): a new table, one mapped row per source row
     case "table_map": {
       const n = ctx.loop++;

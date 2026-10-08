@@ -238,7 +238,7 @@ func UTF16String(u []uint16) string {
 }
 func JoinUTF16(parts ...string) string {
 	v := strings.Join(parts, "")
-	return JoinSurrogates(v)
+	return Canon(v)
 }
 
 // hasHalf distinguishes WTF-8 halves from valid UTF-8 beginning with ED
@@ -284,6 +284,15 @@ func Canon(v string) string {
 	}
 	b.WriteString(v[last:])
 	return b.String()
+}
+
+// Concat joins canonical runtime strings. A new pair can exist only at
+// their boundary; the byte check avoids scanning ASCII or BMP text.
+func Concat(a, b string) string {
+	if len(a) >= 3 && len(b) >= 3 && a[len(a)-3] == 0xed && b[0] == 0xed {
+		return Canon(a + b)
+	}
+	return a + b
 }
 
 // JoinSurrogates is retained for callers of the original UTF-16 helper.
