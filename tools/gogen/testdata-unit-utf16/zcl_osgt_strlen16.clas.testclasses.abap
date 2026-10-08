@@ -27,6 +27,7 @@ METHODS egress_apc FOR TESTING.
 METHODS condense_no_gaps FOR TESTING.
 METHODS mixed_scalar FOR TESTING.
 METHODS condense_half FOR TESTING.
+METHODS flat_string FOR TESTING.
 ENDCLASS.
 CLASS ltcl_test IMPLEMENTATION.
 METHOD len.
@@ -310,5 +311,26 @@ DATA(lo) = s+1(1).
 cl_abap_unit_assert=>assert_equals( act = condense( hi ) exp = hi ).
 DATA(emoji) = s+0(2).
 cl_abap_unit_assert=>assert_equals( act = condense( val = hi && ` ` && lo to = `` ) exp = emoji ).
+ENDMETHOD.
+METHOD flat_string.
+DATA(s) = zcl_osgt_strlen16=>emoji( ).
+TYPES: BEGIN OF ty_pair, hi TYPE c LENGTH 1, lo TYPE c LENGTH 1, END OF ty_pair.
+DATA pair TYPE ty_pair.
+pair-hi = s+0(1).
+pair-lo = s+1(1).
+DATA r TYPE string.
+r = pair.
+DATA(emoji) = s+0(2).
+IF r <> emoji.
+ cl_abap_unit_assert=>fail( msg = `flat MOVE canonical equality` ).
+ENDIF.
+TYPES: BEGIN OF ty_row, value TYPE string, END OF ty_row.
+DATA keys TYPE HASHED TABLE OF ty_row WITH UNIQUE KEY value.
+DATA row TYPE ty_row.
+row-value = r.
+INSERT row INTO TABLE keys.
+row-value = emoji.
+INSERT row INTO TABLE keys.
+cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 4 ).
 ENDMETHOD.
 ENDCLASS.

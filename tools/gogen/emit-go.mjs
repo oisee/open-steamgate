@@ -2186,7 +2186,7 @@ function conv(e, ctx) {
     case "struct_layout":
       return `func(v ${goType(e.from)}) ${goType(e.to)} { return ${goType(e.to)}{${e.pairs.map(([t, f]) => `${ident(t)}: v.${ident(f)}`).join(", ")}} }(${x})`;
     case "flat_struct_string":
-      return `func(v ${goType(e.from)}) string { return strings.TrimRight(${e.fields.map((f) => `abap.CFit(v.${ident(f.name)}, ${f.len})`).join(" + ")}, " ") }(${x})`;
+      return `func(v ${goType(e.from)}) string { return strings.TrimRight(abap.Canon(${e.fields.map((f) => `abap.CFit(v.${ident(f.name)}, ${f.len})`).join(" + ")}), " ") }(${x})`;
     case "num":
       if (from === "i" && to === "f") return `float64(${x})`;
       if (from === "f" && to === "i") return `abap.F2I(${x})`;
