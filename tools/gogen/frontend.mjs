@@ -4019,6 +4019,7 @@ function namedType(typeNode, ctx, inferred) {
   const t = upper(text);
   const builtin = {
     I, F, STRING: S, XSTRING: XS, INT8, D: {k: "d"}, T: {k: "t"},
+    OBJECT: {k: "ref", name: "OBJECT", intf: true},
     P: {k: "p", len: 8, dec: 0}, C: C(1), N: {k: "n", len: 1}, X: X(1), ABAP_BOOL: C(1),
   }[t];
   if (builtin) return builtin;
