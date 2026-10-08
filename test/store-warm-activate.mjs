@@ -150,11 +150,12 @@ process.send({ready: true});`);
   });
 
   it("publishes an existing edit with warm swap, new serving code, and one status/test generation", async () => {
+    const registry = store.registry();
     await edit(2);
-    // The separate full-registry check was STORE's slow path. Warm compilation
-    // checks the entire affected closure and keeps the checked revision fence.
-    store.activate = () => {throw new Error("separate cold validation was taken");};
+    expect(store.registry(), "WRITE must reuse the kept registry").to.equal(registry);
+    // Synchronous validation does not prevent publication from swapping warm.
     const operation = await activate();
+    expect(store.registry(), "ACTIVATE must not rebuild the registry").to.equal(registry);
     expect(operation).to.include({state: "published", active: true, live: true, verified: false});
     expect(operation.op_id).to.be.a("string").and.not.equal("");
     expect(publications[0]).to.include({ok: true, hot: true, recycled: false});
@@ -168,6 +169,60 @@ process.send({ready: true});`);
     expect(unit.counts.pass).to.equal(1);
     await store.warmState.verifying;
     expect(JSON.parse((await execute("ACTIVATION_STATUS", {IV_JSON: JSON.stringify({op_id: operation.op_id})})).EV_JSON).verified).to.equal(true);
+  });
+
+  for (const include of ["testclasses", "definitions", "implementations", "macros"]) {
+    it(`synchronously checks a NEW ${include} include before scheduling publication`, async () => {
+      const subject = "ZCL_UNRELATED";
+      const before = runtime.generation;
+      let scheduled = false;
+      const invalid = include === "testclasses" ? tests.replaceAll("check", "responses_two_calls_brace_in_string")
+        : include === "definitions" ? "CLASS lcl_new DEFINITION. PUBLIC SECTION. METHODS responses_two_calls_brace_in_string. ENDCLASS."
+        : "this is invalid ABAP.";
+      await execute("WRITE", {IV_NAME: subject, IV_INCLUDE: include, IV_SOURCE: invalid});
+      const answer = await withSystem(() => {}, () => destination.execute({IV_COMMAND: "ACTIVATE", IV_TYPE: "CLAS", IV_NAME: subject}),
+        {store, deferActivate: () => {scheduled = true;}});
+      const operation = JSON.parse(answer.EV_JSON);
+      expect(operation).to.include({state: "failed", failure_stage: "validation", active: false});
+      expect(scheduled).to.equal(false); expect(publications).to.have.length(0);
+      expect(operation.issues[0]).to.include({OBJ_NAME: subject});
+      if (["testclasses", "definitions"].includes(include)) {
+        expect(operation.issues.some(i => i.MESSAGE === 'Method name "responses_two_calls_brace_in_string" is too long, maximum length is 30 characters')).to.equal(true);
+      }
+      expect(runtime.generation).to.equal(before);
+      expect(store.read("CLAS", subject, include, "active").source).to.equal("");
+    });
+  }
+
+  it("re-primes live plus inactive after a failed cold publication of a new include", async () => {
+    const subject = "ZCL_UNRELATED", before = runtime.generation;
+    let continuation;
+    // Valid at synchronous check; the exact build refusal happens after the
+    // step if another editor changes the draft before the compiler reads it.
+    await execute("WRITE", {IV_NAME: subject, IV_INCLUDE: "testclasses", IV_SOURCE: tests});
+    const pending = JSON.parse((await withSystem(() => {}, () => destination.execute({IV_COMMAND: "ACTIVATE", IV_TYPE: "CLAS", IV_NAME: subject}),
+      {store, deferActivate: work => {continuation = work;}})).EV_JSON);
+    await execute("WRITE", {IV_NAME: subject, IV_INCLUDE: "testclasses",
+      IV_SOURCE: tests.replaceAll("check", "responses_two_calls_brace_in_string")});
+    const failed = JSON.parse((await continuation()).EV_JSON);
+    expect(failed).to.include({state: "failed", op_id: pending.op_id, failure_stage: "build", active: false});
+    const issue = failed.issues.find(i => i.RULE === "check_syntax");
+    expect(issue).to.include({FILE: "zcl_unrelated.clas.testclasses.abap", LINE: 2});
+    expect(issue.MESSAGE).to.include("maximum length is 30 characters");
+    expect(store.activate("CLAS", subject).issues[0]).to.include({message: issue.MESSAGE, line: issue.LINE});
+    expect(JSON.parse((await execute("ACTIVATION_STATUS", {IV_JSON: JSON.stringify({op_id: pending.op_id})})).EV_JSON)).to.deep.equal(failed);
+    const refused = JSON.parse((await execute("RUN_TESTS", {IV_JSON: JSON.stringify({targets: [{type: "CLAS", name: subject}]})})).EV_JSON);
+    expect(refused).to.include({state: "not_run", generation_id: before});
+    expect(refused.error).to.include({code: "PUBLICATION_FAILED", op_id: pending.op_id});
+    expect(refused.error.issues).to.deep.equal(failed.issues);
+    expect(runtime.generation).to.equal(before); expect(runtime.epoch).to.equal(1);
+    expect(store.stateOf(store.find("CLAS", subject)).version).to.equal("inactive");
+    expect(await store.warmUp(), store.warmState.reason).to.not.equal(undefined);
+    await edit(2);
+    expect((await activate()).state).to.equal("published");
+    expect(publications.at(-1).transpile.warm).to.equal(true);
+    expect(publications.at(-1).recycled).to.equal(false); expect(runtime.epoch).to.equal(1);
+    expect(store.read("CLAS", subject, "testclasses").source).to.include("responses_two_calls_brace_in_string");
   });
 
   it("keeps unrelated inactive edits and never-active drafts out of a warm generation", async () => {

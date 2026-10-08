@@ -5,7 +5,7 @@ import {transpileStore} from "./osd-store-build.mjs";
 import {deferSourceMutation} from "./osd-store-source-lock.mjs";
 import {verifyNext} from "./osd-store-verify.mjs";
 import {warmUp} from "./osd-store-warm.mjs";
-import {recordBaselineGeneration, recordStoreGeneration} from "./osd-activation-journal.mjs";
+import {activationJournal, recordBaselineGeneration, recordStoreGeneration} from "./osd-activation-journal.mjs";
 // The object store of OSD, the off-stack doppelgänger: what sits behind
 // the ADT façade. A client asks for an object by type and name; this finds
 // the file, reads it, writes it, checks it and activates it. The façade
@@ -24,7 +24,7 @@ import {chmodSync, copyFileSync, readdirSync, existsSync, mkdirSync, readFileSyn
 import {createHash} from "node:crypto";
 import {CREATABLE} from "./osd-store-create.mjs";
 import {StoreVersions} from "./osd-store-versions.mjs";
-import {buildRegistry, forgetRegistry, registryIssues, walkStoreFiles, withSource} from "./osd-store-registry.mjs";
+import {buildRegistry, forgetRegistry, registryDependents, registryIssues, updateRegistryFiles, walkStoreFiles, withSource} from "./osd-store-registry.mjs";
 import {warmCheck} from "./adt-warm-check.mjs";
 import {entityOf} from "./ddls-entity.mjs";
 import {inputFoldersOf, packRootsOf} from "./osd-packs.mjs";
@@ -223,6 +223,10 @@ export class ObjectStore {
     return this.#versions.overlay(activating);
   }
 
+  withActiveSources(entry, fn) {
+    return this.#versions.withActiveSources(entry, fn);
+  }
+
   withOverlay(activating, fn) {
     return this.#versions.withOverlay(activating, fn);
   }
@@ -284,7 +288,7 @@ export class ObjectStore {
   }
 
   // every object of every root, by type and name
-  build() {
+  build(invalidate = true) {
     const index = new Map();
     for (const root of [...this.roots, ...this.libs]) {
       // a library brings the file list the BUILD reads; a root is walked
@@ -323,11 +327,9 @@ export class ObjectStore {
     }
     indexTmp(index, this.root); // $TMP, and who made what in it
     this.index = index;
-    // the index was rebuilt because files changed under us and we do not
-    // know which, an import being the reason this exists. The parse
-    // describes the system as it was, so it goes: a check against a parse
-    // that predates the objects it is checking is the worst kind of fast.
-    this.#forget();
+    if (invalidate) this.#forget();
+    this.incrementalIndex = false;
+
     return index;
   }
 
@@ -355,7 +357,7 @@ export class ObjectStore {
 
   #entries() {
     if (this.index === undefined) {
-      this.build();
+      this.build(!this.incrementalIndex);
     }
     return this.index;
   }
@@ -558,7 +560,7 @@ export class ObjectStore {
     this.#versions.markInactive(entry, new Map([[file, Buffer.from(text, "utf8")]]));
     this.#versions.crash("write:before-source");
     writeChecked(this.root, file, text, safe, this.hooks);
-    this.#forget();
+    this.#forget([file]);
     return {...entry, ...this.stateOf(entry), include, file, bytes: Buffer.byteLength(source, "utf8"),
       revision: this.#versions.sourceRevision(type, entry.name)};
   }
@@ -636,16 +638,15 @@ export class ObjectStore {
     }
     for (const [target, content] of writes) writeChecked(this.root, target, content, safe, this.hooks);
     this.#entries().set(`${type} ${upper}`, entry);
-    this.#forget();
+    this.#forget(writes.map(([file]) => file));
     return {...entry, ...this.stateOf(entry), created: true};
   }
 
   // The disk is the other editor. A file that appears, changes or goes
   // under a writable root (a git checkout, an abapGit pull, an editor that
-  // is not ADT) is noticed here, and the next request rebuilds the index
-  // and the registry rather than answering from what was true at start.
-  // Coarse on purpose: any change forgets everything, because the walk is
-  // milliseconds and the parse is what the next check pays anyway.
+  // is not ADT) is noticed here. The next request rebuilds the object index
+  // and updates the changed source files in the kept registry. Reparse also
+  // invalidates cached readers; configuration/root changes stay cold.
   // persistent:false so a store in a test does not keep the process alive.
   watch() {
     if (this.watchers !== undefined) {
@@ -659,7 +660,8 @@ export class ObjectStore {
             return;
           }
           this.index = undefined;
-          this.#forget();
+          this.incrementalIndex = true;
+          this.#forget([join(root.path, String(file))]);
           for (const listener of this.listeners ?? []) {
             listener({event, file: join(root.path, String(file)), root: root.path});
           }
@@ -729,7 +731,8 @@ export class ObjectStore {
     if (this.inactive.delete(`${entry.type} ${entry.name}`)) this.#versions.saveInactive();
     this.#versions.dropActiveCopy(entry);
     tmpDelete(this.root, entry, false);
-    this.#forget();
+    activationJournal(this).forgetObject(entry.type, entry.name);
+    this.#forget(files);
     return {type: entry.type, name: entry.name, deleted: true};
   }
 
@@ -1367,12 +1370,19 @@ export class ObjectStore {
   }
 
   // a write means the parse is stale, here and for anyone sharing this tree
-  #forget() {
+  #forget(files) {
     this.ddlsEntityIndex = undefined;
-    forgetRegistry(this);
+    forgetRegistry(this, files);
+  }
+
+  // StoreVersions borrows the registry update from here so that it can be
+  // imported without the compiler (the Docker core image has none).
+  updateRegistryFiles(registry, replacements) {
+    return updateRegistryFiles(registry, replacements);
   }
 
   registry(configPath = "abaplint.jsonc") {
+    this.#entries();
     return buildRegistry(this, configPath);
   }
 
@@ -1427,21 +1437,7 @@ export class ObjectStore {
   // and a healthy object costs one check to clear. The cheap direction to be
   // wrong in — the expensive one is telling a client a rename was fine.
   dependents(type, name) {
-    const needle = String(name).toUpperCase();
-    const word = new RegExp(`\\b${needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
-    const out = [];
-    for (const object of this.registry().getObjects()) {
-      if (object.getType() === type && object.getName().toUpperCase() === needle) {
-        continue;
-      }
-      for (const file of object.getFiles()) {
-        if (word.test(file.getRaw())) {
-          out.push({type: object.getType(), name: object.getName()});
-          break;
-        }
-      }
-    }
-    return out;
+    return registryDependents(this.registry(), type, name);
   }
 
   // activation is that check over the object AND everything that uses it: a

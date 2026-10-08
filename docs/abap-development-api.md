@@ -170,6 +170,12 @@ still planned. STORE WRITE now also returns EV_JSON `{written:true, type, name, 
 the revision is the store's digest of the saved inactive object, including its class includes.
 Existing scalar fields and EV_ERROR behavior are preserved; callers that omit EV_JSON keep working.
 
+A failed build retains live plus inactive: the draft and active copies remain,
+and the live pointer is untouched. Warm re-priming proves the retained active
+files against live and excludes new includes with no active copy from that
+proof. Such a draft does not require a correctness recycle; a later successful
+cold publication still requires the ordinary runtime reload.
+
 ### P3a: activation completion (W6)
 
 The shared result has `{state, op_id, generation_id}`. State vocabulary for the first implementation:
@@ -179,7 +185,7 @@ The shared result has `{state, op_id, generation_id}`. State vocabulary for the 
 | `checked` | Validation succeeded; publication has not been requested/completed | No |
 | `pending` | Publication is scheduled or running; leave the calling step | No |
 | `published` | The checked source revision was published and its generation is available for a new execution context | Yes, in that generation |
-| `failed` | Validation, build, promotion or publication failed | No |
+| `failed` | Validation, build, promotion or publication failed; `failure_stage`, `note`, and issues retain the build error (FILE, LINE, COL, MESSAGE) | No; RUN_TESTS on this object returns PUBLICATION_FAILED with op_id and diagnostics |
 
 `op_id` identifies the activation operation, not merely the object. `generation_id` is initial until
 publication is confirmed and names the published generation afterwards. Diagnostics distinguish a
@@ -193,13 +199,16 @@ for current callers, and add `state`, `op_id`, `generation_id`, `type`, `name`, 
 `updated_at`, `completed_at`, and `failure_stage`. IDs and timestamps are strings; timestamps are UTC ISO 8601.
 `generation_id` and `failure_stage` are empty strings until applicable. `failure_stage` is one of
 `validation`, `step`, `build`, `promotion`, `revision`, or `recovery` for a failed operation.
-Issues retain the existing OBJ_TYPE/OBJ_NAME/LINE/COL/RULE/MESSAGE rows.
+Issues retain the existing OBJ_TYPE/OBJ_NAME/LINE/COL/RULE/MESSAGE rows and add FILE in JSON.
 
 STORE ACTIVATE and ADT activation use `osd-publish-activation.mjs` for the same
-revision capture, publication and promotion. When the warm compiler is primed,
-its build validates the changed objects and their affected readers; STORE does
-not reparse the full registry before that validation. The compiler's existing
-eligibility rule decides whether publication builds warm or falls back cold.
+revision capture, publication and promotion. ACTIVATE synchronously runs the publication validator's rules
+(including check_syntax and the 30-character method-name limit)
+over every include of the object, including newly saved testclasses, locals_def,
+locals_imp and macros. A refusal returns failed/validation with the same message
+and position before scheduling any publication; the active source is untouched.
+Warm availability never skips this check. The compiler's existing eligibility
+rule decides whether subsequent publication builds warm or falls back cold.
 Every other inactive object still builds from its last active copy, or is
 excluded when it has never been active. A refused swap is followed by an awaited
 runtime recycle; failure to load or promote returns `failed` with an existing
@@ -377,11 +386,33 @@ EV_JSON (optional diagnostic fields shown):
   `not_run`/GENERATION_UNAVAILABLE. Thus an unpromoted build cannot masquerade as published,
   including after a failed promotion or a restart. A short source-lock turn selects the
   generation, reads only its digest-verified retained source for discovery, and copies its
-  complete modules to a disposable run directory. Inactive working source is never used.
+  complete modules to a disposable run directory. Discovery and execution use published source.
+  The latest failed activation of any requested object returns `not_run` with
+  `PUBLICATION_FAILED`, its `op_id`, `failure_stage`, `text` and `issues`, even when
+  the old generation is still available. A later published activation of that
+  object clears this refusal, as does deleting the object. Attempts are ordered
+  by their per-object sequence at start; an older completion cannot replace a
+  newer outcome. Deletion fences pending attempts too. External removal or rename
+  clears the old object's outcome when the source host reloads its inactive set.
+  This per-object outcome
+  is durable across source-host restarts and independent of the operation history's
+  24-hour expiry; expiring a failed ticket never permits tests on the old generation.
+  Both STORE and ADT record validation refusals, build failures and completed publications.
+  Failure of an unrelated object's activation does
+  not block its tests. Zero discovered classes when the requested class has a
+  saved/active testclasses include returns `not_run`/`TEST_CLASSES_MISMATCH`,
+  never a green empty run. Inactive source is used only for this presence guard.
   Subsequent activations and generation GC cannot change the copied modules in a run.
   ObjectStore promotion updates this same checkpoint for ADT activations as well as STORE.
   Recording the checkpoint is best-effort: failures log once per owner, never fail publication
   or leave a completed ticket pending, and make RUN_TESTS refuse GENERATION_UNAVAILABLE until recording succeeds.
+
+| RUN_TESTS state | error code | meaning |
+|---|---|---|
+| `not_run` | `PUBLICATION_PENDING` | Publication is unfinished; leave the activation step and poll its ticket |
+| `not_run` | `PUBLICATION_FAILED` | A requested object's latest activation failed; `op_id` and the build diagnostics identify the failure |
+| `not_run` | `TEST_CLASSES_MISMATCH` | Saved/active source has a testclasses include but published discovery found zero classes |
+
 - **Isolation:** the existing `UnitRun.runDetached` runs each local test class in a fresh
   child process and its own database/runtime, separate from the agent's LUW and static
   state. It does not acquire or nest the caller's work-process lock; synchronous STORE

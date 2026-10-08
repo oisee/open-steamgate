@@ -40,7 +40,7 @@ describe("ADT unit discovery pre-warm lifecycle", () => {
       expect(changed.writesTotal).to.equal(1);
       expect(changed.writes[0].kind).to.equal("COMMIT WORK");
       expect(changed.classes[0].schedule).to.equal("dangerous");
-      expect(store.registry(), "source write kept stale risk facts").not.to.equal(warmed);
+      expect(store.registry(), "source write updates risk facts in the kept registry").to.equal(warmed);
     } finally {rmSync(root, {recursive: true, force: true});}
   });
 });

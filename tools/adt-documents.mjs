@@ -278,7 +278,7 @@ export function structureOf(store, type, name, version = "inactive") {
     if (["INCL", "SRVD"].includes(type)) result.version = version;
     return result;
   };
-  return version === "active" ? store.withOverlay(new Set(), () => outlineOf(store.registry())) : outlineOf(store.registry());
+  return version === "active" ? store.withActiveSources(entry, outlineOf) : outlineOf(store.registry());
 }
 
 // The base resource of a class include. A client resolves a method body by

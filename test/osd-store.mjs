@@ -352,9 +352,18 @@ ENDCLASS.
   });
 
   it("a library object cannot be written or deleted", () => {
-    const withLibs = new ObjectStore();
+    // Keep even a regressed write guard from planting a writable shadow in
+    // the checkout and poisoning subsequent repository/library tests.
+    const libraryFile = join(root, "lib", "cl_abap_zip.clas.abap");
+    const source = readFileSync(new ObjectStore().find("CLAS", "CL_ABAP_ZIP").file, "utf8");
+    mkdirSync(join(root, "lib"));
+    writeFileSync(libraryFile, source);
+    const withLibs = new ObjectStore({root, libs: ["lib"]});
+    expect(withLibs.find("CLAS", "CL_ABAP_ZIP")).to.include({root: "lib", writable: false, library: true});
     expect(() => withLibs.write("CLAS", "CL_ABAP_ZIP", "nope")).to.throw(ReadOnly);
     expect(() => withLibs.delete("CLAS", "CL_ABAP_ZIP")).to.throw(ReadOnly);
+    expect(readFileSync(libraryFile, "utf8")).to.equal(source);
+    expect(existsSync(join(root, "src", "osd", "cl_abap_zip.clas.abap"))).to.equal(false);
   });
 
   it("the transpile behind an activation is a separate call, so the verdict is fast", async () => {
@@ -414,20 +423,24 @@ ENDCLASS.
     expect(broken.issues[0].line).to.be.greaterThan(1);
   });
 
-  it("a write drops the parse, because an update does not reach the callers", () => {
-    // the fast path was built, measured and taken out again: telling
-    // abaplint what changed is twenty milliseconds against four seconds,
-    // and the object that changed then checks correctly while its callers
-    // do not. A rename that breaks a caller came back clean, which is the
-    // exact case activation exists to catch.
+  it("a write updates the kept parse and invalidates cached callers", () => {
     store.write("CLAS", "ZCL_OSD_PROBE", CLASS);
-    store.registry();
-    expect(store.parsed).to.not.equal(undefined);
-
-    store.write("CLAS", "ZCL_OSD_PROBE", CLASS.replace("'hello'", "'goodbye'"));
-    expect(store.parsed, "a write buys a reparse rather than an update").to.equal(undefined);
-    expect(store.check("CLAS", "ZCL_OSD_PROBE").issues).to.deep.equal([]);
-    expect(store.read("CLAS", "ZCL_OSD_PROBE").source).to.contain("'goodbye'");
+    store.write("CLAS", "ZCL_OSD_PROBE_CALLER", `CLASS zcl_osd_probe_caller DEFINITION PUBLIC.
+PUBLIC SECTION. CLASS-METHODS run. ENDCLASS.
+CLASS zcl_osd_probe_caller IMPLEMENTATION.
+METHOD run. DATA probe TYPE REF TO zcl_osd_probe. CREATE OBJECT probe. probe->run( ). ENDMETHOD. ENDCLASS.`);
+    expect(store.completeActivation(store.activate("CLAS", "ZCL_OSD_PROBE_CALLER", {activating: ["CLAS ZCL_OSD_PROBE"]}))).to.equal(true);
+    const registry = store.registry();
+    expect(store.check("CLAS", "ZCL_OSD_PROBE_CALLER").issues).to.deep.equal([]);
+    store.write("CLAS", "ZCL_OSD_PROBE", CLASS.replaceAll("run", "renamed"));
+    const refused = store.activate("CLAS", "ZCL_OSD_PROBE");
+    expect(store.registry(), "the hot path keeps the registry").to.equal(registry);
+    expect(refused.active).to.equal(false);
+    expect(refused.dependents.map(d => d.name)).to.include("ZCL_OSD_PROBE_CALLER");
+    store.write("CLAS", "ZCL_OSD_PROBE", CLASS);
+    expect(store.activate("CLAS", "ZCL_OSD_PROBE").active).to.equal(true);
+    expect(store.check("CLAS", "ZCL_OSD_PROBE_CALLER").issues).to.deep.equal([]);
+    store.delete("CLAS", "ZCL_OSD_PROBE_CALLER");
   });
 
   it("rebuilding the index drops the parse, because files changed under it", () => {
@@ -597,5 +610,82 @@ describe("the libraries the store reads are the ones the build reads", function 
     const held = store.libs.filter((l) => l.path.includes("abapgit")).flatMap((l) => l.files ?? []);
     expect(held.length, "the configured files, not the folder").to.equal(abapgit.files.length);
     expect(held.length).to.be.lessThan(592);
+  });
+});
+
+// A valid numeric include must participate in the same retained dependency index.
+describe('ObjectStore numeric include invalidation', function () {
+  let root, store;
+  before(() => {
+    root = mkdtempSync(join(tmpdir(), 'numeric-include-'));
+    mkdirSync(join(root, 'src'));
+    writeFileSync(join(root, 'abap_transpile.json'), JSON.stringify({input_folder: 'src', libs: []}));
+    writeFileSync(join(root, 'abaplint.jsonc'), JSON.stringify({syntax: {version: 'v702'}}));
+    writeFileSync(join(root, 'src/123.prog.abap'), 'DATA gv_old TYPE i.\n');
+    writeFileSync(join(root, 'src/zreader.prog.abap'), 'REPORT zreader.\nINCLUDE 123.\nSTART-OF-SELECTION.\ngv_old = 1.\n');
+    activeFixture(root);
+    store = new ObjectStore({root, libs: []});
+  });
+  after(() => rmSync(root, {recursive: true, force: true}));
+  it('refuses a variable rename used by an active cached reader, then recovers', () => {
+    expect(store.check('PROG', 'ZREADER').issues).to.deep.equal([]);
+    const registry = store.registry();
+    store.write('INCL', '123', 'DATA gv_new TYPE i.\n');
+    const result = store.activate('INCL', '123');
+    expect(store.registry()).to.equal(registry);
+    expect(result.active).to.equal(false);
+    expect(result.dependents.map(d => d.name)).to.include('ZREADER');
+    expect(result.dependents.flatMap(d => d.issues).some(i => /gv_old/i.test(i.message))).to.equal(true);
+    store.write('INCL', '123', 'DATA gv_old TYPE i.\n');
+    expect(store.activate('INCL', '123').active).to.equal(true);
+  });
+});
+
+describe('ObjectStore transitive activation checks', function () {
+  let root, store;
+  const base = 'CLASS zcl_base DEFINITION PUBLIC. PUBLIC SECTION. METHODS run IMPORTING iv_old TYPE i. ENDCLASS.\nCLASS zcl_base IMPLEMENTATION. METHOD run. ENDMETHOD. ENDCLASS.\n';
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'transitive-activation-'));
+    mkdirSync(join(root, 'src'));
+    writeFileSync(join(root, 'abap_transpile.json'), JSON.stringify({input_folder: 'src', libs: []}));
+    writeFileSync(join(root, 'abaplint.jsonc'), JSON.stringify({syntax: {version: 'v702'}}));
+    writeFileSync(join(root, 'src/zcl_base.clas.abap'), base);
+    writeFileSync(join(root, 'src/zcl_sub.clas.abap'), 'CLASS zcl_sub DEFINITION PUBLIC INHERITING FROM zcl_base. ENDCLASS.\nCLASS zcl_sub IMPLEMENTATION. ENDCLASS.\n');
+    writeFileSync(join(root, 'src/zcl_caller.clas.abap'), 'CLASS zcl_caller DEFINITION PUBLIC. PUBLIC SECTION. CLASS-METHODS call. ENDCLASS.\nCLASS zcl_caller IMPLEMENTATION. METHOD call. DATA sub TYPE REF TO zcl_sub. CREATE OBJECT sub. sub->run( iv_old = 1 ). ENDMETHOD. ENDCLASS.\n');
+    activeFixture(root);
+    store = new ObjectStore({root, libs: []});
+  });
+  afterEach(() => rmSync(root, {recursive: true, force: true}));
+  it('checks an inherited parameter through a subclass and recovers with the kept registry', () => {
+    expect(store.check('CLAS', 'ZCL_CALLER').issues).to.deep.equal([]);
+    const registry = store.registry();
+    store.write('CLAS', 'ZCL_BASE', base.replace('iv_old', 'iv_new'));
+    const result = store.activate('CLAS', 'ZCL_BASE');
+    expect(result.issues).to.deep.equal([]);
+    expect(result.active).to.equal(false);
+    expect(result.dependents.map(d => d.name)).to.include('ZCL_CALLER');
+    expect(result.dependents.flatMap(d => d.issues).some(i => /iv_old/i.test(i.message))).to.equal(true);
+    expect(store.registry()).to.equal(registry);
+    store.write('CLAS', 'ZCL_BASE', base);
+    expect(store.activate('CLAS', 'ZCL_BASE').active).to.equal(true);
+  });
+  it('accepts APC metadata reached through its handler while retaining source checks', () => {
+    writeFileSync(join(root, 'src/zchannel.sapc.xml'), '<SAPC><APPLICATION_ID>ZCHANNEL</APPLICATION_ID><PATH>/channel</PATH><CLASS_NAME>ZCL_CALLER</CLASS_NAME><STATEFUL>X</STATEFUL></SAPC>');
+    store.build();
+    expect(store.activate('CLAS', 'ZCL_BASE').active).to.equal(true);
+    store.write('CLAS', 'ZCL_BASE', base.replace('iv_old', 'iv_new'));
+    expect(store.activate('CLAS', 'ZCL_BASE').dependents.map(d => d.name)).to.include('ZCL_CALLER');
+  });
+  it('logs and checks the full registry above the dirty closure limit', () => {
+    for (let i = 0; i < 257; i++) writeFileSync(join(root, `src/zreader${i}.prog.abap`), `REPORT zreader${i}.\n* zcl_base\n`);
+    writeFileSync(join(root, 'src/zbad.prog.abap'), 'REPORT zbad.\nmissing_variable = 1.\n');
+    store.build();
+    const messages = [], warn = console.warn;
+    console.warn = message => messages.push(message);
+    let result;
+    try {result = store.activate('CLAS', 'ZCL_BASE');} finally {console.warn = warn;}
+    expect(messages.some(m => m.includes('exceeds 256') && m.includes('full registry check'))).to.equal(true);
+    expect(result.active).to.equal(false);
+    expect(result.dependents.map(d => d.name)).to.include('ZBAD');
   });
 });

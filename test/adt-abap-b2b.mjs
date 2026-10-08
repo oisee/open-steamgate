@@ -167,7 +167,7 @@ describe("B2b objectstructure live Node byte diff",function () {
     }
     expect(results.Node).to.equal(results.ABAP);delete results.Node;delete results.ABAP;console.log("B2b latency ms",JSON.stringify(results));
   });
-  it("host save defers parsing to the next outline; activation primes the registry",async () => {
+  it("host save updates the kept registry without parsing; activation checks it",async () => {
     const url=node.origin+base+"oo/classes/zcl_empty";
     const warm=await fetch(url,{headers:{"x-csrf-token":"fetch"}});await warm.arrayBuffer();
     const headers={cookie:warm.headers.getSetCookie().map((c) => c.split(";")[0]).join("; "),"x-csrf-token":warm.headers.get("x-csrf-token"),"x-sap-adt-sessiontype":"stateful","content-type":"text/plain"};
@@ -176,18 +176,19 @@ describe("B2b objectstructure live Node byte diff",function () {
     try {
       const source=store.read("CLAS","ZCL_EMPTY").source;
       const registry=store.registry;
+      const kept=store.registry();
       store.registry=() => {throw new Error("SAVE must not parse the project");};
       try {
         const saved=await fetch(url+"/source/main?lockHandle="+encodeURIComponent(handle),{method:"PUT",headers,body:source});
-        await saved.arrayBuffer();expect(saved.status).to.equal(200);expect(store.parsed).to.equal(undefined);
+        await saved.arrayBuffer();expect(saved.status).to.equal(200);expect(store.parsed).to.equal(kept);
       } finally {store.registry=registry;}
       await diff(base+"oo/classes/zcl_empty/objectstructure");
-      expect(store.parsed).not.to.equal(undefined);
+      expect(store.parsed).to.equal(kept);
       let calls=0;const original=store.registry;store.registry=function (...args) {calls++;return original.apply(this,args);};
       try {
         const activated=await fetch(node.origin+base+"activation?method=activate",{method:"POST",headers:{...headers,"content-type":"application/xml"},body:`<adtcore:objectReference xmlns:adtcore="http://www.sap.com/adt/core" adtcore:uri="${base}oo/classes/zcl_empty"/>`});
         expect(await activated.text()).to.include("activationExecuted");expect(calls).to.be.greaterThan(0);
-        expect(store.parsed).not.to.equal(undefined);
+        expect(store.parsed).to.equal(kept);
       } finally {store.registry=original;}
     } finally {await fetch(url+"?_action=UNLOCK&lockHandle="+encodeURIComponent(handle),{method:"POST",headers});}
   });
@@ -211,31 +212,56 @@ describe("B2b objectstructure live Node byte diff",function () {
     finally {renameSync(join(root,"zddl.off"),ddls);renameSync(join(root,"zsrv.off"),srvd);}
     expect(built.ok,built.output).to.equal(true);
     expect(store.completeActivation(activation,built.built)).to.equal(true);
+    const activeTests=store.read("CLAS","ZCL_OUTLINE","testclasses","active").source;
     const inactive=`* inactive outline shift\n${active}`;
-    store.write("CLAS","ZCL_OUTLINE",inactive);
+    const inactiveTests=`* external include shift\n\n${activeTests}`;
+    const baseline=structureOf(store,"CLAS","zcl_outline","active");
+    const selections=(outline,main,tests) => {
+      const result=[];
+      const visit=e => {
+        for(const link of e.links ?? []) if(link.href.includes("#start="))
+          result.push([e.name,link.rel,slice(link.href.startsWith("./includes/testclasses") ? tests : main,link.href)]);
+        for(const child of e.children ?? []) visit(child);
+      };
+      visit(outline);return result;
+    };
+    const expectedSelections=selections(baseline,active,activeTests);
+    // No STORE save or publication: another editor shifts both physical files.
+    writeFileSync(join(root,"src/zcl_outline.clas.abap"),inactive);
+    writeFileSync(join(root,"src/zcl_outline.clas.testclasses.abap"),inactiveTests);
+    store.build(); // notice the external edit, without inactive STORE intent
+    expect(store.inactive.has("CLAS ZCL_OUTLINE")).to.equal(false);
     const structurePath=`${base}oo/classes/zcl_outline/objectstructure`;
     const ordered=e => ({...e,extra:Object.entries(e.extra ?? {}).map(([name,value]) => ({name,value})),links:e.links ?? [],children:(e.children ?? []).map(ordered)});
-    for(const [version,source] of [["active",active],["inactive",inactive]]) {
-      const outline=structureOf(store,"CLAS","zcl_outline",version);
-      const answer=await new StoreDestination({store}).execute({iv_command:"PARSE",iv_json:JSON.stringify({kind:"OUTLINE",type:"CLAS",name:"zcl_outline",version})});
-      expect(answer.EV_ERROR).to.equal("");
-      expect(JSON.parse(answer.EV_JSON)).to.deep.equal({found:true,...ordered(outline)});
-      const bodies=[];
-      for(const front of [node,ported]) {
-        const structure=await wire(front,`${structurePath}?version=${version}`);
-        const text=await wire(front,`${base}oo/classes/zcl_outline/source/main?version=${version}`);
-        expect(structure.status).to.equal(200);
-        expect(text.status,`${front === node ? "Node" : "ABAP"} source ${version}`).to.equal(200);
-        expect(text.body.toString()).to.equal(source);
-        bodies.push(structure.body.toString());
-      }
-      expect(bodies[0]).to.equal(objectStructureDocument(outline,{base:`${structurePath}?version=${version}`}));
-      expect(bodies[1]).to.equal(bodies[0]);
-      const execute=outline.children.find(child => child.name === "EXECUTE");
-      for(const link of execute.links.filter(link => link.rel.endsWith("Identifier") || link.rel.endsWith("Block"))) {
-        const selected=slice(source,link.href);
-        if(link.rel === "implementationIdentifier") expect(selected).to.match(/^execute\.?$/);
-        if(link.rel === "implementationBlock") expect(selected).to.match(/^METHOD execute\.[\s\S]*ENDMETHOD\.$/);
+    for(const edit of ["external","STORE"]) {
+      if(edit === "STORE") store.write("CLAS","ZCL_OUTLINE",inactive);
+      for(const [version,source] of [["active",active],["inactive",inactive]]) {
+        const outline=structureOf(store,"CLAS","zcl_outline",version);
+        const tests=version === "active" ? activeTests : inactiveTests;
+        expect(selections(outline,source,tests),`${edit} ${version} ranges`).to.deep.equal(expectedSelections);
+        const answer=await new StoreDestination({store}).execute({iv_command:"PARSE",iv_json:JSON.stringify({kind:"OUTLINE",type:"CLAS",name:"zcl_outline",version})});
+        expect(answer.EV_ERROR).to.equal("");
+        expect(JSON.parse(answer.EV_JSON)).to.deep.equal({found:true,...ordered(outline)});
+        const bodies=[];
+        for(const front of [node,ported]) {
+          const structure=await wire(front,`${structurePath}?version=${version}`);
+          const text=await wire(front,`${base}oo/classes/zcl_outline/source/main?version=${version}`);
+          expect(structure.status).to.equal(200);
+          expect(text.status,`${front === node ? "Node" : "ABAP"} source ${version}`).to.equal(200);
+          expect(text.body.toString()).to.equal(source);
+          const testText=await wire(front,`${base}oo/classes/zcl_outline/includes/testclasses/source/main?version=${version}`);
+          expect(testText.status).to.equal(200);
+          expect(testText.body.toString()).to.equal(tests);
+          bodies.push(structure.body.toString());
+        }
+        expect(bodies[0]).to.equal(objectStructureDocument(outline,{base:`${structurePath}?version=${version}`}));
+        expect(bodies[1]).to.equal(bodies[0]);
+        const execute=outline.children.find(child => child.name === "EXECUTE");
+        for(const link of execute.links.filter(link => link.rel.endsWith("Identifier") || link.rel.endsWith("Block"))) {
+          const selected=slice(source,link.href);
+          if(link.rel === "implementationIdentifier") expect(selected).to.match(/^execute\.?$/);
+          if(link.rel === "implementationBlock") expect(selected).to.match(/^METHOD execute\.[\s\S]*ENDMETHOD\.$/);
+        }
       }
     }
     const defaultAnswer=await new StoreDestination({store}).execute({iv_command:"PARSE",iv_json:JSON.stringify({kind:"OUTLINE",type:"CLAS",name:"zcl_outline"})});

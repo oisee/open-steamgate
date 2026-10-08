@@ -31,8 +31,9 @@ ADT Save only writes source; the warm compiler is used on Check and Activate.
 STORE ACTIVATE uses the same activation publisher as ADT
 (`tools/osd-publish-activation.mjs`): capture the checked revision, publish via
 `ObjectStore.publish`, and promote only when that revision matches the build's
-reads and current source. A primed compiler checks the affected closure during
-the build for both callers, avoiding STORE's separate full-registry validation.
+reads and current source. STORE validates synchronously in the source host's
+retained registry, updating changed files and dirtying their transitive readers.
+A primed compiler also checks the affected closure during the build for both callers.
 Eligibility, inactive-source isolation, cold fallback, swap refusal/recycle and
 verification retain the rules below. STORE's durable operation reports the
 warm generation ID and `live:true` after an acknowledged swap, with
@@ -169,7 +170,7 @@ Background comparisons yield to a full registry prime: an already running
 frozen comparison has up to 30 seconds to finish. On timeout the front kills
 and reaps that verifier before priming; queued comparisons resume once priming
 settles. Saves remain available during that wait. Verifiers also have a
-30-second lifetime deadline, and acquiring their build-lock pins is bounded.
+180-second lifetime deadline, and acquiring their build-lock pins is bounded.
 This prevents a silent verifier from blocking later cold publications.
 
 ## The checks, and why each exists
@@ -520,9 +521,15 @@ Doctor keeps this informational (exit 0): cold compilation remains available.
   digest are the follow-up.
 - **The dev loop's cold path** still reparses the tree three times (the
   parent's check, the build, the child's cross-reference seed; foreman-dell's
-  measurement) and runs every generator on every save. The warm path skips
-  the parent check and generators and derives selected xref rows from the
-  compiler registry; the cold path is unchanged.
+  measurement) and runs every generator on every save. The warm path checks
+  synchronously using the source host's kept registry: only changed source files
+  are updated, and affected objects and transitive readers are dirtied before
+  reparsing. It retains the publication validator's identifier rules, including
+  the 30-character method-name limit, and checks new class includes before
+  scheduling publication. The warm path skips generators and derives selected
+  xref rows from the compiler registry. Cold builds queue the changed generated
+  files for the same synchronous validator; failed builds that rewrote `gen/`
+  invalidate it when no complete file delta is available.
 - **Priming after a nonincremental cold build** costs a full transpile in the
   compiler process. Ordinary creates and removals instead update the registry.
   Saves during a prime can require another prime to catch up; requests continue

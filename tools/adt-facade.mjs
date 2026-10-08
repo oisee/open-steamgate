@@ -1,4 +1,4 @@
-import {prepareActivation, publishActivation} from "./osd-publish-activation.mjs";
+import {prepareActivation, publishActivation, beginActivation, activationIssues} from "./osd-publish-activation.mjs";
 import {unitResultDocument, unitResultOptions} from "./adt-unit-result.mjs";
 import {validateCreation, validationDocument} from "./adt-create-validation.mjs";
 import {requestElements, elementsNamed, attributeValue, namespaces, objectXMLRoots, invalidObjectXML} from "./adt-request-xml.mjs";
@@ -2485,45 +2485,62 @@ export function adtRouter(options = {}) {
     let named = [];
     let checked = [];
     let published = false;
+    let attempt;
     answer(res, () => {
       named = objectReferencesIn(body, collections);
       if (named.length === 0) {
         res.status(400).type("application/xml").send(exceptionDocument("ExceptionInvalidRequest", "no object references in the request"));
         return;
       }
-      // Workbench sends the entity tag of the exact source that passed its
-      // check. Refuse activation if Git or another editor replaced it in the
-      // meantime; otherwise a green Check could activate different bytes.
-      const expected = req.headers["if-match"];
-      if (expected !== undefined) {
-        if (named.length !== 1) {
-          res.status(400).type("application/xml").send(exceptionDocument(
-            "ExceptionInvalidRequest", "If-Match activation requires exactly one object reference"));
+      attempt = beginActivation(store, named);
+      try {
+        // Workbench sends the entity tag of the exact source that passed its
+        // check. Refuse activation if Git or another editor replaced it in the
+        // meantime; otherwise a green Check could activate different bytes.
+        const expected = req.headers["if-match"];
+        if (expected !== undefined) {
+          if (named.length !== 1) {
+            attempt.fail("validation", {note: "If-Match activation requires exactly one object reference"});
+            res.status(400).type("application/xml").send(exceptionDocument(
+              "ExceptionInvalidRequest", "If-Match activation requires exactly one object reference"));
+            return;
+          }
+          const current = store.read(named[0].type, named[0].name).source;
+          if (normalizedTag(expected) !== "*" && normalizedTag(expected) !== entityTag(current)) {
+            attempt.fail("validation", {note: "source changed after it was checked; check and activate again"});
+            res.status(412).type("application/xml").send(exceptionDocument(
+              "ExceptionResourceIsModified",
+              "source changed after it was checked; check and activate again",
+            ));
+            return;
+          }
+        }
+        checked = prepareActivation(store, named, {transpile: options.transpileOnActivate !== false, forced});
+        const failed = checked.filter((r) => r.active === false);
+        if (failed.length > 0) {
+          // Include diagnostics for the named objects and any dependents
+          // whose active source would break.
+          const entries = failed.flatMap((r) => [r, ...(r.dependents ?? [])]);
+          attempt.fail("validation", {issues: activationIssues(failed)});
+          res.status(200).type("application/xml").send(failureDocument(entries));
           return;
         }
-        const current = store.read(named[0].type, named[0].name).source;
-        if (normalizedTag(expected) !== "*" && normalizedTag(expected) !== entityTag(current)) {
-          res.status(412).type("application/xml").send(exceptionDocument(
-            "ExceptionResourceIsModified",
-            "source changed after it was checked; check and activate again",
-          ));
-          return;
-        }
+        published = true;
+      } catch (error) {
+        attempt.fail("validation", {note: withoutHostPaths(String(error.message ?? error), store.root)});
+        throw error;
       }
-      checked = prepareActivation(store, named, {transpile: options.transpileOnActivate !== false, forced});
-      const failed = checked.filter((r) => r.active === false);
-      if (failed.length > 0) {
-        // Include diagnostics for the named objects and any dependents
-        // whose active source would break.
-        const entries = failed.flatMap((r) => [r, ...(r.dependents ?? [])]);
-        res.status(200).type("application/xml").send(failureDocument(entries));
-        return;
-      }
-      published = true;
     });
     if (published === false || options.transpileOnActivate === false) {
       if (published === true) {
-        if (!(await store.completeActivations(checked))) {
+        let completed;
+        try { completed = await store.completeActivations(checked); }
+        catch (error) {
+          attempt.fail("revision", {note: withoutHostPaths(String(error.message ?? error), store.root)});
+          throw error;
+        }
+        if (!completed) {
+          attempt.fail("revision", {note: "source changed during activation; check and activate again"});
           res.status(200).type("application/xml").send(failureDocument(
             named.map((o) => ({...o, issues: [{message: "source changed during activation; check and activate again", severity: "E", line: 1, column: 1}]})),
           ));
@@ -2531,6 +2548,8 @@ export function adtRouter(options = {}) {
         }
         // A successful activation reports whether the separate check ran;
         // activation and generation remain executed, including when forced.
+        // No build is promised by this fixture/source-only mode.
+        attempt.update({state: "published", active: true, live: false, generation_id: liveHash(store.root) ?? ""});
         warmOutline();
         res.status(200).type("application/xml").send(successDocument());
       }
@@ -2543,12 +2562,14 @@ export function adtRouter(options = {}) {
     // publish() makes the success properties mean what a real system means by them:
     // the modules are written, and the process that serves them is the one
     // that has them.
+    attempt.update({state: "pending", active: true, note: "publication pending"});
     try {
       // the named objects are built with their saved version; every other
       // inactive object is built with its last active one, or left out
       // (ObjectStore#overlay), so one broken save fails its own activation
       // and nobody else's
       const result = await publishActivation(store, checked);
+      attempt.finish(result, activationIssues(result.transpile?.issues ?? []));
       warmHeaders(res, result);
       if (result?.ok === false && result.transpile?.check === true && (result.transpile.issues ?? []).length > 0) {
         // the build refused, warm or cold: each object's own issues at their
@@ -2584,6 +2605,7 @@ export function adtRouter(options = {}) {
       if (result?.transpile?.warm !== true) warmOutline();
       res.status(200).type("application/xml").send(successDocument());
     } catch (e) {
+      attempt.fail("build", {note: withoutHostPaths(String(e?.message ?? e), store.root)});
       res.status(200).type("application/xml").send(failureDocument(
         named.map((o) => ({type: o.type, name: o.name, issues: [{message: withoutHostPaths(String(e?.message ?? e), store.root).split("\n")[0].slice(0, 500), severity: "E", line: 1, column: 1}]})),
       ));
