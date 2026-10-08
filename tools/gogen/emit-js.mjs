@@ -652,6 +652,9 @@ function stmt(st, ctx, d) {
       ];
     }
     case "nop": return [];
+    // an update-task module's LUW mark: without a database no COMMIT
+    // here can read it, so it emits nothing
+    case "note_update_task": return [];
     // the JS runtime has no database (select_table is not emitted either),
     // so there is no LUW to end: refused, not a no-op
     case "commit_work": case "rollback_work":

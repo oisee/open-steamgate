@@ -6,6 +6,7 @@ import {basename, dirname, join} from "node:path";
 import {fileURLToPath} from "node:url";
 import {compileProgram} from "./frontend.mjs";
 import {emitGo} from "./emit-go.mjs";
+import {emitJs} from "./emit-js.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 test("generated LUW statements notify the host with session-local update state", {timeout: 120000}, () => {
@@ -117,4 +118,10 @@ func TestDatabaseBeforeGeneratedHook(t *testing.T) {
     });
     assert.equal(run.status, 0, run.stdout + run.stderr);
   } finally { rmSync(dir, {recursive: true, force: true}); }
+});
+
+test("the JS emitter accepts an update-task module's LUW mark", () => {
+  const program = compileProgram({folders: [join(here, "testdata-luw-seam")], objects: ["ZCL_GOGEN_LUW_SEAM"]});
+  assert.ok(program.classes.find((c) => c.name === "FUGR:ZGOGEN_LUW").methods.some((m) => m.body[0]?.s === "note_update_task"));
+  assert.doesNotThrow(() => emitJs(program));
 });
