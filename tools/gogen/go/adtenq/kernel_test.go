@@ -170,6 +170,38 @@ func TestDropContext(t *testing.T) {
 		t.Fatal("dump reused old handle")
 	}
 }
+
+// Node retires a dumped handle from its key immediately. A pinned step keeps
+// that old ENQ context only until it exits; the key meanwhile gets a new one.
+func TestDropContextWhilePinned(t *testing.T) {
+	k, srv := fixture(t)
+	sid := bind(t, k, "id", "OLD")
+	pinned, bound, err := k.Pin("id", "OLD")
+	if !bound || err != nil || pinned != sid {
+		t.Fatalf("Pin: %d, %v, %v", pinned, bound, err)
+	}
+	lock(t, srv, sid, 1)
+	k.DropContext("id")
+	if k.ContextAlive("id") {
+		t.Fatal("dumped key remained alive")
+	}
+	if len(srv.Read(enq.Filter{})) != 1 {
+		t.Fatal("dump released a pinned context too early")
+	}
+	next := bind(t, k, "id", "NEW")
+	if next == sid {
+		t.Fatal("bind after dump reused retired context")
+	}
+	lock(t, srv, next, 2)
+	k.Unpin(sid)
+	rows := srv.Read(enq.Filter{})
+	if len(rows) != 1 || rows[0].Session != next || rows[0].User != "NEW" {
+		t.Fatalf("retirement released replacement: %+v", rows)
+	}
+	if len(k.pins) != 0 || len(k.retired) != 0 {
+		t.Fatal("retired pin state leaked")
+	}
+}
 func TestKernelTextAndOwnership(t *testing.T) {
 	k, _ := fixture(t)
 	id := " leading"
@@ -281,5 +313,44 @@ func TestConcurrentLifecycle(t *testing.T) {
 	}
 	if len(k.sessions) != 0 || len(srv.Read(enq.Filter{})) != 0 {
 		t.Fatal("lifecycle leaked contexts")
+	}
+	if len(k.pins) != 0 || len(k.retired) != 0 {
+		t.Fatal("lifecycle leaked pin/retirement state")
+	}
+}
+
+func TestConcurrentPinRetirement(t *testing.T) {
+	k, srv := fixture(t)
+	var wg sync.WaitGroup
+	var ready sync.WaitGroup
+	start := make(chan struct{})
+	for i := 0; i < 32; i++ {
+		wg.Add(1)
+		ready.Add(1)
+		go func() {
+			defer func() { <-start; wg.Done() }()
+			sid, bound, err := k.Pin("shared", "U")
+			if !bound || err != nil {
+				t.Errorf("Pin: %v, %v", bound, err)
+				return
+			}
+			ready.Done()
+			<-start
+			k.DropContext("shared")
+			if replacement, bound, err := k.Pin("shared", "U"); !bound || err != nil || replacement == sid {
+				t.Errorf("dump reused retired handle %d", sid)
+			} else {
+				k.Unpin(replacement)
+			}
+			k.Unpin(sid)
+		}()
+	}
+	ready.Wait()
+	close(start)
+	wg.Wait()
+	k.End("shared")
+	if len(k.sessions) != 0 || len(k.pins) != 0 || len(k.retired) != 0 ||
+		len(srv.Read(enq.Filter{})) != 0 {
+		t.Fatal("concurrent pin retirement leaked state")
 	}
 }

@@ -23,8 +23,8 @@
       "reason": "recorded by --update"
     },
     "go:adtenq": {
-      "lines": 174,
-      "reason": "ADT ENQ owner and session-kernel bridge over enq public API; no generated ABAP dependency"
+      "lines": 236,
+      "reason": "ADT ENQ owner and session-kernel bridge over enq public API; adds Node-exact handle-scoped pins and retired dump contexts so replacement binds do not release parked steps, with no generated ABAP dependency"
     },
     "go:amc": {
       "lines": 506,

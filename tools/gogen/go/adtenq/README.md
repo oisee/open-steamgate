@@ -18,15 +18,18 @@ All six kernel methods trim trailing ECMAScript whitespace like
 The ended-key ledger retains the latest 10,000 distinct keys in insertion
 order, with repeated ends refreshing that order, as on Node.
 
-`Handle(id)` exposes the existing lock-server handle for request-local
-ENQUEUE, COMMIT and ROLLBACK calls. `DropContext(id)` releases a dumped
-context without marking its key ended, allowing its next bind to open anew.
-These operations are synchronized; no process-global current request is set.
-Use one kernel per host/server. The host must own step pinning and defer dump
-cleanup until its last pinned step exits; this package supplies no work-process
-scheduler or WAIT continuation. Notify it through `DropContext`/`End` rather
-than ending handles directly on the server, since `ContextAlive` deliberately
-matches Node's host map rather than inferring life from lock rows.
+`Handle(id)` exposes the current lock-server handle for request-local ENQUEUE,
+COMMIT and ROLLBACK calls. `Pin(id, user)` atomically opens or reuses a context
+and counts a step pinned to its returned handle; `Unpin(sid)` releases that pin.
+`DropContext(id)` immediately retires the key's current handle without marking
+the key ended: `ContextAlive` becomes false, the next bind opens a replacement,
+and the old handle—and only its locks—ends when its last pin leaves. A host
+`End` ends both the current and retired handles for that key. These operations
+are synchronized; no process-global current request is set. Use one kernel per
+host/server. This package supplies no work-process scheduler or WAIT
+continuation. Notify it through `Pin`/`Unpin`/`DropContext`/`End` rather than
+ending handles directly on the server, since `ContextAlive` deliberately matches
+Node's host map rather than inferring life from lock rows.
 
 Once the gogen host-replacement seam lands, `cmd/osgo` will create the kernel
 in `init()` and set generated `HostZCL_OSD_ENQ_KERNEL_*` variables to adapters

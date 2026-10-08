@@ -18,6 +18,8 @@ type Kernel struct {
 	server   *enq.Server
 	owner    Owner
 	sessions map[string]int64
+	pins     map[int64]int
+	retired  map[int64]string
 	ended    map[string]*list.Element
 	order    *list.List
 }
@@ -25,6 +27,7 @@ type Kernel struct {
 // New uses the process's shared owner, like Node's adtEnqOwner singleton.
 func New(server *enq.Server) *Kernel {
 	return &Kernel{server: server, owner: processOwner, sessions: make(map[string]int64),
+		pins: make(map[int64]int), retired: make(map[int64]string),
 		ended: make(map[string]*list.Element), order: list.New()}
 }
 
@@ -81,6 +84,11 @@ func (k *Kernel) End(id string) {
 		k.order.Remove(oldest)
 	}
 	k.drop(key)
+	for sid, retired := range k.retired {
+		if retired == key {
+			k.retireNow(sid, key)
+		}
+	}
 }
 
 // Revive permits the next bind; it opens no context and restores no locks.
@@ -115,12 +123,61 @@ func (k *Kernel) Handle(id string) (int64, bool) {
 	return sid, sid != 0
 }
 
+// Pin atomically binds and pins id's context, returning the handle that Unpin
+// must release. A pinned context survives DropContext until its last pin exits.
+func (k *Kernel) Pin(id, user string) (int64, bool, error) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	key := k.owner.Key(text(id))
+	if k.ended[key] != nil {
+		return 0, false, nil
+	}
+	sid := k.sessions[key]
+	if sid == 0 {
+		if k.server == nil {
+			return 0, false, errors.New("ADT ENQ: no lock server")
+		}
+		sid = k.server.Open(text(user))
+		if sid == 0 {
+			return 0, false, errors.New("ADT ENQ: lock server is closed")
+		}
+		k.sessions[key] = sid
+	}
+	k.pins[sid]++
+	return sid, true, nil
+}
+
+// Unpin releases one pin acquired for the returned handle. The last pin of a
+// dumped context ends that old context, never its replacement.
+func (k *Kernel) Unpin(sid int64) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if k.pins[sid] <= 1 {
+		delete(k.pins, sid)
+		if key, dumped := k.retired[sid]; dumped {
+			k.retireNow(sid, key)
+		}
+		return
+	}
+	k.pins[sid]--
+}
+
 // DropContext is the host's dump cleanup, unlike logoff: the key may bind
-// again without Revive. The host must call it after its last pinned step exits.
+// again without Revive while a pinned old context is retired. Its last Unpin
+// finally ends the old ENQ context and releases its locks.
 func (k *Kernel) DropContext(id string) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
-	k.drop(k.owner.Key(text(id)))
+	key := k.owner.Key(text(id))
+	sid := k.sessions[key]
+	if sid != 0 {
+		delete(k.sessions, key)
+		if k.pins[sid] > 0 {
+			k.retired[sid] = key
+			return
+		}
+		k.retireNow(sid, key)
+	}
 }
 
 func (k *Kernel) drop(key string) {
@@ -128,4 +185,9 @@ func (k *Kernel) drop(key string) {
 		delete(k.sessions, key)
 		k.server.End(sid)
 	}
+}
+
+func (k *Kernel) retireNow(sid int64, key string) {
+	delete(k.retired, sid)
+	k.server.End(sid)
 }
