@@ -2797,6 +2797,29 @@ function statement(node, ctx) {
     if (target.type.k !== "i") throw new Unsupported(`GET RUN TIME FIELD into a ${target.type.k}`);
     return {s: "get_runtime", target};
   }
+  if (isStmt(node, Statements.Convert)) {
+    const kids = node.getChildren();
+    const inputs = new Map(), outputs = new Map();
+    for (let i = 0; i < kids.length; i++) {
+      if (!isExpr(kids[i], Expressions.Source) && !isExpr(kids[i], Expressions.Target)) continue;
+      const key = upper(kids[i - 1].concatTokens());
+      (isExpr(kids[i], Expressions.Source) ? inputs : outputs).set(key, kids[i]);
+    }
+    if (!inputs.has("ZONE") || /DAYLIGHT|UTCLONG|INVERTED/i.test(text)) throw new Unsupported(`CONVERT form: ${text}`);
+    const zone = convert(source(inputs.get("ZONE"), ctx), S);
+    if (inputs.has("STAMP")) {
+      const stamp = source(inputs.get("STAMP"), ctx);
+      if (stamp.type.k !== "p") throw new Unsupported(`CONVERT TIME STAMP of a ${stamp.type.k}`);
+      const date = outputs.has("DATE") ? lvalue(outputs.get("DATE"), ctx) : null;
+      const time = outputs.has("TIME") ? lvalue(outputs.get("TIME"), ctx) : null;
+      if ((!date && !time) || (date && date.type.k !== "d") || (time && time.type.k !== "t")) throw new Unsupported(`CONVERT targets: ${text}`);
+      return {s: "convert_timestamp", stamp, zone, date, time};
+    }
+    if (!inputs.has("DATE") || !inputs.has("TIME") || !outputs.has("STAMP")) throw new Unsupported(`CONVERT form: ${text}`);
+    const stamp = lvalue(outputs.get("STAMP"), ctx);
+    if (stamp.type.k !== "p") throw new Unsupported(`CONVERT INTO TIME STAMP of a ${stamp.type.k}`);
+    return {s: "convert_date_time", date: convert(source(inputs.get("DATE"), ctx), S), time: convert(source(inputs.get("TIME"), ctx), S), zone, stamp};
+  }
   // ultra/events: GET TIME STAMP FIELD ts into a TIMESTAMP p(8,0) or a
   // TIMESTAMPL p(11,7): UTC, as sy-datum and sy-uzeit are here
   if (isStmt(node, Statements.GetTime)) {

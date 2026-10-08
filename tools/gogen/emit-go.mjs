@@ -1339,6 +1339,18 @@ function stmtLines(st, ctx, d) {
     // ultra/events: SET HANDLER, one registration per handler (the names
     // Ev* are mixed case, so no ABAP name, all upper or all lower, meets them)
     case "get_runtime": return [`${t}${place(st.target, ctx)} = ${helperFn("runtimeclock.Microseconds")}()`];
+    case "convert_timestamp": {
+      const n = ctx.loop++;
+      return [`${t}{`, `${t}\td${n}, tm${n}, ok${n} := abap.ConvertTimestamp(s, ${expr(st.stamp, ctx)}, ${expr(st.zone, ctx)})`,
+        `${t}\t_, _ = d${n}, tm${n}`, `${t}\tif ok${n} {`,
+        ...(st.date ? [`${t}\t\t${place(st.date, ctx)} = d${n}`] : []),
+        ...(st.time ? [`${t}\t\t${place(st.time, ctx)} = tm${n}`] : []), `${t}\t}`, `${t}}`];
+    }
+    case "convert_date_time": {
+      const n = ctx.loop++;
+      return [`${t}{`, `${t}\tts${n}, ok${n} := abap.ConvertDateTime(s, ${expr(st.date, ctx)}, ${expr(st.time, ctx)}, ${expr(st.zone, ctx)})`,
+        `${t}\tif ok${n} { ${place(st.stamp, ctx)} = abap.PFit(ts${n}, ${st.stamp.type.len}, ${st.stamp.type.dec ?? 0}, false) }`, `${t}}`];
+    }
     case "get_timestamp": return [`${t}${place(st.target, ctx)} = abap.TimeStamp(${st.dec})`];
     // AMC on the Go host (go/amc; the bodies frontend.mjs AMC_HOST gives)
     case "amc": {
