@@ -101,7 +101,9 @@ describe("the write boundary: a padded CHAR stores the same on every engine", fu
 
   it("a literal of millions of characters is trimmed without a regular expression", async () => {
     const {trimLiterals} = await import("../tools/sql-literals.mjs");
-    const body = ("WRITE 'x''y'. " + " ".repeat(240) + "\n").repeat(20000);
+    // the shape that overflowed the pattern (abapiti case 038): a short class
+    // and 150 000 lines of 100 blanks, about 15 million characters
+    const body = "CLASS zcl_x DEFINITION. ENDCLASS. WRITE 'x''y'.\n" + (" ".repeat(100) + "\n").repeat(150000);
     const q = "'";
     const sql = "INSERT INTO t VALUES (" + q + body.replace(/'/g, "''") + "   " + q + ", 'b  ')";
     const out = trimLiterals(sql);
