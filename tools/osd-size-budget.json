@@ -103,8 +103,8 @@
       "reason": "baseline 2026-10-01"
     },
     "go:enqseam": {
-      "lines": 160,
-      "reason": "#39 builds the lock request from generated DDIC metadata, maps classic results through a narrow Session interface, and keeps go/abap out of the package."
+      "lines": 170,
+      "reason": "#39 builds the lock request from generated DDIC metadata, maps classic results through a narrow Session interface, and keeps go/abap out of the package. #39 critic r2: the client from the key's own parameter and packed keys formatted as Node does."
     },
     "go:filepick": {
       "lines": 504,

@@ -96,17 +96,17 @@ func Request(s Session, table Table, object string, args Args) enq.Request {
 	for _, key := range table.Key {
 		name := strings.ToUpper(key.Name)
 		if name == "MANDT" || name == "CLIENT" {
-			if value, ok := args["MANDT"]; ok {
-				r.Client = strings.TrimSpace(value)
-			} else if value, ok := args["CLIENT"]; ok {
-				r.Client = strings.TrimSpace(value)
-			}
+			r.Client = strings.TrimSpace(args[name])
 			if r.Client == "" && s != nil {
 				r.Client = s.EnqClient()
 			}
 			continue
 		}
-		field := enq.Field{Length: key.Length, Value: strings.TrimRight(args[name], " ")}
+		value := args[name]
+		if key.Kind == 'P' {
+			value = nodeNumber(value)
+		}
+		field := enq.Field{Length: key.Length, Value: strings.TrimRight(value, " ")}
 		field.Generic = initial(field.Value, key.Kind) && !flag(args, "X_"+name)
 		r.Fields = append(r.Fields, field)
 	}
@@ -130,6 +130,23 @@ func session(step any) Session {
 		panic("ENQUEUE call without an ABAP Session")
 	}
 	return s
+}
+
+// nodeNumber is a packed value as Node's request() writes it, String() of
+// the runtime's number: no trailing zeros, the sign in front.
+func nodeNumber(v string) string {
+	t := strings.TrimSpace(v)
+	if strings.HasSuffix(t, "-") {
+		t = "-" + strings.TrimSuffix(t, "-")
+	}
+	f, err := strconv.ParseFloat(t, 64)
+	if err != nil {
+		return v
+	}
+	if f == 0 {
+		return "0"
+	}
+	return strconv.FormatFloat(f, 'f', -1, 64)
 }
 
 func initial(value string, kind byte) bool {
