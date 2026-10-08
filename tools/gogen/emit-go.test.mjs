@@ -281,6 +281,11 @@ CLASS zcl_gogen_static_reader IMPLEMENTATION.
     IF zcl_gogen_static_owner=>gv_y = 7.
       rv = rv + 1.
     ENDIF.
+    DO 2 TIMES.
+      IF zcl_gogen_static_owner=>gv_y <> 7.
+        rv = 0.
+      ENDIF.
+    ENDDO.
   ENDMETHOD.
 ENDCLASS.
 `);
@@ -291,6 +296,12 @@ ENDCLASS.
     assert.doesNotMatch(generated, /"osg\/gogen\/session"/);
     assert.doesNotMatch(emitGo(program, "main", null, true), /session\.Register\(/);
     assert.doesNotMatch(generated, /NOT_COMPILED in ZCL_GOGEN_STATIC_READER=>RUN/);
+    const reader = generated.slice(generated.indexOf("func ZCL_GOGEN_STATIC_READER_RUN("));
+    const body = reader.slice(0, reader.indexOf("\n}\n"));
+    assert.equal((body.match(/:= St_ZCL_GOGEN_STATIC_OWNER\(s\)/g) ?? []).length, 1);
+    assert.doesNotMatch(body, /St_ZCL_GOGEN_STATIC_OWNER\(s\)\./);
+    // Foreign constructors stay at the access site, preserving conditional use.
+    assert.match(body, /Ensure_ZCL_GOGEN_STATIC_OWNER\(s\)/);
     writeFileSync(join(goDir, "zz_generated.go"), generated);
     writeFileSync(join(goDir, "zz_generated_test.go"), `package main\nimport ("testing"; "osg/gogen/abap")\nfunc TestRead(t *testing.T) { if got := ZCL_GOGEN_STATIC_READER_RUN(&abap.Session{}); got != 9 { t.Fatalf("got %d", got) } }\n`);
     const run = spawnSync("go", ["test", `./cmd/${basename(goDir)}`], {cwd: join(here, "go"), encoding: "utf8", timeout: 120000});
