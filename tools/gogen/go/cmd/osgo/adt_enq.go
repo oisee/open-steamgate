@@ -13,11 +13,28 @@ import (
 )
 
 var adtLocks = enq.New("osd")
+var adtKernel = adtenq.New(adtLocks)
+
+type adtENQStep struct{ handles map[int64]string }
+
+var adtCurrentStep *adtENQStep
 
 func init() {
-	k := adtenq.New(adtLocks)
+	k := adtKernel
 	h := &hostclass.ZCL_OSD_ENQ_KERNEL
-	h.Bind = k.Bind
+	h.Bind = func(id, user string) (bool, error) {
+		if step := adtCurrentStep; step != nil {
+			current, exists := k.Handle(id)
+			if _, pinned := step.handles[current]; !exists || !pinned {
+				sid, ok, err := k.Pin(id, user)
+				if ok && err == nil {
+					step.handles[sid] = id
+				}
+				return ok, err
+			}
+		}
+		return k.Bind(id, user)
+	}
 	h.End = func(id string) error { k.End(id); return nil }
 	h.Revive = func(id string) error { k.Revive(id); return nil }
 	h.ContextAlive = func(id string) (bool, error) { return k.ContextAlive(id), nil }

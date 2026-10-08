@@ -94,13 +94,12 @@ would delete the handles being restored.
 The Go host bridge is [`adtenq`](../../tools/gogen/go/adtenq/README.md),
 a standalone owner and kernel over `enq.Server` matching Node's
 `tools/osd-enq-session.mjs` replacement: bind, end, revive, context life and
-holder-key conversion. Once the gogen seam lands, `cmd/osgo` will create one
-kernel in `init()` and set the generated `HostZCL_OSD_ENQ_KERNEL_*` function
-variables to adapters for its six methods. The adapters convert ABAP values,
-attach the bound handle to the request's execution context, and translate
-errors by panicking with a generated `ZCX_OSD_ADT` object via gogen's helper;
-an ended key returns false so ABAP performs its existing cleanup/revive path.
-The package is implemented; the seam and osgo installation are pending.
+holder-key conversion. The hostclass seam and osgo installation are implemented:
+`cmd/osgo` creates one kernel and fills `hostclass.ZCL_OSD_ENQ_KERNEL`
+for all six methods. Generated adapters convert ABAP values and translate
+errors to `ZCX_OSD_ADT`; an ended key returns false so ABAP performs its
+existing cleanup/revive path. The serialized request pins each bound context,
+retains the step's own handle for dump retirement, and unpins at step end.
 
 The host scans sessions by `touched DESC` (newest wins), and runs one dialog
 step per stateful session with handles. Native ICF

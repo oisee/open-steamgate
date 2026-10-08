@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"osg/gogen/abap"
+	"osg/gogen/hostclass"
 )
 
 func TestADTEnabled(t *testing.T) {
@@ -20,34 +21,39 @@ func TestADTEnabled(t *testing.T) {
 	}
 }
 
-func TestADTSessionBinding(t *testing.T) {
-	s := &abap.Session{}
-	var first ZIF_OSD_ADT_SESSION
-	withADTSession(s, func() {
-		first = St_ZCL_OSD_ADT_HANDLER(s).go_session
-		if first == nil || first.(*ZCL_OSD_ADT_SESSION).mv_ttl != 1800 {
-			t.Fatal("request did not bind a session with the Node TTL")
-		}
-	})
-	if St_ZCL_OSD_ADT_HANDLER(s).go_session != nil {
-		t.Fatal("session remained bound after request")
-	}
-	const marker = "request dump"
+// Closest host-level equivalent to a stateful ABAP dump: bind the request's
+// stateful key through the installed hostclass adapter, then dump its step.
+func TestADTStatefulDumpRetiresContext(t *testing.T) {
+	const id = "test-stateful-dump"
+	defer adtKernel.End(id)
+	var old int64
 	func() {
 		defer func() {
-			if got := recover(); got != marker {
-				t.Fatalf("dump changed: %v", got)
+			if recover() != "request dump" {
+				t.Fatal("dump changed")
 			}
 		}()
-		withADTSession(s, func() {
-			if current := St_ZCL_OSD_ADT_HANDLER(s).go_session; current == nil || current == first {
-				t.Fatal("next request reused the previous session adapter")
+		withADTSession(&abap.Session{}, func() {
+			ok, err := hostclass.ZCL_OSD_ENQ_KERNEL.Bind(id, "USER")
+			if !ok || err != nil {
+				t.Fatalf("bind: %v %v", ok, err)
 			}
-			panic(marker)
+			old, _ = adtKernel.Handle(id)
+			panic("request dump")
 		})
 	}()
-	if St_ZCL_OSD_ADT_HANDLER(s).go_session != nil {
-		t.Fatal("session remained bound after dump")
+	if adtKernel.ContextAlive(id) {
+		t.Fatal("dumped context is still alive")
+	}
+	withADTSession(&abap.Session{}, func() {
+		ok, err := hostclass.ZCL_OSD_ENQ_KERNEL.Bind(id, "USER")
+		next, _ := adtKernel.Handle(id)
+		if !ok || err != nil || next == old {
+			t.Fatalf("replacement: %v %v %d -> %d", ok, err, old, next)
+		}
+	})
+	if !adtKernel.ContextAlive(id) {
+		t.Fatal("successful request lost its context")
 	}
 }
 
@@ -64,6 +70,9 @@ func TestADTNotCompiledTrapIs501(t *testing.T) {
 }
 
 func TestADTHandlerTurnsACompiledFrontTrapInto501(t *testing.T) {
+	if !hasADTSession {
+		t.Skip("ADT classes absent in echo build")
+	}
 	request := httptest.NewRequest("GET", "/sap/bc/adt", nil)
 	response := httptest.NewRecorder()
 	icfHandler("ZCL_OSD_ADT_HANDLER", "/sap/bc/adt", adtDump).ServeHTTP(response, request)
@@ -120,5 +129,35 @@ func TestADTMountPreservesTransportHeadersAndHeadBodyRule(t *testing.T) {
 	}
 	if body, err := io.ReadAll(response.Body); err != nil || len(body) != 0 {
 		t.Fatalf("HEAD body %q (%v)", body, err)
+	}
+}
+
+func TestADTSessionBindingCleanup(t *testing.T) {
+	previous := bindADTSession
+	defer func() { bindADTSession = previous }()
+	bound, count := false, 0
+	bindADTSession = func(s *abap.Session) func() {
+		if bound {
+			t.Fatal("previous request still bound")
+		}
+		bound = true
+		count++
+		return func() { bound = false }
+	}
+	withADTSession(&abap.Session{}, func() {
+		if !bound {
+			t.Fatal("session absent")
+		}
+	})
+	func() {
+		defer func() {
+			if recover() != "dump" {
+				t.Fatal("dump changed")
+			}
+		}()
+		withADTSession(&abap.Session{}, func() { panic("dump") })
+	}()
+	if bound || count != 2 {
+		t.Fatalf("bound=%v requests=%d", bound, count)
 	}
 }

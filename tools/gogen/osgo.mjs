@@ -127,6 +127,21 @@ const has = (fn) => go.includes(`\nfunc ${fn}(`);
   writeFileSync(join(dir, "zz_status.go"), statusGo(facts, has("ZCL_OSD_STATUS_REFRESH")));
   console.log(`status: ${facts.services.length} services and ${facts.packs.length} packs of this binary, generation ${facts.generation}`);
 }
+// Keep generated ADT references out of handwritten cmd/osgo and echo tests.
+const adtSessionAdapter = has("New_ZCL_OSD_ADT_SESSION") && has("ZCL_OSD_ADT_HANDLER_USE_SESSION") ? `
+func init() {
+ hasADTSession = true
+ bindADTSession = func(s *abap.Session) func() {
+  session := New_ZCL_OSD_ADT_SESSION(s, 1800, "0")
+  ZCL_OSD_ADT_HANDLER_USE_SESSION(s, session)
+  return func() { ZCL_OSD_ADT_HANDLER_USE_SESSION(s, nil) }
+ }
+}
+` : "// ADT session classes are absent; use the handwritten no-op binding.\n";
+writeFileSync(join(dir, "zz_adt_session.go"), `package main
+import "osg/gogen/abap"
+var _ *abap.Session
+${adtSessionAdapter}`);
 const boots = ["ZCL_STG_SEGW_REGISTRY_REGISTER", "ZCL_STG_SHLP_REGISTRY_REGISTER"].filter(has);
 // the synthetic demo rows: ZCL_OSD_DEMO_DATA=>BOOT with the knob the Node
 // hosts pass (tools/osd-demo-data.mjs, OSD_DEMO_ROWS); main.go runs it in a

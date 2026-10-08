@@ -95,10 +95,10 @@ func TestSearchLimitMatchesJavaScriptNumber(t *testing.T) {
 		input any
 		want  float64
 	}{
-		{nil, -1}, {float64(0), 0}, {float64(2), 2}, {"4", 4},
-		{float64(0.5), 0.5}, {"Infinity", math.Inf(1)}, {"NaN", -1}, {"junk", -1},
+		{nil, math.NaN()}, {float64(0), 0}, {float64(2), 2}, {"4", 4},
+		{float64(0.5), 0.5}, {"Infinity", math.Inf(1)}, {"NaN", math.NaN()}, {"junk", math.NaN()}, {"", 0}, {" 2 ", 2}, {"0x2", 2}, {true, 1}, {false, 0}, {float64(-2), -2},
 	} {
-		if got := storeSearchLimit(test.input); got != test.want {
+		if got := storeSearchLimit(test.input); got != test.want && !(math.IsNaN(got) && math.IsNaN(test.want)) {
 			t.Errorf("limit(%#v) = %v, want %v", test.input, got, test.want)
 		}
 	}

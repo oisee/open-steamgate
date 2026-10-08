@@ -2,12 +2,28 @@ package main
 
 import "osg/gogen/abap"
 
-// The ICF entry reads the handler's class-static session slot. Bind inside
-// the serialized dialog step, just as Node's sessionFor creates its adapter
-// inside the request's step. Clear before the step ends, including on a dump.
+// osgo.mjs installs the generated adapter only when both ADT classes exist.
+// The fallback and host lifecycle require no generated ADT types.
+var bindADTSession = func(s *abap.Session) func() { return func() {} }
+var hasADTSession bool
+
 func withADTSession(s *abap.Session, work func()) {
-	session := New_ZCL_OSD_ADT_SESSION(s, 1800, "0")
-	ZCL_OSD_ADT_HANDLER_USE_SESSION(s, session)
-	defer ZCL_OSD_ADT_HANDLER_USE_SESSION(s, nil)
+	step := &adtENQStep{handles: make(map[int64]string)}
+	adtCurrentStep = step // all dialog steps hold the work-process lock
+	defer func() { adtCurrentStep = nil }()
+	defer func() {
+		dumped := recover()
+		for sid, id := range step.handles {
+			if dumped != nil {
+				adtKernel.DropContext(id, sid)
+			}
+			adtKernel.Unpin(sid)
+		}
+		if dumped != nil {
+			panic(dumped)
+		}
+	}()
+	clear := bindADTSession(s)
+	defer clear()
 	work()
 }

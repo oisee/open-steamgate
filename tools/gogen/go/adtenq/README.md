@@ -31,14 +31,12 @@ continuation. Notify it through `Pin`/`Unpin`/`DropContext`/`End` rather than
 ending handles directly on the server, since `ContextAlive` deliberately matches
 Node's host map rather than inferring life from lock rows.
 
-Once the gogen host-replacement seam lands, `cmd/osgo` will create the kernel
-in `init()` and set generated `HostZCL_OSD_ENQ_KERNEL_*` variables to adapters
-for `Bind`, `End`, `Revive`, `ContextAlive`, `Owns` and `SessionID`. The adapters
-convert generated ABAP values and booleans and panic with a generated
-`ZCX_OSD_ADT` object for errors, using gogen's exception helper. Binding must
-also install `Handle(id)` in the host's request-local execution context.
-That seam and installation are pending; this package does not import
-`osg/gogen/abap` or install itself.
+The hostclass seam is installed: `cmd/osgo` creates one kernel in `init()`
+and fills `hostclass.ZCL_OSD_ENQ_KERNEL` for all six methods. Generated
+adapters convert ABAP values and translate errors to `ZCX_OSD_ADT`.
+The serialized ADT dialog step retains handles acquired through `Pin` on
+binding, calls `DropContext(id, sid)` on a dump, and `Unpin` at step end.
+This package does not import `osg/gogen/abap` or install itself.
 
 Tests port lifecycle and ownership cases from `test/osd-enq-abap.mjs` and
 `test/adt-abap-session.mjs`, plus failure, retention and concurrent-call cases:

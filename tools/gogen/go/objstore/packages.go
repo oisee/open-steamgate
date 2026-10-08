@@ -2,6 +2,7 @@ package objstore
 
 import (
 	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -312,7 +313,7 @@ func storeSearch(ix *storeIndex, seed, typ string, limit float64) []*storeEntry 
 		}
 		if strings.Contains(e.Name, needle) {
 			out = append(out, e)
-			if limit >= 0 && float64(len(out)) >= limit {
+			if float64(len(out)) >= limit {
 				break
 			}
 		}
@@ -320,20 +321,63 @@ func storeSearch(ix *storeIndex, seed, typ string, limit float64) []*storeEntry 
 	return out
 }
 
+// SEARCH applies Number(input.limit), except null is deliberately NaN in Node.
+// JSON scalars cover the destination contract; unsupported values stay NaN.
 func storeSearchLimit(value any) float64 {
 	switch value := value.(type) {
 	case float64:
 		return value
-	case string:
-		number, err := strconv.ParseFloat(value, 64)
-		if err != nil || number != number {
-			return -1
+	case bool:
+		if value {
+			return 1
 		}
-		return number
-	default:
-		return -1
+		return 0
+	case string:
+		value = strings.TrimFunc(value, func(r rune) bool {
+			return r >= '\t' && r <= '\r' || r == ' ' || r == '\u00a0' || r == '\u1680' ||
+				r >= '\u2000' && r <= '\u200a' || r == '\u2028' || r == '\u2029' ||
+				r == '\u202f' || r == '\u205f' || r == '\u3000' || r == '\ufeff'
+		})
+		if value == "" {
+			return 0
+		}
+		if len(value) > 2 && value[0] == '0' {
+			base := 0
+			switch value[1] {
+			case 'x', 'X':
+				base = 16
+			case 'b', 'B':
+				base = 2
+			case 'o', 'O':
+				base = 8
+			}
+			if base != 0 {
+				n, err := strconv.ParseUint(value[2:], base, 64)
+				if err == nil {
+					return float64(n)
+				}
+				return math.NaN()
+			}
+		}
+		// ParseFloat additionally accepts Inf and hex floats; Number does not.
+		if value == "Infinity" || value == "+Infinity" {
+			return math.Inf(1)
+		}
+		if value == "-Infinity" {
+			return math.Inf(-1)
+		}
+		if !searchDecimal.MatchString(value) {
+			return math.NaN()
+		}
+		n, err := strconv.ParseFloat(value, 64)
+		if err == nil || math.IsInf(n, 0) {
+			return n
+		}
 	}
+	return math.NaN()
 }
+
+var searchDecimal = regexp.MustCompile(`^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$`)
 
 func storeJSON(v any) (string, error) {
 	b, err := json.Marshal(v)

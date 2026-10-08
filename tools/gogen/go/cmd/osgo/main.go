@@ -65,11 +65,8 @@ func adtIdentity(sid string, lookup func(string) (string, bool)) objstore.Identi
 	} else if len(client) > 3 {
 		client = client[:3]
 	}
-	userValue, _ := lookup("OSD_USER")
+	userValue := lookupDefault("OSD_USER", lookup, "DEVELOPER")
 	user := strings.TrimSpace(userValue)
-	if user == "" {
-		user = "OSD"
-	}
 	user = strings.ToUpper(user)
 	if runes := []rune(user); len(runes) > 12 {
 		user = string(runes[:12])
@@ -237,13 +234,12 @@ func step(x *abap.ICFExchange, base string) (dump any, frames []string) {
 			}
 		}()
 		s := &abap.Session{Statics: abap.ProcessStatics}
-		abap.DialogStep(func() {
-			if base == "/sap/bc/adt" || base == "/sap/public/bc/icf/logoff" {
-				withADTSession(s, func() { runShim(s, x, base) })
-			} else {
-				runShim(s, x, base)
-			}
-		})
+		dialog := func() { abap.DialogStep(func() { runShim(s, x, base) }) }
+		if base == "/sap/bc/adt" || base == "/sap/public/bc/icf/logoff" {
+			withADTSession(s, dialog)
+		} else {
+			dialog()
+		}
 	}()
 	return dump, frames
 }
