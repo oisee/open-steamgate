@@ -525,6 +525,10 @@
     "go:timestamp": {
       "lines": 52,
       "reason": "ADT batch 1 (adt-i5 cases 1-7): Independent UTC/initial-zone timestamp conversion with validation, subrc results and explicit unsupported-zone errors; no runtime imports."
+    },
+    "go:nodeutf8": {
+      "lines": 47,
+      "reason": "abapiti 037: Node's UTF-8 decode (WHATWG maximal subparts) for @KERNEL Buffer.toString(); no go/abap import"
     }
   },
   "readmeMissing": [

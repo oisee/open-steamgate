@@ -1,6 +1,6 @@
 package abap
 
-import "strings"
+import "osg/gogen/nodeutf8"
 
 // EncodeBase64 is cl_http_utility=>encode_base64: Buffer.from(text), its
 // UTF-8 bytes, as base64 (open-abap-core's kernel lines; authenticate's
@@ -11,9 +11,9 @@ func EncodeBase64(s *Session, unencoded string) string {
 }
 
 // DecodeBase64 is cl_http_utility=>decode_base64: Buffer.from(encoded,
-// "base64").toString(), the decoded bytes read as UTF-8, an invalid byte
-// becoming U+FFFD as in Node (open-abap-core's kernel lines). Not measured
-// on A4H, which converts from its own code page.
+// "base64").toString() in open-abap-core's kernel lines: the bytes read as
+// UTF-8 the way Node reads them (go/nodeutf8). Not measured on A4H, which
+// converts from its own code page.
 func DecodeBase64(s *Session, encoded string) string {
-	return strings.ToValidUTF8(DecodeXBase64(s, encoded), "\uFFFD")
+	return nodeutf8.Decode(DecodeXBase64(s, encoded))
 }
