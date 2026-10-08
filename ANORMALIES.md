@@ -40,6 +40,9 @@ Format adapted from `larshp/hithub` (MIT).
   configured newline; APC submits the same bytes as a text frame, which a
   receiver requiring valid UTF-8 may reject. Adjacent high/low halves are
   joined at string construction and leave as the normal supplementary character.
+- `substring_before/after` with a half inside a supplementary character return empty in OSGo; the kernel splits on UTF-16 units; A4H was not measured.
+- `SPLIT AT` a half leaves the supplementary character unsplit in OSGo; the kernel splits on UTF-16 units; A4H was not measured.
+- `shift_left/right( sub = half )` leaves the supplementary character unchanged in OSGo; the kernel splits on UTF-16 units; A4H was not measured.
 - Expected SAP behaviour: unknown; A4H was not measured. No substitution,
   rejection or encoding rule is inferred from the behaviour of this host.
 - Smallest safe workaround: avoid sending lone halves to text output.
