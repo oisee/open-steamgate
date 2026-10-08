@@ -3894,3 +3894,15 @@ Not an anomaly, recorded for porting: on 7.58, `FIND ... REGEX` (POSIX) raises a
 - Regression: abaplint/transpiler `test/operators/instance_of.ts` (18 cases, 16 fail before the fix), carried by the pin.
 - Upstream: https://github.com/abaplint/transpiler/pull/1975 (branch inside the repository; CI and Regression green, 64/64 rows); pinned 2026-10-08 as `libs.lock.json` transpiler oisee/transpiler `local/osd-build-2026-10-08` e2a459b1 = the previous pin 2ff0e801 plus a cherry-pick of #1975.
 - Upstream version containing a fix: unknown.
+
+### ANOMALY-2026-10-08-zip-read-int4 - cl_abap_zip's read_int4 overflows type i, and only the Go runtime notices
+
+- Status: `fixed upstream` (open-abap/open-abap-core#1282, ce4ddaad, 2026-10-02); pinned 2026-10-08
+- Discovery: abapiti's case 033, `cl_abap_zip=>load` raising `CX_SY_ARITHMETIC_OVERFLOW` on osgo for an ordinary 50-file ZIP, while OSG-JS loaded it.
+- Affected path: open-abap-core `lcl_stream=>read_int4` (`cl_abap_zip.clas.locals_imp.abap`) before #1282: `rv_int = rv_int + lv_val * lv_factor`, then `lv_factor = lv_factor * 256`, all in `i`; the factor reaches 2^32 after the fourth byte for any input.
+- Expected SAP behaviour (7.58): the same method body dumps `COMPUTE_INT_TIMES_OVERFLOW` for both `01020304` and `01020380` (measured on A4H by abapiti on 2026-10-08 in a throwaway package, removed after). SAP's own `cl_abap_zip` is not affected; this is open-abap-core's implementation.
+- Actual local behaviour: osgo raised the overflow, as the kernel does; OSG-JS did not, because the JS runtime does not raise on `i * i` here (abaplint/transpiler#1955, open).
+- Fix: pin `libs.lock.json` open-abap-core to oisee/open-abap-core `osd-build-2026-10-08` d5aea88b = the previous pin 22d31a35 plus a cherry-pick of ce4ddaad. After the pin a ZIP round trip on osgo gets past `read_int4` and stops at a separate osgo gap: `cl_abap_conv_in_ce=>read` passes a generic `data` parameter (an osgo NOT_COMPILED, tracked with the generic by-reference parameter work).
+- Regression: open-abap-core `cl_abap_zip.clas.testclasses.abap` (from #1282), carried by the pin.
+- Upstream: https://github.com/open-abap/open-abap-core/pull/1282 (merged); JS overflow: https://github.com/abaplint/transpiler/pull/1955
+- Upstream version containing a fix: open-abap-core main after 2026-10-02.
