@@ -766,6 +766,12 @@ const NATIVE = new Map([
  *   {bound}               a line of that loop whose work the binds do
  */
 const KERNEL = new Map([
+  // ADT capability answers match Node's parent kernel / non-one-runtime host.
+  ["ZCL_OSD_ADT_HOST=>ONE_RUNTIME|rv_on.set(abap.context.RFCDestinations.STORE?.localSystem ? \"X\" : \"\");", {fn: "abap.ADTOneRuntime", args: ["&RV_ON:c"]}],
+  ["ZCL_OSD_KERNEL_GUARD=>HAS_SERVING_DATABASE|if (globalThis.__osdAdtKernel !== undefined) rv_available.set(\" \");", {fn: "abap.ADTUnavailable", args: ["&RV_AVAILABLE:c"]}],
+  ["ZCL_OSD_KERNEL_GUARD=>HAS_GENERATION|if (globalThis.__osdAdtKernel !== undefined || !((typeof process !== \"undefined\" && process.env?.OSD_ADT_ONE_RUNTIME === \"1\") || abap.context.RFCDestinations.STORE?.oneRuntimeEnabled?.() === true)) rv_available.set(\" \");", {fn: "abap.ADTUnavailable", args: ["&RV_AVAILABLE:c"]}],
+  // CALL_CLASSRUN's try/catch needs an exception boundary and a caught host
+  // error; fn/loop/bound/end cannot express those, so its lines stay refused.
   // the class name of an object as the transpiler runtime names it (go/classname)
   ["CL_ABAP_CLASSDESCR=>GET_CLASS_NAME|lv_name.set(p_object.get().constructor.INTERNAL_NAME);", {fn: "classname.Internal", args: ["P_OBJECT:ref", "&LV_NAME:string"]}],
   ["CL_EXPRESS_ICF_SHIM=>RUN|lv_classname.set(INPUT.class);", {fn: "abap.ICFClass", args: ["REQ:data", "&LV_CLASSNAME:string"]}],
