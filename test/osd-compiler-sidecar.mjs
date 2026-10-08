@@ -156,33 +156,29 @@ describe("osd compiler --stdio", function () {
       expect(baseline.registryHash).to.equal(expectedHash);
     });
   }
-  it("uses OSD_LIB overrides in the registry identity and verdict", async () => {
+  it("covers library sources in the registry identity and verdict", async () => {
     const fixture = mkdtempSync(join(tmpdir(), "osd-sidecar-library-"));
-    const key = "OSD_LIB_SIDECAR_FIXTURE", previous = process.env[key];
     try {
       mkdirSync(join(fixture, "src"));
       writeFileSync(join(fixture, "abaplint.jsonc"), JSON.stringify({syntax: {version: "v702"}}));
       writeFileSync(join(fixture, "abap_transpile.json"), JSON.stringify({input_folder: ["src"],
         libs: [{folder: "/.local/lars/sidecar-fixture", files: "/src/**"}]}));
-      writeFileSync(join(fixture, "libs.lock.json"), JSON.stringify({transpiler: {repo: "fixture/transpiler", ref: "a".repeat(40)},
-        libraries: [{folder: "sidecar-fixture", repo: "fixture/library", ref: "b".repeat(40)}]}));
       const text = source("ZCL_SC_LIB_READER", "run", "DATA ref TYPE REF TO zcl_sc_library. CREATE OBJECT ref. ref->run( ).");
       const path = "src/zcl_sc_lib_reader.clas.abap";
       writeFileSync(join(fixture, path), text);
       const snap = {root: fixture, generation: "fixture", objects: [{type: "CLAS", name: "ZCL_SC_LIB_READER", version: "inactive",
         files: [{path, sha256: createHash("sha256").update(text).digest("hex")}]}]};
+      const lib = join(fixture, ".local/lars/sidecar-fixture/src");
+      mkdirSync(lib, {recursive: true});
       const results = [];
-      for (const [dir, method] of [["first", "run"], ["second", "renamed"]]) {
-        mkdirSync(join(fixture, dir, "src"), {recursive: true});
-        writeFileSync(join(fixture, dir, "src/zcl_sc_library.clas.abap"), source("ZCL_SC_LIBRARY", method));
-        process.env[key] = join(fixture, dir);
+      for (const method of ["run", "renamed"]) {
+        writeFileSync(join(lib, "zcl_sc_library.clas.abap"), source("ZCL_SC_LIBRARY", method));
         results.push(await checkSnapshot(snap));
       }
       expect(results[0].diagnostics).to.deep.equal([]);
       expect(results[1].diagnostics.length).to.be.greaterThan(0);
       expect(results[1].registryHash).not.to.equal(results[0].registryHash);
     } finally {
-      if (previous === undefined) delete process.env[key]; else process.env[key] = previous;
       rmSync(fixture, {recursive: true, force: true});
     }
   });

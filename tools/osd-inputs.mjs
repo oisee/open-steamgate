@@ -24,8 +24,7 @@
 // Neither is an error; both are said out loud, here and in the builder's
 // log.
 import {readFileSync, readdirSync, statSync, existsSync} from "node:fs";
-import {basename, resolve} from "node:path";
-import {libraryPath} from "./osd-lib-path.mjs";
+import {resolve} from "node:path";
 import {inputFoldersOf} from "./osd-packs.mjs";
 import {runsAs} from "./osd-main.mjs";
 
@@ -238,8 +237,7 @@ export function libraryFiles(root = process.cwd(), config = undefined) {
   const out = [];
   for (const lib of cfg.libs ?? []) {
     if (lib.folder === undefined || lib.folder === "") continue;
-    const dir = existsSync(resolve(root, "libs.lock.json"))
-      ? libraryPath(root, basename(lib.folder)) : resolve(root, "." + lib.folder);
+    const dir = resolve(root, "." + lib.folder);
     if (existsSync(dir) === false) continue;
     const patterns = typeof lib.files === "string" && lib.files !== ""
       ? [lib.files]
