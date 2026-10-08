@@ -1,0 +1,6 @@
+CLASS zcl_osgt_instance_object DEFINITION PUBLIC FINAL CREATE PUBLIC.
+PUBLIC SECTION.
+INTERFACES zif_osgt_declared.
+ENDCLASS.
+CLASS zcl_osgt_instance_object IMPLEMENTATION.
+ENDCLASS.

@@ -337,6 +337,8 @@ export function emitGo(program, pkg = "main", layers = null, unitBuild = false) 
   for (const [name, sigs] of program.interfaceMethods ?? []) {
     if (layers?.interfaces && !layers.interfaces.has(name)) continue;
     out.push(`type ${typeName(name)} interface {`);
+    out.push(`\t${interfaceMarker(name)}()`);
+    for (const included of componentInterfaces(program.reg, name)) out.push(`\t${interfaceMarker(included)}()`);
     for (const m of sigs) if (definable(program, m)) out.push(`\t${signature({name}, m, true)}`);
     out.push(...intfAccessors(program, name));
     out.push("}", "");
@@ -370,6 +372,7 @@ export function emitGo(program, pkg = "main", layers = null, unitBuild = false) 
     if (out.at(-1) === `type ${typeName(cls.name)} struct {`) out.push("\t_ byte");
     out.push("}", "");
     if (cls.name === "KERNEL_CX_ASSERT") out.push(`func (me *KERNEL_CX_ASSERT) AssertionMessage() string { return me.${ident("MSG")} }`, "");
+    for (const intf of implementedInterfaces(program, cls)) out.push(`func (me *${typeName(cls.name)}) ${interfaceMarker(intf)}() {}`, "");
     if (POLY.has(cls.name)) out.push(...classInterface(program, cls));
     out.push(...attrAccessors(cls, inst));
     for (const a of statics) {
@@ -780,6 +783,7 @@ function classInterface(program, cls) {
   const T = typeName(cls.name);
   const out = [`type I_${T} interface {`];
   if (cls.super && POLY.has(cls.super)) out.push(`\tI_${typeName(cls.super)}`);
+  for (const intf of implementedInterfaces(program, cls)) out.push(`\t${interfaceMarker(intf)}()`);
   out.push(`\tAs_${T}() *${T}`);
   // the accessors of the interfaces the class implements, so the reference converts to them
   for (const a of (cls.attributes ?? []).filter((x) => x.fromIntf && !x.unsupported)) out.push(`\t${accessorName(a.name)}() *${goType(a.type)}`);
@@ -798,6 +802,30 @@ function classInterface(program, cls) {
  * it. A read is *p, a write *p = v; both reach the object.
  */
 const accessorName = (attr) => `Ptr_${typeName(attr)}`;
+
+// Exported methods have the same identity in every Go package. The Greek
+// letter cannot come from an ABAP name: ident() and typeName() emit ASCII
+// only, so no user method/accessor can collide with this generated marker.
+const interfaceMarker = (intf) => `AbapΩImplements_${typeName(intf)}`;
+
+function implementedInterfaces(program, cls) {
+  const out = new Set();
+  for (const c of [cls, ...ancestorsOf(cls)]) {
+    for (const intf of c.interfaces ?? []) {
+      out.add(intf);
+      for (const included of componentInterfaces(program.reg, intf)) out.add(included);
+    }
+  }
+  return out;
+}
+
+function componentInterfaces(reg, intf, seen = new Set()) {
+  for (const c of reg?.getObject("INTF", intf)?.getDefinition()?.getImplementing?.() ?? []) {
+    const name = String(c.name).toUpperCase();
+    if (!seen.has(name)) { seen.add(name); componentInterfaces(reg, name, seen); }
+  }
+  return [...seen];
+}
 
 function intfAccessors(program, intf) {
   return (program.interfaceAttrs?.get(intf) ?? []).filter((a) => !a.static && !a.unsupported && definable(program, {params: [{type: a.type}]}))
@@ -2199,6 +2227,10 @@ function fn(e, ctx) {
   return emitBuiltinGo(e, e.args.map((a) => expr(a, ctx)), FN_F, HELPER_IMPORTS);
 }
 
+// an initial reference: the frontend decided it from the static type
+// (frontend.mjs upcastable)
+const initialReferenceInstanceOf = (predicate) => (predicate.initial ? "true" : "false");
+
 function cond(c, ctx) {
   const fast = emitPackedComparison(c, (n) => expr(n, ctx));
   if (fast !== null) return fast;
@@ -2238,6 +2270,15 @@ function cond(c, ctx) {
       // a structure holding such a field: component by component
       if (c.x.type.k === "struct" && typedZeroInside(c.x.type)) return `abap.IsInitialOf(${expr(c.x, ctx)}, ${desc(c.x.type)})`;
       return `(${expr(c.x, ctx)} == ${zero(c.x.type)})`;
+    // IS INSTANCE OF uses the same fit as ?= / CAST, but reports false
+    // instead of raising CX_SY_MOVE_CAST_ERROR.
+    case "instance_of": {
+      const value = expr(c.x, ctx);
+      const target = goType(c.type);
+      const initial = initialReferenceInstanceOf(c);
+      if (c.type.name === "OBJECT" && c.type.intf) return `func() bool { value := ${value}; if value == nil { return ${initial} }; return true }()`;
+      return `func() bool { value := ${value}; if value == nil { return ${initial} }; _, ok := any(value).(${target}); return ok }()`;
+    }
     // ultra/events: line_exists( ) (frontend lineExists)
     case "line_exists": {
       const n = ctx.loop++;

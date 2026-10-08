@@ -4,7 +4,7 @@ import {tmpdir} from "node:os";
 import {execFileSync} from "node:child_process";
 import {dirname, join} from "node:path";
 import {createRequire} from "node:module";
-import {build, liveHash, hashOf, inputsOf, generatorClosure, genHash} from "../tools/osd-build.mjs";
+import {build, liveHash, hashOf, inputsOf, generatorClosure, generatorIdentity, genHash} from "../tools/osd-build.mjs";
 
 import {WarmCompiler} from "../tools/osd-warm.mjs";
 import {modulesOf} from "../tools/osd-transpile.mjs";
@@ -26,6 +26,22 @@ import {buildIdentity, packageIdentity} from "../tools/osd-transpiler.mjs";
 // and not the thing represented. The representative is gone and the thing
 // represented -- the generators and everything they import -- is hashed.
 describe("a generation's name is a function of the tree, not of its build history", () => {
+  it("interpreted osd dispatch and a standalone builder hash the same generator inputs", () => {
+    const saved = process.env.OSD_SELF;
+    try {
+      delete process.env.OSD_SELF;
+      const direct = generatorIdentity(), hash = hashOf(process.cwd());
+      process.env.OSD_SELF = JSON.stringify([process.execPath, join(process.cwd(), 'bin/osd.mjs')]);
+      expect(generatorIdentity()).to.equal(direct);
+      expect(hashOf(process.cwd())).to.equal(hash);
+      // A genuinely embedded host still hashes its executable, not sources.
+      process.env.OSD_SELF = JSON.stringify([process.execPath]);
+      expect(generatorIdentity()).to.match(/^binary:/);
+      expect(generatorIdentity()).not.to.equal(direct);
+    } finally {
+      if (saved === undefined) delete process.env.OSD_SELF; else process.env.OSD_SELF = saved;
+    }
+  });
   it("a change under gen/ does not rename the generation, because gen/ is an output", () => {
     const before = hashOf(process.cwd());
     const probe = join("gen", "osd-hash-probe.tmp.abap");

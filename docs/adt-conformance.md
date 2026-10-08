@@ -1,0 +1,155 @@
+# Shared ADT conformance cases
+
+The runner uses one case list for JS, osgo and an explicitly requested reference
+system. This first slice covers discovery, HEAD, identity, package browsing,
+search, class documents, default/active/inactive source, includes, versions,
+objectstructure and five lock/session contracts. It never writes source or
+activates an object. X2 ABAP Unit and activation are later slices.
+
+Run heavy commands one at a time, waiting for the wrapper's slot:
+
+```sh
+OSD_HEAVY_RANGE=90-99 OSD_HEAVY_SLOTS=4 tools/osd-heavy.sh npm run transpile
+OSD_HEAVY_RANGE=90-99 OSD_HEAVY_SLOTS=4 tools/osd-heavy.sh node test/adt-conformance/js.mjs
+OSD_HEAVY_RANGE=90-99 OSD_HEAVY_SLOTS=4 tools/osd-heavy.sh node tools/osd-suites.mjs --group adt-conformance-only
+```
+
+`js.mjs` starts the existing `test/start.mjs` server helper and places the
+synthetic #642 outline fixture in a disposable repository view with an additional
+source layer and matching active-source snapshots. The view links the existing
+repository and built source evidence; fixture snapshots exist only in the
+temporary view, so active requests can read the same synthetic bytes. It
+pins the already-transpiled output so adding parser fixtures does not publish a
+new live generation. It restores the working directory and layer/output settings
+and closes the server on success or failure; the
+private `.local/lars` is never relinked. `suite.mjs` runs the same HTTP cases
+plus focused checks for the harness. The manifest registers it as required;
+the group entry is a small import wrapper for selecting this fragment alone.
+
+For an already running target:
+
+```sh
+node test/adt-conformance/run.mjs --target js --base http://127.0.0.1:8091
+node test/adt-conformance/run.mjs --target osgo --base http://127.0.0.1:8091 \
+  --expected test/adt-conformance/expected/osgo.json --only C1-discovery,C3-head
+node test/adt-conformance/square.mjs
+```
+
+The base may include `/sap/bc/adt`. An external server must expose the repository's
+`ZCL_OSD_ADT_URI` and `$STG_ADT`, plus the synthetic class/includes exported by
+`test/adt-conformance/fixtures/source.mjs` in its source index for O1–O5.
+Each case gets a fresh cookie jar and CSRF-fetch handshake. Cookies are updated
+from every repeated Set-Cookie header. All requests have a timeout and stateful
+session affinity unless a case explicitly requests stateless behavior. Additional
+sessions exercise contention. Cleanup runs after assertion and setup failures;
+all opened sessions log off. Transport, login and cleanup errors fail the suite.
+
+Case modules export arrays of `{id, point, title, setup?, request, expect, after?}`.
+IDs remain stable; `point` groups the parity square. Requests take `method`
+(default GET), `path`, `query`, `headers`, `body` and optionally a named `session`.
+A request may be a function of the per-case context for values from setup.
+`setup(ctx)` and `after(ctx, response)` may call `ctx.session.request()` and
+`ctx.newSession()`. Cleanup must preserve handles before making assertions.
+
+Expectations specify `status`, optional `contentType`, `headers`, `body` (value
+or RegExp), `json` (top-level facts), `xml`, `bodyBytes` and `normalize`.
+XML rules are `{xpath, value}`, `{xpath, regexp}` or `{xpath, count}`; all selected
+values must satisfy the rule. XPath supports `/`, `//`, qualified element names,
+`*`, an attribute equality predicate, and terminal `/@attribute` or `/text()`.
+Prefixes resolve through the runner's namespace map plus `expect.namespaces`;
+the response's prefix spelling does not matter. Unsupported XPath is rejected.
+There is no external entity resolver. Missing matches fail. Byte assertions
+compare the raw Buffer and bypass normalization.
+
+Normalization masks host, client, user, ISO timestamps, ETags, lock handles,
+session and generation IDs. JSON identity keys are masked recursively. For XML,
+volatile attributes and handle/ID elements are masked; `normalize.values` allows
+explicit identity substitutions and `normalize.host` replaces the target origin.
+Only complete attribute names (optionally namespace-qualified) are matched;
+`objectclient`, `clientXYZ` and stable `systemID` facts are retained.
+Opaque identifiers keep their length. Protocol namespaces, object names and
+source coordinates are retained. Assertions for handle shape use the unmasked
+response so a wrong handle length cannot pass.
+
+`expected/osgo.json` maps every ID to `pass`, `known-gap: reason` or `n/a: reason`.
+Unknown IDs, missing entries and invalid values are errors. JS cannot supply a
+gap file. A known gap that passes fails with “update the expected file”. An n/a
+entry is reported as not-applicable without running it. The suite writes
+`suite-results/adt-conformance-<target>.json`; reports retain only status,
+content type, byte count and assertion messages, never payloads, cookies,
+credentials, tokens or handles. Exit codes: 0 expectations satisfied, 1 failed
+cases (including unexpected passes) or missing execution/discovery evidence,
+2 invalid invocation or harness startup. Every HTTP run requires at least one
+completed case request and a successful GET `/core/discovery`, after the CSRF
+handshake. All-n/a runs, unreachable servers and zero-observation runs fail.
+Reports include `executedCases`, `discoverySucceeded` and `runErrors`; a case is
+observed only when its case request produced a response. The explicit unavailable
+inventory below is distinct from an HTTP run.
+
+At base main `0de1f89b`, osgo has no `-adt` flag or ADT mount. The 2026-10-07
+measurement found host route 404s; stoker case #5 identifies the router trap.
+The expected file records those route gaps and the missing host commands or
+adapters underneath them. Do not pretend an absent mounting flag is a successful
+HTTP test. Record the inventory explicitly:
+
+```sh
+node test/adt-conformance/run.mjs --target osgo \
+  --unavailable 'osgo: not mountable on this main'
+```
+
+Every resulting row is a known gap with `observed: false`; the square labels it
+unobserved. Once slice 1a provides `-adt`, build the osgo binary from the tested
+tree using `tools/gogen/osgo.mjs`, start it with that flag and the wrapper's
+`STG_PORT`, and run the same case list by URL. Promote expectations individually
+with each implementation change. No osgo build is claimed for this base.
+
+O1–O5 reuse PR #642's synthetic source and hand-entered A4H 7.58 coordinates,
+attributes and links. `fixtures/bytes.mjs` deterministically serializes those
+facts independently of the serving serializer. Each response is compared in
+full, across media negotiation and active-version requests. The expected
+`xml:base` is derived from the exact request path and query, so O5 includes
+`?version=active` as #642 serves it. These are our own
+facts and synthetic code; no SAP-captured payload is tracked. The byte contracts
+require #642's implementation, which is not on the starting main. The runner
+does not replace that implementation or silently soften those assertions.
+
+The square merger reads schema-1 reports from `suite-results/*.json`, chooses
+the newest observation per target/case, and prints A4H / JS / osgo columns.
+Unrelated suite report schemas are ignored. Conflicting results with the same
+timestamp are rejected. Missing evidence remains `not-measured`; the renderer
+never infers A4H pass from JS pass. No live SAP call is part of this runner's
+local/CI verification. Future reference fixtures must use this same normalization
+and clean-room facts rather than tracked captures.
+
+CI wiring belongs to dell's separate PR; this slice changes no workflows.
+That PR must keep required checks exactly `test` and `scan`, and implement
+Alice's ratchet as follows:
+
+- Keep the JS integration fragment in required `test`, after transpile; any JS
+  case failure fails `test`.
+- Add an osgo job that builds the tested tree, starts its binary with `-adt`
+  and the assigned `STG_PORT` once mounting is available, and runs the common
+  cases with `expected/osgo.json`. Until then, publish the explicit unavailable
+  inventory with all cases unobserved; never substitute it for an HTTP run.
+- Keep known-gap results advisory. Promote each implemented case to expected
+  `pass` in the expected file, alongside its implementation change.
+- Propagate any failure of an osgo case whose expectation is `pass` into the
+  required `test` verdict. Making the osgo job advisory with
+  `continue-on-error` alone is insufficient: `test` must consume its report
+  (and captured exit status) before completing, and fail on those regressions.
+  Missing/malformed reports, HTTP infrastructure failures, unsuccessful
+  discovery and zero executed cases fail `test` only while `expected/osgo.json`
+  holds at least one `pass` (then they cannot prove the expected passes were
+  retained). While every osgo expectation is `known-gap` or `n/a`, they stay
+  advisory like the known gaps themselves: known-gap never blocks (Alice,
+  2026-10-07).
+- Preserve the runner's non-zero status for an unexpected known-gap pass and
+  surface it in the advisory osgo result until its expectation is updated.
+  Upload both target reports even on failure and print the merged square;
+  artifact upload or advisory handling must not erase the required verdict.
+
+Round-1 verification on this branch: JS passes all 23 read/lock cases,
+including O1–O5 against #642's fixture and exact request URL. osgo remains
+not mountable on this main: all 23 inventory cases are unobserved known gaps.
+The focused fragment checks the harness and the same JS HTTP cases. No
+six-shard run or workflow edit is part of this slice.

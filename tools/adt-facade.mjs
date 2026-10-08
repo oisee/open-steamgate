@@ -1782,7 +1782,7 @@ export function adtRouter(options = {}) {
     // front door was not.
     const structure = (req, res) => {
       answer(res, () => {
-        const found = structureOf(store, type, req.params.name);
+        const found = structureOf(store, type, req.params.name, req.query.version);
         if (found === undefined) {
           throw new NotFound(type, req.params.name);
         }
@@ -1792,7 +1792,10 @@ export function adtRouter(options = {}) {
         // (abapsource!AdtStructuralInfoService#mergeOutlineContentWithRndBasedOutline@78-93,
         // ObjectStructureContentHandler#parseRecursively@135-231). Without it:
         // "Index 0 out of bounds for length 0" on every keystroke in the editor.
-        res.type("application/vnd.sap.adt.objectstructure.v2+xml")
+        const accept = req.get("accept") ?? "";
+        const version = !accept.includes("application/vnd.sap.adt.objectstructure.v2+xml")
+          && (accept.includes("application/vnd.sap.adt.objectstructure+xml") || accept.includes("application/xml")) ? "" : ".v2";
+        res.type(`application/vnd.sap.adt.objectstructure${version}+xml`)
           .send(objectStructureDocument(found, {base: req.originalUrl}));
       });
     };

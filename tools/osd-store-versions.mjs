@@ -349,6 +349,34 @@ export class StoreVersions {
     }
   }
 
+  // Outline coordinates belong to READ's active bytes, even when an external
+  // editor changed a file without adding STORE inactive intent. Borrow only
+  // this object's physical sources; activation's build overlay has a different
+  // purpose and must continue to see the candidate publication.
+  withActiveSources(entry, fn) {
+    const registry = this.#store.registry();
+    const parts = entry.type === "CLAS"
+      ? Object.entries(INCLUDES).map(([include, suffix]) => ({...entry, include,
+        file: entry.file.replace(/\.clas\.abap$/, suffix)}))
+      : [{...entry, include: "main"}];
+    const replacements = [], restore = [];
+    for (const part of parts) {
+      const name = "/" + part.file;
+      const before = registry.getFileByName(name)?.getRaw();
+      const source = this.#activeSource(part);
+      if (before === source) continue;
+      replacements.push([name, source]);
+      restore.push([name, before]);
+    }
+    if (replacements.length === 0) return fn(registry);
+    try {
+      this.#store.updateRegistryFiles(registry, replacements);
+      return fn(registry);
+    } finally {
+      this.#store.updateRegistryFiles(registry, restore);
+    }
+  }
+
   // the inactive objects, for the ADT inactive-objects feed
   inactiveObjects() {
     return [...this.#store.inactive].sort().map((key) => {
@@ -466,19 +494,26 @@ export class StoreVersions {
     return target;
   }
 
+  // One resolver for the active text of a physical source, shared by READ
+  // and OUTLINE. Undefined means absent; an empty string is proven empty.
+  #activeSource(part) {
+    const file = this.#activeFile(part.file, part);
+    return file === undefined ? undefined : readFileSync(file, "utf8");
+  }
+
   sourceVersion(part, version) {
     const active = version === "active";
-    const activeFile = active ? this.#activeFile(part.file, part) : undefined;
+    const activeSource = active ? this.#activeSource(part) : undefined;
     const classInclude = part.type === "CLAS" && part.include !== "main";
     // Class includes use READ's per-version absence flag. The ADT routes
     // turn it into measured missing-test errors or standard templates.
     // A main source without active proof has no readable representation.
-    if (active && activeFile === undefined && !classInclude) {
+    if (active && activeSource === undefined && !classInclude) {
       throw new NotFound(part.type, `${part.name} active version (${part.include ?? "main"})`);
     }
-    const source = active ? (activeFile === undefined ? "" : readFileSync(activeFile, "utf8")) : part.source;
+    const source = active ? (activeSource ?? "") : part.source;
     // Retained active bytes, including zero bytes, survive working-file removal.
-    const presence = active ? {empty: activeFile === undefined} : {};
+    const presence = active ? {empty: activeSource === undefined} : {};
     return {...part, ...presence, source, etag: entityTag(active ? "active\0" + source : source)};
   }
 

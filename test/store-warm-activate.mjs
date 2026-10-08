@@ -124,6 +124,12 @@ process.send({ready: true});`);
     };
     store.warmState = {on: true, compiler: new WarmCompilerProcess({root,
       overlay: set => store.overlay(set), keyOf: file => store.objectKeyOf(file), inactiveSources: set => store.inactiveSources(set)})};
+    // Startup can still be priming when the first ZIP save arrives. Prime
+    // the saved view directly to exercise the strict live-input rollback
+    // proof deterministically, rather than relying on scheduler timing.
+    if (this.currentTest.title.includes('first ZIP')) {
+      store.write(target.type, target.name, source(target.name.toLowerCase(), 2));
+    }
     expect(await store.warmUp(), store.warmState.reason).to.not.equal(undefined);
     destination = new StoreDestination({store}); publications = [];
     const publish = store.publish.bind(store);
@@ -132,7 +138,7 @@ process.send({ready: true});`);
   afterEach(async () => {await closeWarm(store); await store.warmState?.verifying; await stop(); if (root) rmSync(root, {recursive: true, force: true});
     if (priorLayers === undefined) delete process.env.OSD_LAYERS; else process.env.OSD_LAYERS = priorLayers;});
 
-  it("first ZIP STORE WRITE + ACTIVATE stays warm without recycling the serving process", async () => {
+  it("first ZIP STORE WRITE before priming + ACTIVATE stays warm without recycling the serving process", async () => {
     const layers = userLayersOf(root);
     expect(readFileSync(join(root, layers[1].path, 'package.devc.xml'), 'utf8')).to.include('$ZWARM');
     const pid = child.pid;
