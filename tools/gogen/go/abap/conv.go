@@ -736,11 +736,16 @@ func DecodeXBase64(s *Session, encoded string) string {
 // one character, # makes the next character literal and case-sensitive;
 // everything else compares ignoring case. A c pattern stored empty was all
 // blanks and is one blank (” CP ” is false); a string pattern is as written.
-func CP(a, p string, cpat bool) bool {
+func CP(a, p string, cpat bool, csubject ...bool) bool {
 	if cpat && p == "" {
 		p = " "
 	}
 	ps := cpTokens(p)
+	if cpat {
+		for len(ps) > 1 && ps[len(ps)-1].kind == 'l' && ps[len(ps)-1].r == ' ' {
+			ps = ps[:len(ps)-1]
+		}
+	}
 	// the subject as characters: its bytes when it is ASCII (no copy, the
 	// common case: a tag, a name), else its runes
 	var ar []rune
@@ -775,6 +780,16 @@ func CP(a, p string, cpat bool) bool {
 	// classic wildcard matching with backtracking over the last *
 	i, j, star, mark := 0, 0, -1, 0
 	for i < n {
+		if j == len(ps) && len(csubject) > 0 && csubject[0] && func() bool {
+			for k := i; k < n; k++ {
+				if at(k) != ' ' {
+					return false
+				}
+			}
+			return true
+		}() {
+			return true
+		}
 		if j < len(ps) && ps[j].kind != '*' && eq(ps[j], at(i)) {
 			i++
 			j++

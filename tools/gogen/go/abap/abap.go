@@ -22,6 +22,7 @@ import (
 // goroutines never see each other's sy-index.
 type Sy struct {
 	// Message fields belong to the dialog session, including classic FM exceptions.
+	// Msgno is NUMC(3); MessageNumber supplies its initial value on access.
 	Msgid, Msgno, Msgty        string
 	Msgv1, Msgv2, Msgv3, Msgv4 string
 	Index                      int32
@@ -30,6 +31,14 @@ type Sy struct {
 	Fdpos                      int32
 	// Dbcnt: the rows the last Open SQL statement read or wrote
 	Dbcnt int32
+}
+
+// MessageNumber preserves NUMC(3)'s initial value, including reference reads.
+func (sy *Sy) MessageNumber() *string {
+	if sy.Msgno == "" {
+		sy.Msgno = "000"
+	}
+	return &sy.Msgno
 }
 
 // Session is what a dialog step runs in. A goroutine picks one up, runs, and
@@ -50,6 +59,7 @@ type Session struct {
 	// inflate: the decoders of ZCL_OSD_INFLATE=>HOST_* by handle (inflate.go)
 	inflate           *inflate.Registry
 	localDestinations map[string]bool
+	messageCall       *messageCall
 }
 
 // ArithmeticError retains the identity of errors from pure packages.

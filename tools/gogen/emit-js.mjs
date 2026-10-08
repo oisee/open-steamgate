@@ -941,7 +941,7 @@ function expr(e, ctx) {
     case "padc": return `abap.PadC(${expr(e.x, ctx)}, ${e.n})`;
     case "flag": return String(e.value);
     case "str_fn": return `abap.${e.fn}(${e.args.map((a) => expr(a, ctx)).join(", ")})`;
-    case "sy": return `s.sy.${e.field.toLowerCase()}`;
+    case "sy": return /^Msg/.test(e.field) ? `(s.sy.${e.field.toLowerCase()} ?? ${JSON.stringify(e.field === "Msgno" ? "000" : "")})` : `s.sy.${e.field.toLowerCase()}`;
     case "sy_mandt": return "abap.Mandt";
     case "sy_host": return `abap.${e.name}`;
     case "int": return String(e.value);
@@ -1134,6 +1134,7 @@ function conv(e, ctx) {
     case "xs2x": return `abap.XFit(${x}, ${e.to.len})`;
     case "c2x": return e.to.k === "x" ? `abap.XFit(abap.CToX(${x}), ${e.to.len})` : `abap.CToX(${x})`;
     case "d2i": return `abap.DToI(${x})`;
+    case "t2i": return `abap.TToI(${x})`;
     case "c2n":
       if (to === "f") return `abap.ParseF(${x})`;
       if (to === "i") return `abap.ParseI(${x})`;
@@ -1155,8 +1156,8 @@ function cond(c, ctx) {
       return `(() => { const rows${n} = ${expr(c.range, ctx)}; let hasI${n} = false, hit${n} = false; for (const r${n} of rows${n}) { let match${n}; if (r${n}.Option === "EQ") match${n} = ${expr(c.value, ctx)} === r${n}.Low; else if (r${n}.Option === "BT") match${n} = ${expr(c.value, ctx)} >= r${n}.Low && ${expr(c.value, ctx)} <= r${n}.High; else throw new abap.AbapError("NOT_COMPILED", "IN range: selection option other than EQ or BT"); if (r${n}.Sign === "I") { hasI${n} = true; if (match${n}) hit${n} = true; } else if (r${n}.Sign === "E") { if (match${n}) return false; } else throw new abap.AbapError("NOT_COMPILED", "IN range: selection sign other than I or E"); } return !hasI${n} || hit${n}; })()`;
     }
     case "co": return `abap.CO(${expr(c.l, ctx)}, ${expr(c.r, ctx)})`;
-    case "cs": return `abap.CSWithPos(s, ${expr(c.l, ctx)}, ${expr(c.r, ctx)})`;
-    case "cp": return `abap.CP(${expr(c.l, ctx)}, ${expr(c.r, ctx)}, ${!!c.cpat})`;
+    case "cs": return `abap.CSWithPos(s, ${expr(c.l, ctx)}, ${expr(c.r, ctx)}, ${!!c.csubject})`;
+    case "cp": return `abap.CP(${expr(c.l, ctx)}, ${expr(c.r, ctx)}, ${!!c.cpat}, ${!!c.csubject})`;
     case "ca": return `abap.CA(${expr(c.l, ctx)}, ${expr(c.r, ctx)})`;
     case "cmp":
       if (c.type?.k === "p") return `abap.CmpP(${expr(c.l, ctx)}, ${expr(c.r, ctx)}) ${c.op === "=" ? "===" : c.op === "<>" ? "!==" : c.op} 0`;
@@ -1169,7 +1170,7 @@ function cond(c, ctx) {
     }
     // two object references (ultra/json refeq; ultra/events: undefined and
     // null are both the initial reference)
-    case "refeq": return `((${expr(c.l, ctx)} ?? null) ${c.op === "=" ? "===" : "!=="} (${expr(c.r, ctx)} ?? null))`;
+    case "refeq": return `(${c.op === "=" ? "" : "!"}abap.RefEq(${expr(c.l, ctx)}, ${expr(c.r, ctx)}))`;
     case "data_bound": return `abap.DataBound(${expr(c.x, ctx)})`;
     case "initial":
       if (c.x.type.k === "data") return `abap.IsInitialData(${expr(c.x, ctx)})`;

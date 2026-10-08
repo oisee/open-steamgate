@@ -26,8 +26,12 @@ func TestConvertUTC(t *testing.T) {
 		t.Fatal("invalid clock changed target")
 	}
 	ConvertTimestampInto(s, "0", "UTC", date, clock)
-	if d != "00000000" || tm != "000000" {
-		t.Fatal("initial timestamp")
+	if d != "20261007" || tm != "231500" || s.Sy.Subrc != 12 {
+		t.Fatal("initial timestamp changed targets")
+	}
+	ConvertDateTimeInto(s, "00000000", "000000", "UTC", stamp)
+	if ts != "20261007231500" || s.Sy.Subrc != 12 {
+		t.Fatal("initial date changed target")
 	}
 	ConvertTimestampInto(s, "20261007231500", "UTC", Data{}, Data{})
 }

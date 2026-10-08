@@ -44,19 +44,21 @@ export function packageInUse(root, name, at = join(root, "node_modules", "@abapl
   // commit of it, not which version it calls itself
   let branch;
   let commit;
+  let fullCommit;
   let dirty;
   try {
     const git = (...args) => execFileSync("git", args, {cwd: real, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"]}).trim();
     branch = git("rev-parse", "--abbrev-ref", "HEAD");
     commit = git("rev-parse", "--short", "HEAD");
+    fullCommit = git("rev-parse", "HEAD");
     // only tracked changes count: an untracked note beside the checkout
     // does not change what the build does, and saying it does would train
     // everyone to ignore the warning
-    dirty = git("status", "--porcelain", "--untracked-files=no").length > 0;
+    dirty = git("-c", "core.fileMode=false", "status", "--porcelain", "--untracked-files=no").length > 0;
   } catch {
     // not a git tree, or git is not there: the path is still the answer
   }
-  return {kind: "linked", version, where: real, branch, commit, dirty};
+  return {kind: "linked", version, where: real, branch, commit, fullCommit, dirty};
 }
 
 // the transpiler is the library, since the build calls it in-process (N3);
@@ -65,17 +67,30 @@ export function packageInUse(root, name, at = join(root, "node_modules", "@abapl
 export function transpilerInUse(root = process.cwd()) {
   const installed = join(root, "node_modules", "@abaplint", "transpiler");
   if (existsSync(installed)) {
-    return packageInUse(root, "transpiler");
+    return withPinnedRef(packageInUse(root, "transpiler"), root);
   }
   try {
-    return packageInUse(root, "transpiler", transpilerLocation(root));
+    return withPinnedRef(packageInUse(root, "transpiler", transpilerLocation(root)), root);
   } catch {
     return {kind: "missing", where: installed};
   }
 }
 
+// the build `npm run transpiler:pin` makes is the intended one, not a local
+// experiment: same commit as libs.lock.json and no tracked changes
+function withPinnedRef(found, root) {
+  if (found.kind !== "linked" || found.dirty) return found;
+  let pinned;
+  try {
+    pinned = JSON.parse(readFileSync(join(root, "libs.lock.json"), "utf8")).transpiler;
+  } catch {
+    return found;
+  }
+  return pinned && found.fullCommit === pinned.ref ? {...found, pinnedRepo: pinned.repo} : found;
+}
+
 export function runtimeInUse(root = process.cwd()) {
-  return packageInUse(root, "runtime");
+  return withPinnedRef(packageInUse(root, "runtime"), root);
 }
 
 function describeOne(label, pkg, found) {
@@ -85,6 +100,9 @@ function describeOne(label, pkg, found) {
     case "published":
       return `${label}: @abaplint/${pkg} ${found.version}, published`;
     default:
+      if (found.pinnedRepo) {
+        return `${label}: the pinned build of ${found.pinnedRepo} ${found.fullCommit.slice(0, 8)} (libs.lock.json), at ${found.where}, calling itself ${found.version}`;
+      }
       return `${label}: a LOCAL BUILD, ${found.where}`
         + (found.branch ? ` (${found.branch} ${found.commit}${found.dirty ? ", uncommitted changes" : ""})` : "")
         + `, calling itself ${found.version}. A clean clone will not build this way.`;

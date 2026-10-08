@@ -26,14 +26,11 @@ func ToDateTime(stamp, zone string) (date, clock string, subrc int32, valid bool
 	if err != nil {
 		return "", "", rc, false, err
 	}
-	if stamp == "0" {
-		return "00000000", "000000", rc, true, nil
-	}
 	stamp = strings.SplitN(stamp, ".", 2)[0]
 	if len(stamp) != 14 {
 		return "", "", 12, false, nil
 	}
-	if _, err := time.Parse("20060102150405", stamp); err != nil {
+	if parsed, err := time.Parse("20060102150405", stamp); err != nil || parsed.Year() == 0 {
 		return "", "", 12, false, nil
 	}
 	return stamp[:8], stamp[8:], rc, true, nil
@@ -45,13 +42,10 @@ func FromDateTime(date, clock, zone string) (stamp string, subrc int32, valid bo
 	if err != nil {
 		return "", rc, false, err
 	}
-	if date == "00000000" && clock == "000000" {
-		return "0", rc, true, nil
-	}
 	if len(date) != 8 || len(clock) != 6 {
 		return "", 12, false, nil
 	}
-	if _, err := time.Parse("20060102150405", date+clock); err != nil {
+	if parsed, err := time.Parse("20060102150405", date+clock); err != nil || parsed.Year() == 0 {
 		return "", 12, false, nil
 	}
 	return date + clock, rc, true, nil

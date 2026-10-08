@@ -113,10 +113,9 @@ to ABAP output parameters; they live beside host information in
 `go/abap/sysinfo.go`. Neither needs a separate capability package.
 
 The budget check also attributed the inherited charsection-to-abap dependency
-to this branch because it changes Go code. `go/charsection` now takes a narrow
-`Text` interface for the existing UTF-16 operations. The runtime supplies
-CharacterOps, and the emitter passes it explicitly. Existing supplementary and
-unpaired-surrogate tests still run through those same runtime operations.
+to this branch because it changes Go code. That carve-out landed on main
+separately (#663: `charsection.Text`, supplied as `abap.Text16`), and this
+branch uses it as merged.
 `go list -deps ./timestamp ./charsection` contains no `osg/gogen/abap`.
 
 Budget edits name the ADT cases and each binding's purpose. They touch only
@@ -134,3 +133,36 @@ charsection: three top-level tests each, normal and race passed. Heavy runs
 used range 50-59; GOFLAGS=-buildvcs=false retains the documented round 2
 workaround. Commands/results are in `.local/adt/round3-*.log` and
 `round3-results.json`; the final budget check exited 0.
+
+## Round 5 critic findings
+
+The shared IF/WHERE comparison path preserves the subject's fixed-character
+identity after padding. [SAP's character comparison rules](https://help.sap.com/doc/abapdocu_751_index_htm/7.51/en-us/abenlogexp_strings.htm)
+make an initial string or all-blank c subject match under CS only when the
+pattern is an initial string or all-blank c. NS negates that result. CA/NA
+respect both operands' blanks; CP/NP retain their wildcard, escaped-blank and
+fixed-subject handling. The initial-subject probes cover string and c patterns,
+and retain the non-initial c(3) 'A' CS string `A ` regression through IF and WHERE.
+These are supplied/documentation-backed expectations; no SAP system was called.
+
+An absent OTHERS assignment is now -1 in the IR and both classic handlers.
+Explicit zero remains a real mapping: MESSAGE RAISING and classic RAISE leave
+the callee and assign caller subrc 0, including compiled function modules.
+Caller scopes use the resolved interface~method key, as do raising methods;
+alias, explicit-interface and interface-reference calls agree.
+
+The existing Sy binding supplies a NUMC(3) message-number pointer initialized
+to "000" on first access. Both expression and reference reads use it, keeping
+zero-value sessions usable and preserving subsequent MESSAGE values. The other
+message fields retain their initial c representation (empty storage string).
+The Go/JS semantics probes independently check initial message fields and CS.
+
+Round 5 verification: frontend/emission 50/50; semantics 183 Go + 183 JS,
+plus 9 expected refusals; fixture 40/40 classes compiled, 121/121 SUCCESS;
+unit harness 23/23 with no skipped tests; abap, charsearch, timestamp and
+charsection normal and race tests passed. The changed-branch budget exits 0.
+Existing named-zone and host capability refusals from earlier rounds remain.
+Raw red/green evidence is `.local/adt/red5.txt` and `green5.txt`; regression
+logs are `.local/adt/round5-*.log`. Heavy runs used range 90-99. Go's cache
+was redirected into this directory, with GOFLAGS=-buildvcs=false for the
+previously documented disposable-build stamping issue.

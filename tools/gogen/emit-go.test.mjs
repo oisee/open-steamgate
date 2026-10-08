@@ -480,3 +480,50 @@ func TestFlatString(t *testing.T) {
     rmSync(goDir, {recursive: true, force: true});
   }
 });
+
+test("ADT JS host refusals and initial message fields are explicit", async () => {
+  const {emitJs} = await import("./emit-js.mjs");
+  const {pathToFileURL} = await import("node:url");
+  mkdirSync(join(here, ".out"), {recursive: true});
+  const dir = mkdtempSync(join(here, ".out", "adt-js-"));
+  try {
+    writeFileSync(join(dir, "zcl_adt_jscheck.clas.abap"), `
+CLASS zcl_adt_jscheck DEFINITION PUBLIC FINAL CREATE PUBLIC.
+ PUBLIC SECTION.
+ CLASS-METHODS stamp.
+ CLASS-METHODS reverse.
+ CLASS-METHODS msg EXCEPTIONS failed.
+ CLASS-METHODS fields RETURNING VALUE(rv) TYPE string.
+ENDCLASS.
+CLASS zcl_adt_jscheck IMPLEMENTATION.
+ METHOD stamp.
+ DATA ts TYPE p LENGTH 8 DECIMALS 0 VALUE '20261007231500'.
+ DATA d TYPE d.
+ CONVERT TIME STAMP ts TIME ZONE 'UTC' INTO DATE d.
+ ENDMETHOD.
+ METHOD reverse.
+ DATA ts TYPE p LENGTH 8 DECIMALS 0.
+ DATA d TYPE d VALUE '20261007'.
+ DATA t TYPE t.
+ CONVERT DATE d TIME t INTO TIME STAMP ts TIME ZONE 'UTC'.
+ ENDMETHOD.
+ METHOD msg.
+ MESSAGE s001(00) RAISING failed.
+ ENDMETHOD.
+ METHOD fields.
+ rv = |{ sy-msgid }/{ sy-msgno }/{ sy-msgty }/{ sy-msgv1 }/{ sy-msgv2 }/{ sy-msgv3 }/{ sy-msgv4 }|.
+ ENDMETHOD.
+ENDCLASS.`);
+    const program = compileProgram({folders: [dir], objects: ["ZCL_ADT_JSCHECK"]});
+    assert.deepEqual(program.skipped, []);
+    writeFileSync(join(dir, "out.mjs"), emitJs(program, pathToFileURL(join(here, "js", "abap.mjs")).href));
+    const {ZCL_ADT_JSCHECK: cls} = await import(pathToFileURL(join(dir, "out.mjs")).href);
+    const s = {sy: {}};
+    for (const [method, helper] of [["STAMP", "ConvertTimestampInto"], ["REVERSE", "ConvertDateTimeInto"], ["MSG", "MessageRaise"]]) {
+      assert.throws(() => cls[method](s), (e) => e.cls === "NOT_COMPILED" && e.message.includes(helper));
+    }
+    assert.equal(cls.FIELDS(s), "/000/////");
+    Object.assign(s.sy, {msgid: "00", msgno: "001", msgty: "E", msgv1: "one", msgv2: "two", msgv3: "three", msgv4: "four"});
+    assert.equal(cls.FIELDS(s), "00/001/E/one/two/three/four");
+  } finally { rmSync(dir, {recursive: true, force: true}); }
+});

@@ -15,8 +15,8 @@
   ],
   "budgets": {
     "go:abap": {
-      "lines": 11754,
-      "reason": "ADT batch 1 (adt-i5 cases 1-7): Session message fields, classic exception binding, date/time and signed MOVE adapters, object-wrapper identity, STORE answer projection and conservative ADT host answers; timestamp conversion lives in go/timestamp. Includes the merged main baseline and the narrow UTF-16 adapter required to remove charsection dependency on abap."
+      "lines": 11807,
+      "reason": "osgo 026/029 (#658, #659): UTF-16 units and class statics per Session (carve-out queued, stoker QUEUE #33). ADT batch 1 (adt-i5 cases 1-7): Session message fields (sy-msgno as NUMC 3), MESSAGE RAISING binding with scoped restoration, classic exceptions keyed by the resolved interface method, date/time and signed MOVE adapters, object-wrapper identity, STORE answer projection and conservative ADT host answers; timestamp conversion lives in go/timestamp."
     },
     "go:abaperr": {
       "lines": 13,
@@ -43,8 +43,8 @@
       "reason": "byte REPLACE/FIND section spans; independent of go/abap"
     },
     "go:charsearch": {
-      "lines": 58,
-      "reason": "baseline 2026-10-01"
+      "lines": 85,
+      "reason": "osgo 026/029 (#658, #659, 2026-10-08): UTF-16 units with the surrogate-half invariant and class statics per Session; carving utf16/statics out of go/abap is queued (stoker QUEUE #33); ADT batch 1 (round 5 finding 1): CS preserves the initial fixed-character subject rule alongside padding and fdpos."
     },
     "go:classname": {
       "lines": 31,
@@ -75,8 +75,8 @@
       "reason": "sy-sysid from the one system id (go/sysid, tools/osd-identity.mjs), 2026-10-02; rebased over #453"
     },
     "go:cmd/osgo": {
-      "lines": 1251,
-      "reason": "ADT session binding per request (adt_session.go: USE_SESSION around the ADT dialog step); it calls generated ADT symbols, so it lives in cmd/osgo; SYSTEM IDENTITY installs osgo's selected SID and Node's ADT client/user derivation"
+      "lines": 1269,
+      "reason": "ADT on osgo: /sap/bc/adt mount behind -adt, compiler sidecar status and storecompiler wiring, the ADT session bound per request (adt_session.go: USE_SESSION around the dialog step; generated symbols keep it in cmd/osgo), SYSTEM IDENTITY from the selected SID with Node's ADT client/user derivation"
     },
     "go:cmd/storecmp": {
       "lines": 171,
@@ -127,8 +127,8 @@
       "reason": "recorded by --update"
     },
     "go:objstore": {
-      "lines": 1825,
-      "reason": "ADT on osgo slice 1a round 1: Node-parity layer metadata, retained active reads, package ordering/empty descriptions, and deterministic HISTORY semantics; package index extraction remains a later carve-out; round 2: Node's VFS object order; round 3: Node-exact state without a live generation and repository-name refusal; SYSTEM IDENTITY and Node-exact kind refusals"
+      "lines": 1989,
+      "reason": "Store parity with Node: layers, retained active reads, packages, HISTORY; injectable compiler for CHECK/PARSE OUTLINE (conversion lives in storecompiler); SYSTEM IDENTITY and Node-exact kind refusals. Carving SYSTEM into its own package is queued."
     },
     "go:reportargs": {
       "lines": 209,
@@ -143,16 +143,16 @@
       "reason": "carved out of go/abap/dataset.go (wave 2, docs/gogen-go-packages.md)"
     },
     "go:session": {
-      "lines": 53,
-      "reason": "baseline 2026-10-01"
+      "lines": 54,
+      "reason": "osgo 026/029 (#658, #659, 2026-10-08): UTF-16 units with the surrogate-half invariant and class statics per Session; carving utf16/statics out of go/abap is queued (stoker QUEUE #33)"
     },
     "go:shiftleft": {
       "lines": 9,
       "reason": "baseline 2026-10-01"
     },
     "go:subwrite": {
-      "lines": 10,
-      "reason": "baseline 2026-10-01"
+      "lines": 28,
+      "reason": "osgo 026/029 (#658, #659, 2026-10-08): UTF-16 units with the surrogate-half invariant and class statics per Session; carving utf16/statics out of go/abap is queued (stoker QUEUE #33)"
     },
     "go:sxmlscan": {
       "lines": 42,
@@ -195,20 +195,20 @@
       "reason": "lowered 2026-10-02: the YAML line index went to tools/dsl-yaml-lines.mjs; holds the range: of L3 slice 3a"
     },
     "tools/gogen/emit-go.mjs": {
-      "lines": 2346,
-      "reason": "ADT batch 1 (adt-i5 cases 1-7): Emit t2i through the runtime binding and pass the narrow UTF-16 host adapter to charsection; includes the merged main emitter baseline."
+      "lines": 2349,
+      "reason": "osgo 026/029 (#658, #659, 2026-10-08): UTF-16 units with the surrogate-half invariant and class statics per Session; carving utf16/statics out of go/abap is queued (stoker QUEUE #33); ADT batch 1 (adt-i5 cases 1-7): Emit t2i through the runtime binding and pass the narrow UTF-16 host adapter to charsection; includes the merged main emitter baseline. Critic round 1: immediate caller MESSAGE RAISING assignments and scoped restoration, including calls without EXCEPTIONS. ADT batch 1 (round 5 finding 4): normalize zero session message-number storage on typed NUMC(3) reads."
     },
     "tools/gogen/emit-js.mjs": {
       "lines": 1206,
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/frontend.mjs": {
-      "lines": 6858,
-      "reason": "ADT batch 1 (adt-i5 cases 1-7): Lower string WHERE predicates through existing logical IR; bind CONVERT, MESSAGE RAISING, sy-msg fields, STORE parameters, date/time calculation types, object re-raise and conservative ADT kernel answers."
+      "lines": 6862,
+      "reason": "ADT batch 1 (adt-i5 cases 1-7): Lower string WHERE predicates through existing logical IR; bind CONVERT, MESSAGE RAISING, sy-msg fields, STORE parameters, date/time calculation types, object re-raise and conservative ADT kernel answers. Critic round 1: shared fixed-character comparison conversion and CP escaped/trailing blank binding semantics."
     },
     "tools/gogen/go/abap/abap.go": {
-      "lines": 236,
-      "reason": "ADT batch 1 (adt-i5 cases 1-7): Keep sy-msgid/msgno/msgty/msgv1-4 in the session alongside existing system fields."
+      "lines": 246,
+      "reason": "osgo 026/029 (#658, #659, 2026-10-08): UTF-16 units with the surrogate-half invariant and class statics per Session; carving utf16/statics out of go/abap is queued (stoker QUEUE #33); ADT batch 1 (adt-i5 cases 1-7): Keep sy-msgid/msgno/msgty/msgv1-4 in the session alongside existing system fields. Critic round 1: immediate caller MESSAGE RAISING assignments and scoped restoration, including calls without EXCEPTIONS. ADT batch 1 (round 5 finding 4): normalize zero session message-number storage on typed NUMC(3) reads."
     },
     "tools/gogen/go/abap/apc.go": {
       "lines": 39,
@@ -219,8 +219,8 @@
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/go/abap/codepage.go": {
-      "lines": 76,
-      "reason": "baseline 2026-10-01"
+      "lines": 113,
+      "reason": "osgo 026/029 (#658, #659, 2026-10-08): UTF-16 units with the surrogate-half invariant and class statics per Session; carving utf16/statics out of go/abap is queued (stoker QUEUE #33)"
     },
     "tools/gogen/go/abap/conv.go": {
       "lines": 1096,
@@ -275,8 +275,8 @@
       "reason": "wave 0 of docs/gogen-go-packages.md (#411): helper moved within go/abap as core glue, per the plan"
     },
     "tools/gogen/go/abap/events.go": {
-      "lines": 238,
-      "reason": "baseline 2026-10-01"
+      "lines": 241,
+      "reason": "osgo 026/029 (#658, #659, 2026-10-08): UTF-16 units with the surrogate-half invariant and class statics per Session; carving utf16/statics out of go/abap is queued (stoker QUEUE #33)"
     },
     "tools/gogen/go/abap/filedialog.go": {
       "lines": 94,
@@ -347,8 +347,8 @@
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/go/abap/move.go": {
-      "lines": 223,
-      "reason": "ADT batch 1 (adt-i5 cases 1-7): Bind integer-to-character MOVE to existing packed signed formatting and expose the existing UTF-16 operations through the narrow CharacterOps adapter."
+      "lines": 214,
+      "reason": "ADT batch 1 (adt-i5 cases 1-7): signed MOVE and date/time calculation-type adapters"
     },
     "tools/gogen/go/abap/movecorr.go": {
       "lines": 34,
@@ -379,8 +379,8 @@
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/go/abap/registry.go": {
-      "lines": 168,
-      "reason": "ADT batch 1 (adt-i5 cases 1-7): Keep MESSAGE RAISING next to ClassicException: assign session message fields and raise the existing classic exception type."
+      "lines": 191,
+      "reason": "ADT batch 1 (adt-i5 cases 1-7): Keep MESSAGE RAISING next to ClassicException: assign session message fields and raise the existing classic exception type. Critic round 1: immediate caller MESSAGE RAISING assignments and scoped restoration, including calls without EXCEPTIONS."
     },
     "tools/gogen/go/abap/row_binding.go": {
       "lines": 175,
@@ -399,16 +399,16 @@
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/go/abap/shift.go": {
-      "lines": 21,
-      "reason": "baseline 2026-10-01"
+      "lines": 65,
+      "reason": "osgo 026/029 (#658, #659, 2026-10-08): UTF-16 units with the surrogate-half invariant and class statics per Session; carving utf16/statics out of go/abap is queued (stoker QUEUE #33)"
     },
     "tools/gogen/go/abap/store.go": {
       "lines": 126,
       "reason": "ADT batch 1 (adt-i5 cases 1-7): Forward scalar backend JSON/state answers and project SUBJECT_FULL with reflection for compatibility with older store backends."
     },
     "tools/gogen/go/abap/strings.go": {
-      "lines": 544,
-      "reason": "baseline 2026-10-01"
+      "lines": 636,
+      "reason": "osgo 026/029 (#658, #659, 2026-10-08): UTF-16 units with the surrogate-half invariant and class statics per Session; carving utf16/statics out of go/abap is queued (stoker QUEUE #33)"
     },
     "tools/gogen/go/abap/sxmlscan.go": {
       "lines": 12,
@@ -447,8 +447,8 @@
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/js/abap.mjs": {
-      "lines": 1654,
-      "reason": "baseline 2026-10-01"
+      "lines": 1671,
+      "reason": "baseline 2026-10-01; critic round 1: JS time conversion and exception identity. ADT batch 1 (round 5 finding 1): preserve initial c subject CS semantics."
     },
     "tools/lift.mjs": {
       "lines": 1225,
@@ -506,8 +506,24 @@
       "lines": 1006,
       "reason": "#641 zip layers: user source layers (zip cache + overlay) enter the build inputs and the generation hash"
     },
+    "tools/gogen/go/abap/utf16.go": {
+      "lines": 412,
+      "reason": "osgo 026/029 (#658, #659, 2026-10-08): UTF-16 units with the surrogate-half invariant and class statics per Session; carving utf16/statics out of go/abap is queued (stoker QUEUE #33)"
+    },
+    "tools/gogen/go/abap/statics.go": {
+      "lines": 47,
+      "reason": "osgo 026/029 (#658, #659, 2026-10-08): UTF-16 units with the surrogate-half invariant and class statics per Session; carving utf16/statics out of go/abap is queued (stoker QUEUE #33)"
+    },
+    "go:compiler": {
+      "lines": 935,
+      "reason": "Fix1: optional logicalPath per snapshot file and optional saved CHECK mode preserve contract v1; per-occurrence mappings permit multiple logical includes backed by one shared digest file."
+    },
+    "go:storecompiler": {
+      "lines": 77,
+      "reason": "Fix1: adapter owns availability, saved-registry CHECK mode, explicit per-file logical mappings, active hash proof and all diagnostic-to-Issue conversion outside objstore."
+    },
     "go:timestamp": {
-      "lines": 58,
+      "lines": 52,
       "reason": "ADT batch 1 (adt-i5 cases 1-7): Independent UTC/initial-zone timestamp conversion with validation, subrc results and explicit unsupported-zone errors; no runtime imports."
     }
   },

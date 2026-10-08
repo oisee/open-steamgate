@@ -1,10 +1,32 @@
-package charsection_test
+package charsection
 
 import (
-	"osg/gogen/abap"
-	"osg/gogen/charsection"
+	"strings"
 	"testing"
 )
+
+// runes is a Text over Go runes: enough to test the splice and the fitting
+// here; go/abap's UTF-16 implementation is tested in go/abap.
+type runes struct{}
+
+func (runes) Len(s string) int32 { return int32(len([]rune(s))) }
+func (runes) Sub(s string, off, length int32) string {
+	r := []rune(s)
+	if length < 0 {
+		return string(r[off:])
+	}
+	return string(r[off : off+length])
+}
+func (runes) Fit(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n])
+	}
+	return s
+}
+func (t runes) Pad(s string, n int) string {
+	return s + strings.Repeat(" ", max(0, n-int(t.Len(s))))
+}
+func (runes) Join(parts ...string) string { return strings.Join(parts, "") }
 
 func TestReplace(t *testing.T) {
 	for _, c := range []struct {
@@ -21,7 +43,7 @@ func TestReplace(t *testing.T) {
 		{"abcd", "", 1, 2, -1, "ad", 0},
 		{"abcd", "X", 1, -2147483648, -1, "aX", 0},
 	} {
-		got, rc := charsection.Replace(abap.CharacterOps{}, c.base, c.with, c.off, c.n, c.limit)
+		got, rc := Replace(runes{}, c.base, c.with, c.off, c.n, c.limit)
 		if got != c.want || rc != c.rc {
 			t.Fatalf("%+v: got %q, %d", c, got, rc)
 		}
@@ -36,26 +58,7 @@ func TestBoundsBeforeSplice(t *testing.T) {
 					t.Errorf("no bounds error for %v", c)
 				}
 			}()
-			charsection.Replace(abap.CharacterOps{}, "abcd", "X", c[0], c[1], -1)
+			Replace(runes{}, "abcd", "X", c[0], c[1], -1)
 		}()
-	}
-}
-
-func TestReplaceUTF16(t *testing.T) {
-	for _, tc := range []struct {
-		base, with string
-		off, n     int32
-		limit      int
-		want       string
-		rc         int32
-	}{
-		{"😀A", "B", 2, 1, -1, "😀B", 0},
-		{"😀A", "X", 1, 1, -1, "\xed\xa0\xbdXA", 0},
-		{"😀A", "😀", 2, 1, 3, "😀\xed\xa0\xbd", 2},
-	} {
-		got, rc := charsection.Replace(abap.CharacterOps{}, tc.base, tc.with, tc.off, tc.n, tc.limit)
-		if got != tc.want || rc != tc.rc {
-			t.Fatalf("%+v: %x %d", tc, got, rc)
-		}
 	}
 }

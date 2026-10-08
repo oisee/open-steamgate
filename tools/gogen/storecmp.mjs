@@ -15,6 +15,8 @@
 import {execFileSync} from "node:child_process";
 import {cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {join, resolve} from "node:path";
+import {buildFixture} from "../osgo-store-fixture.mjs";
+import {compilerCases, compilerAnswers, compilerGapCases, prepareCompilerFixture} from "../osgo-store-goldens.mjs";
 import {home} from "./home.mjs";
 import {storeConfig} from "./store.mjs";
 import {ADT_SCALARS, adtStoreSignature} from "./storecmp-signature.mjs";
@@ -46,27 +48,28 @@ async function nodeCall(destination, call) {
   return {scalars, objects: answer.ET_OBJECT, issues: answer.ET_ISSUE, types: answer.ET_TYPE, revisions: answer.ET_REVISION};
 }
 
-async function nodeAdapterCall(destination, call) {
+async function nodeAdapterCall(destination, call, fields = ADT_TABLES, scalars = ADT_SCALARS) {
   const signature = {
     exporting: Object.fromEntries(Object.entries(call).map(([key, value]) => [key.toLowerCase(), box(value)])),
-    importing: Object.fromEntries(ADT_SCALARS.map((key) => [key.toLowerCase(), box()])),
-    tables: Object.fromEntries(Object.entries(ADT_TABLES).map(([key, fields]) => [key.toLowerCase(), table(fields)])),
+    importing: Object.fromEntries(scalars.map((key) => [key.toLowerCase(), box()])),
+    tables: Object.fromEntries(Object.entries(fields).map(([key, rowFields]) => [key.toLowerCase(), table(rowFields)])),
   };
   await destination.call("ZOSD_STORE", signature);
   return {
-    scalars: Object.fromEntries(ADT_SCALARS.map((key) => [key, String(signature.importing[key.toLowerCase()].get())])),
+    scalars: Object.fromEntries(scalars.map((key) => [key, String(signature.importing[key.toLowerCase()].get())])),
     objects: rowsOf(signature, "ET_OBJECT"),
     revisions: rowsOf(signature, "ET_REVISION"),
+    ...(fields.ET_ISSUE ? {issues:rowsOf(signature, "ET_ISSUE"), types:rowsOf(signature, "ET_TYPE")} : {}),
   };
 }
 
-function goCalls(tree, config, calls, signature = null) {
+function goCalls(tree, config, calls, signature = null, sidecar = null) {
   const configFile = join(out, `config-${Date.now()}.json`);
   writeFileSync(configFile, JSON.stringify(config));
   const input = signature === null ? calls : {calls, ...signature};
-  const raw = execFileSync("go", ["run", "./cmd/storecmp", "-root", tree, "-config", configFile],
-    {cwd: join(here, "go"), input: JSON.stringify(input), maxBuffer: 1 << 30}).toString();
-  if (signature !== null) return JSON.parse(raw).map((answer) => ({scalars: answer.Scalars, objects: answer.Objects, revisions: answer.Revisions}));
+  const raw = execFileSync("go", ["run", "./cmd/storecmp", "-root", tree, "-config", configFile, ...(sidecar === null ? [] : ["-compiler"])],
+    {cwd: join(here, "go"), input: JSON.stringify(input), env: {...process.env, OSGO_SIDECAR:sidecar ?? "/nonexistent/osgo-sidecar"}, timeout:120000, maxBuffer: 1 << 30}).toString();
+  if (signature !== null) return JSON.parse(raw).map((answer) => ({scalars: answer.Scalars, objects: answer.Objects, revisions: answer.Revisions, issues: answer.Issues, types: answer.Types}));
   return JSON.parse(raw).map((a) => ({scalars: a.Scalars, objects: a.Objects ?? [], issues: a.Issues ?? [],
     revisions: a.Revisions ?? [], types: (a.Types ?? []).map((t) => ({TYPE: t.TYPE, COUNT: t.COUNT}))}));
 }
@@ -75,7 +78,7 @@ function goCalls(tree, config, calls, signature = null) {
 function comparable(answer, touched = new Set()) {
   const scalars = Object.fromEntries(Object.entries(answer.scalars).filter(([k]) => k !== "EV_MS").sort(([a], [b]) => a.localeCompare(b)));
   const objects = answer.objects.map((o) => ({...o, CHANGED_AT: touched.has(o.FILE) ? "(written)" : o.CHANGED_AT}));
-  const issues = answer.issues.map((i) => ({...i, LINE: Number(i.LINE), COL: Number(i.COL)}));
+  const issues = answer.issues.map(i => Object.fromEntries(Object.entries({...i, LINE:Number(i.LINE), COL:Number(i.COL)}).sort(([a],[b]) => a.localeCompare(b))));
   const types = answer.types.map((t) => ({TYPE: t.TYPE, COUNT: Number(t.COUNT)}));
   return JSON.stringify({scalars, objects, issues, types, revisions: answer.revisions});
 }
@@ -320,4 +323,66 @@ for (const file of [...touched, "../ZOSD_ESCAPE", "src/osd/..#..#zosd_escape.pro
   if (!ok) bad += 1;
   console.log(`${ok ? "ok  " : "FAIL"} file ${file}: ${n === undefined ? "absent" : `${n.length} bytes`} / ${g === undefined ? "absent" : `${g.length} bytes`}`);
 }
+
+// CHECK and OUTLINE compare every exporting field and table, including the
+// byte-exact EV_JSON. The adapter's existing expected gaps remain ratcheted.
+const compilerTree = await buildFixture();
+try {
+  await prepareCompilerFixture(compilerTree);
+  const launcher = join(compilerTree,"osd");
+  const quote = value => "'" + value.replaceAll("'", "'\\''") + "'";
+  writeFileSync(launcher, `#!/bin/sh\nexec ${quote(process.execPath)} ${quote(join(tools,"bin/osd.mjs"))} "$@"\n`,{mode:0o700});
+  const facts = await storeConfig(compilerTree,{storeModule:`${tools}/tools/osd-store.mjs`});
+  const calls = compilerCases.map(([,call])=>call);
+  const nodeAnswers = await compilerAnswers(compilerTree);
+  const goAnswers = goCalls(compilerTree,facts,calls,null,launcher);
+  for (let i=0;i<calls.length;i++) {
+    const [name]=compilerCases[i];
+    const answer=nodeAnswers[name];
+    compare(name,{scalars:Object.fromEntries(Object.entries(answer).filter(([k])=>k.startsWith("EV_"))),objects:answer.ET_OBJECT,issues:answer.ET_ISSUE,types:answer.ET_TYPE,revisions:answer.ET_REVISION},goAnswers[i]);
+  }
+  // Exercise the RFC adapter with a complete caller signature. The generated
+  // front's IV_JSON/EV_JSON omissions remain separately ratcheted above.
+  const compilerTables = {...ADT_TABLES, ...Object.fromEntries(["ISSUE", "TYPE"].map(kind => ["ET_"+kind,
+    [...readFileSync(join(tools, `src/webgui/zosd_${kind.toLowerCase()}_s.tabl.xml`), "utf8").matchAll(/<FIELDNAME>([^<]+)<\/FIELDNAME>/g)].map(m => m[1].toLowerCase())]))};
+  const compilerScalars = Object.keys(nodeAnswers[compilerCases[0][0]]).filter(key => key.startsWith("EV_"));
+  const compilerSignature = {inputs:Object.fromEntries(calls.flatMap(call => Object.keys(call)).map(key => [key,true])),
+    imports:Object.fromEntries(compilerScalars.map(key => [key,true])),
+    tables:Object.fromEntries(Object.keys(compilerTables).map(key => [key,true])),
+    tableFields:Object.fromEntries(Object.entries(compilerTables).map(([key, fields]) => [key,fields.map(field => field.toUpperCase())]))};
+  const goCompilerAdapter = goCalls(compilerTree,facts,calls,compilerSignature,launcher);
+  for (let i=0;i<calls.length;i++) {
+    const node = await nodeAdapterCall(new StoreDestination({store:new ObjectStore({root:compilerTree})}),calls[i],compilerTables,compilerScalars);
+    compare(`compiler adapter ${compilerCases[i][0]}`,node,goCompilerAdapter[i]);
+  }
+  console.log(`compiler adapter: ${calls.length} CHECK and OUTLINE answers compared with complete RFC caller signature`);
+  const gapCalls = compilerGapCases.map(([,call])=>call);
+  const nodeGapAnswers = await Promise.all(gapCalls.map(call => {
+    const destination = new StoreDestination({store:new ObjectStore({root:compilerTree})});
+    return destination.execute(call);
+  }));
+  const goGapAnswers = goCalls(compilerTree,facts,gapCalls,null,launcher);
+  for (let i=0;i<gapCalls.length;i++) {
+    const [name] = compilerGapCases[i];
+    const node = nodeGapAnswers[i], go = goGapAnswers[i];
+    if (!Array.isArray(node.ET_ISSUE) || node.ET_ISSUE.length === 0 || !go.scalars.EV_ERROR.includes("UNSUPPORTED_OP: CHECK with IV_SOURCE")) {
+      bad++;console.log(`FAIL compiler gap ${name}: node issues ${node.ET_ISSUE?.length ?? "none"}, go ${go.scalars.EV_ERROR || "(none)"}`);
+    } else {
+      console.log(`compiler gap (ratcheted): ${name}`);
+    }
+  }
+  const absentCalls = [calls[0], ...compilerCases.filter(([name]) => name.startsWith("outline-")).map(([, call]) => call),
+    {IV_COMMAND:"CHECK", IV_TYPE:"CLAS", IV_NAME:"ZMISSING"},
+    {IV_COMMAND:"CHECK", IV_TYPE:"CLAS", IV_NAME:"ZCL_VALID"}];
+  const standalone = goCalls(compilerTree,facts,absentCalls);
+  const absent = goCalls(compilerTree,facts,absentCalls,null,"/nonexistent/osgo-sidecar");
+  for (let i=0;i<absent.length;i++) {
+    if (comparable(absent[i])!==comparable(standalone[i]) || !absent[i].scalars.EV_ERROR) {
+      bad++;console.log(`FAIL compiler absent #${i}: ${JSON.stringify(absent[i])}`);
+    }
+  }
+  if (!absent[0].scalars.EV_ERROR.includes("check needs the compiler") || absent[1].scalars.EV_ERROR!=="unknown store command PARSE") {bad++;console.log("FAIL original compiler refusal text");}
+  console.log(`compiler: ${calls.length} CHECK and OUTLINE answers compared with real sidecar`);
+  console.log("compiler absent: original CHECK and PARSE refusals");
+} finally {rmSync(compilerTree,{recursive:true,force:true});}
 process.exit(bad ? 1 : 0);

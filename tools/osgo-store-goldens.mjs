@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import {mkdir, readFile, rm, writeFile} from "node:fs/promises";
+import {mkdir, readFile, rm, writeFile, symlink} from "node:fs/promises";
 import {readdirSync} from "node:fs";
 import {spawnSync} from "node:child_process";
 import {dirname, resolve} from "node:path";
@@ -43,6 +43,47 @@ export const cases = [
   ["history-include", {IV_COMMAND: "HISTORY", IV_TYPE: "CLAS", IV_NAME: "ZCLASS", IV_INCLUDE: "macros"}, "EV_COUNT"],
 ];
 
+// Shared by frozen goldens and storecmp's real-sidecar proof. Compiler inputs
+// live in the same fixture repository, with a real active generation.
+export const compilerCases = [
+  ["check-clean", {IV_COMMAND:"CHECK", IV_TYPE:"CLAS", IV_NAME:"ZCL_VALID"}, "EV_JSON"],
+  ["check-saved-dependency", {IV_COMMAND:"CHECK", IV_TYPE:"CLAS", IV_NAME:"ZCL_DRAFT_READER"}, "EV_JSON"],
+  ["outline-unproven", {IV_COMMAND:"PARSE", IV_JSON:JSON.stringify({kind:"OUTLINE",type:"CLAS",name:"ZCL_VALID",version:"active"})}, "EV_JSON"],
+  ["check-syntax", {IV_COMMAND:"CHECK", IV_TYPE:"CLAS", IV_NAME:"ZCL_BAD"}, "EV_JSON"],
+  ["check-include", {IV_COMMAND:"CHECK", IV_TYPE:"CLAS", IV_NAME:"ZCLASS"}, "EV_JSON"],
+  ...["active", "inactive"].flatMap(version => [
+    [`outline-class-${version}`, {IV_COMMAND:"PARSE", IV_JSON:JSON.stringify({kind:"OUTLINE",type:"CLAS",name:"ZCLASS",version})}, "EV_JSON"],
+    [`outline-program-${version}`, {IV_COMMAND:"PARSE", IV_JSON:JSON.stringify({kind:"OUTLINE",type:"PROG",name:"ZPROGRAM",version})}, "EV_JSON"],
+  ]),
+  ["outline-missing", {IV_COMMAND:"PARSE", IV_JSON:JSON.stringify({kind:"OUTLINE",type:"CLAS",name:"ZMISSING"})}, "EV_JSON"],
+];
+
+// Node checks these directly through its in-memory unsaved buffer. Contract
+// v1 snapshots contain only named files and hashes, so the Go side refuses.
+export const compilerGapCases = [
+  ["check-unsaved-source", {IV_COMMAND:"CHECK", IV_TYPE:"CLAS", IV_NAME:"ZCL_VALID", IV_SOURCE:"CLASS zcl_valid DEFINITION PUBLIC.\nENDCLASS."}],
+];
+
+export async function prepareCompilerFixture(root) {
+  await writeFile(resolve(root,"abap_transpile.json"), JSON.stringify({input_folder:["src"],libs:[]}));
+  await writeFile(resolve(root,"abaplint.jsonc"), JSON.stringify({syntax:{version:"v702"}}));
+  await symlink("by-input/test",resolve(root,"build/live"));
+  const source = method => `CLASS zcl_valid DEFINITION PUBLIC.\n PUBLIC SECTION.\n METHODS ${method}.\nENDCLASS.\nCLASS zcl_valid IMPLEMENTATION.\n METHOD ${method}.\n ENDMETHOD.\nENDCLASS.\n`;
+  await writeFile(resolve(root,"src/zcl_valid.clas.abap"),source("run"));
+  const store = new ObjectStore({root});
+  store.write("CLAS", "ZCL_DRAFT_DEP", source("run").replaceAll("zcl_valid", "zcl_draft_dep").replace("METHODS run", "CLASS-METHODS run"));
+  store.write("CLAS", "ZCL_DRAFT_READER", source("run").replaceAll("zcl_valid", "zcl_draft_reader").replace(" METHOD run.", " METHOD run.\n zcl_draft_dep=>run( )."));
+  await writeFile(resolve(root,"src/zcl_bad.clas.abap"),source("a".repeat(31)).replaceAll("zcl_valid","zcl_bad"));
+  await writeFile(resolve(root,"src/osd/zclass.clas.abap"), source("edited").replaceAll("zcl_valid","zclass"));
+}
+
+export async function compilerAnswers(root) {
+  const destination = new StoreDestination({store:new ObjectStore({root})});
+  const answers={};
+  for (const [name,parameters] of compilerCases) answers[name]=await destination.execute(parameters);
+  return answers;
+}
+
 function normalize(value) {
   const visit = (node) => Array.isArray(node)
     ? node.map(visit)
@@ -58,7 +99,9 @@ export async function destinationAnswers() {
   const root = await buildFixture();
   const packages = process.env.OSD_LOCAL_PACKAGES;
   try {
-    return await answersIn(root);
+    const ordinary = JSON.parse(await answersIn(root));
+    await prepareCompilerFixture(root);
+    return normalize({...ordinary,...await compilerAnswers(root)});
   } finally {
     if (packages === undefined) delete process.env.OSD_LOCAL_PACKAGES;
     else process.env.OSD_LOCAL_PACKAGES = packages;

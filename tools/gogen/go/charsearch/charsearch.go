@@ -45,7 +45,12 @@ func Reverse(v string) string {
 
 // WithPos folds case without losing WTF-8 halves and records the position
 // in the original subject. Sharp-s expansion is retained for matching only.
-func WithPos(s *abap.Session, a, b string) bool {
+func WithPos(s *abap.Session, a, b string, fixed ...bool) bool {
+	// CS has a special initial-subject rule; padding alone loses the type.
+	if (a == "" || (len(fixed) > 0 && fixed[0] && strings.TrimRight(a, " ") == "")) && b != "" {
+		s.Sy.Fdpos = abap.Strlen(a)
+		return false
+	}
 	upper := func(v string) string { return abap.ToUpper(strings.ReplaceAll(v, "ß", "SS")) }
 	left, right := upper(a), upper(b)
 	pos := int32(0)

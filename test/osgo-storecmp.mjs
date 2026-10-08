@@ -43,5 +43,8 @@ describe("OSGo store command parity", function() {
       }
     }
     assert.match(result.stdout, /history: 2 revisions compared through execute and adapter/);
+    assert.match(result.stdout, /compiler: \d+ CHECK and OUTLINE answers compared with real sidecar/);
+    assert.match(result.stdout, /compiler adapter: \d+ CHECK and OUTLINE answers compared with complete RFC caller signature/);
+    assert.match(result.stdout, /compiler absent: original CHECK and PARSE refusals/);
   });
 });

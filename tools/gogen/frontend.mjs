@@ -1002,7 +1002,7 @@ function callFunction(node, ctx, text) {
           args.push({name: pname, value: convert(target, {k: "data"})});
         }
       } else if (isExpr(k, Expressions.ParameterListExceptions)) {
-        exceptions = {map: {}, others: 0};
+        exceptions = {map: {}, others: -1};
         for (const x of k.findDirectExpressions(Expressions.ParameterException)) {
           const v = x.findDirectExpression(Expressions.Integer);
           if (!v) throw new Unsupported(`EXCEPTIONS with a value that is not a number: ${x.concatTokens()}`);
@@ -1049,10 +1049,10 @@ function compiledFunctionCall(node, ctx, text, name) {
           targets.set(upper(p.findDirectExpression(Expressions.ParameterName).concatTokens()), {kw, target: lvalue(p.findDirectExpression(Expressions.Target), ctx)});
         }
       } else if (isExpr(k, Expressions.ParameterListExceptions)) {
-        exceptions = {map: {}, others: 0};
+        exceptions = {map: {}, others: -1};
         for (const x of k.findDirectExpressions(Expressions.ParameterException)) {
           const v = x.findDirectExpression(Expressions.Integer);
-          if (!v || Number(v.concatTokens()) === 0) throw new Unsupported(`EXCEPTIONS with a value that is not a number other than 0: ${x.concatTokens()}`);
+          if (!v) throw new Unsupported(`EXCEPTIONS with a value that is not a number: ${x.concatTokens()}`);
           const nm = x.findDirectExpression(Expressions.ParameterName);
           if (nm) exceptions.map[upper(nm.concatTokens())] = Number(v.concatTokens());
           else exceptions.others = Number(v.concatTokens());
@@ -2125,7 +2125,11 @@ function uniqueGuard(tableType, what) {
 function stringComparison(op, l, r) {
   const kinds = {CP: "cp", NP: "cp", CA: "ca", NA: "ca", CS: "cs", NS: "cs", CO: "co", CN: "co"};
   if (!kinds[op]) return null;
-  const c = {c: kinds[op], l: convert(l, S), r: convert(r, S), cpat: r.type.k === "c"};
+  const kind = kinds[op];
+  // CS keeps the subject's blanks; CA/CO keep both. CP keeps escaped
+  // pattern blanks and distinguishes fixed subjects from strings.
+  const c = {c: kind, l: padded(l), r: kind === "cs" ? convert(r, S) : padded(r),
+    cpat: r.type.k === "c", csubject: l.type.k === "c"};
   return ["NP", "NA", "NS", "CN"].includes(op) ? {c: "not", x: c} : c;
 }
 
@@ -2874,14 +2878,14 @@ function statement(node, ctx) {
     const values = node.findDirectExpressions(Expressions.MessageSourceSource).map((x) => convert(source(x, ctx), C(50)));
     if (values.length > 4) throw new Unsupported(`MESSAGE WITH more than four values: ${text}`);
     const name = {e: "str", value: upper(raising.concatTokens()), type: S};
-    const method = {e: "str", value: ctx.method.includes("~") ? ctx.method.split("~")[1] : ctx.method, type: S};
+    const method = {e: "str", value: ctx.method, type: S};
     return {s: "native", fn: "abap.MessageRaise", stmt: true, args: [id, ty, no, name, method, ...values].map((value) => ({value}))};
   }
   // RAISE name: a classic exception, for the caller's EXCEPTIONS list
   if (isStmt(node, Statements.Raise) && !/^RAISE\s+(EXCEPTION|RESUMABLE)\b/i.test(text)) {
     const n = node.findDirectExpression(Expressions.ExceptionName);
     if (!n) throw new Unsupported(`RAISE form: ${text}`);
-    return {s: "raise_classic", name: upper(n.concatTokens()), method: ctx.method.includes("~") ? ctx.method.split("~")[1] : ctx.method};
+    return {s: "raise_classic", name: upper(n.concatTokens()), method: ctx.method};
   }
   // CALL METHOD (class)=>m EXPORTING ...: a static method by class name,
   // through the program's registry of static methods
@@ -6132,7 +6136,7 @@ function call(chain, ctx, statement, hint) {
     // called ends it, and sy-subrc says which
     const exl = full.findDirectExpression(Expressions.ParameterListExceptions);
     if (exl) {
-      exceptions = {map: {}, others: 0};
+      exceptions = {map: {}, others: -1};
       for (const x of exl.findDirectExpressions(Expressions.ParameterException)) {
         const v = x.findDirectExpression(Expressions.Integer);
         if (!v) throw new Unsupported(`EXCEPTIONS with a value that is not a number: ${x.concatTokens()}`);
@@ -6194,7 +6198,7 @@ function call(chain, ctx, statement, hint) {
   // SUPER->constructor( ) of a chain where no superclass has a constructor does nothing
   if (sig.none) return {e: "nop_call", type: {k: "void"}};
   return {e: "call", method: qualified, static: sig.static, owner, receiver, sup, args, type: sig.returning?.type ?? {k: "void"},
-    exceptions, receiving, callee: name.includes("~") ? name.split("~")[1] : name};
+    exceptions, receiving, callee: qualified};
 }
 
 function defaultValue(p, ctx) {
