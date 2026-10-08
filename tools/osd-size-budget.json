@@ -71,8 +71,8 @@
       "reason": "sy-sysid from the one system id (go/sysid, tools/osd-identity.mjs), 2026-10-02; rebased over #453"
     },
     "go:cmd/osgo": {
-      "lines": 1210,
-      "reason": "ADT on osgo slice 1a round 1: /sap/bc/adt mount behind -adt / OSD_OSGO_ADT=1 through the testable real route matcher, runShim + DialogStep, NotCompiled -> 501"
+      "lines": 1229,
+      "reason": "ADT session binding per request (adt_session.go: USE_SESSION around the ADT dialog step); it calls generated ADT symbols, so it lives in cmd/osgo"
     },
     "go:cmd/storecmp": {
       "lines": 171,

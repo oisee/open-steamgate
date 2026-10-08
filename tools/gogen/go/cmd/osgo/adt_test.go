@@ -20,6 +20,37 @@ func TestADTEnabled(t *testing.T) {
 	}
 }
 
+func TestADTSessionBinding(t *testing.T) {
+	s := &abap.Session{}
+	var first ZIF_OSD_ADT_SESSION
+	withADTSession(s, func() {
+		first = St_ZCL_OSD_ADT_HANDLER(s).go_session
+		if first == nil || first.(*ZCL_OSD_ADT_SESSION).mv_ttl != 1800 {
+			t.Fatal("request did not bind a session with the Node TTL")
+		}
+	})
+	if St_ZCL_OSD_ADT_HANDLER(s).go_session != nil {
+		t.Fatal("session remained bound after request")
+	}
+	const marker = "request dump"
+	func() {
+		defer func() {
+			if got := recover(); got != marker {
+				t.Fatalf("dump changed: %v", got)
+			}
+		}()
+		withADTSession(s, func() {
+			if current := St_ZCL_OSD_ADT_HANDLER(s).go_session; current == nil || current == first {
+				t.Fatal("next request reused the previous session adapter")
+			}
+			panic(marker)
+		})
+	}()
+	if St_ZCL_OSD_ADT_HANDLER(s).go_session != nil {
+		t.Fatal("session remained bound after dump")
+	}
+}
+
 func TestADTNotCompiledTrapIs501(t *testing.T) {
 	request := httptest.NewRequest("GET", "/sap/bc/adt", nil)
 	response := httptest.NewRecorder()
