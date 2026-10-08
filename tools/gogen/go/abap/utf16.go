@@ -4,6 +4,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"unicode"
 	"unicode/utf16"
 	"unicode/utf8"
 	"unsafe"
@@ -292,6 +293,24 @@ func splitSupplementary(v string) string {
 		i += width
 	}
 	return b.String()
+}
+
+func foldWTF8(v string, upper bool) string {
+	if strings.IndexByte(v, 0xed) < 0 {
+		if upper {
+			return strings.ToUpper(v)
+		}
+		return strings.ToLower(v)
+	}
+	units := UTF16Units(v)
+	for i, unit := range units {
+		if upper {
+			units[i] = uint16(unicode.ToUpper(rune(unit)))
+		} else {
+			units[i] = uint16(unicode.ToLower(rune(unit)))
+		}
+	}
+	return UTF16String(units)
 }
 func index16(v, sub string) int {
 	if !strings.Contains(sub, "\xed") && !strings.Contains(v, "\xed") {

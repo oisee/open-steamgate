@@ -29,7 +29,7 @@ func FindStmt(s, p string, regex, icase bool, n int) (bool, int32, int32, []stri
 		}
 		hay, needle := s, p
 		if icase {
-			hay, needle = strings.ToUpper(s), strings.ToUpper(p)
+			hay, needle = ToUpper(s), ToUpper(p)
 		}
 		i := index16(hay, needle)
 		if i < 0 {

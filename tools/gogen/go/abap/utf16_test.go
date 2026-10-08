@@ -137,6 +137,21 @@ func TestUTF16PlainSearchInsidePair(t *testing.T) {
 	}
 }
 
+func TestUTF16CaseInsensitiveFindOffset(t *testing.T) {
+	hi := SubS("😀", 0, 1)
+	s := hi + "A"
+	ok, off, length, _ := FindStmt(s, "a", false, true, 0)
+	if !ok || off != 1 || length != 1 {
+		t.Fatalf("find: %v %d %d", ok, off, length)
+	}
+	if got := ToUpper(hi + "a"); got != hi+"A" {
+		t.Fatalf("upper: %x", got)
+	}
+	if got := ToLower(hi + "A"); got != hi+"a" {
+		t.Fatalf("lower: %x", got)
+	}
+}
+
 func TestUTF16ConcatenationEgress(t *testing.T) {
 	emoji := "😀"
 	hi := SubS(emoji, 0, 1)

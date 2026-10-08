@@ -9,6 +9,7 @@ METHODS half_roundtrip FOR TESTING.
 METHODS numofchar_units FOR TESTING.
 METHODS concat_pair FOR TESTING.
 METHODS search_half FOR TESTING.
+METHODS case_find FOR TESTING.
 ENDCLASS.
 CLASS ltcl_test IMPLEMENTATION.
 METHOD len.
@@ -76,5 +77,13 @@ cl_abap_unit_assert=>assert_equals( act = count exp = 1 ).
 REPLACE lo IN s WITH `X`.
 cl_abap_unit_assert=>assert_equals( act = cl_abap_codepage=>convert_to( s )
   exp = CONV xstring( 'EDA0BD5841' ) ).
+ENDMETHOD.
+METHOD case_find.
+DATA(s) = zcl_osgt_strlen16=>emoji( ).
+DATA(hi) = s+0(1).
+CONCATENATE hi `A` INTO s.
+DATA(off) = -1.
+FIND `a` IN s IGNORING CASE MATCH OFFSET off.
+cl_abap_unit_assert=>assert_equals( act = off exp = 1 ).
 ENDMETHOD.
 ENDCLASS.

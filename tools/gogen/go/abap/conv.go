@@ -287,8 +287,8 @@ func MinF(vs ...float64) float64 {
 	return m
 }
 
-func ToUpper(v string) string { return strings.ToUpper(v) }
-func ToLower(v string) string { return strings.ToLower(v) }
+func ToUpper(v string) string { return foldWTF8(v, true) }
+func ToLower(v string) string { return foldWTF8(v, false) }
 func Strlen(v string) int32 {
 	if m := memoOf(v); m != nil {
 		return int32(m.units)
