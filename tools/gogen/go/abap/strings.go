@@ -140,7 +140,7 @@ func plainAll(s, sub string, icase, first bool) [][]int {
 	if icase {
 		return rxAll(s, regexp.QuoteMeta(sub), true, first)
 	}
-	if strings.IndexByte(s, 0xed) >= 0 || strings.IndexByte(sub, 0xed) >= 0 || containsSupplementary(s) {
+	if strings.IndexByte(s, 0xed) >= 0 || strings.IndexByte(sub, 0xed) >= 0 {
 		return plainAllWTF(s, sub, first)
 	}
 	var out [][]int
@@ -267,7 +267,7 @@ func ReplaceStmt(v, p, with string, regex, all, icase bool, off, ln int32, cLen 
 		if p == "" && all {
 			panic(ArithmeticError{Class: "CX_SY_REPLACE_INFINITE_LOOP", Op: "REPLACE ALL OCCURRENCES OF ''"})
 		}
-		if !icase && (strings.IndexByte(sec, 0xed) >= 0 || strings.IndexByte(p, 0xed) >= 0 || containsSupplementary(sec)) {
+		if !icase && (strings.IndexByte(sec, 0xed) >= 0 || strings.IndexByte(p, 0xed) >= 0) {
 			sec = splitSupplementary(sec)
 		}
 		ms = plainAll(sec, p, icase, !all)
@@ -313,7 +313,7 @@ func ReplaceFn(v, p, with string, regex bool, occ int32) string {
 	if regex {
 		ms = rxAll(v, p, false, occ == 1)
 	} else {
-		if strings.IndexByte(v, 0xed) >= 0 || strings.IndexByte(p, 0xed) >= 0 || containsSupplementary(v) {
+		if strings.IndexByte(v, 0xed) >= 0 || strings.IndexByte(p, 0xed) >= 0 {
 			v = splitSupplementary(v)
 		}
 		ms = plainAll(v, p, false, occ == 1)

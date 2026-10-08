@@ -272,19 +272,7 @@ func wtf16View(v string) ([]uint16, []int) {
 	return units, append(bounds, len(v))
 }
 
-func containsSupplementary(v string) bool {
-	for i := 0; i < len(v); i++ {
-		if v[i] >= 0xf0 && v[i] <= 0xf4 {
-			return true
-		}
-	}
-	return false
-}
-
 func splitSupplementary(v string) string {
-	if !containsSupplementary(v) {
-		return v
-	}
 	var b strings.Builder
 	for i := 0; i < len(v); {
 		r, width := decode16(v[i:])
