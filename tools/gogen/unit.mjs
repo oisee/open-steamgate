@@ -455,7 +455,7 @@ if (ready.some((r) => r.db)) {
   const {seedStatements} = await import(`${home}/test/seed.mjs`);
   process.env.OSD_ROOT ??= home;
   const db = new DatabaseSetup(program.reg).run();
-  writeFileSync(join(dir, "zz_db.json"), JSON.stringify(replaceWwwparams([...db.schemas.sqlite, ...db.insert, ...seedStatements()], media)));
+  writeFileSync(join(dir, "zz_db.json"), JSON.stringify(replaceWwwparams([...db.schemas.sqlite, ...db.insert, ...seedStatements(fixture)], media)));
 } else writeFileSync(join(dir, "zz_db.json"), "[]");
 timingMs.emit = Math.round(performance.now() - emitStarted);
 }

@@ -4583,7 +4583,7 @@ function sqlCompare(p, ctx, tb, acc) {
     const [lowSrc, andTok, highSrc] = kids.slice(between + 1);
     if (!isExpr(lowSrc, Expressions.SQLSource) || !isTok(andTok, "AND") || !isExpr(highSrc, Expressions.SQLSource)
         || kids.length !== between + 4) throw new Unsupported(`WHERE BETWEEN form: ${text}`);
-    if (!["c", "string", "i", "n", "d", "t", "int8"].includes(ct.k)) throw new Unsupported(`WHERE BETWEEN on a ${ct.k} column: ${text}`);
+    if (!["c", "string", "i", "n", "d", "t", "int8", "p"].includes(ct.k)) throw new Unsupported(`WHERE BETWEEN on a ${ct.k} column: ${text}`);
     const colIr = RIR.col(lowName(col), sqlIrType(ct));
     const bound = (node) => sqlValue(sqlHost(node, [], ctx, text), ct, sqlIrType(ct), acc);
     const both = RIR.bin("AND", RIR.bin(">=", colIr, bound(lowSrc), RIR.T.bool),
@@ -4595,7 +4595,7 @@ function sqlCompare(p, ctx, tb, acc) {
   if (!op || !src || kids[1] !== op || kids[2] !== src) throw new Unsupported(`WHERE compare: ${text}`);
   const sqlOp = SQL_OPS[upper(op.concatTokens())];
   if (sqlOp === undefined) throw new Unsupported(`WHERE operator ${op.concatTokens()}`);
-  if (!["c", "string", "i", "n", "d", "t", "int8", "x"].includes(ct.k)) throw new Unsupported(`WHERE on a ${ct.k} column: ${text}`);
+  if (!["c", "string", "i", "n", "d", "t", "int8", "x", "p"].includes(ct.k)) throw new Unsupported(`WHERE on a ${ct.k} column: ${text}`);
   const v = sqlHost(src, kids.slice(3), ctx, text);
   return RIR.bin(sqlOp, RIR.col(lowName(col), sqlIrType(ct)), sqlValue(v, ct, sqlIrType(ct), acc), RIR.T.bool);
 }
