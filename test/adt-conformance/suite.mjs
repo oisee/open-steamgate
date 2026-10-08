@@ -13,6 +13,16 @@ import lockCases from './cases/locks.mjs';
 
 describe('shared ADT conformance runner contracts', function () {
   this.timeout(180000);
+  // The runner's policy for an all-gap target is tested against an all-gap
+  // file, not against expected/osgo.json, whose entries turn to pass as osgo
+  // implements cases.
+  const allGaps = dir => {
+    const expected = JSON.parse(readFileSync(new URL('./expected/osgo.json', import.meta.url), 'utf8'));
+    const file = join(dir, 'all-gaps.json');
+    writeFileSync(file, JSON.stringify(Object.fromEntries(Object.keys(expected)
+      .map(id => [id, expected[id].startsWith('known-gap: ') ? expected[id] : 'known-gap: synthetic all-gap fixture']))));
+    return file;
+  };
   it('normalizes volatile identity without destroying protocol coordinates or handle lengths', () => {
     const json = normalize({userName: 'synthetic', client: '123', lockHandle: 'abc123', generation_id: 'abcdef', name: 'ZCL_FIX'});
     assert.deepEqual(json, {userName: '{username}', client: '{client}', lockHandle: '******', generation_id: '******', name: 'ZCL_FIX'});
@@ -114,13 +124,13 @@ describe('shared ADT conformance runner contracts', function () {
     const output = mkdtempSync(join(tmpdir(), 'adt-report-'));
     try {
       const result = await run({target: 'osgo', base: `http://127.0.0.1:${server.address().port}`,
-        expectedFile: new URL('./expected/osgo.json', import.meta.url), only: ['C3-head'], output, say: () => {}});
+        expectedFile: allGaps(output), only: ['C3-head'], output, say: () => {}});
       assert.equal(result.exitCode, 0); assert.equal(result.cases[0].status, 'known-gap');
       assert.equal(result.cases[0].observed, true); assert.equal(result.cases[0].actual.status, 404);
       assert.equal(result.targetAnswered, true); assert.equal(result.handshakeStatus, 404);
       assert.match(result.cases[0].detail, /login/);
       assert.equal(result.executedCases, 0); assert.equal(result.discoverySucceeded, false);
-      const unavailable = await recordUnavailable({expectedFile: new URL('./expected/osgo.json', import.meta.url), output,
+      const unavailable = await recordUnavailable({expectedFile: allGaps(output), output,
         reason: 'osgo: not mountable on this main'});
       assert.ok(unavailable.cases.every(c => c.observed === false && c.status === 'known-gap'));
     } finally {await new Promise(resolve => server.close(resolve)); rmSync(output, {recursive: true, force: true});}
@@ -131,7 +141,7 @@ describe('shared ADT conformance runner contracts', function () {
     const server = await new Promise(resolve => {const s = app.listen(0, '127.0.0.1', () => resolve(s));});
     try {
       const result = await run({target: 'osgo', base: `http://127.0.0.1:${server.address().port}`,
-        expectedFile: new URL('./expected/osgo.json', import.meta.url), output, say: () => {}});
+        expectedFile: allGaps(output), output, say: () => {}});
       assert.equal(result.exitCode, 0, JSON.stringify(result));
       assert.equal(result.summary['known-gap'], 23); assert.equal(result.summary.fail, 0);
       assert.equal(result.targetAnswered, true); assert.equal(result.handshakeStatus, 501);
@@ -204,7 +214,7 @@ describe('shared ADT conformance runner contracts', function () {
     app.use((req, res) => res.sendStatus(req.path.endsWith('/logoff') ? 200 : 503));
     const server = await new Promise(resolve => {const s = app.listen(0, '127.0.0.1', () => resolve(s));});
     try {
-      const opts = {target: 'osgo', expectedFile: new URL('./expected/osgo.json', import.meta.url),
+      const opts = {target: 'osgo', expectedFile: allGaps(output),
         only: ['C3-head'], output, say: () => {}};
       for (const base of ['http://127.0.0.1:0', `http://127.0.0.1:${server.address().port}`]) {
         const result = await run({...opts, base});
@@ -235,6 +245,33 @@ describe('shared ADT conformance runner contracts', function () {
       assert.equal(result.discoverySucceeded, true); assert.equal(result.executedCases, 0);
       assert.equal(result.cases[0].observed, false); assert.equal(result.exitCode, 1);
       assert.deepEqual(result.runErrors, ['no executed cases']);
+    } finally {await new Promise(resolve => server.close(resolve)); rmSync(output, {recursive: true, force: true});}
+  });
+  it("counts an assertion in a case's after() as case evidence, not cleanup", async () => {
+    const output = mkdtempSync(join(tmpdir(), 'adt-after-assert-'));
+    const app = express();
+    app.head('/sap/bc/adt/core/discovery', (req, res) => {
+      res.setHeader('set-cookie', 'session=synthetic; Path=/');
+      res.setHeader('x-csrf-token', 'synthetic-token'); res.end();
+    });
+    app.get('/sap/bc/adt/core/discovery', (req, res) => res.end('<discovery/>'));
+    // every LOCK succeeds, also from a second session: the lock does not
+    // survive, so L5's after() assertion (403 expected) fails
+    app.post('/sap/bc/adt/oo/classes/zcl_osd_adt_uri', (req, res) => {
+      res.type('application/vnd.sap.as+xml');
+      res.end(req.query._action === 'LOCK' ? `<asx:abap xmlns:asx="http://www.sap.com/abapxml"><asx:values><DATA><LOCK_HANDLE>${'a'.repeat(40)}</LOCK_HANDLE><IS_LOCAL>X</IS_LOCAL></DATA></asx:values></asx:abap>` : '');
+    });
+    app.get('/sap/bc/adt/oo/classes/zcl_osd_adt_uri/source/main', (req, res) => res.type('text/plain').end('CLASS zcl_osd_adt_uri DEFINITION.'));
+    app.use((req, res) => res.sendStatus(req.path.endsWith('/logoff') ? 200 : 404));
+    const server = await new Promise(resolve => {const s = app.listen(0, '127.0.0.1', () => resolve(s));});
+    try {
+      const base = `http://127.0.0.1:${server.address().port}`;
+      const gap = await run({target: 'osgo', base, expectedFile: allGaps(output), only: ['L5-stateless-read'], output, say: () => {}});
+      assert.equal(gap.cases[0].status, 'known-gap'); assert.match(gap.cases[0].detail, /^after: lock survives stateless read/);
+      const passFile = join(output, 'pass.json');
+      writeFileSync(passFile, JSON.stringify({...JSON.parse(readFileSync(allGaps(output), 'utf8')), 'L5-stateless-read': 'pass'}));
+      const pass = await run({target: 'osgo', base, expectedFile: passFile, only: ['L5-stateless-read'], output, say: () => {}});
+      assert.equal(pass.cases[0].status, 'fail'); assert.equal(pass.exitCode, 1);
     } finally {await new Promise(resolve => server.close(resolve)); rmSync(output, {recursive: true, force: true});}
   });
   it('merges latest evidence without inventing A4H observations', () => {

@@ -88,7 +88,12 @@ export async function run({target, base, expectedFile, only, output = 'suite-res
         stage = 'assert'; assertResponse(response, c.expect);
       } catch (e) {error = e;}
       let cleanupError;
-      try {if (ctx.session) await c.after?.(ctx, response);} catch (e) {cleanupError = e;}
+      // An assertion inside after() checks the case's own contract (a lock
+      // reacquired, a lock surviving a read): it is case evidence like the
+      // request's assertions. Anything else there is cleanup.
+      try {if (ctx.session) await c.after?.(ctx, response);} catch (e) {
+        if (e.code === 'ERR_ASSERTION') {if (!error) {error = e; stage = 'after';}} else cleanupError = e;
+      }
       for (const s of sessions.reverse()) try {await s.close();} catch (e) {cleanupError ??= e;}
       if (!ctx.session && sessions.length) targetResponse ??= sessions.at(-1).handshakeResponse;
       if (targetResponse) targetAnswered = true;

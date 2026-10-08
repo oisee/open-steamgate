@@ -230,7 +230,7 @@ func step(x *abap.ICFExchange, base string) (dump any, frames []string) {
 		}()
 		s := &abap.Session{Statics: abap.ProcessStatics}
 		abap.DialogStep(func() {
-			if base == "/sap/bc/adt" {
+			if base == "/sap/bc/adt" || base == "/sap/public/bc/icf/logoff" {
 				withADTSession(s, func() { runShim(s, x, base) })
 			} else {
 				runShim(s, x, base)
@@ -581,7 +581,9 @@ func main() {
 	webapp := filepath.Join(*root, "webapp")
 	var routes []route
 	if adtEnabled(*adtFlag, os.Getenv) {
-		routes = append(routes, route{"/sap/bc/adt", false, icfHandler("ZCL_OSD_ADT_HANDLER", "/sap/bc/adt", adtDump)})
+		routes = append(routes, route{"/sap/bc/adt", false, icfHandler("ZCL_OSD_ADT_HANDLER", "/sap/bc/adt", adtDump)},
+			// the ADT logoff is the ABAP front's too, as on Node (tools/adt-facade.mjs)
+			route{"/sap/public/bc/icf/logoff", true, icfHandler("ZCL_OSD_ADT_HANDLER", "/sap/public/bc/icf/logoff", adtDump)})
 	}
 	// the port's front door is the launchpad when there is one (test/start.mjs root)
 	routes = append(routes, route{"/", true, func(w http.ResponseWriter, r *http.Request) {

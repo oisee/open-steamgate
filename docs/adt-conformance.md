@@ -84,6 +84,17 @@ Opaque identifiers keep their length. Protocol namespaces, object names and
 source coordinates are retained. Assertions for handle shape use the unmasked
 response so a wrong handle length cannot pass.
 
+An assertion inside a case's `after()` checks that case's own contract (L4:
+another session can reacquire after UNLOCK; L5: a lock survives a stateless
+read), so it is case evidence like the request's assertions and is reported
+as `after: ...`; only a non-assertion error there, or a failing session
+close, is cleanup and keeps the case unobserved.
+
+**osgo, 2026-10-08** (stoker's packed-column WHERE and hostclass seam,
+osgo's ADT session per request, SYSTEM IDENTITY, the ENQ kernel over
+go/adtenq, the logoff mount): 9 pass (C1, C2, C3, C6, R1-R5), 14 known-gap
+with the observed first cause in `expected/osgo.json`, 0 fail.
+
 `expected/osgo.json` maps every ID to `pass`, `known-gap: reason` or `n/a: reason`.
 Unknown IDs, missing entries and invalid values are errors. JS cannot supply a
 gap file. A known gap that passes fails with “update the expected file”. An n/a

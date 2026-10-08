@@ -75,8 +75,8 @@
       "reason": "sy-sysid from the one system id (go/sysid, tools/osd-identity.mjs), 2026-10-02; rebased over #453"
     },
     "go:cmd/osgo": {
-      "lines": 1269,
-      "reason": "ADT on osgo: /sap/bc/adt mount behind -adt, compiler sidecar status and storecompiler wiring, the ADT session bound per request (adt_session.go: USE_SESSION around the dialog step; generated symbols keep it in cmd/osgo), SYSTEM IDENTITY from the selected SID with Node's ADT client/user derivation"
+      "lines": 1297,
+      "reason": "ADT on osgo: /sap/bc/adt mount behind -adt, compiler sidecar status and storecompiler wiring, the ADT session bound per request (adt_session.go: USE_SESSION around the dialog step; generated symbols keep it in cmd/osgo), SYSTEM IDENTITY from the selected SID with Node's ADT client/user derivation; the ADT logoff route and the ENQ kernel hooks over go/adtenq (adt_enq.go)"
     },
     "go:cmd/storecmp": {
       "lines": 171,
