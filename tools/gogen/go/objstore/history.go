@@ -155,7 +155,7 @@ func storeHistoryState(root, file string) (state, changed string) {
 		state = "modified"
 	}
 	if st, err := os.Stat(filepath.Join(root, file)); err == nil {
-		changed = st.ModTime().UTC().Format("2006-01-02T15:04:05.000Z")
+		changed = st.ModTime().Round(time.Millisecond).UTC().Format("2006-01-02T15:04:05.000Z") // as Node: new Date(Math.round(mtimeMs))
 	} else {
 		changed = "1970-01-01T00:00:00.000Z"
 	}

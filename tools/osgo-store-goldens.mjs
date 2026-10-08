@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import {mkdir, readFile, writeFile} from "node:fs/promises";
+import {mkdir, readFile, rm, writeFile} from "node:fs/promises";
 import {readdirSync} from "node:fs";
 import {spawnSync} from "node:child_process";
 import {dirname, resolve} from "node:path";
@@ -53,6 +53,17 @@ function normalize(value) {
 export async function destinationAnswers() {
   assertFixtureTracked();
   const root = await buildFixture();
+  const packages = process.env.OSD_LOCAL_PACKAGES;
+  try {
+    return await answersIn(root);
+  } finally {
+    if (packages === undefined) delete process.env.OSD_LOCAL_PACKAGES;
+    else process.env.OSD_LOCAL_PACKAGES = packages;
+    await rm(root, {recursive: true, force: true});
+  }
+}
+
+async function answersIn(root) {
   const facts = JSON.parse(await readFile(resolve(root, "store.json"), "utf8"));
   process.env.OSD_LOCAL_PACKAGES = "$STG_A,$STG__,$STG";
   const store = new ObjectStore({root, libs: facts.libs.map(({path}) => path), roots: facts.roots.map(({files, ...root}) => root)});
