@@ -170,6 +170,7 @@ export class ObjectStore {
   constructor(options = {}) {
     this.root = options.root ?? process.cwd();
     this.registryIssueOptions = options.registryIssueOptions;
+    this.registryInputs = options.registryInputs === true;
     // test seams: beforeWrite(file) runs between a create's check and its write
     this.hooks = options.hooks ?? {};
     this.explicitRoots = options.roots !== undefined;

@@ -147,9 +147,11 @@ export function buildRegistry(store, configPath = "abaplint.jsonc") {
     store.parsed = shared;
     return shared;
   }
-  const configFile = realpathSync(join(store.root, configPath));
-  const configRaw = readFileSync(configFile);
-  const text = configRaw.toString("utf8").split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
+  const collectInputs = store.registryInputs === true;
+  const configFile = collectInputs ? realpathSync(join(store.root, configPath)) : join(store.root, configPath);
+  const configRaw = collectInputs ? readFileSync(configFile) : undefined;
+  const text = (configRaw ?? readFileSync(configFile, "utf8")).toString("utf8")
+    .split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
   const config = JSON.parse(text);
   // The publication validator owns these rules. Keep identifier and
   // structural checks identical for saved includes and compiled includes.
@@ -164,8 +166,8 @@ export function buildRegistry(store, configPath = "abaplint.jsonc") {
     rules: {...validation.rules, allowed_object_types: {...validation.rules.allowed_object_types,
       allowed: [...validation.rules.allowed_object_types.allowed, "DDLS", "SRVD", "SAPC", "SAMC"]}},
   })));
-  const paths = new Map();
-  INPUTS.set(registry, {configFile, configSha: createHash("sha256").update(configRaw).digest("hex"), paths});
+  const paths = collectInputs ? new Map() : undefined;
+  if (collectInputs) INPUTS.set(registry, {configFile, configSha: createHash("sha256").update(configRaw).digest("hex"), paths});
   // everything, not only what the index calls an object: a class needs its
   // local includes, and a type pool is not an ADT object but the check
   // still needs it
@@ -175,8 +177,8 @@ export function buildRegistry(store, configPath = "abaplint.jsonc") {
       if (hidden.has(file) || /\.(abap|xml|asddls)$/.test(file) === false) {
         continue;
       }
-      const path = realpathSync(join(store.root, file));
-      paths.set("/" + file, path);
+      const path = collectInputs ? realpathSync(join(store.root, file)) : join(store.root, file);
+      if (paths !== undefined) paths.set("/" + file, path);
       registry.addFile(new abaplint.MemoryFile("/" + file, readFileSync(path, "utf8")));
     }
   }
@@ -199,7 +201,8 @@ export function registryDependents(registry, type, name) {
 }
 
 // the issues of one object, in the shape the façade returns
-export function registryIssues(registry, type, name, {endCoordinates = false} = {}) {
+export function registryIssues(registry, type, name, options = undefined) {
+  const {endCoordinates = false} = options ?? {};
   // an include is a program to abaplint: the registry files it as PROG,
   // and asking for INCL finds nothing and calls a clean include broken
   const object = registry.getObject(TYPES[type]?.sameFileAs ?? type, name);

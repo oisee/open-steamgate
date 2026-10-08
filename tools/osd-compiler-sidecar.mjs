@@ -80,7 +80,7 @@ export async function checkSnapshot(snapshot, {beforeAnswer} = {}) {
   }
   const root = realpathSync(snapshot.root);
   const {files} = snapshotFiles(snapshot);
-  const store = new ObjectStore({root, registryIssueOptions: {endCoordinates: true}});
+  const store = new ObjectStore({root, registryIssueOptions: {endCoordinates: true}, registryInputs: true});
   // External writers are not store mutations. Check today's dependency tree
   // using the exact snapshot bytes whose hashes passed.
   forgetRegistry(store);
