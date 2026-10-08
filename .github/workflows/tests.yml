@@ -466,6 +466,38 @@ jobs:
           echo "$out"
           grep -q '^200 OK$' <<<"$out"
           grep -q '"EntitySets":\["TravelSet"' <<<"$out"
+      # ADT conformance on osgo (docs/adt-conformance.md, "CI"): the same case
+      # list the required JS suite runs, against the osgo binary with -adt.
+      # Known gaps are data in expected/osgo.json and never block. The ratchet:
+      # a case expected to pass that fails, or a known gap that passes
+      # unannounced (runner exit 1), fails this job and so the required test.
+      # A build, start or transport failure (exit 2, no report) fails only once
+      # osgo.json holds a pass; before that it is a warning, because nothing
+      # it could have proven is lost.
+      - name: ADT conformance on osgo (known gaps advisory, passes ratcheted)
+        env:
+          STG_PORT: '8091'
+        run: |
+          set +e
+          expected=test/adt-conformance/expected/osgo.json
+          has_pass=$(node -e 'const e=require("./"+process.argv[1]);process.stdout.write(Object.values(e.cases??e).some(v=>String(v).trim()==="pass")?"1":"0")' "$expected")
+          infra() {
+            if [[ "$has_pass" == 1 ]]; then echo "::error::osgo ADT conformance: $1, and osgo.json expects passes"; exit 1; fi
+            echo "::warning::osgo ADT conformance: $1 (advisory while osgo.json holds no pass)"; exit 0
+          }
+          node tools/gogen/osgo.mjs || infra "the osgo build failed"
+          tools/gogen/.out/osgo -adt -port "$STG_PORT" -root "$PWD" > "$RUNNER_TEMP/osgo-adt.log" 2>&1 &
+          pid=$!
+          for _ in $(seq 1 60); do curl -fsS "http://127.0.0.1:$STG_PORT/health" >/dev/null 2>&1 && break; sleep 1; done
+          curl -fsS "http://127.0.0.1:$STG_PORT/health" >/dev/null 2>&1 || { kill "$pid" 2>/dev/null; tail -20 "$RUNNER_TEMP/osgo-adt.log"; infra "osgo did not answer /health"; }
+          node test/adt-conformance/run.mjs --target osgo --base "http://127.0.0.1:$STG_PORT" --expected "$expected"
+          rc=$?
+          kill "$pid" 2>/dev/null
+          case "$rc" in
+            0) echo "osgo ADT conformance: expectations met" ;;
+            1) echo "::error::osgo ADT conformance: a case expected to pass failed, or a known gap passed unannounced"; exit 1 ;;
+            *) infra "the runner could not run (exit $rc)" ;;
+          esac
 
   # An independent parallel gate; no additional work in the suite shards.
   kernel-conformance:
