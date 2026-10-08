@@ -997,7 +997,7 @@ function hostMethod(cls, m) {
   const hook = `hHostclass.${cls.name}.${field}`;
   const ret = m.returning;
   // the IS SUPPLIED flags are the emitter's, not the hook's
-  const call = `${hook}(${m.params.filter((p) => !p.suppliedOf).map((p) => ident(p.name)).join(", ")})`;
+  const call = `${hook}(${["s", ...m.params.filter((p) => !p.suppliedOf).map((p) => ident(p.name))].join(", ")})`;
   const lines = [`\tif ${hook} != nil {`];
   if (ret) lines.push(`\tresult, err := ${call}`);
   else lines.push(`\terr := ${call}`);

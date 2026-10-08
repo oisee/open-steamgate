@@ -111,8 +111,8 @@
       "reason": "baseline 2026-10-01"
     },
     "go:hostclass": {
-      "lines": 34,
-      "reason": "#36: dependency-free host callbacks and Raise values for generated class replacements."
+      "lines": 36,
+      "reason": "#36: dependency-free host callbacks and Raise values for generated class replacements. Hooks take the calling step (*abap.Session as any) first, agreed with adt-i5 for per-step host state."
     },
     "go:inflate": {
       "lines": 499,
