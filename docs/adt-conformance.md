@@ -172,8 +172,8 @@ Alice's ratchet as follows:
   `continue-on-error` alone is insufficient: `test` must consume its report
   (and captured exit status) before completing, and fail on those regressions.
   Missing/malformed reports, HTTP infrastructure failures, unsuccessful
-  discovery and zero executed cases fail `test` only while the selected entries
-  in `expected/osgo.json` holds at least one `pass` (then they cannot prove the
+  discovery and zero executed cases fail `test` only while any entry
+  in `expected/osgo.json` is `pass` (then they cannot prove the
   expected passes were retained). While every osgo expectation is
   `known-gap` or `n/a`, transport failures stay advisory; observed gaps satisfy
   expectations.

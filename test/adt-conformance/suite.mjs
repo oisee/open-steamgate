@@ -157,8 +157,11 @@ describe('shared ADT conformance runner contracts', function () {
   });
   it('keeps connection refusal an infrastructure failure', async () => {
     const output = mkdtempSync(join(tmpdir(), 'adt-refused-'));
+    // A port that was just bound and released: the connect itself is refused
+    // (port 1 would be rejected by fetch as a bad port before any networking).
+    const closed = await new Promise(resolve => {const s = express().listen(0, '127.0.0.1', () => {const port = s.address().port; s.close(() => resolve(port));});});
     try {
-      const result = await run({target: 'osgo', base: 'http://127.0.0.1:1',
+      const result = await run({target: 'osgo', base: `http://127.0.0.1:${closed}`,
         expectedFile: new URL('./expected/osgo.json', import.meta.url), only: ['C3-head'], output, say: () => {}});
       assert.equal(result.exitCode, 1); assert.equal(result.summary.fail, 1);
       assert.equal(result.targetAnswered, false); assert.equal(result.handshakeStatus, undefined);
