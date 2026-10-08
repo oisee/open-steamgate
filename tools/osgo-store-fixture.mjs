@@ -12,9 +12,20 @@ const gitEnv = {
   GIT_COMMITTER_EMAIL: "fixture@example.invalid",
 };
 
+function cleanGitEnv() {
+  return {
+    PATH: process.env.PATH,
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    LC_ALL: "C",
+    TZ: "UTC",
+    ...gitEnv,
+  };
+}
+
 function git(root, date, ...args) {
-  const result = spawnSync("git", args, {cwd: root, encoding: "utf8", env: {
-    ...process.env, ...gitEnv, GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date,
+  const result = spawnSync("git", ["-c", "commit.gpgsign=false", "-c", "core.autocrlf=false", ...args], {cwd: root, encoding: "utf8", env: {
+    ...cleanGitEnv(), GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date,
   }});
   if (result.status !== 0) throw new Error(`git ${args.join(" ")}: ${result.stderr}`);
   return result.stdout;

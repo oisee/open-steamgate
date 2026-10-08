@@ -37,9 +37,12 @@ export async function storeConfig(root, options = {}) {
   }
   const active = {};
   const {liveHash} = await import("../osd-build.mjs");
-  const generation = join(root, "build", "by-input", liveHash(root));
-  if (existsSync(join(generation, "source", ".complete"))) {
-    for (const file of Object.keys(built)) active[file] = join(generation, "source", sourceSnapshotPath(file));
+  const hash = liveHash(root);
+  if (hash !== undefined) {
+    const generation = join(root, "build", "by-input", hash);
+    if (existsSync(join(generation, "source", ".complete"))) {
+      for (const file of Object.keys(built)) active[file] = join("build/by-input", hash, "source", sourceSnapshotPath(file));
+    }
   }
   return {roots, libs, excluded, built, active};
 }

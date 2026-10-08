@@ -397,7 +397,11 @@ func storePackagesLines(ix *storeIndex, format string) string {
 			for _, child := range p.Subpackages {
 				add("C", p.Name, child)
 			}
-			for _, e := range p.objects {
+			objects := append([]*storeEntry(nil), p.objects...)
+			sort.Slice(objects, func(i, j int) bool {
+				return collateLess(objects[i].Type+objects[i].Name, objects[j].Type+objects[j].Name)
+			})
+			for _, e := range objects {
 				if e.Type == "DEVC" && e.Name == p.Name {
 					continue
 				}
