@@ -4,6 +4,8 @@ import (
 	"flag"
 	"path/filepath"
 	"testing"
+
+	"osg/gogen/objstore"
 )
 
 func TestSelectedPort(t *testing.T) {
@@ -74,6 +76,26 @@ func TestSelectedDB(t *testing.T) {
 		t.Fatal(got)
 	}
 	if got := selectedDB("", "", false, func(string) string { return "" }); got != "" {
+		t.Fatal(got)
+	}
+}
+
+func TestADTIdentity(t *testing.T) {
+	env := func(name string) string {
+		return map[string]string{"OSD_ADT_CLIENT": " 001 ", "OSD_USER": " alice "}[name]
+	}
+	present := func(name string) (string, bool) { return env(name), name == "OSD_ADT_CLIENT" || name == "OSD_USER" }
+	got := adtIdentity("XYZ", func(string) (string, bool) { return "", false })
+	if got != (objstore.Identity{SystemID: "XYZ", Client: "001", UserName: "DEVELOPER",
+		UserFullName: "Off-Stack Doppelganger", Language: "EN"}) {
+		t.Fatal(got)
+	}
+	if empty := adtIdentity("XYZ", func(string) (string, bool) { return "", true }); empty.UserName != "" {
+		t.Fatalf("explicit empty user: %q", empty.UserName)
+	}
+	got = adtIdentity("XYZ", present)
+	if got != (objstore.Identity{SystemID: "XYZ", Client: "001", UserName: "ALICE",
+		UserFullName: "Off-Stack Doppelganger", Language: "EN"}) {
 		t.Fatal(got)
 	}
 }

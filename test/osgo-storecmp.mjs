@@ -42,8 +42,6 @@ describe("OSGo store command parity", function() {
         assert.ok(Number(match[1]) > 0);
       }
     }
-    assert.match(result.stdout, /KNOWN adapter gap .*core case batch1 #1/);
-    assert.match(result.stdout, /KNOWN adapter gap .*ET_REVISION-SUBJECT_FULL \(core: adapter row mapping\)/);
     assert.match(result.stdout, /history: 2 revisions compared through execute and adapter/);
     assert.match(result.stdout, /compiler: \d+ CHECK and OUTLINE answers compared with real sidecar/);
     assert.match(result.stdout, /compiler adapter: \d+ CHECK and OUTLINE answers compared with complete RFC caller signature/);

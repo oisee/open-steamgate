@@ -72,6 +72,16 @@ type Config struct {
 	Active   map[string]string `json:"active"`
 }
 
+// Identity is the ADT identity Node's session adapter binds for
+// tools/adt-abap-sessions.mjs; the facade passes all five fields through.
+type Identity struct {
+	SystemID     string `json:"systemID"`
+	Client       string `json:"client"`
+	UserName     string `json:"userName"`
+	UserFullName string `json:"userFullName,omitempty"`
+	Language     string `json:"language,omitempty"`
+}
+
 type storeEntry struct {
 	Type, Name, File, Root string
 	Writable, Library      bool
@@ -90,6 +100,7 @@ var storeState struct {
 	excluded []*regexp.Regexp
 	written  map[string]bool
 	reason   string
+	identity *Identity
 }
 
 // SetStore points the store at a tree and the build's facts about it. An
@@ -128,6 +139,15 @@ func SetStore(root string, config []byte, reason string) error {
 	}
 	storeState.root, storeState.cfg = abs, &cfg
 	return nil
+}
+
+// SetSystemIdentity installs the identity SYSTEM answers. Other SYSTEM kinds
+// still have no answer here, exactly as Node's session binding does when its
+// callback returns undefined.
+func SetSystemIdentity(identity Identity) {
+	storeState.mu.Lock()
+	defer storeState.mu.Unlock()
+	storeState.identity = &identity
 }
 
 // Row is one object as the screen lists it (ZOSD_OBJECT_S).
@@ -189,7 +209,14 @@ var Capabilities = []string{"LIST", "READ", "WRITE", "HISTORY", "REVISION", "OBJ
 
 // Commands lists the implemented protocol commands, including discovery.
 // ACTIVATE and TOKENS remain refused; PARSE supports OUTLINE with a provider.
-var Commands = []string{"LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "TOKENS", "CAPABILITIES", "HISTORY", "REVISION", "OBJECT", "PACKAGE", "PACKAGES", "SEARCH", "COMMANDS"}
+var Commands = []string{"LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "TOKENS", "CAPABILITIES", "HISTORY", "REVISION", "OBJECT", "PACKAGE", "PACKAGES", "SEARCH", "PARSE", "SYSTEM", "COMMANDS"}
+
+var systemKinds = map[string]bool{
+	"IDENTITY": true, "LOCK_HANDLE": true, "LOCK_RELEASE": true, "SESSION": true,
+	"LOCK_HOLDER": true, "BUILD": true, "CHANGED": true, "SERVICES": true,
+	"TRANSACTIONS": true, "XREF_WARM": true, "OBJECT_TYPES": true,
+	"TESTCLASSES": true, "SERVICE_ROWS": true, "SEGW_REGISTRATIONS": true,
+}
 
 // Call answers one call of ZOSD_STORE. in holds the importing values
 // that were passed (IV_*), present or absent the way the caller passed them.
@@ -218,6 +245,34 @@ func Call(in map[string]*string) Answer {
 		// since this binary carries no compiler and is a built generation.
 		// Node answers all five (tools/osd-store-destination.mjs).
 		a.Scalars["EV_NOTE"] = strings.Join(Capabilities, " ")
+		return a
+	case "SYSTEM":
+		kind := text("IV_TYPE", "")
+		if kind == "" {
+			var input struct {
+				Kind string `json:"kind"`
+			}
+			if json.Unmarshal([]byte(text("IV_JSON", "")), &input) == nil {
+				kind = input.Kind
+			}
+		}
+		kind = strings.ToUpper(kind)
+		if !systemKinds[kind] {
+			a.Scalars["EV_ERROR"] = "unknown SYSTEM kind " + map[bool]string{true: kind, false: "(none)"}[kind != ""]
+			a.Scalars["EV_JSON"] = storeJSONRefusal(a.Scalars["EV_ERROR"], "INTERNAL")
+			return a
+		}
+		if kind == "IDENTITY" && storeState.identity != nil {
+			value, _ := json.Marshal(*storeState.identity)
+			a.Scalars["EV_JSON"] = string(value)
+			return a
+		}
+		if storeState.identity == nil {
+			a.Scalars["EV_ERROR"] = "nothing answers SYSTEM " + kind + " for this call: it is bound per ADT facade instance (withSystem)"
+		} else {
+			a.Scalars["EV_ERROR"] = "SYSTEM " + kind + " has no answer here"
+		}
+		a.Scalars["EV_JSON"] = storeJSONRefusal(a.Scalars["EV_ERROR"], "INTERNAL")
 		return a
 	default:
 		a.Scalars["EV_ERROR"] = "unknown store command " + command
@@ -341,7 +396,7 @@ func Call(in map[string]*string) Answer {
 			Format string `json:"format"`
 			Seed   string `json:"seed"`
 			Type   string `json:"type"`
-			Limit  *int   `json:"limit"`
+			Limit  any    `json:"limit"`
 		}
 		if err = json.Unmarshal([]byte(text("IV_JSON", "")), &input); err != nil {
 			err = storeRefusal("Unexpected token in JSON: " + text("IV_JSON", ""))
@@ -368,10 +423,7 @@ func Call(in map[string]*string) Answer {
 			}
 			break
 		}
-		limit := -1
-		if input.Limit != nil {
-			limit = *input.Limit
-		}
+		limit := storeSearchLimit(input.Limit)
 		rows := storeSearch(ix, input.Seed, input.Type, limit)
 		if input.Format == "lines" {
 			a.Scalars["EV_SOURCE"] = storeSearchLines(rows)

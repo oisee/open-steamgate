@@ -22,6 +22,10 @@
       "lines": 13,
       "reason": "recorded by --update"
     },
+    "go:adtenq": {
+      "lines": 244,
+      "reason": "ADT ENQ owner and session-kernel bridge over enq public API; adds Node-exact handle-scoped pins and retired dump contexts so replacement binds do not release parked steps, with no generated ABAP dependency"
+    },
     "go:amc": {
       "lines": 506,
       "reason": "baseline 2026-10-01"
@@ -71,8 +75,8 @@
       "reason": "sy-sysid from the one system id (go/sysid, tools/osd-identity.mjs), 2026-10-02; rebased over #453"
     },
     "go:cmd/osgo": {
-      "lines": 1229,
-      "reason": "Sidecar round 2 injects the lazy storecompiler adapter beside the existing compiler status wiring; six lines in cmd/osgo are the only host-lifecycle growth"
+      "lines": 1357,
+      "reason": "ADT on osgo: /sap/bc/adt mount behind -adt, compiler sidecar status and storecompiler wiring, the ADT session bound per request (adt_session.go: USE_SESSION around the dialog step; generated symbols keep it in cmd/osgo), SYSTEM IDENTITY from the selected SID with Node's ADT client/user/full-name/language derivation; the ADT logoff route and the ENQ kernel hooks over go/adtenq (adt_enq.go) Fix critic findings: generated-only ADT session binding fallback for echo builds, and request-local ENQ handle retention with Pin/Unpin/DropContext around the complete dialog step.; ADT steps keyed by their *abap.Session for the ENQ hooks (carving the ADT host glue into its own package is queued)"
     },
     "go:cmd/storecmp": {
       "lines": 171,
@@ -127,8 +131,8 @@
       "reason": "recorded by --update"
     },
     "go:objstore": {
-      "lines": 1936,
-      "reason": "Fix1: diagnostic filtering, Include-to-FILE conversion and legacy columns moved to storecompiler; objstore retains provider availability, version selection, refusals and answer JSON. Ceiling reduced from 1944."
+      "lines": 2048,
+      "reason": "Store parity with Node: layers, retained active reads, packages, HISTORY; injectable compiler for CHECK/PARSE OUTLINE (conversion lives in storecompiler), JavaScript Number-compatible SEARCH limits, and advertised PARSE discovery; SYSTEM IDENTITY and Node-exact kind refusals. Carving SYSTEM into its own package is queued. Fix SEARCH destination parity: JSON scalar Number conversion (ECMAScript whitespace, booleans, radix strings, decimal grammar and NaN), and negative limits stopping after the first match as on Node."
     },
     "go:reportargs": {
       "lines": 209,

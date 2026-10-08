@@ -57,6 +57,31 @@ var dbScript []byte
 //go:embed zz_store.json
 var storeConfig []byte
 
+func adtIdentity(sid string, lookup func(string) (string, bool)) objstore.Identity {
+	clientValue, _ := lookup("OSD_ADT_CLIENT")
+	client := strings.TrimSpace(clientValue)
+	if client == "" {
+		client = "001"
+	} else if len(client) > 3 {
+		client = client[:3]
+	}
+	userValue := lookupDefault("OSD_USER", lookup, "DEVELOPER")
+	user := strings.TrimSpace(userValue)
+	user = strings.ToUpper(user)
+	if runes := []rune(user); len(runes) > 12 {
+		user = string(runes[:12])
+	}
+	userFull := lookupDefault("OSD_USER_FULL", lookup, "Off-Stack Doppelganger")
+	return objstore.Identity{SystemID: sid, Client: client, UserName: user, UserFullName: userFull, Language: "EN"}
+}
+
+func lookupDefault(name string, lookup func(string) (string, bool), fallback string) string {
+	if value, ok := lookup(name); ok {
+		return value
+	}
+	return fallback
+}
+
 // one work process: class statics are per process (see the package comment).
 // It is abap.WorkProcess, the lock the APC channels' steps take as well
 // (go/abap/apc.go), so an ICF request and a push-channel message never run
@@ -209,7 +234,12 @@ func step(x *abap.ICFExchange, base string) (dump any, frames []string) {
 			}
 		}()
 		s := &abap.Session{Statics: abap.ProcessStatics}
-		abap.DialogStep(func() { runShim(s, x, base) })
+		dialog := func() { abap.DialogStep(func() { runShim(s, x, base) }) }
+		if base == "/sap/bc/adt" || base == "/sap/public/bc/icf/logoff" {
+			withADTSession(s, dialog)
+		} else {
+			dialog()
+		}
 	}()
 	return dump, frames
 }
@@ -464,6 +494,7 @@ func main() {
 	binds := osdbind.Selected(*addr, addrExplicit, os.Getenv)
 	sid, sidSource := sysid.Must(os.LookupEnv)
 	abap.SysID = sid
+	objstore.SetSystemIdentity(adtIdentity(sid, os.LookupEnv))
 	log.Printf("system id: %s (%s)", sid, sysid.Describe(sidSource))
 	*dbFile = selectedDB(*dbFile, *homeDir, dbExplicit, os.Getenv)
 	if *homeDir != "" {
@@ -554,7 +585,9 @@ func main() {
 	webapp := filepath.Join(*root, "webapp")
 	var routes []route
 	if adtEnabled(*adtFlag, os.Getenv) {
-		routes = append(routes, route{"/sap/bc/adt", false, icfHandler("ZCL_OSD_ADT_HANDLER", "/sap/bc/adt", adtDump)})
+		routes = append(routes, route{"/sap/bc/adt", false, icfHandler("ZCL_OSD_ADT_HANDLER", "/sap/bc/adt", adtDump)},
+			// the ADT logoff is the ABAP front's too, as on Node (tools/adt-facade.mjs)
+			route{"/sap/public/bc/icf/logoff", true, icfHandler("ZCL_OSD_ADT_HANDLER", "/sap/public/bc/icf/logoff", adtDump)})
 	}
 	// the port's front door is the launchpad when there is one (test/start.mjs root)
 	routes = append(routes, route{"/", true, func(w http.ResponseWriter, r *http.Request) {

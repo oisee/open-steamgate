@@ -91,6 +91,16 @@ failures are announced and boot continues: the mirror must never block ready.
 It deliberately avoids normal session BIND, whose missing-context cleanup
 would delete the handles being restored.
 
+The Go host bridge is [`adtenq`](../../tools/gogen/go/adtenq/README.md),
+a standalone owner and kernel over `enq.Server` matching Node's
+`tools/osd-enq-session.mjs` replacement: bind, end, revive, context life and
+holder-key conversion. The hostclass seam and osgo installation are implemented:
+`cmd/osgo` creates one kernel and fills `hostclass.ZCL_OSD_ENQ_KERNEL`
+for all six methods. Generated adapters convert ABAP values and translate
+errors to `ZCX_OSD_ADT`; an ended key returns false so ABAP performs its
+existing cleanup/revive path. The serialized request pins each bound context,
+retains the step's own handle for dump retirement, and unpins at step end.
+
 The host scans sessions by `touched DESC` (newest wins), and runs one dialog
 step per stateful session with handles. Native ICF
 can pass `iv_bind_context = abap_false` to use its existing ENQ context rather

@@ -240,6 +240,7 @@ CLASS zcl_osd_adt_versions IMPLEMENTATION.
     DATA lv_author TYPE string.
     DATA lv_stamp TYPE string.
     DATA lv_number TYPE string.
+    DATA lv_revision TYPE i.
     DATA lv_index TYPE i.
     DATA lv_count TYPE i.
     DATA ls_identity TYPE zcl_osd_adt_host=>ty_identity.
@@ -281,8 +282,10 @@ CLASS zcl_osd_adt_versions IMPLEMENTATION.
     lv_index = 0.
     LOOP AT it_revision INTO ls_revision.
       lv_index = lv_index + 1.
-      lv_number = lv_count - lv_index + 1.
-      lv_number = |{ lv_number WIDTH = 5 PAD = '0' ALIGN = RIGHT }|.
+*     formatted from the integer: MOVE i to string keeps the sign place
+*     ("3 "), measured on A4H, and a template keeps that blank
+      lv_revision = lv_count - lv_index + 1.
+      lv_number = |{ lv_revision WIDTH = 5 PAD = '0' ALIGN = RIGHT }|.
       lv_stamp = stamp( iv_date = ls_revision-date iv_time = ls_revision-time ).
       lv_feed = lv_feed && `<atom:entry><atom:author><atom:name>` && xml( ls_revision-author )
         && `</atom:name></atom:author><atom:content type="text/plain" src="`
