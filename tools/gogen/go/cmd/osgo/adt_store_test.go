@@ -17,7 +17,7 @@ func TestStoreAdapterRetainsCallingStep(t *testing.T) {
 	invoke := func(s *abap.Session, want string) {
 		t.Helper()
 		cmd, kind, json, errorText, ms := "SYSTEM", "SESSION", "stale", "stale", "stale"
-		osgoStore(s, map[string]abap.Data{
+		abap.ZOSD_STORE(s, map[string]abap.Data{
 			"IV_COMMAND": {P: &cmd, T: abap.TString}, "IV_TYPE": {P: &kind, T: abap.TString}, "EV_JSON": {P: &json, T: abap.TString}, "EV_ERROR": {P: &errorText, T: abap.TString}, "EV_MS": {P: &ms, T: abap.TString},
 		})
 		if json != want || errorText != "" || ms != "0" {

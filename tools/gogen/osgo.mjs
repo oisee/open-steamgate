@@ -110,10 +110,7 @@ if (echo) {
   webapps = webappsOf(home).map((p) => ({path: `/app/${p.name}`, dir: p.dir}));
 }
 
-// TEMP until the go/abap store-call seam with the calling step exists (asked of
-// stoker 2026-10-08): not for a PR. Retain the calling step at the OSGo host boundary; the default runtime
-// adapter drops it before objstore. Other hosts keep their existing path.
-const go = emitGo(program).replaceAll("abap.ZOSD_STORE(s,", "osgoStore(s,");
+const go = emitGo(program);
 writeFileSync(join(dir, "zz_generated.go"), go);
 writeFileSync(join(dir, "zz_db.json"), JSON.stringify(statements));
 writeFileSync(join(dir, "zz_store.json"), store);
