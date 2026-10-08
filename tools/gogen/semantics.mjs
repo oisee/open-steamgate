@@ -15,6 +15,8 @@ import {home} from "./home.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const EXPECT = {
+  // TASK4 supplied oracles; fixed blanks and re-raise are documented regressions.
+  ZCL_GOGEN_T_ADT4: "83700/20733/20733/[    83700 ]/1/2/X",
   // Unmeasured: private static buffer snapshots across an in-place store.
   ZCL_GOGEN_T_STATICOWNED: "0102030401ABCD0401ABCD04ABCD",
   ZCL_GOGEN_T_STATICWRITE: "1/00ABCD00/4/00EE/aXYd!/0000EE00/7/19/0/9000000000/2/7",

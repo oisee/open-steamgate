@@ -443,8 +443,8 @@
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/js/abap.mjs": {
-      "lines": 1654,
-      "reason": "baseline 2026-10-01"
+      "lines": 1667,
+      "reason": "baseline 2026-10-01 Critic round 1: JS time operand conversion mirrors Go TToI; exception wrappers retain their class during re-raise and reference comparison unwraps their original object."
     },
     "tools/lift.mjs": {
       "lines": 1225,

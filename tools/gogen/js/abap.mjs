@@ -699,7 +699,14 @@ export function isA(cls, ancestor) {
   for (let c = cls, n = 0; c && n < 40; c = supers.get(c), n += 1) if (c === ancestor) return true;
   return false;
 }
+export function RefEq(a, b) {
+  const object = (v) => v instanceof Raised ? v.obj : v ?? null;
+  return object(a) === object(b);
+}
 export function raise(obj, cls) {
+  // A runtime catch stores the exception wrapper, while a class catch stores
+  // its object. Re-raising either retains its original class and identity.
+  if (!cls && (obj instanceof Raised || obj instanceof AbapError)) return obj;
   if (obj === null || obj === undefined) throw new AbapError("OBJECTS_OBJREF_NOT_ASSIGNED", "RAISE EXCEPTION of an initial reference");
   const c = cls || obj.constructor?.$abap;
   if (!c) throw new AbapError("NOT_COMPILED", "RAISE EXCEPTION: the class of the object is not registered");
@@ -1062,6 +1069,12 @@ export function CallStatic(s, cls, method, args) {
   e.call(s, args);
 }
 export function paramMissing(op) { throw new AbapError("CX_SY_DYN_CALL_PARAM_MISSING", op); }
+// t -> i: mirror go/abap/datesplit.go, including invalid digit/length moves.
+export function TToI(v) {
+  if (!/^\d{6}$/.test(v)) return 0;
+  return Number(v.slice(0, 2)) * 3600 + Number(v.slice(2, 4)) * 60 + Number(v.slice(4, 6));
+}
+
 // d -> i, measured on A4H (go/abap/datesplit.go DToI says how)
 export function DToI(v) {
   if (!/^\d{8}$/.test(v)) return 0;

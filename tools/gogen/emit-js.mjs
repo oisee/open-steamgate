@@ -941,7 +941,7 @@ function expr(e, ctx) {
     case "padc": return `abap.PadC(${expr(e.x, ctx)}, ${e.n})`;
     case "flag": return String(e.value);
     case "str_fn": return `abap.${e.fn}(${e.args.map((a) => expr(a, ctx)).join(", ")})`;
-    case "sy": return `s.sy.${e.field.toLowerCase()}`;
+    case "sy": return /^Msg/.test(e.field) ? `(s.sy.${e.field.toLowerCase()} ?? ${JSON.stringify(e.field === "Msgno" ? "000" : "")})` : `s.sy.${e.field.toLowerCase()}`;
     case "sy_mandt": return "abap.Mandt";
     case "sy_host": return `abap.${e.name}`;
     case "int": return String(e.value);
@@ -1134,6 +1134,7 @@ function conv(e, ctx) {
     case "xs2x": return `abap.XFit(${x}, ${e.to.len})`;
     case "c2x": return e.to.k === "x" ? `abap.XFit(abap.CToX(${x}), ${e.to.len})` : `abap.CToX(${x})`;
     case "d2i": return `abap.DToI(${x})`;
+    case "t2i": return `abap.TToI(${x})`;
     case "c2n":
       if (to === "f") return `abap.ParseF(${x})`;
       if (to === "i") return `abap.ParseI(${x})`;
@@ -1169,7 +1170,7 @@ function cond(c, ctx) {
     }
     // two object references (ultra/json refeq; ultra/events: undefined and
     // null are both the initial reference)
-    case "refeq": return `((${expr(c.l, ctx)} ?? null) ${c.op === "=" ? "===" : "!=="} (${expr(c.r, ctx)} ?? null))`;
+    case "refeq": return `(${c.op === "=" ? "" : "!"}abap.RefEq(${expr(c.l, ctx)}, ${expr(c.r, ctx)}))`;
     case "data_bound": return `abap.DataBound(${expr(c.x, ctx)})`;
     case "initial":
       if (c.x.type.k === "data") return `abap.IsInitialData(${expr(c.x, ctx)})`;
