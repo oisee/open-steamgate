@@ -142,6 +142,19 @@ describe("osd compiler --stdio", function () {
       }
       const own2 = {...snap, objects: [{...snap.objects[0], files: [{...snap.objects[0].files[0], logicalPath: "src/sub/zcl_outline_own.clas.abap"}]}]};
       expect((await outlineSnapshot(own2, target)).outline.found).to.equal(true);
+      // the store's own type-to-file rules: an include lives in .prog, a
+      // structure in .tabl, a package in package.devc.xml or <name>.devc.xml
+      const {namesObject} = await import("../tools/osd-compiler-sidecar.mjs");
+      for (const [path, object, ok] of [
+        ["src/zosd_inc.prog.abap", {type: "INCL", name: "ZOSD_INC"}, true],
+        ["src/zosd_s.tabl.xml", {type: "STRU", name: "ZOSD_S"}, true],
+        ["src/package.devc.xml", {type: "DEVC", name: "$ZPKG"}, true],
+        ["src/$zpkg.devc.xml", {type: "DEVC", name: "$ZPKG"}, true],
+        ["src/#ns#zcl_x.clas.testclasses.abap", {type: "CLAS", name: "/NS/ZCL_X"}, true],
+        ["src/zosd_inc.prog.abap", {type: "INCL", name: "ZOSD_OTHER"}, false],
+        ["src/zosd_s.tabl.xml", {type: "STRU", name: "ZOSD_T"}, false],
+        ["src/zosd_inc.clas.abap", {type: "INCL", name: "ZOSD_INC"}, false],
+      ]) expect(namesObject(path, object), path).to.equal(ok);
     });
     it("uses the configured syntax version for a DEFAULT IGNORE declaration", async () => {
       const name = "ZCL_OUTLINE_DEFAULT";

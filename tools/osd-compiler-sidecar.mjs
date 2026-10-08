@@ -6,6 +6,7 @@ import {createInterface} from "node:readline";
 import {once} from "node:events";
 import lock from "../libs.lock.json" with {type: "json"};
 import {runsAs} from "./osd-main.mjs";
+import {TYPES} from "./osd-store-types.mjs";
 
 const limits = {maxSnapshotBytes: 16 * 1024 * 1024, maxConcurrentRequests: 1};
 const digest = bytes => createHash("sha256").update(bytes).digest("hex");
@@ -24,15 +25,18 @@ function realContainedPath(root, path) {
 }
 
 // An abapGit file name says its object: <name>.<type>[.<part>...], with '#'
-// for '/' in a namespace; a package's file is package.devc.xml. A logical
-// path may only name a file of the object it is listed under, so a mapping
-// cannot put one object's bytes under another's name.
-function namesObject(logicalPath, object) {
+// for '/' in a namespace. The store's own type table says which file type a
+// requested type lives in (INCL in .prog, STRU in .tabl); a package's file is
+// package.devc.xml or <name>.devc.xml. A logical path may only name a file of
+// the object it is listed under, so a mapping cannot put one object's bytes
+// under another's name.
+export function namesObject(logicalPath, object, types = TYPES) {
   const parts = basename(logicalPath).toLowerCase().split(".");
   if (parts.length < 3) return false;
-  const type = parts[1].toUpperCase();
-  if (type !== object.type.toUpperCase()) return false;
-  if (type === "DEVC") return parts[0] === "package";
+  const requested = object.type.toUpperCase();
+  const fileType = requested === "STRU" ? "tabl" : (types[requested]?.ext.split(".")[1] ?? requested.toLowerCase());
+  if (parts[1] !== fileType) return false;
+  if (requested === "DEVC" && parts[0] === "package") return true;
   return parts[0].replace(/#/g, "/") === object.name.toLowerCase();
 }
 
