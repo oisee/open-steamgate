@@ -10,7 +10,7 @@ Libraries fill names absent from source and remain read-only.
 | Workspace / content pack | `osd-pack.json`, including linked VS Code workspaces | Writable source roots; changes reach the workspace. |
 | ABAP library | Configured libraries and pinned files/exclusions | Read-only. |
 | Explicit abapGit folder | `--layer` / `OSD_LAYERS`, repository `.abapgit.xml` | Writable, using the repository's starting folder and package layout. |
-| abapGit ZIP | `--layer` / `OSD_LAYERS`, verified and extracted inside the instance | Immutable base; writes copy the entire winning object into its writable overlay first. |
+| abapGit ZIP | `--layer` / `OSD_LAYERS`, verified and extracted inside the instance | Immutable base; independent writable overlay copies (classes/interfaces seeded at mount, other objects copied on first write). |
 
 ## Archive layers (implemented)
 
@@ -35,9 +35,18 @@ edits do. Archive hashes are input identities, not ADT version identifiers;
 ADT active source continues to use generation snapshots (#638).
 
 Every archive revision has an overlay at `local/overlays/<sha256>`, immediately
-above its base in layer order. The first write copies the **whole object**:
-main source, XML header, local definitions/implementations, macros and tests,
-with package headers established at mount time before the first build. A `.clas.abap` edit therefore retains its `.clas.xml`.
+above its base in layer order. Mounting establishes package headers and the
+**whole class/interface object** before the first build: main source, XML
+header, local definitions/implementations, macros and tests. These are independent
+copies, never hard links into the immutable base; existing overlay files are
+preserved. Other object types are copied whole on first write.
+
+This makes the input topology stable before startup priming. Previously, a first
+class save during priming added source/XML/include files to the sparse overlay.
+The strict live-generation proof correctly refused that new input set even with
+the saved source put back, forcing a cold activation (#647). Now a first eligible
+edit can stay warm even while startup prime is running; frozen-input and cold
+verification checks remain unchanged. A `.clas.abap` edit retains its `.clas.xml`.
 Creation in an archive package uses the mounted overlay package header.
 The active-source provenance of a copied object is retained before its saved
 bytes change; failed activation keeps serving the old active source.
@@ -56,8 +65,8 @@ one WARNING with its old SHA-256, overlay path, object count and recovery steps.
 The mount list represents the complete current configuration, including simultaneous
 revisions of the same package, and drops historical mounts. This includes pre-metadata revisions whose
 package can be recovered from the retained archive cache. Counts compare overlay
-files with their old base and deduplicate class includes; unchanged package
-headers do not count. Resume by mounting the original ZIP, or open the overlay
+files with their old base and deduplicate class includes; unchanged seeded
+objects and package headers do not count. Resume by mounting the original ZIP, or open the overlay
 directory and manually diff/reapply the edits against the retained old archive
 sources under build/source-layers/<old-sha>. No export or automatic
 carry-over/rebase command is implemented. There is no implicit migration, cache eviction or delete tombstone:
@@ -93,6 +102,7 @@ while their runtime readers remain the existing channel readers.
 - `tools/osd-packs.mjs`: layer order, shared by build and generators.
 - `tools/osd-store.mjs`: package mapping and whole-object copy before writes.
 - `tools/osd-store-versions.mjs`: retained active source after relocation.
+- [First ZIP activation](zip-first-activation.md): #647 reproducer and stable startup inputs.
 - [Generations](generations.md): immutable build artifacts and source snapshots.
 - [ADR 0001](adr/0001-osd-version-and-data-model.md): Git source history and the
   separate per-process liveness counter.

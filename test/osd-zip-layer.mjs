@@ -76,6 +76,21 @@ describe('immutable abapGit ZIP source layers', function () {
     expect(exported.has(`src/${a}.sicf.xml`)).to.equal(true);
     expect(exported.has(`src/${b}.sicf.xml`)).to.equal(true);
   });
+  it('establishes complete warm-editable inputs on mount, preserving saved overlays on remount', () => {
+    const layers = zip(), overlay = join(root, layers[1].path);
+    for (const member of ['abap', 'xml', 'locals_def.abap']) {
+      expect(readFileSync(join(overlay, 'zcl_zip_demo.clas.' + member))).to.deep.equal(readFileSync(join(repo, 'src/zcl_zip_demo.clas.' + member)));
+    }
+    const before = hashOf(root, inputsOf(root));
+    const store = new ObjectStore({root, libs: []});
+    store.write('CLAS', 'ZCL_ZIP_DEMO', source('saved'));
+    const saved = hashOf(root, inputsOf(root));
+    expect(saved).not.to.equal(before);
+    userLayersOf(root);
+    expect(hashOf(root, inputsOf(root))).to.equal(saved);
+    expect(readFileSync(join(overlay, 'zcl_zip_demo.clas.abap'), 'utf8')).to.equal(source('saved'));
+    expect(readFileSync(join(root, layers[0].path, 'zcl_zip_demo.clas.abap'), 'utf8')).to.equal(source('base'));
+  });
   it('copies the complete object to the overlay and preserves active source through cold activation', async () => {
     const layers=zip(); await build({root,generators:false});
     const store=new ObjectStore({root,libs:[],build:{generators:false}});
@@ -169,7 +184,7 @@ describe('immutable abapGit ZIP source layers', function () {
     expect(doctor).to.include('orphaned overlay').and.include(first[0].archiveId).and.include(first[1].path);
     expect(orphanedOverlays(root)[0]).to.include({count: 1, sameLayer: true, key: '$ZDEMO'});
     expect(new ObjectStore({root,libs:[]}).read('CLAS','ZCL_ZIP_DEMO').source).to.equal(source('new base'));
-    expect(existsSync(join(root, second[1].path, 'zcl_zip_demo.clas.abap'))).to.equal(false);
+    expect(readFileSync(join(root, second[1].path, 'zcl_zip_demo.clas.abap'), 'utf8')).to.equal(source('new base'));
     process.env.OSD_LAYERS = join(scratch, 'fixture.zip'); userLayersOf(root);
     expect(orphanedOverlays(root)).to.deep.equal([]);
   });
@@ -223,6 +238,7 @@ describe('immutable abapGit ZIP source layers', function () {
   });
   it('refuses overlay links that would redirect mounting or STORE writes into the base', () => {
     const layers = zip(), base = join(root, layers[0].path), overlay = join(root, layers[1].path);
+    rmSync(join(overlay, 'zcl_zip_demo.clas.abap'));
     symlinkSync(join(base, 'zcl_zip_demo.clas.abap'), join(overlay, 'zcl_zip_demo.clas.abap'));
     expect(() => new ObjectStore({root, libs: []}).write('CLAS', 'ZCL_ZIP_DEMO', source('bad'))).to.throw(/link/);
     expect(readFileSync(join(base, 'zcl_zip_demo.clas.abap'), 'utf8')).to.equal(source('base'));

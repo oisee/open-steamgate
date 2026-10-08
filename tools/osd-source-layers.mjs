@@ -89,16 +89,19 @@ export function userLayersOf(root, env = process.env) {
       throw new Error(`ZIP overlay is redirected through a link: ${overlay}`);
     }
     mkdirSync(join(root, overlay), {recursive: true});
-    // Establish package inputs before the first generation is hashed/primed.
-    // Copying these on first save otherwise introduces a new DEVC input and
-    // forces a cold publication, disconnecting existing APC sessions.
-    const headers = folder => {
+    // Establish all warm-editable object inputs before hashing/priming, not
+    // just package headers. A first save copies the COMPLETE object; adding
+    // its source/XML/includes while startup prime is reading forces a retry
+    // whose live-input proof cannot undo that new overlay topology. Copies
+    // are independent (never hard links into the immutable base), and an
+    // existing overlay file is always preserved, including inactive edits.
+    const seedInputs = folder => {
       for (const entry of readdirSync(folder, {withFileTypes: true})) {
         const from = join(folder, entry.name);
-        if (entry.isDirectory()) headers(from);
-        else if (entry.name.endsWith('.devc.xml')) {
+        if (entry.isDirectory()) seedInputs(from);
+        else if (entry.name.endsWith('.devc.xml') || /\.(?:clas|intf)\./i.test(entry.name)) {
           const to = join(root, overlay, relative(source, from));
-          if (!writable(root, overlay, relative(root, to), true)) throw new Error(`ZIP package header is redirected through a link: ${to}`);
+          if (!writable(root, overlay, relative(root, to), true)) throw new Error(`ZIP overlay input is redirected through a link: ${to}`);
           if (!existsSync(to)) {
             mkdirSync(dirname(to), {recursive: true});
             copyFileSync(from, to);
@@ -107,7 +110,7 @@ export function userLayersOf(root, env = process.env) {
         }
       }
     };
-    headers(source);
+    seedInputs(source);
     // Keep every configured revision, including simultaneous ZIPs of one package.
     (mounts[pkg] ??= []).push(id);
     const metadata = join(root, 'local/overlays', id + '.meta.txt');
