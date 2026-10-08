@@ -58,7 +58,7 @@ and the end points to the last character. All other operations receive
 |---|---|---|
 | `hello` | `contract: 1` | versions, capabilities, limits |
 | `check` | snapshot | diagnostics, registryHash, configSha, inputCount, virtualFiles |
-| `outline` | snapshot (one object), object `{type, name, version}` | outline, registryHash, inputCount, virtualFiles |
+| `outline` | snapshot (one object), object `{type, name, version}` | outline, registryHash, configSha, inputCount, virtualFiles |
 
 `outline` returns exactly the JSON produced by STORE `PARSE` kind `OUTLINE`,
 under `outline`, including `{found:false}` for an unknown object. It calls the
@@ -67,14 +67,16 @@ abaplint registry. Both active and inactive requests read the files the snapshot
 names; the object identity and version must match the snapshot object. Active
 copies and the working tree outside that snapshot cannot supply coordinates.
 The same hash checks, realpath containment and final snapshot verification as
-`check` apply.
+`check` apply. Outline also reads `abaplint.jsonc` through the same configured
+registry construction used by the Node store, because syntax settings can
+change declaration facts and coordinates.
 
 For outline, `registryHash` uses the same sorted `[filename, sha256(raw)]`
 encoding as check, but covers only the supplied parser files; `inputCount`
-counts them and `virtualFiles` is empty. There is no `configSha`: outline
-parses structure with the parser defaults and does not read lint configuration
-or validate dependencies. This identity describes the actual outline inputs
-without claiming the validation registry or the generation covers them.
+counts them and `virtualFiles` is empty. `configSha` hashes the raw
+`abaplint.jsonc` bytes used to configure that parser registry, and is re-hashed
+before answering. This identity describes the actual outline inputs without
+claiming the validation registry or the generation covers them.
 
 Example NDJSON request (replace the digest with SHA-256 of the named file):
 
@@ -83,7 +85,7 @@ Example NDJSON request (replace the digest with SHA-256 of the named file):
 ```
 
 The answer is `{"id":2,"outline":{"found":true,...},"registryHash":"...",
-"inputCount":1,"virtualFiles":[]}`. Links use the existing A4H coordinates:
+"configSha":"...","inputCount":1,"virtualFiles":[]}`. Links use the existing A4H coordinates:
 lines start at 1, columns at 0, and ends point to the last character.
 
 Light verification:

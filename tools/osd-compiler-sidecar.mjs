@@ -131,8 +131,11 @@ export async function outlineSnapshot(snapshot, object, {beforeAnswer} = {}) {
     throw refusal("BAD_REQUEST", "outline object must match snapshot object");
   }
   const abaplint = await import("@abaplint/core");
+  const {ObjectStore} = await import("./osd-store.mjs");
+  const {configuredRegistry} = await import("./osd-store-registry.mjs");
   const {PARSE_KINDS} = await import("./osd-store-destination.mjs");
-  const registry = new abaplint.Registry();
+  const configured = configuredRegistry(new ObjectStore({root, registryInputs: true}));
+  const registry = configured.registry;
   for (const [path, file] of files) registry.addFile(new abaplint.MemoryFile("/" + path, file.bytes.toString("utf8")));
   registry.parse();
   const store = {
@@ -146,10 +149,15 @@ export async function outlineSnapshot(snapshot, object, {beforeAnswer} = {}) {
   const outline = await PARSE_KINDS.OUTLINE(store, object);
   const members = [...registry.getFiles()].map(file => [file.getFilename(), digest(file.getRaw())])
     .sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
-  const response = {outline, registryHash: digest(JSON.stringify(members)),
+  const response = {outline, registryHash: digest(JSON.stringify(members)), configSha: configured.configSha,
     inputCount: members.length, virtualFiles: []};
   await beforeAnswer?.();
   snapshotFiles({...snapshot, root});
+  try {
+    if (digest(readFileSync(configured.configFile)) !== configured.configSha) throw new Error("changed config");
+  } catch {
+    throw refusal("SNAPSHOT_MISMATCH", "inputs moved during check");
+  }
   return response;
 }
 

@@ -89,6 +89,14 @@ describe("osd compiler --stdio", function () {
     const request = () => send({id: ++nextId, op: "outline", snapshot: snap, object});
     const nodeOutline = async () => (await destination.execute({IV_COMMAND: "PARSE",
       IV_JSON: JSON.stringify({kind: "OUTLINE", ...object})})).EV_JSON;
+    const nodeOutlineFor = async target => (await destination.execute({IV_COMMAND: "PARSE",
+      IV_JSON: JSON.stringify({kind: "OUTLINE", type: target.type, name: target.name, version: target.version})})).EV_JSON;
+    const snapshotFor = (name, text) => {
+      const path = `src/${name.toLowerCase()}.clas.abap`;
+      writeFileSync(join(fixture, path), text);
+      return {root: fixture, generation: "outline-fixture", objects: [{type: "CLAS", name, version: "inactive",
+        files: [{path, sha256: sha(text)}]}]};
+    };
     beforeEach(() => {
       fixture = mkdtempSync(join(tmpdir(), "osd-sidecar-outline-"));
       mkdirSync(join(fixture, "src"));
@@ -117,10 +125,32 @@ describe("osd compiler --stdio", function () {
         const pairs = snap.objects[0].files.map(f => ["/" + f.path, f.sha256]).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
         expect(response.registryHash).to.equal(sha(JSON.stringify(pairs)));
         expect(response.inputCount).to.equal(3);
+        expect(response.configSha).to.equal(sha(readFileSync(join(fixture, "abaplint.jsonc"))));
         expect(response.virtualFiles).to.deep.equal([]);
-        expect(response).not.to.have.property("configSha");
       });
     }
+    it("uses the configured syntax version for a DEFAULT IGNORE declaration", async () => {
+      const name = "ZCL_OUTLINE_DEFAULT";
+      const text = `CLASS ${name.toLowerCase()} DEFINITION PUBLIC.\n  PUBLIC SECTION.\n    METHODS run DEFAULT IGNORE.\nENDCLASS.\nCLASS ${name.toLowerCase()} IMPLEMENTATION.\n  METHOD run.\n  ENDMETHOD.\nENDCLASS.\n`;
+      const target = {type: "CLAS", name, version: "inactive"};
+      store.write("CLAS", name, text);
+      const response = await outlineSnapshot(snapshotFor(name, text), target);
+      expect(JSON.stringify(response.outline)).to.equal(await nodeOutlineFor(target));
+      expect(response.outline.links.some(link => link.href.includes("source/main#"))).to.equal(true);
+    });
+    it("matches Node outline when inherited and implemented objects are absent", async () => {
+      const targetName = "ZCL_OUTLINE_DEPENDENT";
+      store.write("CLAS", "ZCL_OUTLINE_BASE", "CLASS zcl_outline_base DEFINITION PUBLIC.\n  PUBLIC SECTION.\n    METHODS base.\nENDCLASS.\nCLASS zcl_outline_base IMPLEMENTATION.\n  METHOD base.\n  ENDMETHOD.\nENDCLASS.\n");
+      store.write("INTF", "ZIF_OUTLINE_EXTERNAL", "INTERFACE zif_outline_external PUBLIC.\n  METHODS external.\nENDINTERFACE.\n");
+      const text = `CLASS ${targetName.toLowerCase()} DEFINITION PUBLIC INHERITING FROM zcl_outline_base.\n  PUBLIC SECTION.\n    INTERFACES zif_outline_external.\n    METHODS run.\nENDCLASS.\nCLASS ${targetName.toLowerCase()} IMPLEMENTATION.\n  METHOD run.\n  ENDMETHOD.\nENDCLASS.\n`;
+      store.write("CLAS", targetName, text);
+      const target = {type: "CLAS", name: targetName, version: "inactive"};
+      const nodeDestination = new StoreDestination({store: new ObjectStore({root: fixture})});
+      const nodeJson = await nodeDestination.execute({IV_COMMAND: "PARSE",
+        IV_JSON: JSON.stringify({kind: "OUTLINE", ...target})});
+      const response = await outlineSnapshot(snapshotFor(targetName, text), target);
+      expect(JSON.stringify(response.outline)).to.equal(nodeJson.EV_JSON);
+    });
     it("uses an inactive edit's shifted coordinates rather than active copies", async () => {
       const baseline = await request();
       store.write("CLAS", outlineName, "\n\n" + outlineFiles[`${outlineName.toLowerCase()}.clas.abap`]);
@@ -162,6 +192,18 @@ describe("osd compiler --stdio", function () {
         }});
       } catch (caught) {error = caught;}
       expect(error).to.have.property("protocolCode", "SNAPSHOT_MISMATCH");
+    });
+    it("re-verifies outline configuration before answering", async () => {
+      const configPath = join(fixture, "abaplint.jsonc");
+      const before = readFileSync(configPath);
+      let error;
+      try {
+        error = await outlineSnapshot(snap, object, {beforeAnswer() {
+          writeFileSync(configPath, JSON.stringify({syntax: {version: "v750"}}));
+        }});
+      } catch (caught) {error = caught;}
+      finally {writeFileSync(configPath, before);}
+      expect(error).to.include({protocolCode: "SNAPSHOT_MISMATCH", message: "inputs moved during check"});
     });
     it("enforces outline realpath containment", async () => {
       const file = snap.objects[0].files[0];
