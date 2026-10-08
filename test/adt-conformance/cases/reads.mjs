@@ -2,6 +2,8 @@ const object = '/oo/classes/zcl_osd_adt_uri';
 const source = /CLASS zcl_osd_adt_uri DEFINITION/i;
 const atom = /application\/(?:atomsvc|atom)\+xml/;
 const nodeStructureExpect = {status: 200, xml: [{xpath: '/asx:abap/asx:values/DATA/TREE_CONTENT', regexp: /^[\s\S]*$/}], body: /ZCL_OSD_ADT_URI/};
+const checkrunUri = '/sap/bc/adt' + object;
+const checkrunBody = `<?xml version="1.0" encoding="utf-8"?><chkrun:checkObjectList xmlns:chkrun="http://www.sap.com/adt/checkrun" xmlns:adtcore="http://www.sap.com/adt/core"><chkrun:checkObject adtcore:uri="${checkrunUri}"/></chkrun:checkObjectList>`;
 export default [
   ...['/discovery', '/core/discovery'].map((path, i) => ({id: `C${i + 1}-discovery`, point: `C${i + 1}`,
     title: 'Discovery advertises repository and source collections', request: {path},
@@ -26,6 +28,12 @@ export default [
   {id: 'C5-search', point: 'C5', title: 'Search points to the matching class',
     request: {path: '/repository/informationsystem/search', query: {query: 'ZCL_OSD_ADT_URI'}},
     expect: {status: 200, xml: [{xpath: '/adtcore:objectReferences/adtcore:objectReference/@adtcore:name', value: 'ZCL_OSD_ADT_URI'}]}},
+  {id: 'C9b-checkrun-active', point: 'C9b', title: 'An active checkrun returns a clean report for the requested URI',
+    request: {method: 'POST', path: '/checkruns', headers: {'content-type': 'application/xml'}, body: checkrunBody},
+    expect: {status: 200, contentType: /application\/vnd\.sap\.adt\.checkmessages\+xml/,
+      xml: [{xpath: '/chkrun:checkRunReports/chkrun:checkReport/@chkrun:triggeringUri', value: checkrunUri},
+        {xpath: '/chkrun:checkRunReports/chkrun:checkReport/@chkrun:status', value: 'processed'},
+        {xpath: '/chkrun:checkRunReports/chkrun:checkReport/chkrun:checkMessageList/chkrun:checkMessage', count: 0}]}},
   {id: 'C6-class-document', point: 'C6', title: 'Class metadata and include links', request: {path: object},
     expect: {status: 200, xml: [{xpath: '/class:abapClass/@adtcore:name', value: 'ZCL_OSD_ADT_URI'}], body: /includes\/testclasses/}},
   ...[undefined, 'active', 'inactive'].map((version, i) => ({id: `R${i + 1}-source-${version ?? 'default'}`, point: `R${i + 1}`,

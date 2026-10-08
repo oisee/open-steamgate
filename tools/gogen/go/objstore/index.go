@@ -19,12 +19,14 @@ import (
 var storeTypes = []struct {
 	Type, Ext  string
 	SameFileAs string
+	Source     bool
 }{
-	{"CLAS", ".clas.abap", ""}, {"INTF", ".intf.abap", ""}, {"PROG", ".prog.abap", ""},
-	{"FUGR", ".fugr.xml", ""}, {"TABL", ".tabl.xml", ""}, {"DTEL", ".dtel.xml", ""},
-	{"DOMA", ".doma.xml", ""}, {"TTYP", ".ttyp.xml", ""}, {"DDLS", ".ddls.asddls", ""},
-	{"SRVD", ".srvd.srvdsrv", ""}, {"VIEW", ".view.xml", ""}, {"SHLP", ".shlp.xml", ""},
-	{"MSAG", ".msag.xml", ""}, {"DEVC", ".devc.xml", ""}, {"INCL", ".prog.abap", "PROG"},
+	{"CLAS", ".clas.abap", "", true}, {"INTF", ".intf.abap", "", true}, {"PROG", ".prog.abap", "", true},
+	{"FUGR", ".fugr.xml", "", false}, {"TABL", ".tabl.xml", "", false}, {"DTEL", ".dtel.xml", "", false},
+	{"DOMA", ".doma.xml", "", false}, {"TTYP", ".ttyp.xml", "", false}, {"DDLS", ".ddls.asddls", "", true},
+	{"SRVD", ".srvd.srvdsrv", "", true}, {"VIEW", ".view.xml", "", false}, {"SHLP", ".shlp.xml", "", false},
+	{"MSAG", ".msag.xml", "", false}, {"SICF", ".sicf.xml", "", false}, {"SAPC", ".sapc.xml", "", false},
+	{"SAMC", ".samc.xml", "", false}, {"DEVC", ".devc.xml", "", false}, {"INCL", ".prog.abap", "PROG", true},
 }
 
 func storeTypeExt(t string) (string, bool) {
@@ -34,6 +36,18 @@ func storeTypeExt(t string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+func storeTypeSource(t string) (bool, bool) {
+	if t == "STRU" {
+		return false, true
+	}
+	for _, x := range storeTypes {
+		if x.Type == t {
+			return x.Source, true
+		}
+	}
+	return false, false
 }
 
 // a class's parts, by the suffix abapGit gives them (osd-store.mjs INCLUDES)

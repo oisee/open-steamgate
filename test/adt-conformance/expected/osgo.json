@@ -27,5 +27,6 @@
   "W2-write-unlocked": "known-gap: POST /oo/classes (class CREATE) is not served on osgo yet (404); write scenario not reached",
   "W3-write-foreign": "known-gap: POST /oo/classes (class CREATE) is not served on osgo yet (404); write scenario not reached",
   "W4-create-delete": "known-gap: POST /oo/classes (class CREATE) is not served on osgo yet (404); write scenario not reached",
-  "W5-check-inactive": "known-gap: POST /oo/classes (class CREATE) is not served on osgo yet (404); write scenario not reached"
+  "W5-check-inactive": "known-gap: POST /oo/classes (class CREATE) is not served on osgo yet (404); write scenario not reached",
+  "C9b-checkrun-active": "pass"
 }

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"osg/gogen/storecheck"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -95,6 +96,7 @@ type storeEntry struct {
 
 var storeState struct {
 	mu       sync.Mutex
+	revision uint64
 	root     string
 	cfg      *Config
 	excluded []*regexp.Regexp
@@ -109,6 +111,7 @@ var storeState struct {
 func SetStore(root string, config []byte, reason string) error {
 	storeState.mu.Lock()
 	defer storeState.mu.Unlock()
+	storeState.revision++
 	storeState.root, storeState.cfg, storeState.excluded = "", nil, nil
 	storeState.written = map[string]bool{}
 	storeState.reason = reason
@@ -156,12 +159,7 @@ type Row struct {
 }
 
 // Issue is one issue (ZOSD_ISSUE_S).
-type Issue struct {
-	OBJ_TYPE, OBJ_NAME string
-	FILE               string
-	LINE, COL          int32
-	RULE, MESSAGE      string
-}
+type Issue = storecheck.Issue
 
 // Tally is one type and how many of it matched (ZOSD_TYPE_S).
 type Tally struct {
@@ -205,11 +203,11 @@ func storeNotFound(typ, name string) error { return storeRefusal(typ + " " + nam
 
 // Capabilities is what CAPABILITIES names: the commands this host does,
 // as opposed to the ones it only refuses (CHECK, ACTIVATE: storeNoCompiler).
-var Capabilities = []string{"LIST", "READ", "WRITE", "HISTORY", "REVISION", "OBJECT", "PACKAGE", "PACKAGES", "SEARCH"}
+var Capabilities = []string{"LIST", "READ", "WRITE", "HISTORY", "REVISION", "OBJECT", "PACKAGE", "PACKAGES", "SEARCH", "CHECKRUN"}
 
 // Commands lists the implemented protocol commands, including discovery.
 // ACTIVATE and TOKENS remain refused; PARSE supports OUTLINE with a provider.
-var Commands = []string{"LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "TOKENS", "CAPABILITIES", "HISTORY", "REVISION", "OBJECT", "PACKAGE", "PACKAGES", "SEARCH", "PARSE", "SYSTEM", "COMMANDS"}
+var Commands = []string{"LIST", "READ", "WRITE", "CHECK", "CHECKRUN", "ACTIVATE", "TOKENS", "CAPABILITIES", "HISTORY", "REVISION", "OBJECT", "PACKAGE", "PACKAGES", "SEARCH", "PARSE", "SYSTEM", "COMMANDS"}
 
 var systemKinds = map[string]bool{
 	"IDENTITY": true, "LOCK_HANDLE": true, "LOCK_RELEASE": true, "SESSION": true,
@@ -233,7 +231,7 @@ func Call(in map[string]*string) Answer {
 	command := strings.ToUpper(text("IV_COMMAND", "LIST"))
 
 	switch command {
-	case "LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "TOKENS", "HISTORY", "REVISION", "OBJECT", "PACKAGE", "PACKAGES", "SEARCH", "PARSE":
+	case "LIST", "READ", "WRITE", "CHECK", "CHECKRUN", "ACTIVATE", "TOKENS", "HISTORY", "REVISION", "OBJECT", "PACKAGE", "PACKAGES", "SEARCH", "PARSE":
 	case "COMMANDS":
 		value, _ := json.Marshal(map[string]any{"commands": Commands})
 		a.Scalars["EV_JSON"] = string(value)
@@ -317,6 +315,9 @@ func Call(in map[string]*string) Answer {
 		}
 		err = storeWrite(ix, &a, typ, name, include, *src)
 		if err == nil {
+			storeState.revision++
+		}
+		if err == nil {
 			a.Scalars["EV_MS"] = ms()
 		}
 	case "HISTORY", "REVISION":
@@ -372,11 +373,9 @@ func Call(in map[string]*string) Answer {
 				a.Scalars["EV_VERSION"] = strings.ToLower(rev[:12])
 			}
 		}
-	case "CHECK":
-		err = storeCheck(ix, &a, typ, name, in["IV_SOURCE"])
+	case "CHECK", "CHECKRUN", "PARSE":
+		err = runCompiler(ix, &a, command, typ, name, include, in["IV_SOURCE"], text("IV_FILTER", ""), text("IV_JSON", ""))
 		a.Scalars["EV_MS"] = ms()
-	case "PARSE":
-		err = storeParse(ix, &a, text("IV_JSON", ""))
 	case "ACTIVATE", "TOKENS":
 		err = storeNoCompiler(ix, &a, command, typ, name)
 		if err == nil {

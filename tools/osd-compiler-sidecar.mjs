@@ -82,9 +82,10 @@ function snapshotFiles(snapshot) {
   return {root, files};
 }
 
-function diagnostic(issue) {
-  const col = Math.max(0, (issue.column ?? 1) - 1);
+export function diagnostic(issue) {
+  const col = (issue.column ?? 1) - 1;
   return {
+    ...(issue.uri === undefined ? {} : {uri: issue.uri}),
     severity: issue.severity ?? "E", code: "ABAP_SYNTAX", text: issue.message, rule: issue.rule ?? "",
     object: {type: issue.type, name: issue.name}, include: (issue.file ?? "").replace(/^\//, ""),
     line: issue.line ?? 1, col, endLine: issue.endLine ?? issue.line ?? 1,
@@ -125,12 +126,16 @@ export async function checkSnapshot(snapshot, {beforeAnswer} = {}) {
     frozen = {members, registryHash, configSha: inputs.configSha, configPath: realpathSync(inputs.configFile)};
   };
   let issues;
-  if (snapshot.checkMode === "saved") {
+  if (snapshot.checkMode === "saved" || snapshot.checkMode === "checkrun") {
     freeze(registry);
-    issues = snapshot.objects.flatMap(object => {
-      const result = store.check(object.type, object.name);
-      return result.issues.map(issue => ({...issue, type:result.type, name:result.name}));
-    });
+    const {checkRunReport} = await import("./adt-checkrun.mjs");
+    issues = (await Promise.all(snapshot.objects.map(async object => {
+      const result = snapshot.checkMode === "checkrun"
+        ? await checkRunReport(store, {...object, include: snapshot.include})
+        : store.check(object.type, object.name);
+      if (result.status === "notProcessed") throw refusal("CHECK_FAILED", result.statusText);
+      return result.issues.map(issue => ({...issue, type:object.type, name:object.name}));
+    }))).flat();
   } else if (snapshot.checkMode === undefined || snapshot.checkMode === "activation") {
     const checked = prepareActivation(store, snapshot.objects, {transpile:false, beforeCheck:freeze});
     issues = activationIssues(checked);
@@ -138,7 +143,7 @@ export async function checkSnapshot(snapshot, {beforeAnswer} = {}) {
     throw refusal("BAD_REQUEST", "invalid checkMode");
   }
   const diagnostics = issues.map(diagnostic);
-  const response = {diagnostics: [...new Map(diagnostics.map(d => [JSON.stringify(d), d])).values()],
+  const response = {diagnostics: snapshot.checkMode === "checkrun" ? diagnostics : [...new Map(diagnostics.map(d => [JSON.stringify(d), d])).values()],
     registryHash: frozen.registryHash, configSha: frozen.configSha, inputCount: frozen.members.length,
     virtualFiles: frozen.members.filter(m => m.realPath === undefined).map(m => m.filename)};
   // Test seam: mutate a dependency after validation, before freeze.

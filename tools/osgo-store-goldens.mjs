@@ -9,6 +9,7 @@ import {buildFixture} from "./osgo-store-fixture.mjs";
 
 const here = resolve(dirname(new URL(import.meta.url).pathname));
 export const fixtureRoot = resolve(here, "../test/fixtures/osgo-store");
+export const reportGoldenPath = resolve(fixtureRoot, "checkrun-report-golden.json");
 export const goldenPath = resolve(fixtureRoot, "destination-golden.json");
 
 export const cases = [
@@ -64,6 +65,16 @@ export const compilerCases = [
     [`outline-program-${version}`, {IV_COMMAND:"PARSE", IV_JSON:JSON.stringify({kind:"OUTLINE",type:"PROG",name:"ZPROGRAM",version})}, "EV_JSON"],
   ]),
   ["outline-missing", {IV_COMMAND:"PARSE", IV_JSON:JSON.stringify({kind:"OUTLINE",type:"CLAS",name:"ZMISSING"})}, "EV_JSON"],
+  ["checkrun-clean", {IV_COMMAND:"CHECKRUN", IV_TYPE:"CLAS", IV_NAME:"ZCL_VALID"}, "EV_JSON"],
+  ["checkrun-existing-include", {IV_COMMAND:"CHECKRUN", IV_TYPE:"CLAS", IV_NAME:"ZCLASS", IV_INCLUDE:"definitions"}, "EV_JSON"],
+  ["checkrun-absent-include", {IV_COMMAND:"CHECKRUN", IV_TYPE:"CLAS", IV_NAME:"ZCL_VALID", IV_INCLUDE:"macros"}, "EV_JSON"],
+  ["checkrun-amdp", {IV_COMMAND:"CHECKRUN", IV_TYPE:"CLAS", IV_NAME:"ZCL_PORTABLE"}, "EV_JSON"],
+  ["checkrun-amdp-include", {IV_COMMAND:"CHECKRUN", IV_TYPE:"CLAS", IV_NAME:"ZCL_PORTABLE", IV_INCLUDE:"macros"}, "EV_JSON"],
+  ["checkrun-syntax", {IV_COMMAND:"CHECKRUN", IV_TYPE:"CLAS", IV_NAME:"ZCL_BAD"}, "EV_JSON"],
+  ["checkrun-non-source", {IV_COMMAND:"CHECKRUN", IV_TYPE:"TABL", IV_NAME:"ZTABLE"}, "EV_JSON"],
+  ["checkrun-structure", {IV_COMMAND:"CHECKRUN", IV_TYPE:"STRU", IV_NAME:"ZSTRUCT"}, "EV_JSON"],
+  ["checkrun-missing-structure", {IV_COMMAND:"CHECKRUN", IV_TYPE:"STRU", IV_NAME:"ZMISSING"}, "EV_JSON"],
+  ["checkrun-missing", {IV_COMMAND:"CHECKRUN", IV_TYPE:"CLAS", IV_NAME:"ZMISSING"}, "EV_JSON"],
 ];
 
 // Node checks these directly through its in-memory unsaved buffer. Contract
@@ -73,6 +84,7 @@ export const compilerGapCases = [
 ];
 
 export async function prepareCompilerFixture(root) {
+  await writeFile(resolve(root,"src/zstruct.tabl.xml"), "<abapGit><TABCLASS>INTTAB</TABCLASS></abapGit>");
   await writeFile(resolve(root,"abap_transpile.json"), JSON.stringify({input_folder:["src"],libs:[]}));
   await writeFile(resolve(root,"abaplint.jsonc"), JSON.stringify({syntax:{version:"v702"}}));
   await symlink("by-input/test",resolve(root,"build/live"));
@@ -82,6 +94,16 @@ export async function prepareCompilerFixture(root) {
   store.write("CLAS", "ZCL_DRAFT_DEP", source("run").replaceAll("zcl_valid", "zcl_draft_dep").replace("METHODS run", "CLASS-METHODS run"));
   store.write("CLAS", "ZCL_DRAFT_READER", source("run").replaceAll("zcl_valid", "zcl_draft_reader").replace(" METHOD run.", " METHOD run.\n zcl_draft_dep=>run( )."));
   await writeFile(resolve(root,"src/zcl_bad.clas.abap"),source("a".repeat(31)).replaceAll("zcl_valid","zcl_bad"));
+  await writeFile(resolve(root,"src/zcl_portable.clas.abap"), `CLASS zcl_portable DEFINITION PUBLIC CREATE PUBLIC.
+ PUBLIC SECTION.
+ CLASS-METHODS run EXPORTING VALUE(ev_result) TYPE i.
+ENDCLASS.
+CLASS zcl_portable IMPLEMENTATION.
+ METHOD run BY DATABASE PROCEDURE FOR HDB LANGUAGE SQLSCRIPT OPTIONS READ-ONLY.
+ ev_result = CAST('x' AS INTEGER);
+ ENDMETHOD.
+ENDCLASS.`);
+  await writeFile(resolve(root,"src/ztable.tabl.xml"),`<abapGit version="v1.0.0">\n <TABL><NAME>ztable</NAME></TABL>\n</abapGit>\n`);
   await writeFile(resolve(root,"src/osd/zclass.clas.abap"), source("edited").replaceAll("zcl_valid","zclass"));
 }
 
@@ -156,13 +178,39 @@ function assertFixtureTracked() {
   if (missing.length > 0) throw new Error(`fixture files are not tracked: ${missing.join(", ")}`);
 }
 
+// Exercise the shared report contract with diagnostic shapes unavailable from
+// a cold syntax error: nullish defaults, explicit zero, severity, warm URI.
+export async function reportGoldens() {
+  const {checkRunReport} = await import("./adt-checkrun.mjs");
+  const {diagnostic} = await import("./osd-compiler-sidecar.mjs");
+  const object = {type:"PROG",name:"ZREPORT"};
+  const issues = [
+    {message:"missing coordinates <token> & value"},
+    {severity:null,line:null,column:null,message:"null coordinates"},
+    {severity:"",line:1,column:1,message:"empty severity"},
+    {severity:"W",line:0,column:0,message:"explicit zero",type:"PROG",name:"ZREPORT",file:"/src/zreport.prog.abap"},
+    {severity:"I",line:2,column:3,message:"include URI",type:"CLAS",name:"ZCLASS",file:"/src/zclass.clas.locals_def.abap"},
+    {severity:"W",line:4,column:5,message:"fallback URI",type:"PROG",name:"ZREPORT"},
+  ];
+  const answers = {};
+  for (const warm of [false,true]) {
+    const store = {check:() => ({issues}), checkWarm:async () => warm ? {issues,warm:true} : undefined};
+    const report = await checkRunReport(store,object);
+    answers[warm ? "warm" : "cold"] = {report,diagnostics:report.issues.map(issue => diagnostic({...issue,...object}))};
+  }
+  return JSON.stringify(answers,null,2) + "\n";
+}
+
 export async function regenerate() {
   await mkdir(dirname(goldenPath), {recursive: true});
   await writeFile(goldenPath, await destinationAnswers());
+  await writeFile(reportGoldenPath, await reportGoldens());
 }
 
 export async function check() {
   const [wanted, current] = await Promise.all([readFile(goldenPath, "utf8"), destinationAnswers()]);
+  const [reportWanted, reportCurrent] = await Promise.all([readFile(reportGoldenPath,"utf8"), reportGoldens()]);
+  if (reportWanted !== reportCurrent) return {ok:false,wanted:reportWanted,current:reportCurrent};
   if (wanted !== current) return {ok: false, wanted, current};
   return {ok: true};
 }
