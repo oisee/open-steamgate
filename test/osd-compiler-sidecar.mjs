@@ -7,7 +7,6 @@ import {join, resolve} from "node:path";
 import {createInterface} from "node:readline";
 import {once} from "node:events";
 import {checkSnapshot} from "../tools/osd-compiler-sidecar.mjs";
-import {hashOf, inputsOf} from "../tools/osd-build.mjs";
 import {compilerCommand} from "../tools/osd-host.mjs";
 
 describe("osd compiler --stdio", function () {
@@ -82,8 +81,11 @@ describe("osd compiler --stdio", function () {
     const response = await send({id: ++nextId, op: "check", snapshot: snapshot("ZCL_SC_CLEAN", source("ZCL_SC_CLEAN"))});
     expect(response.id).to.equal(nextId);
     expect(response.diagnostics).to.deep.equal([]);
-    expect(response.inputsHash).to.equal(hashOf(root, inputsOf(root)));
-    expect(response.inputsHash).to.match(/^[0-9a-f]{16}$/);
+    expect(response.registryHash).to.match(/^[0-9a-f]{64}$/);
+    expect(response.configSha).to.equal(createHash("sha256").update(readFileSync(join(root, "abaplint.jsonc"))).digest("hex"));
+    expect(response.inputCount).to.equal(1);
+    expect(response.virtualFiles).to.deep.equal([]);
+    expect(response).not.to.have.property("inputsHash");
     expect(response).not.to.have.property("inputs");
   });
   it("refuses a non-listed input that moves during check", async () => {
@@ -100,6 +102,89 @@ describe("osd compiler --stdio", function () {
     finally { rmSync(other, {force: true}); }
     expect(reachedHook).to.equal(true);
     expect(error).to.include({protocolCode: "SNAPSHOT_MISMATCH", message: "inputs moved during check"});
+  });
+  it("identifies the same registry twice", async () => {
+    const snap = snapshot("ZCL_SC_REPEAT", source("ZCL_SC_REPEAT"));
+    const first = await checkSnapshot(snap), second = await checkSnapshot(snap);
+    expect(first.registryHash).to.match(/^[0-9a-f]{64}$/);
+    expect(second.registryHash).to.equal(first.registryHash);
+    expect(second.configSha).to.equal(first.configSha);
+    expect(second.inputCount).to.equal(first.inputCount);
+  });
+  for (const target of ["generated", "overlay", "config", "vanished"]) {
+    it(`freezes ${target} inputs from the validation registry`, async () => {
+      const fixture = mkdtempSync(join(tmpdir(), "osd-sidecar-freeze-"));
+      const sha = text => createHash("sha256").update(text).digest("hex");
+      const path = "src/zcl_sc_candidate.clas.abap", other = "src/zcl_sc_other.clas.abap";
+      const config = JSON.stringify({syntax: {version: "v702"}});
+      mkdirSync(join(fixture, "src"));
+      mkdirSync(join(fixture, "gen"));
+      writeFileSync(join(fixture, "abap_transpile.json"), JSON.stringify({input_folder: ["src", "gen"], libs: []}));
+      writeFileSync(join(fixture, "abaplint.jsonc"), config);
+      writeFileSync(join(fixture, path), source("ZCL_SC_CANDIDATE"));
+      writeFileSync(join(fixture, other), source("ZCL_SC_OTHER", "inactive"));
+      writeFileSync(join(fixture, "gen/zcl_sc_generated.clas.abap"), source("ZCL_SC_GENERATED"));
+      const copy = join(fixture, "build/inactive/active", other);
+      mkdirSync(join(fixture, "build/inactive/active/src"), {recursive: true});
+      // The copy intentionally differs from the working source. The hash
+      // and freeze must describe the active bytes used by the validator.
+      writeFileSync(copy, source("ZCL_SC_OTHER", "active"));
+      const inactiveDigest = createHash("sha256").update(other).update("\0").update(source("ZCL_SC_OTHER", "inactive")).update("\0").digest("hex");
+      writeFileSync(join(fixture, "build/inactive/inactive.json"), JSON.stringify({inactive: {
+        "CLAS ZCL_SC_OTHER": {files: [other], digest: inactiveDigest},
+      }}));
+      const snap = {root: fixture, generation: "fixture", objects: [{type: "CLAS", name: "ZCL_SC_CANDIDATE", version: "inactive",
+        files: [{path, sha256: sha(source("ZCL_SC_CANDIDATE"))}]}]};
+      let error, baseline, expectedHash, reachedHook = false;
+      try {
+        baseline = await checkSnapshot(snap);
+        const pairs = [["/" + path, sha(source("ZCL_SC_CANDIDATE"))],
+          ["/" + other, sha(source("ZCL_SC_OTHER", "active"))],
+          ["/gen/zcl_sc_generated.clas.abap", sha(source("ZCL_SC_GENERATED"))]].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
+        expectedHash = sha(JSON.stringify(pairs));
+        await checkSnapshot(snap, {beforeAnswer() {
+          reachedHook = true;
+          const changed = target === "overlay" ? copy : target === "config" ? join(fixture, "abaplint.jsonc")
+            : join(fixture, "gen/zcl_sc_generated.clas.abap");
+          if (target === "vanished") rmSync(changed);
+          else writeFileSync(changed, target === "config" ? config + "\n" : "changed");
+        }});
+      } catch (caught) { error = caught; }
+      finally { rmSync(fixture, {recursive: true, force: true}); }
+      expect(reachedHook).to.equal(true);
+      expect(error).to.include({protocolCode: "SNAPSHOT_MISMATCH", message: "inputs moved during check"});
+      expect(baseline.registryHash).to.equal(expectedHash);
+    });
+  }
+  it("uses OSD_LIB overrides in the registry identity and verdict", async () => {
+    const fixture = mkdtempSync(join(tmpdir(), "osd-sidecar-library-"));
+    const key = "OSD_LIB_SIDECAR_FIXTURE", previous = process.env[key];
+    try {
+      mkdirSync(join(fixture, "src"));
+      writeFileSync(join(fixture, "abaplint.jsonc"), JSON.stringify({syntax: {version: "v702"}}));
+      writeFileSync(join(fixture, "abap_transpile.json"), JSON.stringify({input_folder: ["src"],
+        libs: [{folder: "/.local/lars/sidecar-fixture", files: "/src/**"}]}));
+      writeFileSync(join(fixture, "libs.lock.json"), JSON.stringify({transpiler: {repo: "fixture/transpiler", ref: "a".repeat(40)},
+        libraries: [{folder: "sidecar-fixture", repo: "fixture/library", ref: "b".repeat(40)}]}));
+      const text = source("ZCL_SC_LIB_READER", "run", "DATA ref TYPE REF TO zcl_sc_library. CREATE OBJECT ref. ref->run( ).");
+      const path = "src/zcl_sc_lib_reader.clas.abap";
+      writeFileSync(join(fixture, path), text);
+      const snap = {root: fixture, generation: "fixture", objects: [{type: "CLAS", name: "ZCL_SC_LIB_READER", version: "inactive",
+        files: [{path, sha256: createHash("sha256").update(text).digest("hex")}]}]};
+      const results = [];
+      for (const [dir, method] of [["first", "run"], ["second", "renamed"]]) {
+        mkdirSync(join(fixture, dir, "src"), {recursive: true});
+        writeFileSync(join(fixture, dir, "src/zcl_sc_library.clas.abap"), source("ZCL_SC_LIBRARY", method));
+        process.env[key] = join(fixture, dir);
+        results.push(await checkSnapshot(snap));
+      }
+      expect(results[0].diagnostics).to.deep.equal([]);
+      expect(results[1].diagnostics.length).to.be.greaterThan(0);
+      expect(results[1].registryHash).not.to.equal(results[0].registryHash);
+    } finally {
+      if (previous === undefined) delete process.env[key]; else process.env[key] = previous;
+      rmSync(fixture, {recursive: true, force: true});
+    }
   });
   it("rejects a 31-character method name with A4H coordinates", async () => {
     const method = "a".repeat(31);

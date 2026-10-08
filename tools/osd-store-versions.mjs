@@ -1,6 +1,6 @@
 import {warmOverlay} from "./osd-warm-overlay.mjs";
 // Active/inactive versions, source snapshots and activation provenance.
-import {existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync} from "node:fs";
+import {existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, writeFileSync} from "node:fs";
 import {createHash} from "node:crypto";
 import {dirname, join, relative, resolve} from "node:path";
 import {hashOf, inputsOf, liveHash, normalPath} from "./osd-build.mjs";
@@ -319,7 +319,7 @@ export class StoreVersions {
   // (#withSource's borrowing, for several files).
   withOverlay(activating, fn) {
     const registry = this.#store.registry();
-    const replacements = [], restore = [];
+    const replacements = [], restore = [], paths = new Map();
     for (const key of this.#store.inactive) {
       if (activating.has(key)) continue;
       const [type, ...rest] = key.split(" ");
@@ -330,16 +330,18 @@ export class StoreVersions {
         const name = "/" + file;
         const before = registry.getFileByName(name)?.getRaw();
         const copy = join(this.#store.root, this.#snapshotOf(file));
-        const source = existsSync(copy) ? readFileSync(copy, "utf8") : undefined;
+        const path = existsSync(copy) ? realpathSync(copy) : undefined;
+        const source = path === undefined ? undefined : readFileSync(path, "utf8");
+        if (path !== undefined) paths.set(name, path);
         if (before === source) continue;
         replacements.push([name, source]);
         restore.push([name, before]);
       }
     }
-    if (replacements.length === 0) return fn(registry);
+    if (replacements.length === 0) return fn(registry, paths);
     try {
       this.#store.updateRegistryFiles(registry, replacements);
-      return fn(registry);
+      return fn(registry, paths);
     } finally {
       this.#store.updateRegistryFiles(registry, restore);
     }

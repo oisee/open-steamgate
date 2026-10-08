@@ -1452,7 +1452,10 @@ export class ObjectStore {
     const self = `${type} ${String(name).toUpperCase()}`;
     const activating = new Set([self, ...[...(options.activating ?? [])].map((o) =>
       typeof o === "string" ? o : `${o.type} ${String(o.name).toUpperCase()}`)]);
-    return this.#versions.withOverlay(activating, () => this.#activateChecked(type, name));
+    return this.#versions.withOverlay(activating, (registry, paths) => {
+      options.beforeCheck?.(registry, paths);
+      return this.#activateChecked(type, name);
+    });
   }
 
   #activateChecked(type, name) {

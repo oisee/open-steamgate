@@ -1,7 +1,8 @@
 import {layers} from "./osd-inputs.mjs";
 // Registry construction, diagnostics and temporary source borrowing.
-import {readFileSync, readdirSync, statSync} from "node:fs";
+import {readFileSync, readdirSync, realpathSync, statSync} from "node:fs";
 import {join} from "node:path";
+import {createHash} from "node:crypto";
 import * as abaplint from "@abaplint/core";
 import {ddlsIssues} from "./osd-store-ddls.mjs";
 import {config as publicationValidation} from "@abaplint/transpiler/build/src/validation.js";
@@ -11,6 +12,8 @@ import {OBJECT_NAME_PATTERN} from "./osd-object-name.mjs";
 // The parse is shared per root. Known source mutations queue only their files;
 // configuration/root changes invalidate the whole registry.
 const PARSED = new Map();
+const INPUTS = new WeakMap();
+export const registryInputs = registry => INPUTS.get(registry);
 const PENDING = new Map();
 const REFERENCES = new WeakMap();
 const REVISIONS = new WeakMap();
@@ -144,7 +147,9 @@ export function buildRegistry(store, configPath = "abaplint.jsonc") {
     store.parsed = shared;
     return shared;
   }
-  const text = readFileSync(join(store.root, configPath), "utf8").split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
+  const configFile = realpathSync(join(store.root, configPath));
+  const configRaw = readFileSync(configFile);
+  const text = configRaw.toString("utf8").split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
   const config = JSON.parse(text);
   // The publication validator owns these rules. Keep identifier and
   // structural checks identical for saved includes and compiled includes.
@@ -159,6 +164,8 @@ export function buildRegistry(store, configPath = "abaplint.jsonc") {
     rules: {...validation.rules, allowed_object_types: {...validation.rules.allowed_object_types,
       allowed: [...validation.rules.allowed_object_types.allowed, "DDLS", "SRVD", "SAPC", "SAMC"]}},
   })));
+  const paths = new Map();
+  INPUTS.set(registry, {configFile, configSha: createHash("sha256").update(configRaw).digest("hex"), paths});
   // everything, not only what the index calls an object: a class needs its
   // local includes, and a type pool is not an ADT object but the check
   // still needs it
@@ -168,7 +175,9 @@ export function buildRegistry(store, configPath = "abaplint.jsonc") {
       if (hidden.has(file) || /\.(abap|xml|asddls)$/.test(file) === false) {
         continue;
       }
-      registry.addFile(new abaplint.MemoryFile("/" + file, readFileSync(join(store.root, file), "utf8")));
+      const path = realpathSync(join(store.root, file));
+      paths.set("/" + file, path);
+      registry.addFile(new abaplint.MemoryFile("/" + file, readFileSync(path, "utf8")));
     }
   }
   registry.parse();

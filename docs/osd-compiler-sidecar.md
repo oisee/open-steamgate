@@ -22,22 +22,27 @@ osgo names; missing or changed snapshot files return `SNAPSHOT_MISMATCH`.
 Listed snapshot paths are contained by `realpath`; a file or directory
 symlink that resolves outside the snapshot root returns `BAD_REQUEST`.
 
-Contract statement: `snapshot` is the objects osgo names, pinned by SHA-256
-and containment. `inputsHash` is the generation input hash of everything the
-check could read, frozen by re-hashing before the answer. The sidecar uses
-`inputsOf` / `hashOf` from `tools/osd-build.mjs`, the builder's generation
-identity machinery covering source trees, packs, configured libraries,
-configuration and ZIP layers. It computes the hash at the start of the check,
-then rediscovers and re-hashes inputs just before answering. A changed hash
-returns `SNAPSHOT_MISMATCH` with `inputs moved during check`; successful
-answers carry the original `inputsHash` (the builder's 16 hex character hash).
-Listed snapshot files are also reverified before answering. There is no
-per-file read audit or `inputs` list.
+Contract statement: the verdict is computed from exactly the registry identified
+by `registryHash` (+ `configSha`); every on-disk member is re-verified before
+the answer. `snapshot` pins the named objects by SHA-256 and realpath containment
+and is also reverified before answering.
 
-The contract's completeness guarantee follows the existing builder input
-identity. That identity hashes `abap_transpile.json`; it currently does not
-hash `abaplint.jsonc`. Edits to that lint configuration therefore are not
-frozen by `inputsHash` unless it is also a listed snapshot file.
+After applying the inactive overlay, `registryHash` is SHA-256 of the JSON
+encoded sorted list of `[filename, sha256(raw)]` for every registry file:
+sources, includes, `gen/`, resolved libraries (including `OSD_LIB_*` overrides)
+and active copies of inactive dependencies. Filenames sort by code unit order.
+`configSha` hashes the raw abaplint config file used to build that registry.
+Successful answers carry both 64-character hashes, `inputCount` (all registry
+members), and `virtualFiles` (filenames without disk backing, empty when none).
+Before answering, each on-disk member is read from its resolved real path and
+compared with the registry raw by SHA-256, and the config is re-hashed. A changed
+or vanished input returns `SNAPSHOT_MISMATCH` with `inputs moved during check`.
+This identifies the actual validation view, rather than claiming that the
+builder's generation hash covers all check inputs.
+
+generation = transpile output, keyed by abap_transpile.json + sources + transpiler;
+lint config is not an input of the output, but is an input of every check verdict,
+so verdict caches key on its sha.
 
 Checks use the store's existing ACTIVATE validation, including publication
 rules, active dependency overlays and the transitive reader closure. The

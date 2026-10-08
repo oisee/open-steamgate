@@ -6,7 +6,6 @@ import {createInterface} from "node:readline";
 import {once} from "node:events";
 import lock from "../libs.lock.json" with {type: "json"};
 import {runsAs} from "./osd-main.mjs";
-import {inputsOf, hashOf} from "./osd-build.mjs";
 
 const limits = {maxSnapshotBytes: 16 * 1024 * 1024, maxConcurrentRequests: 1};
 const digest = bytes => createHash("sha256").update(bytes).digest("hex");
@@ -70,30 +69,48 @@ function diagnostic(issue) {
 }
 
 // Contract: snapshot pins the named objects by sha256 and containment;
-// inputsHash names the generation inputs, frozen by re-hashing before reply.
+// the verdict uses exactly registryHash (+ configSha), with every on-disk
+// member re-verified before the answer.
 export async function checkSnapshot(snapshot, {beforeAnswer} = {}) {
   const {ObjectStore} = await import("./osd-store.mjs");
-  const {forgetRegistry, updateRegistryFiles} = await import("./osd-store-registry.mjs");
+  const {forgetRegistry, updateRegistryFiles, registryInputs} = await import("./osd-store-registry.mjs");
   const {prepareActivation, activationIssues} = await import("./osd-publish-activation.mjs");
   if (!snapshot || typeof snapshot.root !== "string" || !snapshot.root) {
     throw refusal("BAD_REQUEST", "snapshot needs root, generation and objects");
   }
   const root = realpathSync(snapshot.root);
-  const inputsHash = hashOf(root, inputsOf(root));
   const {files} = snapshotFiles(snapshot);
   const store = new ObjectStore({root, registryIssueOptions: {endCoordinates: true}});
   // External writers are not store mutations. Check today's dependency tree
   // using the exact snapshot bytes whose hashes passed.
   forgetRegistry(store);
-  updateRegistryFiles(store.registry(), [...files].map(([path, file]) => ["/" + path, file.bytes.toString("utf8")]));
-  const checked = prepareActivation(store, snapshot.objects, {transpile: false});
+  const registry = store.registry();
+  updateRegistryFiles(registry, [...files].map(([path, file]) => ["/" + path, file.bytes.toString("utf8")]));
+  for (const path of files.keys()) registryInputs(registry).paths.set("/" + path, join(root, path));
+  let frozen;
+  const checked = prepareActivation(store, snapshot.objects, {transpile: false, beforeCheck(registry, overlayPaths) {
+    const inputs = registryInputs(registry);
+    const members = [...registry.getFiles()].map(file => {
+      const filename = file.getFilename(), sha256 = digest(file.getRaw());
+      const path = overlayPaths.get(filename) ?? inputs.paths.get(filename);
+      return {filename, sha256, realPath: path === undefined ? undefined : realpathSync(path)};
+    }).sort((a, b) => a.filename < b.filename ? -1 : a.filename > b.filename ? 1 : 0);
+    const registryHash = digest(JSON.stringify(members.map(({filename, sha256}) => [filename, sha256])));
+    if (frozen && frozen.registryHash !== registryHash) throw refusal("SNAPSHOT_MISMATCH", "inputs moved during check");
+    frozen = {members, registryHash, configSha: inputs.configSha, configPath: realpathSync(inputs.configFile)};
+  }});
   const diagnostics = activationIssues(checked).map(diagnostic);
-  const response = {diagnostics: [...new Map(diagnostics.map(d => [JSON.stringify(d), d])).values()], inputsHash};
-  // Test seam: mutate an unlisted dependency after validation, before freeze.
+  const response = {diagnostics: [...new Map(diagnostics.map(d => [JSON.stringify(d), d])).values()],
+    registryHash: frozen.registryHash, configSha: frozen.configSha, inputCount: frozen.members.length,
+    virtualFiles: frozen.members.filter(m => m.realPath === undefined).map(m => m.filename)};
+  // Test seam: mutate a dependency after validation, before freeze.
   await beforeAnswer?.();
   snapshotFiles(snapshot);
   try {
-    if (hashOf(root, inputsOf(root)) !== inputsHash) throw new Error("changed inputs");
+    for (const member of frozen.members) {
+      if (member.realPath !== undefined && digest(readFileSync(member.realPath)) !== member.sha256) throw new Error("changed member");
+    }
+    if (digest(readFileSync(frozen.configPath)) !== frozen.configSha) throw new Error("changed config");
   } catch {
     throw refusal("SNAPSHOT_MISMATCH", "inputs moved during check");
   }
