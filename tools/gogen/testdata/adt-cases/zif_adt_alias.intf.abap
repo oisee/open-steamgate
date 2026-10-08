@@ -1,0 +1,4 @@
+INTERFACE zif_adt_alias PUBLIC.
+ METHODS status EXCEPTIONS failed.
+ METHODS plain EXCEPTIONS failed.
+ENDINTERFACE.

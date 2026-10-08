@@ -2878,14 +2878,14 @@ function statement(node, ctx) {
     const values = node.findDirectExpressions(Expressions.MessageSourceSource).map((x) => convert(source(x, ctx), C(50)));
     if (values.length > 4) throw new Unsupported(`MESSAGE WITH more than four values: ${text}`);
     const name = {e: "str", value: upper(raising.concatTokens()), type: S};
-    const method = {e: "str", value: ctx.method.includes("~") ? ctx.method.split("~")[1] : ctx.method, type: S};
+    const method = {e: "str", value: ctx.method, type: S};
     return {s: "native", fn: "abap.MessageRaise", stmt: true, args: [id, ty, no, name, method, ...values].map((value) => ({value}))};
   }
   // RAISE name: a classic exception, for the caller's EXCEPTIONS list
   if (isStmt(node, Statements.Raise) && !/^RAISE\s+(EXCEPTION|RESUMABLE)\b/i.test(text)) {
     const n = node.findDirectExpression(Expressions.ExceptionName);
     if (!n) throw new Unsupported(`RAISE form: ${text}`);
-    return {s: "raise_classic", name: upper(n.concatTokens()), method: ctx.method.includes("~") ? ctx.method.split("~")[1] : ctx.method};
+    return {s: "raise_classic", name: upper(n.concatTokens()), method: ctx.method};
   }
   // CALL METHOD (class)=>m EXPORTING ...: a static method by class name,
   // through the program's registry of static methods
@@ -6198,7 +6198,7 @@ function call(chain, ctx, statement, hint) {
   // SUPER->constructor( ) of a chain where no superclass has a constructor does nothing
   if (sig.none) return {e: "nop_call", type: {k: "void"}};
   return {e: "call", method: qualified, static: sig.static, owner, receiver, sup, args, type: sig.returning?.type ?? {k: "void"},
-    exceptions, receiving, callee: name.includes("~") ? name.split("~")[1] : name};
+    exceptions, receiving, callee: qualified};
 }
 
 function defaultValue(p, ctx) {
