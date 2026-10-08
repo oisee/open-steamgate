@@ -1180,7 +1180,7 @@ function withBuilders(body, ctx, t, emitLoop, outside = []) {
   ctx.loopLevel = (ctx.loopLevel ?? 0) + 1;
   const lines = emitLoop();
   ctx.loopLevel -= 1;
-  const post = names.map((n) => `${t}${ident(n)} = ${ctx.builders.get(n)}.String()`);
+  const post = names.map((n) => `${t}${ident(n)} = abap.Canon(${ctx.builders.get(n)}.String())`);
   for (const n of names) ctx.builders.delete(n);
   return [...pre, ...lines, ...post];
 }
@@ -1242,6 +1242,11 @@ function stmtLines(st, ctx, d) {
     case "assign":
       if (st.target.e === "substr_target") {
         HELPER_IMPORTS.add("subwrite");
+        if (st.target.base.type.k !== "x") {
+          const limit = st.target.base.type.k === "c" ? st.target.base.type.len : -1;
+          return [`${t}${place(st.target.base, ctx)} = hSubwrite.Char(${expr(st.target.base, ctx)}, ${st.target.off ? expr(st.target.off, ctx) : "0"}, ${st.target.len ? expr(st.target.len, ctx) : "-1"}, ${expr(st.value, ctx)}, ${limit})`];
+        }
+
         return [`${t}${place(st.target.base, ctx)} = hSubwrite.X(${expr(st.target.base, ctx)}, ${st.target.off ? expr(st.target.off, ctx) : "0"}, ${expr(st.target.len, ctx)}, ${expr(st.value, ctx)})`];
       }
       if (ctx.builders?.has(st.target.name) && isAppend(st, st.target.name)) {
@@ -1681,6 +1686,11 @@ ${t}	}`));
       return [`${t}${place(st.target, ctx)} = string(${expr(st.x, ctx)}.T.Kind)`];
     case "move_corr_data":
       return [`${t}abap.MoveCorrespondingData(${expr(st.to, ctx)}, ${expr(st.from, ctx)})`];
+    case "shift_places": {
+      const p = place(st.target, ctx);
+      const limit = st.target.type.k === "c" ? st.target.type.len : -1;
+      return [`${t}${p} = abap.ShiftPlaces(${p}, ${st.left}, ${st.circular}, ${expr(st.amount, ctx)}, ${limit})`];
+    }
     case "shift_right_trailing": {
       const p = place(st.target, ctx);
       const mask = st.maskLen !== undefined ? `abap.PadC(${expr(st.mask, ctx)}, ${st.maskLen})` : expr(st.mask, ctx);
@@ -2009,7 +2019,7 @@ ${t}	}`));
     // strings back first (parity-wave1: ZCL_STG_JSON=>READ_STRING appended a
     // 750 KB value a character at a time and returned from inside the loop,
     // which kept it off the builder and made the append quadratic)
-    case "return": return [...[...(ctx.builders ?? new Map())].map(([n, sb]) => `${t}${ident(n)} = ${sb}.String()`), `${t}${leave(ctx, 1)}`];
+    case "return": return [...[...(ctx.builders ?? new Map())].map(([n, sb]) => `${t}${ident(n)} = abap.Canon(${sb}.String())`), `${t}${leave(ctx, 1)}`];
     default: throw new Error(`no Go for statement ${st.s}`);
   }
 }
@@ -2049,9 +2059,9 @@ function expr(e, ctx) {
     case "chars": case "str": return JSON.stringify(e.value);
     case "template": {
       const parts = e.parts.map((p) => (p.text !== undefined ? JSON.stringify(p.text) : templatePart(p.value, ctx, p.opts ?? {})));
-      return parts.length === 0 ? `""` : `(${parts.join(" + ")})`;
+      return parts.length === 0 ? `""` : parts.reduce((a, b) => `abap.Concat(${a}, ${b})`);
     }
-    case "concat": return `(${e.l.e === "conv" && ["i2s", "i82s"].includes(e.l.kind) ? `strings.TrimRight(${expr(e.l, ctx)}, " ")` : expr(e.l, ctx)} + ${e.r.e === "conv" && ["i2s", "i82s"].includes(e.r.kind) ? `strings.TrimRight(${expr(e.r, ctx)}, " ")` : expr(e.r, ctx)})`;
+    case "concat": return `abap.Concat(${e.l.e === "conv" && ["i2s", "i82s"].includes(e.l.kind) ? `strings.TrimRight(${expr(e.l, ctx)}, " ")` : expr(e.l, ctx)}, ${e.r.e === "conv" && ["i2s", "i82s"].includes(e.r.kind) ? `strings.TrimRight(${expr(e.r, ctx)}, " ")` : expr(e.r, ctx)})`;
     // CORRESPONDING type( itab ): a new table, one mapped row per source row
     case "table_map": {
       const n = ctx.loop++;
@@ -2196,7 +2206,7 @@ function conv(e, ctx) {
     case "struct_layout":
       return `func(v ${goType(e.from)}) ${goType(e.to)} { return ${goType(e.to)}{${e.pairs.map(([t, f]) => `${ident(t)}: v.${ident(f)}`).join(", ")}} }(${x})`;
     case "flat_struct_string":
-      return `func(v ${goType(e.from)}) string { return strings.TrimRight(${e.fields.map((f) => `abap.CFit(v.${ident(f.name)}, ${f.len})`).join(" + ")}, " ") }(${x})`;
+      return `func(v ${goType(e.from)}) string { return strings.TrimRight(abap.Canon(${e.fields.map((f) => `abap.CFit(v.${ident(f.name)}, ${f.len})`).join(" + ")}), " ") }(${x})`;
     case "num":
       if (from === "i" && to === "f") return `float64(${x})`;
       if (from === "f" && to === "i") return `abap.F2I(${x})`;

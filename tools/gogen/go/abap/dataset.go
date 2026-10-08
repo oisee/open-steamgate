@@ -6,7 +6,6 @@ import (
 	"osg/gogen/sandbox"
 	"strings"
 	"sync"
-	"unicode/utf16"
 )
 
 // OPEN / READ / TRANSFER / CLOSE / DELETE / GET / SET DATASET, as the
@@ -184,15 +183,15 @@ func charsOf(d Data, padded bool) string {
 	v := *d.P.(*string)
 	if d.T.Kind == 'C' {
 		v = strings.TrimRight(v, " ")
-		if padded && len([]rune(v)) < d.T.Len {
-			v += strings.Repeat(" ", d.T.Len-len([]rune(v)))
+		if padded && int(Strlen(v)) < d.T.Len {
+			v += strings.Repeat(" ", d.T.Len-int(Strlen(v)))
 		}
 	}
 	return v
 }
 
 func utf16le(s string) []byte {
-	units := utf16.Encode([]rune(s))
+	units := UTF16Units(s)
 	out := make([]byte, 2*len(units))
 	for i, u := range units {
 		out[2*i], out[2*i+1] = byte(u), byte(u>>8)
@@ -205,7 +204,7 @@ func fromUTF16LE(b []byte) string {
 	for i := range units {
 		units[i] = uint16(b[2*i]) | uint16(b[2*i+1])<<8
 	}
-	return string(utf16.Decode(units))
+	return UTF16String(units)
 }
 
 // Transfer is TRANSFER src TO name [LENGTH length] [NO END OF LINE]; length
@@ -232,11 +231,11 @@ func Transfer(s *Session, src Data, name string, length int, noEndOfLine bool) {
 			// UTF-16LE, a C field at its full length (measured)
 			text := charsOf(src, true)
 			if length >= 0 {
-				r := []rune(text)
+				r := UTF16Units(text)
 				if len(r) > length {
 					r = r[:length]
 				}
-				text = string(r) + strings.Repeat(" ", length-len(r))
+				text = UTF16String(r) + strings.Repeat(" ", length-len(r))
 			}
 			b = utf16le(text)
 		default:
@@ -248,11 +247,11 @@ func Transfer(s *Session, src Data, name string, length int, noEndOfLine bool) {
 		}
 		var text string
 		if length >= 0 {
-			r := []rune(charsOf(src, true))
+			r := UTF16Units(charsOf(src, true))
 			if len(r) > length {
 				r = r[:length]
 			}
-			text = string(r)
+			text = UTF16String(r)
 		} else {
 			// a C field loses its trailing blanks, a string keeps them (measured)
 			text = charsOf(src, false)
@@ -334,7 +333,7 @@ func readDatasetLine(s *Session, f *openDataset, target Data, max int, setActual
 	f.pos = pos
 	text := string(line)
 	MoveData(target, Data{P: &text, T: TString})
-	setActual(len(utf16.Encode([]rune(text))))
+	setActual(int(Strlen(text)))
 	s.Sy.Subrc = 0
 }
 

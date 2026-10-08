@@ -313,7 +313,7 @@ func IsInitialData(d Data) bool {
 // blanks inside becomes one; NO-GAPS removes every blank.
 func Condense(s string, noGaps bool) string {
 	if noGaps {
-		return strings.ReplaceAll(s, " ", "")
+		return Canon(strings.ReplaceAll(s, " ", ""))
 	}
 	return strings.Join(strings.FieldsFunc(s, func(r rune) bool { return r == ' ' }), " ")
 }

@@ -443,3 +443,40 @@ func TestMembership(t *testing.T) {
     rmSync(goDir, {recursive: true, force: true});
   }
 });
+
+test("MOVE of flat character components rejoins surrogate halves", () => {
+  const sourceDir = mkdtempSync(join(tmpdir(), "gogen-flat-string-"));
+  const goDir = mkdtempSync(join(here, "go", "cmd", "gogen-flat-string-"));
+  try {
+    writeFileSync(join(sourceDir, "zcl_gogen_flat_string.clas.abap"), `
+CLASS zcl_gogen_flat_string DEFINITION PUBLIC FINAL CREATE PUBLIC.
+PUBLIC SECTION.
+CLASS-METHODS run IMPORTING hi TYPE string lo TYPE string RETURNING VALUE(rv) TYPE string.
+ENDCLASS.
+CLASS zcl_gogen_flat_string IMPLEMENTATION.
+METHOD run.
+TYPES: BEGIN OF ty_pair, hi TYPE c LENGTH 1, lo TYPE c LENGTH 1, END OF ty_pair.
+DATA pair TYPE ty_pair.
+pair-hi = hi.
+pair-lo = lo.
+rv = pair.
+ENDMETHOD.
+ENDCLASS.
+`);
+    const generated = emitGo(compileProgram({folders: [sourceDir], objects: ["ZCL_GOGEN_FLAT_STRING"]}));
+    writeFileSync(join(goDir, "zz_generated.go"), generated);
+    writeFileSync(join(goDir, "zz_generated_test.go"), `package main
+import ("testing"; "osg/gogen/abap")
+func TestFlatString(t *testing.T) {
+ hi,lo:=abap.SubS("😀",0,1),abap.SubS("😀",1,1)
+ got:=ZCL_GOGEN_FLAT_STRING_RUN(&abap.Session{},hi,lo)
+ if got!="😀" {t.Fatalf("MOVE bytes=%x, want F09F9880",got)}
+}
+`);
+    const run = spawnSync("go", ["test", `./cmd/${basename(goDir)}`], {cwd: join(here, "go"), encoding: "utf8", timeout: 120000});
+    assert.equal(run.status, 0, run.stderr || run.stdout);
+  } finally {
+    rmSync(sourceDir, {recursive: true, force: true});
+    rmSync(goDir, {recursive: true, force: true});
+  }
+});
