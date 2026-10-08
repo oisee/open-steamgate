@@ -363,17 +363,17 @@ writeGeneratedGo = function (dir) {
     return Math.max(owner ? layer.get(owner.name) : 0, typeLayer(c.type)) === i;
   }));
   writeFileSync(join(coreDir, "zz_generated.go"), emitGo(program, "core", {
-    classes: layerClasses[0], structs: structsAt(0), consts: constsAt(0), tables: tablesAt(0),
+    classes: layerClasses[0], visibleClasses: new Set([...allClassNames].filter((n) => layer.get(n) <= 0)), structs: structsAt(0), consts: constsAt(0), tables: tablesAt(0),
     interfaces: coreInterfaces, events: eventsFor(0), externalClasses: new Set([...allClassNames].filter((n) => !coreNames.has(n))),
     marker: "GogenCoreLayer",
   }, true));
   writeFileSync(join(appDir, "zz_generated.go"), emitGo(program, "app", {
-    classes: layerClasses[1], structs: structsAt(1), consts: constsAt(1), tables: tablesAt(1),
+    classes: layerClasses[1], visibleClasses: new Set([...allClassNames].filter((n) => layer.get(n) <= 1)), structs: structsAt(1), consts: constsAt(1), tables: tablesAt(1),
     interfaces: appInterfaces, events: eventsFor(1), externalClasses: new Set([...allClassNames].filter((n) => !appNames.has(n))),
     imports: ["osg/gogen/generated/core"], importMarkers: ["GogenCoreLayer"], marker: "GogenAppLayer",
   }, true));
   writeFileSync(join(dir, "zz_generated.go"), emitGo(program, "main", {
-    classes: layerClasses[2], structs: structsAt(2), consts: constsAt(2), tables: tablesAt(2),
+    classes: layerClasses[2], visibleClasses: new Set([...allClassNames].filter((n) => layer.get(n) <= 2)), structs: structsAt(2), consts: constsAt(2), tables: tablesAt(2),
     interfaces: new Set(), events: eventsFor(2), externalClasses: new Set([...allClassNames].filter((n) => layer.get(n) < 2)),
     imports: ["osg/gogen/generated/core", "osg/gogen/generated/app"],
     importMarkers: ["GogenCoreLayer", "GogenAppLayer"],
@@ -455,7 +455,7 @@ if (ready.some((r) => r.db)) {
   const {seedStatements} = await import(`${home}/test/seed.mjs`);
   process.env.OSD_ROOT ??= home;
   const db = new DatabaseSetup(program.reg).run();
-  writeFileSync(join(dir, "zz_db.json"), JSON.stringify(replaceWwwparams([...db.schemas.sqlite, ...db.insert, ...seedStatements()], media)));
+  writeFileSync(join(dir, "zz_db.json"), JSON.stringify(replaceWwwparams([...db.schemas.sqlite, ...db.insert, ...seedStatements(fixture)], media)));
 } else writeFileSync(join(dir, "zz_db.json"), "[]");
 timingMs.emit = Math.round(performance.now() - emitStarted);
 }

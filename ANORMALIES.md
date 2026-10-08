@@ -29,6 +29,23 @@ Format adapted from `larshp/hithub` (MIT).
 - Upstream version containing a fix: `...` or `unknown`
 
 ## Open anomalies
+
+### ANOMALY-2026-10-08-dec-sqlite-real -- DEC precision collapses in SQLite
+
+- Status: `open`
+- Discovery date: `2026-10-08`
+- Affected versions: `@abaplint/transpiler 2.13.93`, `@abaplint/runtime 2.13.93`, `@abaplint/database-sqlite 2.13.83`; OSGo SQLite host.
+- Affected adapter: DEC columns in the SQLite Open SQL seam.
+- Minimal ABAP reproducer: `tools/gogen/testdata/adt-cases/zcl_adt_pwhere.clas.abap`, method `precision_parity`, table `zadt_pwhere` (DEC 21,7).
+- Exact command: `GOFLAGS=-buildvcs=false OSD_HEAVY_RANGE=50-59 tools/osd-heavy.sh node tools/gogen/unit.mjs --fixture tools/gogen/testdata --class ZCL_ADT_PWHERE --jobs 4`.
+- Expected SAP behaviour: exact decimal comparison of rows `20261008100000.1234567` and `20261008100000.1234568` against the first value gives counts `1, 0, 2, 1` for `=`, `<`, `>=`, and point `BETWEEN`.
+- Actual open-abap behaviour: DEC beyond 15 significant digits is stored as REAL by the SQLite seam; equality and ranges at the 16th digit collapse. The transpiled JS class through `@abaplint/database-sqlite` stores both rows as REAL `20261008100000.125` and returns `2, 0, 2, 2`; the same ABAP/table fixture on Go returns identical counts. Local measurement: `.local/hostcls/dec-measure.txt`, scripts `measure-dec.mjs` and `measure-dec-go.mjs` beside it.
+- Impact: DEC 15 timestamps remain exact; full DEC 21,7 timestamp precision is unavailable in SQLite comparisons on both hosts.
+- Smallest safe workaround: compare values within 15 significant digits when exactness is required; storage is unchanged.
+- Upstream issue: not reported; this round is local only.
+- Regression: the fixture asserts DEC 15 exactly, adjacent DEC 21,7 values `20261008.1234567` / `20261008.1234568` exactly, and measured high-precision host parity.
+- Upstream version containing a fix: unknown.
+
 ### ANOMALY-2026-10-08-lone-surrogate-egress -- Unmeasured text output of lone UTF-16 halves
 
 - Status: `open`
