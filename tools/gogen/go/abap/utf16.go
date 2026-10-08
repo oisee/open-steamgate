@@ -241,15 +241,53 @@ func JoinUTF16(parts ...string) string {
 	return JoinSurrogates(v)
 }
 
-// JoinSurrogates makes every value that leaves the ABAP world valid UTF-8:
-// adjacent high/low halves become their supplementary character. The byte
-// scan keeps every ASCII and ordinary UTF-8 path unchanged.
-func JoinSurrogates(v string) string {
-	if strings.IndexByte(v, 0xed) < 0 {
+// hasHalf distinguishes WTF-8 halves from valid UTF-8 beginning with ED
+// (including Hangul). IndexByte skips ASCII runs without decoding them.
+func hasHalf(v string) bool {
+	for at := 0; at+2 < len(v); {
+		i := strings.IndexByte(v[at:], 0xed)
+		if i < 0 {
+			return false
+		}
+		at += i
+		if at+2 < len(v) && v[at+1] >= 0xa0 && v[at+1] <= 0xbf && v[at+2]&0xc0 == 0x80 {
+			return true
+		}
+		at++
+	}
+	return false
+}
+
+// Canon enforces the runtime representation: only adjacent WTF-8 high/low
+// halves are joined. Lone halves and all other bytes remain unchanged.
+// It allocates only if a pair actually needs joining.
+func Canon(v string) string {
+	if !hasHalf(v) {
 		return v
 	}
-	return UTF16String(UTF16Units(v))
+	var b strings.Builder
+	last := 0
+	for i := 0; i+5 < len(v); i++ {
+		if v[i] != 0xed || v[i+1] < 0xa0 || v[i+1] > 0xaf || v[i+2]&0xc0 != 0x80 ||
+			v[i+3] != 0xed || v[i+4] < 0xb0 || v[i+4] > 0xbf || v[i+5]&0xc0 != 0x80 {
+			continue
+		}
+		hi, _ := decode16(v[i:])
+		lo, _ := decode16(v[i+3:])
+		b.WriteString(v[last:i])
+		b.WriteRune(utf16.DecodeRune(hi, lo))
+		i += 5
+		last = i + 1
+	}
+	if last == 0 {
+		return v
+	}
+	b.WriteString(v[last:])
+	return b.String()
 }
+
+// JoinSurrogates is retained for callers of the original UTF-16 helper.
+func JoinSurrogates(v string) string { return Canon(v) }
 
 // wtf16View returns the UTF-16 units and the byte boundary of each unit in
 // v. Supplementary characters contribute two units: the second boundary is
@@ -289,24 +327,31 @@ func splitSupplementary(v string) string {
 }
 
 func foldWTF8(v string, upper bool) string {
-	if strings.IndexByte(v, 0xed) < 0 {
+	if !hasHalf(v) {
 		if upper {
 			return strings.ToUpper(v)
 		}
 		return strings.ToLower(v)
 	}
-	units := UTF16Units(v)
-	for i, unit := range units {
-		if upper {
-			units[i] = uint16(unicode.ToUpper(rune(unit)))
+	var b strings.Builder
+	for i := 0; i < len(v); {
+		r, w := decode16(v[i:])
+		if utf16.IsSurrogate(r) {
+			b.WriteString(v[i : i+w])
 		} else {
-			units[i] = uint16(unicode.ToLower(rune(unit)))
+			if upper {
+				r = unicode.ToUpper(r)
+			} else {
+				r = unicode.ToLower(r)
+			}
+			b.WriteRune(r)
 		}
+		i += w
 	}
-	return UTF16String(units)
+	return b.String()
 }
 func index16(v, sub string) int {
-	if !strings.Contains(sub, "\xed") && !strings.Contains(v, "\xed") {
+	if !hasHalf(sub) && !hasHalf(v) {
 		if b := strings.Index(v, sub); b >= 0 {
 			return int(Strlen(v[:b]))
 		}

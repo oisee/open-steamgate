@@ -12,6 +12,7 @@ METHODS concat_cs FOR TESTING.
 METHODS search_half FOR TESTING.
 METHODS case_find FOR TESTING.
 METHODS json_escape FOR TESTING.
+METHODS supplementary_fold FOR TESTING.
 ENDCLASS.
 CLASS ltcl_test IMPLEMENTATION.
 METHOD len.
@@ -114,5 +115,10 @@ IF r CS expected.
 ELSE.
   cl_abap_unit_assert=>fail( ).
 ENDIF.
+ENDMETHOD.
+METHOD supplementary_fold.
+DATA(s) = cl_abap_codepage=>convert_from( source = CONV xstring( 'F09090A8ED8080' ) ).
+DATA(expected) = cl_abap_codepage=>convert_from( source = CONV xstring( 'F0909080ED8080' ) ).
+cl_abap_unit_assert=>assert_equals( act = to_upper( s ) exp = expected ).
 ENDMETHOD.
 ENDCLASS.
