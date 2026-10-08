@@ -338,6 +338,7 @@ export function emitGo(program, pkg = "main", layers = null, unitBuild = false) 
     if (layers?.interfaces && !layers.interfaces.has(name)) continue;
     out.push(`type ${typeName(name)} interface {`);
     out.push(`\t${interfaceMarker(name)}()`);
+    for (const included of componentInterfaces(program.reg, name)) out.push(`\t${interfaceMarker(included)}()`);
     for (const m of sigs) if (definable(program, m)) out.push(`\t${signature({name}, m, true)}`);
     out.push(...intfAccessors(program, name));
     out.push("}", "");
@@ -782,6 +783,7 @@ function classInterface(program, cls) {
   const T = typeName(cls.name);
   const out = [`type I_${T} interface {`];
   if (cls.super && POLY.has(cls.super)) out.push(`\tI_${typeName(cls.super)}`);
+  for (const intf of implementedInterfaces(program, cls)) out.push(`\t${interfaceMarker(intf)}()`);
   out.push(`\tAs_${T}() *${T}`);
   // the accessors of the interfaces the class implements, so the reference converts to them
   for (const a of (cls.attributes ?? []).filter((x) => x.fromIntf && !x.unsupported)) out.push(`\t${accessorName(a.name)}() *${goType(a.type)}`);
@@ -816,7 +818,7 @@ function implementedInterfaces(program, cls) {
 
 function componentInterfaces(reg, intf, seen = new Set()) {
   for (const c of reg?.getObject("INTF", intf)?.getDefinition()?.getImplementing?.() ?? []) {
-    const name = upper(c.name);
+    const name = String(c.name).toUpperCase();
     if (!seen.has(name)) { seen.add(name); componentInterfaces(reg, name, seen); }
   }
   return [...seen];
