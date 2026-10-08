@@ -2144,7 +2144,7 @@ function whereOf(cc, rowType, ctx, text) {
       }
       const opT = upper(kids[1].concatTokens());
       const op = OPS[opT] ?? opT;
-      const sc = stringComparison(op, fx, source(kids[2], ctx));
+      const sc = ["CP", "NP", "CA", "NA", "CS", "NS", "CO", "CN"].includes(op) ? stringComparison(op, fx, source(kids[2], ctx, rowType)) : null;
       if (sc) { where.push({cond: sc}); continue; }
       if (!["=", "<>", "<", "<=", ">", ">="].includes(op)) throw new Unsupported(`WHERE table_line operator ${op}`);
       const v = source(kids[2], ctx, rowType);
@@ -2170,7 +2170,7 @@ function whereOf(cc, rowType, ctx, text) {
     const f = fx !== null ? {name: fx.name, type: fx.type} : fieldOf(ctx, rowType, comp.concatTokens(), text);
     const opT = upper(opN.concatTokens());
     const op = OPS[opT] ?? opT;
-    const sc = stringComparison(op, fx ?? {e: "field", base: {e: "lrow", type: rowType}, name: f.name, type: f.type}, source(src, ctx));
+    const sc = ["CP", "NP", "CA", "NA", "CS", "NS", "CO", "CN"].includes(op) ? stringComparison(op, fx ?? {e: "field", base: {e: "lrow", type: rowType}, name: f.name, type: f.type}, source(src, ctx, f.type)) : null;
     if (sc) { where.push({cond: sc}); continue; }
     if (!["=", "<>", "<", "<=", ">", ">="].includes(op)) throw new Unsupported(`WHERE operator ${op}`);
     const v = source(src, ctx, f.type);

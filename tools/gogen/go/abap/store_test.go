@@ -32,3 +32,26 @@ func TestADTTypeIDInputKey(t *testing.T) {
 		t.Fatal("type_id input was dropped or changed")
 	}
 }
+
+func TestStoreRevisionFullSubject(t *testing.T) {
+	// A backend row with the additional field must preserve every byte. In
+	// particular SUBJECT_FULL is not the legacy 80-character SUBJECT.
+	type revision struct {
+		StoreRevision
+		SUBJECT_FULL string
+	}
+	full := "A complete subject longer than the legacy eighty-character field, including unicode: 世界"
+	r := revision{StoreRevision: StoreRevision{REVISION: "revision", SUBJECT: "short subject"}, SUBJECT_FULL: full}
+	got := map[string]any{}
+	storeRevisionRow(r, func(k string, v any) { got[k] = v })
+	if got["SUBJECT_FULL"] != full || got["SUBJECT"] != "short subject" || got["REVISION"] != "revision" {
+		t.Fatalf("revision mapping: %#v", got)
+	}
+	// An older backend cannot supply the field. Keep it empty, rather than
+	// claiming its already truncated SUBJECT is the full subject.
+	got = map[string]any{}
+	storeRevisionRow(r.StoreRevision, func(k string, v any) { got[k] = v })
+	if got["SUBJECT_FULL"] != "" {
+		t.Fatalf("old backend: %#v", got)
+	}
+}
