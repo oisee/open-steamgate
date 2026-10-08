@@ -22,6 +22,7 @@ export class Session {
   }
   async login() {
     const res = await this.request({method: 'HEAD', path: '/core/discovery', headers: {'x-csrf-token': 'fetch'}});
+    this.handshakeResponse = res;
     assert.equal(res.status, 200, 'CSRF handshake status');
     this.token = res.headers.get('x-csrf-token');
     assert.ok(this.token && this.token.toLowerCase() !== 'required', 'CSRF token missing');
