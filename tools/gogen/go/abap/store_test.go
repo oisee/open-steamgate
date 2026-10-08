@@ -75,11 +75,12 @@ func TestStoreHookSeesTheStep(t *testing.T) {
 	if seen != any(s) || state != "from the host" {
 		t.Fatalf("hook step %v, EV_STATE %q", seen, state)
 	}
-	command, state = "PING", ""
+	// a declined call is the store's answer: an unknown command's EV_ERROR
+	command, failure := "PING", ""
+	args["EV_ERROR"] = Data{P: &failure, T: TString}
 	StoreHook = func(step any, in map[string]*string) (StoreAnswer, bool) { return StoreAnswer{}, false }
-	declined := StoreCall(storeInputs(args)).Scalars["EV_STATE"]
 	ZOSD_STORE(s, args)
-	if state != declined {
-		t.Fatalf("a declined hook changed the answer: %q, store says %q", state, declined)
+	if want := StoreCall(storeInputs(args)).Scalars["EV_ERROR"]; failure == "" || failure != want {
+		t.Fatalf("a declined hook changed the answer: %q, store says %q", failure, want)
 	}
 }
