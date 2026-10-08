@@ -610,8 +610,9 @@ Parked ideas, in the archive:
 
 ## The last stage: the ABAP front on a system, under real clients (2026-10-08)
 
-Planned after ADT on osgo passes the whole shared suite on `main` and the
-suite has grown to writes, activation and the DDIC objects abapGit needs.
+Parked (2026-10-08): not needed for now. When it comes back, it follows
+ADT on osgo passing the whole shared suite on `main` and the
+suite having grown to writes, activation and the DDIC objects abapGit needs.
 The ABAP front (variant C, `ZCL_OSD_ADT_HANDLER` and its routes) is deployed
 to the sandbox system as an ICF service of its own, beside the system's own
 ADT, in a disposable package; then:
@@ -630,3 +631,22 @@ Before it, a slice of its own: the host jumps of the front (`ZCL_OSD_ADT_HOST`:
 store, locks, system facts) answered by the system itself. The sandbox is
 used only on explicit request, with disposable objects whose cleanup is
 verified, and no capture is committed.
+
+## RFC and DIAG listeners inside osgo, without a sidecar (2026-10-08, backlog)
+
+Today the RFC-to-ADT bridge (gateway port 33NN, one function module,
+`docs/adt-over-rfc.md`) and the DIAG tape screen (32NN) are Node listeners in
+`tools/protocols/`; osgo has neither (`cmd/osgo/status.go` says so). Pointing
+the Node bridge at an osgo started with `-adt` works, but it is a second
+process. The native form:
+
+- an RFC listener in `cmd/osgo`: NI framing, the gateway/APPC handshake, the
+  logon answer with the configured identity, the two dictionary bootstrap
+  answers, and `SADT_REST_REQUEST`/`SADT_REST_RESPONSE` in and out; the ADT
+  handler is called in process, with no HTTP hop;
+- the protocol code reused from the MIT sibling open-rfc-go rather than
+  written again; the JS bridge stays the reference for behaviour, and its
+  tests run against both;
+- the DIAG tape screen on 32NN, with the DIAG library the `osabap` binary
+  already uses for its selection screens;
+- ports derived from the instance like every other listener, off unless asked.
