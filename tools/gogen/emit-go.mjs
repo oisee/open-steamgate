@@ -1,3 +1,4 @@
+import {omittedFactoryCall} from "./frontend.mjs";
 import {analyzeOwnership} from "./frontend-owned.mjs";
 import {ownedExpression, ownedStatement, emitByteConcat} from "./emit-owned.mjs";
 import {emitBuiltinGo} from "./emit-builtins.mjs";
@@ -429,7 +430,7 @@ export function emitGo(program, pkg = "main", layers = null, unitBuild = false) 
     out.push(`func init() {`, `\tabap.RegisterClass(${JSON.stringify(cls.name)}, (*${typeName(cls.name)})(nil), func(s *abap.Session) any { ${make} })`, "}", "");
   }
   out.push(...exceptionSupers(program));
-  out.push(...hostRaiseGlue(program, classes));
+  out.push(...hostRaiseGlue(program, classes, layers));
   if (!layers) out.push(...dispatcher(classes));
   out.push(...staticRegistry(program, classes));
   if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_DESCRIBE_BY_NAME"))) out.push(...nativeRtti(program));
@@ -1008,31 +1009,24 @@ function hostMethod(cls, m) {
   return lines;
 }
 
-function hostRaiseGlue(program, classes) {
+function hostRaiseGlue(program, classes, layers) {
   if (!classes.some((cls) => cls.hostReplaced)) return [];
   const cases = [];
   for (const cls of CLASSES.values()) {
+    if (layers && !(layers.visibleClasses ?? new Set(classes.map((c) => c.name))).has(cls.name)) continue;
     for (const method of cls.methods) {
-      if (!(program.exceptionSupers ?? {})[cls.name] || !method.static || method.params.length !== 0 || !method.returning) continue;
-      cases.push([`${cls.name}=>${method.name}`, `${funcName(cls.name, method.name)}(s)`]);
+      if (!(program.exceptionSupers ?? {})[cls.name] || !method.static || method.returning?.type.k !== "ref"
+        || !method.params.every((p) => p.suppliedOf || p.optional || p.default !== undefined)) continue;
+      cases.push([`${cls.name}=>${method.name}`, expr(omittedFactoryCall(program, cls, method), {cls})]);
     }
   }
-  const lines = ["// hostRaise turns a host's Raise request into an ABAP exception.",
+  const lines = ["// hostRaise turns a host's factory request into an ABAP exception.",
     "func hostRaise(s *abap.Session, err error) {", "\tif err == nil { return }",
     "\tif raise, ok := err.(*hHostclass.Raise); ok {",
-    `\t\tswitch raise.Class + "=>" + strings.ToUpper(raise.Factory) {`];
-  for (const [key, call] of cases) lines.push(`\t\t\t\tcase ${JSON.stringify(key)}:`, `\t\t\t\t\tpanic(abap.Raise(${call}, raise.Class))`);
-  lines.push("\t\t}");
-  const fallback = [];
-  for (const cls of CLASSES.values()) {
-    if (!(program.exceptionSupers ?? {})[cls.name]) continue;
-    const message = cls.attributes?.find((a) => a.name === "MESSAGE_TEXT" && a.type?.k === "string");
-    if (!message) continue;
-    fallback.push(`\t\tif raise.Class == ${JSON.stringify(cls.name)} {`,
-      `\t\t\tobject := Alloc_${typeName(cls.name)}()`, `\t\t\tobject.${ident(message.name)} = raise.Text`,
-      `\t\t\tpanic(abap.Raise(object, raise.Class))`, "\t\t}");
-  }
-  lines.push(...fallback, `\t\tpanic(abap.NotCompiled("host class Raise", "no compiled factory or text constructor for "+raise.Class))`,
+    `\t\tname := strings.ToUpper(raise.Class) + "=>" + strings.ToUpper(raise.Factory)`,
+    "\t\tswitch name {"];
+  for (const [key, call] of cases) lines.push(`\t\tcase ${JSON.stringify(key)}:`, `\t\t\tpanic(abap.Raise(${call}, strings.ToUpper(raise.Class)))`);
+  lines.push("\t\t}", `\t\tpanic(abap.NotCompiled(name, "no compiled exception factory callable with omitted parameters"))`,
     "\t}", "\tpanic(err)", "}", "");
   return lines;
 }

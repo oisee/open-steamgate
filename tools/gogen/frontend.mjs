@@ -6176,8 +6176,7 @@ function call(chain, ctx, statement, hint) {
     if (p.dir === "importing") {
       const s = given.get(p.name);
       if (s === undefined) {
-        if (p.default !== undefined) return {dir: "importing", byValue: p.byValue, type: p.type, value: defaultValue(p, ctx)};
-        if (p.optional) return {dir: "importing", byValue: p.byValue, type: p.type, value: {e: "zero", type: p.type}};
+        if (p.default !== undefined || p.optional) return omittedArgument(p, ctx);
         throw new Unsupported(`${name}: parameter ${p.name} not supplied`);
       }
       const actual = source(s, ctx, p.type);
@@ -6209,6 +6208,23 @@ function call(chain, ctx, statement, hint) {
   if (sig.none) return {e: "nop_call", type: {k: "void"}};
   return {e: "call", method: qualified, static: sig.static, owner, receiver, sup, args, type: sig.returning?.type ?? {k: "void"},
     exceptions, receiving, callee: qualified};
+}
+
+// Shared with an ordinary method call whose importing argument is omitted.
+function omittedArgument(p, ctx) {
+  return {dir: "importing", byValue: p.byValue, type: p.type,
+    value: p.default !== undefined ? defaultValue(p, ctx) : {e: "zero", type: p.type}};
+}
+
+// Host exceptions use the ordinary call IR, including defaults, references,
+// output temporaries and IS SUPPLIED flags. No constructor shortcut is used.
+export function omittedFactoryCall(program, cls, method) {
+  const ctx = {program, reg: program.reg, className: cls.name};
+  const args = method.params.map((p) => p.suppliedOf
+    ? {dir: "importing", byValue: true, type: p.type, value: {e: "chars", value: "", type: p.type}}
+    : p.dir === "importing" ? omittedArgument(p, ctx) : {dir: p.dir, place: null, type: p.type});
+  return {e: "call", owner: cls.name, method: method.name, static: true, args,
+    type: method.returning.type, callee: method.name};
 }
 
 function defaultValue(p, ctx) {
