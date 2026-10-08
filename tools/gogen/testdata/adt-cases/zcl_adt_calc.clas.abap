@@ -38,7 +38,8 @@ CLASS zcl_adt_calc IMPLEMENTATION.
  CLEAR rows.
  DO 5 TIMES. APPEND `x` TO rows. ENDDO.
  text = lines( rows ) + 1.
- cl_abap_unit_assert=>assert_equals( act = text exp = '6' ).
+ " the sign place stays, as MOVE i -> string keeps it (go/abap IToString)
+ cl_abap_unit_assert=>assert_equals( act = text exp = `6 ` ).
  n = -2.
  c = n - 1 + 1.
  cl_abap_unit_assert=>assert_equals( act = c exp = '        2-' ).

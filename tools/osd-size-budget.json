@@ -119,7 +119,7 @@
       "reason": "baseline 2026-10-01"
     },
     "go:hostclass": {
-      "lines": 48,
+      "lines": 50,
       "reason": "#36: dependency-free host callbacks and Raise values for generated class replacements. #39 adds the agreed KERNEL_LOCK callbacks while keeping this package free of go/abap. Hooks take the calling step (*abap.Session as any) first, agreed with adt-i5."
     },
     "go:inflate": {
@@ -203,8 +203,8 @@
       "reason": "lowered 2026-10-02: the YAML line index went to tools/dsl-yaml-lines.mjs; holds the range: of L3 slice 3a"
     },
     "tools/gogen/emit-go.mjs": {
-      "lines": 2408,
-      "reason": "#36: generated host-class hook dispatch and ABAP Raise/error bridging on top of the merged emitter baseline. #38/#39 add lock-call emission and trim the arithmetic string result only for arithmetic sources."
+      "lines": 2409,
+      "reason": "#36: generated host-class hook dispatch and ABAP Raise/error bridging on top of the merged emitter baseline. #38/#39 add lock-call emission and trim the arithmetic string result only for arithmetic sources. Rebased on #675 (step-first host hooks)."
     },
     "tools/gogen/emit-js.mjs": {
       "lines": 1206,
