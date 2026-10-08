@@ -6538,16 +6538,8 @@ export function convert(expr, to) {
   if (charlike(from) && to.k === "n") return ok("s2n");
   // i -> string, measured on A4H: the digits and then a place for the sign,
   // 42 is "42 ", -5 is "5-" (a template writes -5; a move does not)
-  if (to.k === "string" && from.k === "i") {
-    const result = ok("i2s");
-    result.arith = expr.e === "bin" || expr.e === "neg" || (expr.e === "fn" && expr.name === "IPOW");
-    return result;
-  }
-  if (to.k === "string" && from.k === "int8") {
-    const result = ok("i82s");
-    result.arith = expr.e === "bin" || expr.e === "neg" || (expr.e === "fn" && expr.name === "IPOW");
-    return result;
-  }
+  if (to.k === "string" && from.k === "i") return ok("i2s");
+  if (to.k === "string" && from.k === "int8") return ok("i82s");
   if (to.k === "string" && from.k === "f") return ok("f2s");
   // Four/eight big-endian bytes, zero-padded or truncated on the left.
   if (["x", "xstring"].includes(to.k) && ["i", "int8"].includes(from.k)) return ok(from.k === "i" ? "i2x" : "i82x");
