@@ -2,6 +2,7 @@ package objstore
 
 import (
 	"encoding/json"
+	"math"
 	"reflect"
 	"sort"
 	"strings"
@@ -87,4 +88,18 @@ func TestStoreCommandsAndUnknownWithoutTree(t *testing.T) {
 		}
 	}
 	storeState.cfg = nil
+}
+
+func TestSearchLimitMatchesJavaScriptNumber(t *testing.T) {
+	for _, test := range []struct {
+		input any
+		want  float64
+	}{
+		{nil, -1}, {float64(0), 0}, {float64(2), 2}, {"4", 4},
+		{float64(0.5), 0.5}, {"Infinity", math.Inf(1)}, {"NaN", -1}, {"junk", -1},
+	} {
+		if got := storeSearchLimit(test.input); got != test.want {
+			t.Errorf("limit(%#v) = %d, want %d", test.input, got, test.want)
+		}
+	}
 }

@@ -75,8 +75,8 @@
       "reason": "sy-sysid from the one system id (go/sysid, tools/osd-identity.mjs), 2026-10-02; rebased over #453"
     },
     "go:cmd/osgo": {
-      "lines": 1297,
-      "reason": "ADT on osgo: /sap/bc/adt mount behind -adt, compiler sidecar status and storecompiler wiring, the ADT session bound per request (adt_session.go: USE_SESSION around the dialog step; generated symbols keep it in cmd/osgo), SYSTEM IDENTITY from the selected SID with Node's ADT client/user derivation; the ADT logoff route and the ENQ kernel hooks over go/adtenq (adt_enq.go)"
+      "lines": 1305,
+      "reason": "ADT on osgo: /sap/bc/adt mount behind -adt, compiler sidecar status and storecompiler wiring, the ADT session bound per request (adt_session.go: USE_SESSION around the dialog step; generated symbols keep it in cmd/osgo), SYSTEM IDENTITY from the selected SID with Node's ADT client/user/full-name/language derivation; the ADT logoff route and the ENQ kernel hooks over go/adtenq (adt_enq.go)"
     },
     "go:cmd/storecmp": {
       "lines": 171,
@@ -131,8 +131,8 @@
       "reason": "recorded by --update"
     },
     "go:objstore": {
-      "lines": 1989,
-      "reason": "Store parity with Node: layers, retained active reads, packages, HISTORY; injectable compiler for CHECK/PARSE OUTLINE (conversion lives in storecompiler); SYSTEM IDENTITY and Node-exact kind refusals. Carving SYSTEM into its own package is queued."
+      "lines": 2010,
+      "reason": "Store parity with Node: layers, retained active reads, packages, HISTORY; injectable compiler for CHECK/PARSE OUTLINE (conversion lives in storecompiler), JavaScript Number-compatible SEARCH limits, and advertised PARSE discovery; SYSTEM IDENTITY and Node-exact kind refusals. Carving SYSTEM into its own package is queued."
     },
     "go:reportargs": {
       "lines": 209,

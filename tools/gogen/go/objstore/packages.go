@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -301,7 +302,7 @@ func storeClassIncludes(e *storeEntry) []string {
 	return out
 }
 
-func storeSearch(ix *storeIndex, seed, typ string, limit int) []*storeEntry {
+func storeSearch(ix *storeIndex, seed, typ string, limit float64) []*storeEntry {
 	out := []*storeEntry{}
 	needle := strings.ToUpper(seed)
 	for _, key := range ix.keys {
@@ -311,12 +312,27 @@ func storeSearch(ix *storeIndex, seed, typ string, limit int) []*storeEntry {
 		}
 		if strings.Contains(e.Name, needle) {
 			out = append(out, e)
-			if limit >= 0 && len(out) >= limit {
+			if limit >= 0 && float64(len(out)) >= limit {
 				break
 			}
 		}
 	}
 	return out
+}
+
+func storeSearchLimit(value any) float64 {
+	switch value := value.(type) {
+	case float64:
+		return value
+	case string:
+		number, err := strconv.ParseFloat(value, 64)
+		if err != nil || number != number {
+			return -1
+		}
+		return number
+	default:
+		return -1
+	}
 }
 
 func storeJSON(v any) (string, error) {

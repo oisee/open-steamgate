@@ -485,6 +485,27 @@ jobs:
             if [[ "$has_pass" == 1 ]]; then echo "::error::osgo ADT conformance: $1, and osgo.json expects passes"; exit 1; fi
             echo "::warning::osgo ADT conformance: $1 (advisory while osgo.json holds no pass)"; exit 0
           }
+          # The outline cases parse the same synthetic fixture as JS. Rebuild
+          # with it as an input, then stage it again in the new live generation
+          # so both its inactive file and retained active copy enter
+          # zz_store.json. The launcher is where compiler.New discovers osd.
+          stage_fixture() {
+            node --input-type=module -e '
+            import {mkdirSync, writeFileSync} from "node:fs";
+            import {join} from "node:path";
+            import {files} from "./test/adt-conformance/fixtures/source.mjs";
+            for (const [name, source] of Object.entries(files)) {
+              for (const root of ["src/conformance-fixture", "build/live/source/conformance-fixture/src"]) {
+                mkdirSync(root, {recursive: true});
+                writeFileSync(join(root, name), source);
+              }
+            }'
+          }
+          stage_fixture
+          npm run transpile || infra "the fixture transpile failed"
+          stage_fixture
+          printf '%s\n' '#!/bin/sh' "exec \"$(command -v node)\" \"$PWD/bin/osd.mjs\" \"\$@\"" > tools/gogen/.out/osd
+          chmod +x tools/gogen/.out/osd
           node tools/gogen/osgo.mjs || infra "the osgo build failed"
           tools/gogen/.out/osgo -adt -port "$STG_PORT" -root "$PWD" > "$RUNNER_TEMP/osgo-adt.log" 2>&1 &
           pid=$!

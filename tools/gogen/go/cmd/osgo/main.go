@@ -74,7 +74,15 @@ func adtIdentity(sid string, lookup func(string) (string, bool)) objstore.Identi
 	if runes := []rune(user); len(runes) > 12 {
 		user = string(runes[:12])
 	}
-	return objstore.Identity{SystemID: sid, Client: client, UserName: user}
+	userFull := lookupDefault("OSD_USER_FULL", lookup, "Off-Stack Doppelganger")
+	return objstore.Identity{SystemID: sid, Client: client, UserName: user, UserFullName: userFull, Language: "EN"}
+}
+
+func lookupDefault(name string, lookup func(string) (string, bool), fallback string) string {
+	if value, ok := lookup(name); ok {
+		return value
+	}
+	return fallback
 }
 
 // one work process: class statics are per process (see the package comment).

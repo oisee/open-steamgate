@@ -84,12 +84,15 @@ func TestADTIdentity(t *testing.T) {
 	env := func(name string) string {
 		return map[string]string{"OSD_ADT_CLIENT": " 001 ", "OSD_USER": " alice "}[name]
 	}
+	present := func(name string) (string, bool) { return env(name), name == "OSD_ADT_CLIENT" || name == "OSD_USER" }
 	got := adtIdentity("XYZ", func(string) (string, bool) { return "", false })
-	if got != (objstore.Identity{SystemID: "XYZ", Client: "001", UserName: "OSD"}) {
+	if got != (objstore.Identity{SystemID: "XYZ", Client: "001", UserName: "OSD",
+		UserFullName: "Off-Stack Doppelganger", Language: "EN"}) {
 		t.Fatal(got)
 	}
-	got = adtIdentity("XYZ", func(name string) (string, bool) { return env(name), true })
-	if got != (objstore.Identity{SystemID: "XYZ", Client: "001", UserName: "ALICE"}) {
+	got = adtIdentity("XYZ", present)
+	if got != (objstore.Identity{SystemID: "XYZ", Client: "001", UserName: "ALICE",
+		UserFullName: "Off-Stack Doppelganger", Language: "EN"}) {
 		t.Fatal(got)
 	}
 }

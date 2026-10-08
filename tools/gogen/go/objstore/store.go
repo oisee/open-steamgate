@@ -73,11 +73,13 @@ type Config struct {
 }
 
 // Identity is the ADT identity Node's session adapter binds for
-// tools/adt-abap-sessions.mjs: exactly the three fields that facade passes on.
+// tools/adt-abap-sessions.mjs; the facade passes all five fields through.
 type Identity struct {
-	SystemID string `json:"systemID"`
-	Client   string `json:"client"`
-	UserName string `json:"userName"`
+	SystemID     string `json:"systemID"`
+	Client       string `json:"client"`
+	UserName     string `json:"userName"`
+	UserFullName string `json:"userFullName,omitempty"`
+	Language     string `json:"language,omitempty"`
 }
 
 type storeEntry struct {
@@ -207,7 +209,7 @@ var Capabilities = []string{"LIST", "READ", "WRITE", "HISTORY", "REVISION", "OBJ
 
 // Commands lists the implemented protocol commands, including discovery.
 // ACTIVATE and TOKENS remain refused; PARSE supports OUTLINE with a provider.
-var Commands = []string{"LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "TOKENS", "CAPABILITIES", "HISTORY", "REVISION", "OBJECT", "PACKAGE", "PACKAGES", "SEARCH", "SYSTEM", "COMMANDS"}
+var Commands = []string{"LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "TOKENS", "CAPABILITIES", "HISTORY", "REVISION", "OBJECT", "PACKAGE", "PACKAGES", "SEARCH", "PARSE", "SYSTEM", "COMMANDS"}
 
 var systemKinds = map[string]bool{
 	"IDENTITY": true, "LOCK_HANDLE": true, "LOCK_RELEASE": true, "SESSION": true,
@@ -394,7 +396,7 @@ func Call(in map[string]*string) Answer {
 			Format string `json:"format"`
 			Seed   string `json:"seed"`
 			Type   string `json:"type"`
-			Limit  *int   `json:"limit"`
+			Limit  any    `json:"limit"`
 		}
 		if err = json.Unmarshal([]byte(text("IV_JSON", "")), &input); err != nil {
 			err = storeRefusal("Unexpected token in JSON: " + text("IV_JSON", ""))
@@ -421,10 +423,7 @@ func Call(in map[string]*string) Answer {
 			}
 			break
 		}
-		limit := -1
-		if input.Limit != nil {
-			limit = *input.Limit
-		}
+		limit := storeSearchLimit(input.Limit)
 		rows := storeSearch(ix, input.Seed, input.Type, limit)
 		if input.Format == "lines" {
 			a.Scalars["EV_SOURCE"] = storeSearchLines(rows)

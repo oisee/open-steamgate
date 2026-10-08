@@ -92,8 +92,10 @@ close, is cleanup and keeps the case unobserved.
 
 **osgo, 2026-10-08** (stoker's packed-column WHERE and hostclass seam,
 osgo's ADT session per request, SYSTEM IDENTITY, the ENQ kernel over
-go/adtenq, the logoff mount): 9 pass (C1, C2, C3, C6, R1-R5), 14 known-gap
-with the observed first cause in `expected/osgo.json`, 0 fail.
+go/adtenq, the logoff mount, and PARSE OUTLINE through the compiler sidecar
+when CI provides `osd`): 16 pass, 7 known-gap with the observed first cause
+in `expected/osgo.json`, 0 fail. Without a sidecar the five outline cases are
+observed 501 gaps rather than manufactured answers.
 
 `expected/osgo.json` maps every ID to `pass`, `known-gap: reason` or `n/a: reason`.
 Unknown IDs, missing entries and invalid values are errors. JS cannot supply a
