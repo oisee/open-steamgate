@@ -29,6 +29,27 @@ Format adapted from `larshp/hithub` (MIT).
 - Upstream version containing a fix: `...` or `unknown`
 
 ## Open anomalies
+### ANOMALY-2026-10-08-lone-surrogate-egress -- Unmeasured text output of lone UTF-16 halves
+
+- Status: `open`
+- Affected runtime: OSGo's text DATASET, `CL_GUI_FRONTEND_SERVICES=>GUI_DOWNLOAD`
+  in ASC mode, and APC text messages.
+- Actual OSGo behaviour: a lone surrogate produced by a character section is
+  stored as WTF-8 and its bytes are written unchanged to UTF-8 text output
+  (for example, a high D83D unit is `ED A0 BD`). File output also writes its
+  configured newline; APC submits the same bytes as a text frame, which a
+  receiver requiring valid UTF-8 may reject. Adjacent high/low halves are
+  joined at string construction and leave as the normal supplementary character.
+- `substring_before/after` with a half inside a supplementary character return empty in OSGo; the kernel splits on UTF-16 units; A4H was not measured.
+- `SPLIT AT` a half leaves the supplementary character unsplit in OSGo; the kernel splits on UTF-16 units; A4H was not measured.
+- `shift_left/right( sub = half )` leaves the supplementary character unchanged in OSGo; the kernel splits on UTF-16 units; A4H was not measured.
+- Expected SAP behaviour: unknown; A4H was not measured. No substitution,
+  rejection or encoding rule is inferred from the behaviour of this host.
+- Smallest safe workaround: avoid sending lone halves to text output.
+- Regression: `tools/gogen/go/abap/text_egress_test.go`,
+  `tools/gogen/go/apc/surrogate_test.go`, and the UTF-16 ABAP Unit fixture.
+- Upstream: not reported; kernel behaviour needs measurement first.
+
 ### ANOMALY-2026-10-07-aunit-comparison-sign -- E.2 type-blind comparison formatting
 
 - Status: `fixed locally`
@@ -325,6 +346,19 @@ Format adapted from `larshp/hithub` (MIT).
 - Upstream issue: not filed
 - Regression-test location: `docs/probes/dsl-l2/zcl_l2_aggregate_probe.clas.testclasses.abap` distinguishes ABAP assignment from the direct API; `test/dsl-l2.mjs` covers aggregate alert text, including a negative DEC minimum
 - Upstream version containing a fix: `unknown`
+
+### ANOMALY-2026-10-07-osgo-session-statics -- Go class state shared between internal sessions
+
+- Status: fixed locally in the Go emitter; Node daemon state remains the separate entry below
+- Discovery date: `2026-10-07`
+- Affected statement: `CLASS-DATA` and `CLASS_CONSTRUCTOR` in generated Go
+- Reproducer: `tools/gogen/fixtures/session-statics/`, eight goroutines with separate zero Sessions
+- Exact command: `node --test tools/gogen/session-statics.test.mjs` (Go driver runs with `-race`)
+- Expected behaviour: each session reads 42 after initialization and finishes its own 10,000 increments
+- Actual behaviour before the fix: package globals shared values and constructor flags; the race detector reports concurrent access in `Ensure_ZCL_RACE_INIT`
+- Fix: stable class storage and constructor flags in lazy `abap.Statics` slots selected by `Session.Statics`, inherited attributes in the declaring class's slot. Nil selects private state; serialized HTTP/APC hosts select `ProcessStatics` to retain caches across requests. The host regression test observes counter values 1 then 2 on separate connections.
+- Regression location: `tools/gogen/session-statics.test.mjs` and its generated-code Go driver; wired into `gogen.yml`
+- Upstream issue: none; this is our Go emitter
 
 ### ANOMALY-2026-09-24-daemon-statics -- a daemon's class data is its own session's on a system, and the process's here
 
@@ -3881,3 +3915,28 @@ Not an anomaly, recorded for porting: on 7.58, `FIND ... REGEX` (POSIX) raises a
 - Regression: none yet.
 - Upstream: https://github.com/abaplint/abaplint/issues/4393 (abaplint check_syntax accepts it; filed 2026-10-07).
 - Upstream version containing a fix: unknown.
+
+### ANOMALY-2026-10-08-instance-of-initial - IS INSTANCE OF ignores an initial reference's static type; object as the target throws
+
+- Status: `fixed locally` (pinned transpiler); `open` upstream (abaplint/transpiler#1975)
+- Discovery: abapiti's translated lexer on three runtimes (its case 032), measured on A4H 7.58 by abapiti on 2026-10-08 in a throwaway package (removed after).
+- Affected path: the transpiler's `IS INSTANCE OF` (`packages/transpiler/src/expressions/compare.ts`, `packages/runtime/src/compare/instance_of.ts`); osgo: fixed separately in oisee/open-steamgate#655 (same A4H rows).
+- Reproducer: `DATA r TYPE REF TO zcl_a.` (initial) `ASSERT r IS INSTANCE OF zcl_a.`; and a bound `o`: `ASSERT o IS INSTANCE OF object.`
+- Expected SAP behaviour (7.58): an initial reference is decided by its static type: true when the static type is the target or a subtype (initial REF TO zcl_a / zcl_a: true; initial REF TO zif_x / zif_x: true; initial REF TO zcl_a / a subclass: false; initial REF TO object / zcl_a: false; an interface the static type does not implement: false); a bound reference `IS INSTANCE OF object` is true.
+- Actual local behaviour: OSG-JS gave false for every initial reference and threw "Right-hand side of 'instanceof' is not an object" for `object`.
+- Workaround: none needed after the pin; abapiti's generator also writes `x IS BOUND AND x IS INSTANCE OF c`.
+- Regression: abaplint/transpiler `test/operators/instance_of.ts` (18 cases, 16 fail before the fix), carried by the pin.
+- Upstream: https://github.com/abaplint/transpiler/pull/1975 (branch inside the repository; CI and Regression green, 64/64 rows); pinned 2026-10-08 as `libs.lock.json` transpiler oisee/transpiler `local/osd-build-2026-10-08` e2a459b1 = the previous pin 2ff0e801 plus a cherry-pick of #1975.
+- Upstream version containing a fix: unknown.
+
+### ANOMALY-2026-10-08-zip-read-int4 - cl_abap_zip's read_int4 overflows type i, and only the Go runtime notices
+
+- Status: `fixed upstream` (open-abap/open-abap-core#1282, ce4ddaad, 2026-10-02); pinned 2026-10-08
+- Discovery: abapiti's case 033, `cl_abap_zip=>load` raising `CX_SY_ARITHMETIC_OVERFLOW` on osgo for an ordinary 50-file ZIP, while OSG-JS loaded it.
+- Affected path: open-abap-core `lcl_stream=>read_int4` (`cl_abap_zip.clas.locals_imp.abap`) before #1282: `rv_int = rv_int + lv_val * lv_factor`, then `lv_factor = lv_factor * 256`, all in `i`; the factor reaches 2^32 after the fourth byte for any input.
+- Expected SAP behaviour (7.58): the same method body dumps `COMPUTE_INT_TIMES_OVERFLOW` for both `01020304` and `01020380` (measured on A4H by abapiti on 2026-10-08 in a throwaway package, removed after). SAP's own `cl_abap_zip` is not affected; this is open-abap-core's implementation.
+- Actual local behaviour: osgo raised the overflow, as the kernel does; OSG-JS did not, because the JS runtime does not raise on `i * i` here (abaplint/transpiler#1955, open).
+- Fix: pin `libs.lock.json` open-abap-core to oisee/open-abap-core `osd-build-2026-10-08` d5aea88b = the previous pin 22d31a35 plus a cherry-pick of ce4ddaad. After the pin a ZIP round trip on osgo gets past `read_int4` and stops at a separate osgo gap: `cl_abap_conv_in_ce=>read` passes a generic `data` parameter (an osgo NOT_COMPILED, tracked with the generic by-reference parameter work).
+- Regression: open-abap-core `cl_abap_zip.clas.testclasses.abap` (from #1282), carried by the pin.
+- Upstream: https://github.com/open-abap/open-abap-core/pull/1282 (merged); JS overflow: https://github.com/abaplint/transpiler/pull/1955
+- Upstream version containing a fix: open-abap-core main after 2026-10-02.

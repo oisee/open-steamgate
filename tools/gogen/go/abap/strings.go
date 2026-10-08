@@ -21,7 +21,7 @@ const NoLength = math.MinInt32
 // and its Go string does not. SPLIT ... AT a c separator keeps them ('a '
 // splits `a b` into ” and 'b'; a c(5) holding 'x' is 'x    ').
 func PadC(v string, n int) string {
-	if c := utf8.RuneCountInString(v); c < n {
+	if c := int(Strlen(v)); c < n {
 		return v + strings.Repeat(" ", n-c)
 	}
 	return v
@@ -50,7 +50,7 @@ func SplitInto(v, sep string, n int) []string {
 // the length of each c target, -1 for a string.
 func SplitSubrc(pieces []string, lens []int) int32 {
 	for i, p := range pieces {
-		if lens[i] >= 0 && utf8.RuneCountInString(p) > lens[i] {
+		if lens[i] >= 0 && int(Strlen(p)) > lens[i] {
 			return 4
 		}
 	}
@@ -137,9 +137,13 @@ func compileABAPAfter(p string, icase bool) *regexp.Regexp {
 // plainAll is every occurrence of sub in s, left to right, not overlapping,
 // as [start end] byte pairs; icase compares case-insensitively.
 func plainAll(s, sub string, icase, first bool) [][]int {
+	if hasHalf(s) || hasHalf(sub) {
+		return plainAllWTF(s, sub, icase, first)
+	}
 	if icase {
 		return rxAll(s, regexp.QuoteMeta(sub), true, first)
 	}
+
 	var out [][]int
 	for pos := 0; pos <= len(s); {
 		i := strings.Index(s[pos:], sub)
@@ -151,6 +155,35 @@ func plainAll(s, sub string, icase, first bool) [][]int {
 			break
 		}
 		pos += i + len(sub)
+	}
+	return out
+}
+
+func plainAllWTF(s, sub string, icase, first bool) [][]int {
+	s = splitSupplementary(s)
+	hay, bounds := wtf16View(s)
+	needle := UTF16Units(sub)
+	if icase {
+		// Fold scalars before splitting them; keep byte boundaries on the
+		// original split subject (case mappings can change UTF-8 byte widths).
+		hay = UTF16Units(ToUpper(Canon(s)))
+		needle = UTF16Units(ToUpper(sub))
+	}
+	var out [][]int
+	for pos := 0; pos+len(needle) <= len(hay); {
+		i := 0
+		for i < len(needle) && hay[pos+i] == needle[i] {
+			i++
+		}
+		if i == len(needle) {
+			out = append(out, []int{bounds[pos], bounds[pos+len(needle)]})
+			if first {
+				break
+			}
+			pos += len(needle)
+			continue
+		}
+		pos++
 	}
 	return out
 }
@@ -191,7 +224,7 @@ func rxWith(s, with string, m []int) string {
 			b.WriteRune(r[i])
 		}
 	}
-	return b.String()
+	return Canon(b.String())
 }
 
 // splice replaces the given matches of s (byte ranges, in order) with the
@@ -205,17 +238,7 @@ func splice(s string, ms [][]int, with func(m []int) string) string {
 		last = m[1]
 	}
 	b.WriteString(s[last:])
-	return b.String()
-}
-
-// runeByte is the byte offset of the n-th character of s.
-func runeByte(s string, n int) int {
-	i := 0
-	for k := 0; k < n; k++ {
-		_, w := utf8.DecodeRuneInString(s[i:])
-		i += w
-	}
-	return i
+	return Canon(b.String())
 }
 
 // ReplaceStmt is REPLACE [FIRST OCCURRENCE | ALL OCCURRENCES] OF [REGEX] p
@@ -234,23 +257,25 @@ func ReplaceStmt(v, p, with string, regex, all, icase bool, off, ln int32, cLen 
 	if cLen >= 0 {
 		v = PadC(v, cLen)
 	}
-	n := int32(utf8.RuneCountInString(v))
+	n := Strlen(v)
 	if ln == NoLength {
 		ln = n - off
 	} else if ln < 0 {
 		panic(NotCompiled("REPLACE", "a SECTION of negative LENGTH is not measured"))
 	}
-	if off < 0 || off > n || off+ln > n {
+	if off < 0 || off > n || int64(off)+int64(ln) > int64(n) {
 		rangeError()
 	}
-	b0, b1 := runeByte(v, int(off)), runeByte(v, int(off+ln))
-	sec := v[b0:b1]
+	sec := SubS(v, off, ln)
 	var ms [][]int
 	if regex {
 		ms = rxAll(sec, p, icase, !all)
 	} else {
 		if p == "" && all {
 			panic(ArithmeticError{Class: "CX_SY_REPLACE_INFINITE_LOOP", Op: "REPLACE ALL OCCURRENCES OF ''"})
+		}
+		if hasHalf(sec) || hasHalf(p) {
+			sec = splitSupplementary(sec)
 		}
 		ms = plainAll(sec, p, icase, !all)
 	}
@@ -260,18 +285,18 @@ func ReplaceStmt(v, p, with string, regex, all, icase bool, off, ln int32, cLen 
 		}
 		return v, 4
 	}
-	out := v[:b0] + splice(sec, ms, func(m []int) string {
+	out := JoinUTF16(SubS(v, 0, off), splice(sec, ms, func(m []int) string {
 		if regex {
 			return rxWith(sec, with, m)
 		}
 		return with
-	}) + v[b1:]
+	}), SubS(v, off+ln, -1))
 	if cLen >= 0 {
-		if utf8.RuneCountInString(out) > cLen {
-			cut := []rune(out)[cLen:]
+		if int(Strlen(out)) > cLen {
+			cut := SubS(out, int32(cLen), -1)
 			// only blanks cut is no cut (measured: ab in a c(4), a -> xxx, is
 			// xxxb and sy-subrc 0)
-			if strings.TrimRight(string(cut), " ") == "" {
+			if strings.TrimRight(cut, " ") == "" {
 				return CFit(out, cLen), 0
 			}
 			return CFit(out, cLen), 2
@@ -295,6 +320,9 @@ func ReplaceFn(v, p, with string, regex bool, occ int32) string {
 	if regex {
 		ms = rxAll(v, p, false, occ == 1)
 	} else {
+		if hasHalf(v) || hasHalf(p) {
+			v = splitSupplementary(v)
+		}
 		ms = plainAll(v, p, false, occ == 1)
 	}
 	switch {
@@ -318,7 +346,7 @@ func Repeat(v string, occ int32) string {
 	if occ < 0 {
 		panic(ArithmeticError{Class: "CX_SY_STRG_PAR_VAL", Op: "repeat"})
 	}
-	return strings.Repeat(v, int(occ))
+	return Canon(strings.Repeat(v, int(occ)))
 }
 
 // CondenseFn is condense( val del from to ), measured: the characters of
@@ -326,6 +354,37 @@ func Repeat(v string, occ int32) string {
 // the first character of to (none when to is empty); an empty del strips
 // nothing, an empty from joins nothing.
 func CondenseFn(v, del, from, to string) string {
+	if hasHalf(v) || hasHalf(del) || hasHalf(from) || hasHalf(to) {
+		u, d, f, t := UTF16Units(v), UTF16Units(del), UTF16Units(from), UTF16Units(to)
+		contains := func(set []uint16, c uint16) bool {
+			for _, x := range set {
+				if x == c {
+					return true
+				}
+			}
+			return false
+		}
+		for len(u) > 0 && contains(d, u[0]) {
+			u = u[1:]
+		}
+		for len(u) > 0 && contains(d, u[len(u)-1]) {
+			u = u[:len(u)-1]
+		}
+		out := make([]uint16, 0, len(u))
+		in := false
+		for _, c := range u {
+			if contains(f, c) {
+				if !in && len(t) > 0 {
+					out = append(out, t[0])
+				}
+				in = true
+			} else {
+				out = append(out, c)
+				in = false
+			}
+		}
+		return UTF16String(out)
+	}
 	v = strings.TrimFunc(v, func(r rune) bool { return strings.ContainsRune(del, r) })
 	if from == "" {
 		return v
@@ -348,7 +407,7 @@ func CondenseFn(v, del, from, to string) string {
 		in = false
 		b.WriteRune(r)
 	}
-	return b.String()
+	return Canon(b.String())
 }
 
 // ShiftFn is shift_left / shift_right( val [places | circular | sub] ),
@@ -357,8 +416,7 @@ func CondenseFn(v, del, from, to string) string {
 // CX_SY_RANGE_OUT_OF_BOUNDS; sub goes as often as it stands at that end.
 // kind is "", "places", "circular" or "sub".
 func ShiftFn(v string, left bool, kind string, n int32, sub string) string {
-	r := []rune(v)
-	l := int32(len(r))
+	l := Strlen(v)
 	switch kind {
 	case "":
 		if left {
@@ -370,9 +428,9 @@ func ShiftFn(v string, left bool, kind string, n int32, sub string) string {
 			rangeError()
 		}
 		if left {
-			return string(r[n:])
+			return SubS(v, n, -1)
 		}
-		return string(r[:l-n])
+		return SubS(v, 0, l-n)
 	case "circular":
 		if n < 0 {
 			panic(NotCompiled("shift( )", "a negative circular is not measured"))
@@ -381,9 +439,9 @@ func ShiftFn(v string, left bool, kind string, n int32, sub string) string {
 			rangeError()
 		}
 		if left {
-			return string(r[n:]) + string(r[:n])
+			return JoinUTF16(SubS(v, n, -1), SubS(v, 0, n))
 		}
-		return string(r[l-n:]) + string(r[:l-n])
+		return JoinUTF16(SubS(v, l-n, -1), SubS(v, 0, l-n))
 	}
 	if sub == "" {
 		panic(NotCompiled("shift( )", "an empty sub is not measured"))
@@ -404,34 +462,51 @@ func ShiftFn(v string, left bool, kind string, n int32, sub string) string {
 // is taken as it is, even a second sep: _a__b_ is _a_b_). hasCase says a
 // case was given.
 func ToMixed(v, sep string, hasCase bool, cs string, min int32) string {
-	if utf8.RuneCountInString(sep) != 1 {
+	if int(Strlen(sep)) != 1 {
 		panic(NotCompiled("to_mixed( )", "a sep that is not one character is not measured"))
 	}
 	if min < 1 {
 		panic(NotCompiled("to_mixed( )", "a min below 1 is not measured"))
 	}
-	s, _ := utf8.DecodeRuneInString(sep)
-	r := []rune(v)
-	var b strings.Builder
-	for i := 0; i < len(r); i++ {
+	sepRune, _ := decode16(sep)
+	var out strings.Builder
+	// Fold complete Unicode scalars; only lone WTF-8 halves pass through.
+	// The separator threshold still counts ABAP's UTF-16 units.
+	units := int32(0)
+	for i := 0; i < len(v); {
+		r, width := decode16(v[i:])
+		upper, fold := false, true
 		switch {
-		case i == 0 && hasCase:
-			c, _ := utf8.DecodeRuneInString(cs)
-			if unicode.IsUpper(c) {
-				b.WriteRune(unicode.ToUpper(r[0]))
-			} else {
-				b.WriteRune(unicode.ToLower(r[0]))
-			}
 		case i == 0:
-			b.WriteRune(r[0])
-		case r[i] == s && int32(i) >= min && i+1 < len(r):
-			i++
-			b.WriteRune(unicode.ToUpper(r[i]))
-		default:
-			b.WriteRune(unicode.ToLower(r[i]))
+			fold = hasCase
+			c, _ := decode16(cs)
+			upper = unicode.IsUpper(c)
+		case r == sepRune && units >= min && i+width < len(v):
+			i += width
+			units++
+			r, width = decode16(v[i:])
+			upper = true
 		}
+		if r >= 0xd800 && r <= 0xdfff {
+			out.WriteString(v[i : i+width])
+		} else {
+			c := r
+			if fold {
+				if upper {
+					c = unicode.ToUpper(r)
+				} else {
+					c = unicode.ToLower(r)
+				}
+			}
+			out.WriteRune(c)
+		}
+		units++
+		if r > 0xffff {
+			units++
+		}
+		i += width
 	}
-	return b.String()
+	return Canon(out.String())
 }
 
 // ConcatFit puts the result of CONCATENATE into its target (ultra/events,
@@ -439,15 +514,15 @@ func ToMixed(v, sep string, hasCase bool, cs string, min int32) string {
 // characters takes the first n and sy-subrc is 4 when something was cut;
 // n < 0 is a string. A c is held without trailing blanks.
 func ConcatFit(v string, n int) (string, int32) {
+	v = Canon(v)
 	if n < 0 {
 		return v, 0
 	}
-	r := []rune(v)
 	var rc int32
-	if len(r) > n {
-		r, rc = r[:n], 4
+	if int(Strlen(v)) > n {
+		v, rc = SubS(v, 0, int32(n)), 4
 	}
-	return strings.TrimRight(string(r), " "), rc
+	return strings.TrimRight(v, " "), rc
 }
 
 // FindAllCount is FIND ALL OCCURRENCES OF [REGEX] p IN s MATCH COUNT: the
@@ -483,7 +558,7 @@ func EscapeHTMLAttr(v string) string {
 // in upper-case hex; / ' U+007F and everything beyond ASCII unchanged.
 func EscapeJSONString(v string) string {
 	var b strings.Builder
-	for _, r := range v {
+	write := func(r rune) {
 		switch r {
 		case '\\':
 			b.WriteString(`\\`)
@@ -504,10 +579,27 @@ func EscapeJSONString(v string) string {
 				b.WriteString(`\u00`)
 				b.WriteByte("0123456789ABCDEF"[r>>4])
 				b.WriteByte("0123456789ABCDEF"[r&15])
+			} else if r >= 0xd800 && r < 0xe000 {
+				b.WriteString(`\u`)
+				b.WriteByte("0123456789ABCDEF"[r>>12])
+				b.WriteByte("0123456789ABCDEF"[(r>>8)&15])
+				b.WriteByte("0123456789ABCDEF"[(r>>4)&15])
+				b.WriteByte("0123456789ABCDEF"[r&15])
 			} else {
 				b.WriteRune(r)
 			}
 		}
+	}
+	if !hasHalf(v) {
+		for _, r := range v {
+			write(r)
+		}
+		return b.String()
+	}
+	for i := 0; i < len(v); {
+		r, width := decode16(v[i:])
+		write(r)
+		i += width
 	}
 	return b.String()
 }
@@ -540,5 +632,5 @@ func SubstringAfter(v, sub string) string {
 // by sep, an empty table the empty string. The front end admits string rows
 // only.
 func ConcatLinesOf(t []string, sep string) string {
-	return strings.Join(t, sep)
+	return Canon(strings.Join(t, sep))
 }

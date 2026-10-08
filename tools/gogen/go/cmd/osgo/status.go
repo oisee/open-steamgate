@@ -427,7 +427,7 @@ func refreshStatus(h statusHost) (rows int32, err error) {
 			err = fmt.Errorf("%s  at %s", dumpText(r), strings.Join(abapStack(r), " <- "))
 		}
 	}()
-	abap.DialogStep(func() { rows = statusRefresh(&abap.Session{}, body) })
+	abap.DialogStep(func() { rows = statusRefresh(&abap.Session{Statics: abap.ProcessStatics}, body) })
 	return rows, nil
 }
 

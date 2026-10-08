@@ -2,7 +2,6 @@ package abap
 
 import (
 	"strings"
-	"sync"
 )
 
 // A class CREATE OBJECT ... TYPE (name) can make: a typed nil to check the
@@ -143,13 +142,11 @@ func CallStatic(s *Session, class, method string, args map[string]Data) {
 	e.call(s, args)
 }
 
-// Local RFC destinations: CALL FUNCTION ... DESTINATION to one of these runs
-// the module in this process ('NONE' on a Gateway). The transpiler runtime
-// keeps them in abap.context.RFCDestinations; CALL FUNCTION is not compiled
-// yet, so nothing reads this table so far. TODO(U4 step 2): move this
-// process-wide store into Session when destination lookup is implemented.
-var localDestinations sync.Map
-
+// Local RFC destination registrations belong to the registering internal session.
+// CALL FUNCTION is not compiled yet; preserve that boundary before adding lookup.
 func RegisterLocalDestination(s *Session, name string) {
-	localDestinations.Store(strings.TrimRight(name, " "), true)
+	if s.localDestinations == nil {
+		s.localDestinations = map[string]bool{}
+	}
+	s.localDestinations[strings.TrimRight(name, " ")] = true
 }

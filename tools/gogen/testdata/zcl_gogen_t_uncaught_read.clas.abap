@@ -5,7 +5,7 @@ ENDCLASS.
 
 CLASS zcl_gogen_t_uncaught_read IMPLEMENTATION.
   METHOD run.
-    " runs after zcl_gogen_t_uncaught in the same process (objects in name
+    " runs after zcl_gogen_t_uncaught in the same internal session (objects in name
     " order) and reads what its CLEANUPs left in the static
     r = |log:{ zcl_gogen_t_uncaught=>get_log( ) }|.
   ENDMETHOD.

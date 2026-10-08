@@ -200,7 +200,7 @@ func step(x *abap.ICFExchange, base string) (dump any, frames []string) {
 				dump, frames = r, abapStack(r)
 			}
 		}()
-		s := &abap.Session{}
+		s := &abap.Session{Statics: abap.ProcessStatics}
 		abap.DialogStep(func() { runShim(s, x, base) })
 	}()
 	return dump, frames
@@ -501,7 +501,7 @@ func main() {
 				log.Fatalf("boot: %s  at %s", dumpText(r), strings.Join(abapStack(r), " <- "))
 			}
 		}()
-		abap.DialogStep(func() { boot(&abap.Session{}) })
+		abap.DialogStep(func() { boot(&abap.Session{Statics: abap.ProcessStatics}) })
 	}()
 	// the synthetic demo rows (ZCL_OSD_DEMO_DATA=>BOOT, as the Node hosts run
 	// it through tools/osd-demo-data.mjs): the same class and the same knob,
@@ -516,7 +516,7 @@ func main() {
 				}
 			}()
 			var report string
-			abap.DialogStep(func() { report = demoData(&abap.Session{}, os.Getenv("OSD_DEMO_ROWS")) })
+			abap.DialogStep(func() { report = demoData(&abap.Session{Statics: abap.ProcessStatics}, os.Getenv("OSD_DEMO_ROWS")) })
 			log.Printf("demo data: %s (%d ms)", report, time.Since(started).Milliseconds())
 		}()
 	}

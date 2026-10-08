@@ -1,10 +1,24 @@
 package abap
 
 import (
+	"strings"
+	"sync/atomic"
 	"unicode/utf16"
 	"unicode/utf8"
-	"strings"
+	"unsafe"
 )
+
+// Go strings are immutable. Retaining the source keeps its backing memory
+// alive, so pointer+length identity cannot hit a reused address. Each entry
+// is immutable and atomically published; concurrent misses or eviction only
+// affect hit rate, never the conversion returned. Keep at most four sources;
+// short conversions do bounded work and must not evict cached documents.
+type encodedMemo struct {
+	source  string
+	encoded string
+}
+
+var utf16Memos [4]atomic.Pointer[encodedMemo]
 
 // EncodeText is cl_abap_conv_out_ce->convert: the characters of a string as
 // the bytes of an encoding. open-abap's create( ) sets the encoding to
@@ -15,12 +29,35 @@ func EncodeText(encoding, text string) string {
 	case "utf8":
 		return text
 	case "utf16le", "utf-16le":
-		u := utf16.Encode([]rune(text))
+		if len(text) >= 256 {
+			for i := range utf16Memos {
+				if m := utf16Memos[i].Load(); m != nil && len(m.source) == len(text) && unsafe.StringData(m.source) == unsafe.StringData(text) {
+					return m.encoded
+				}
+			}
+		}
+		u := UTF16Units(text)
 		b := make([]byte, 0, 2*len(u))
 		for _, c := range u {
 			b = append(b, byte(c), byte(c>>8))
 		}
-		return string(b)
+		encoded := string(b)
+		if len(text) < 256 {
+			return encoded
+		}
+		slot, shortest := 0, int(^uint(0)>>1)
+		for i := range utf16Memos {
+			old := utf16Memos[i].Load()
+			if old == nil {
+				slot = i
+				break
+			}
+			if len(old.source) < shortest {
+				slot, shortest = i, len(old.source)
+			}
+		}
+		utf16Memos[slot].Store(&encodedMemo{source: text, encoded: encoded})
+		return encoded
 	}
 	panic(NotCompiled("CL_ABAP_CONV_OUT_CE=>CONVERT", "encoding "+encoding))
 }

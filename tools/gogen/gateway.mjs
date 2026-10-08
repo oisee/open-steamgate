@@ -231,7 +231,7 @@ func abapStack(r any) string {
 var dbScript []byte
 
 func main() {
-	s := &abap.Session{}
+	s := &abap.Session{Statics: abap.ProcessStatics}
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Println("DUMP", r)

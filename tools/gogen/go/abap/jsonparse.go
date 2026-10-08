@@ -5,8 +5,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"unicode/utf16"
-	"unicode/utf8"
 )
 
 // The kernel half of open-abap-core's JSON reader (CL_SXML_STRING_READER,
@@ -22,8 +20,8 @@ import (
 //     a repeated key keeps its first place and takes its last value;
 //   - a number becomes its JavaScript text (Number.prototype.toString:
 //     1.0 is "1", 1e21 is "1e+21", 1e999 is "Infinity");
-//   - a string is decoded; a lone surrogate, which a JavaScript (and an
-//     ABAP) string can hold and a Go string cannot, is refused.
+//   - strings preserve lone UTF-16 surrogates as WTF-8; escaped pairs
+//     become their canonical supplementary character.
 //
 // A text that is not JSON answers ok false; the reader raises
 // CX_SXML_PARSE_ERROR then. On Node its XML_OFFSET is the position V8 names
@@ -211,18 +209,7 @@ func (p *jsonParser) str() (string, bool) {
 		if len(units) == 0 {
 			return true
 		}
-		for i := 0; i < len(units); i++ {
-			u := units[i]
-			if utf16.IsSurrogate(rune(u)) {
-				if u < 0xDC00 && i+1 < len(units) && units[i+1] >= 0xDC00 && units[i+1] <= 0xDFFF {
-					b.WriteRune(utf16.DecodeRune(rune(u), rune(units[i+1])))
-					i++
-					continue
-				}
-				panic(NotCompiled("JSON.parse", "a string with a lone surrogate, which a Go string cannot hold"))
-			}
-			b.WriteRune(rune(u))
-		}
+		b.WriteString(UTF16String(units))
 		units = units[:0]
 		return true
 	}
@@ -232,7 +219,7 @@ func (p *jsonParser) str() (string, bool) {
 		case c == '"':
 			flush()
 			p.i++
-			return b.String(), true
+			return Canon(b.String()), true
 		case c < 0x20:
 			return "", false
 		case c == '\\':
@@ -261,8 +248,12 @@ func (p *jsonParser) str() (string, bool) {
 			b.WriteByte(r)
 		default:
 			flush()
-			r, size := utf8.DecodeRuneInString(p.s[p.i:])
-			b.WriteRune(r)
+			r, size := decode16(p.s[p.i:])
+			if r >= 0xd800 && r < 0xe000 {
+				b.WriteString(p.s[p.i : p.i+size])
+			} else {
+				b.WriteRune(r)
+			}
 			p.i += size
 		}
 	}

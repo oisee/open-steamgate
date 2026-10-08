@@ -42,4 +42,3 @@ export const INCLUDES = {
   macros: ".clas.macros.abap",
   testclasses: ".clas.testclasses.abap",
 };
-

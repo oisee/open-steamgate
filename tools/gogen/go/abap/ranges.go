@@ -5,7 +5,6 @@ import (
 	"math"
 	"strconv"
 	"strings"
-	"unicode/utf16"
 )
 
 // col IN range: a port of rangesPredicate() of tools/ir-ranges.mjs, the one
@@ -51,7 +50,7 @@ func refuse(reason, format string, a ...any) {
 }
 
 // jsLen is String.length: UTF-16 code units.
-func jsLen(s string) int { return len(utf16.Encode([]rune(s))) }
+func jsLen(s string) int { return int(Strlen(s)) }
 
 // jsString is String(v ?? "").
 func jsString(v any) string {

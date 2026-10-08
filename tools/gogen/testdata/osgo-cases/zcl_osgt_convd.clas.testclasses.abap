@@ -1,0 +1,12 @@
+CLASS ltcl_test DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS.
+PRIVATE SECTION.
+METHODS check FOR TESTING.
+ENDCLASS.
+CLASS ltcl_test IMPLEMENTATION.
+METHOD check.
+DATA first TYPE d VALUE '20240108'.
+DATA delta TYPE i.
+delta = first - CONV d( '20240101' ).
+cl_abap_unit_assert=>assert_equals( act = delta exp = 7 ).
+ENDMETHOD.
+ENDCLASS.

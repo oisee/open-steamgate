@@ -57,7 +57,7 @@ const PARSE_KINDS = {
   },
   OUTLINE: async (store, input) => {
     const {structureOf} = await import("./adt-documents.mjs");
-    const outline = structureOf(store, String(input.type ?? "").toUpperCase(), input.name ?? "");
+    const outline = structureOf(store, String(input.type ?? "").toUpperCase(), input.name ?? "", input.version ?? "inactive");
     const rows = (node) => ({...node,
       extra: Object.entries(node.extra ?? {}).map(([name, value]) => ({name, value})),
       links: node.links ?? [], children: (node.children ?? []).map(rows)});
