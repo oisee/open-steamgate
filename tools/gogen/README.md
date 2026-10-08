@@ -448,8 +448,8 @@ range LOW, and the plain comparison and the `SET` are not measured yet
 - `d`, `t` and `n` are declared, copied and compared with initial (`p`:
   see "Packed numbers"); no `decfloat`. No `RAISE RESUMABLE`, no `RAISE
   EXCEPTION ... MESSAGE`, no T100 or OTR texts in `get_text( )`.
-- Class statics and constructor flags are per internal session. Hosts still
-  serialize access to remaining shared runtime stores, including the database.
+- Class statics and constructor flags use a session-selected store. Serialized
+  hosts share `abap.ProcessStatics` across requests, alongside the database.
 - The handler's `ON_MESSAGE` is still three host lines in the stands; the
   `RETURN` inside its `TRY` that kept it out compiles now.
 - Table values: an assignment, `APPEND`, `MODIFY`, `READ ... INTO`, `LOOP
@@ -792,10 +792,12 @@ results start there too. All measured on A4H (`ZCL_GOGEN_T_BYTECAT`,
 `ZCL_GOGEN_T_B64`, `ZCL_GOGEN_T_XINIT`).
 
 Generated `CLASS-DATA` and `class_constructor` flags live in lazily allocated class
-slots on `abap.Session`, so each internal session has independent values and runs
-its constructors once. Inherited statics use the declaring class's slot; references
-keep a stable address. A zero Session is ready to use and may be used by one
-goroutine at a time. A fresh Session also resets class state for ABAP Unit.
+slots in `abap.Statics`, selected by `Session.Statics`. A nil pointer lazily creates
+private state; serialized hosts select `abap.ProcessStatics` to retain caches and
+constructor state across requests, with concurrent hosts taking `abap.WorkProcess`. ABAP Unit keeps a
+fresh private store per test class. Inherited statics use the declaring class's
+slot, and references and method-cached pointers stay valid because slot values
+never move. Only one goroutine may use a Session or its shared store at a time.
 
 Against OSG on Node (`STG_DB=sqlite node test/run.mjs`), in Chromium and on
 the sockets: the three pages are byte for byte equal; Zork boots from

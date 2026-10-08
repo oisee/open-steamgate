@@ -33,8 +33,9 @@ type Sy struct {
 // puts it down: nothing ties a Session to the goroutine that ran it last.
 // Only one goroutine may use a Session at a time. Its zero value is ready to use.
 type Session struct {
-	// statics: lazily allocated class attributes and constructor flags.
-	statics []any
+	// Statics holds class attributes and constructor flags. Nil creates a private
+	// store on first access. Shared stores require serialized access.
+	Statics *Statics
 	Sy      Sy
 	// Handlers: the CATCH clauses of the TRYs active in this session,
 	// outermost first, each asking whether it takes a recovered value. A

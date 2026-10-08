@@ -60,7 +60,7 @@ func main() {
 				failed = true
 			}
 		}()
-		s := &abap.Session{}
+		s := &abap.Session{Statics: abap.ProcessStatics}
 		report := newReport(s)
 		cli := commandLine(os.Args[1:])
 		sapGUI, launchSAPGUI, listen := sapGUIOption(cli.Host)

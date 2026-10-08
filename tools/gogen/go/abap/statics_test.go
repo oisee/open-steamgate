@@ -12,18 +12,33 @@ var testOtherSlot = RegisterStatics(func() any { return new(int) })
 
 func TestStaticsIsolationAndStableAddress(t *testing.T) {
 	a, b := &Session{}, &Session{}
-	st := a.Statics(testClassSlot).(*testClassStatics)
+	st := a.Static(testClassSlot).(*testClassStatics)
 	addr := &st.count
 	st.count, st.ran = 42, true
-	a.Statics(testOtherSlot) // initializing another slot preserves references
-	if a.Statics(testClassSlot) != st || *addr != 42 {
+	a.Static(testOtherSlot) // initializing another slot preserves references
+	if a.Static(testClassSlot) != st || *addr != 42 {
 		t.Fatal("class storage moved")
 	}
-	other := b.Statics(testClassSlot).(*testClassStatics)
+	other := b.Static(testClassSlot).(*testClassStatics)
 	if other == st || other.count != 7 || other.ran {
 		t.Fatal("class storage shared across sessions")
 	}
-	if allocs := testing.AllocsPerRun(100, func() { a.Statics(testClassSlot) }); allocs != 0 {
+	if allocs := testing.AllocsPerRun(100, func() { a.Static(testClassSlot) }); allocs != 0 {
 		t.Fatalf("hot lookup allocated: %g", allocs)
+	}
+}
+
+func TestSharedStatics(t *testing.T) {
+	store := &Statics{}
+	a, b := &Session{Statics: store}, &Session{Statics: store}
+	st := a.Static(testClassSlot).(*testClassStatics)
+	st.count, st.ran = 42, true
+	b.Static(testOtherSlot)
+	if got := b.Static(testClassSlot).(*testClassStatics); got != st || got.count != 42 || !got.ran {
+		t.Fatal("shared store lost attributes or constructor state")
+	}
+	private := (&Session{}).Static(testClassSlot).(*testClassStatics)
+	if private == st || private.count != 7 || private.ran {
+		t.Fatal("private store adopted shared state")
 	}
 }

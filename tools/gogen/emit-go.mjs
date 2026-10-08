@@ -386,7 +386,7 @@ export function emitGo(program, pkg = "main", layers = null, unitBuild = false) 
         const init = OWNERSHIP.declarations.has(a) ? undefined : a.value !== undefined ? constLiteral(a) : isGoZero(zero(a.type)) ? undefined : zero(a.type);
         if (init !== undefined) out.push(`\t\t${ident(a.name)}: ${init},`);
       }
-      out.push("\t}", "})", `func St_${name}(s *abap.Session) *statics_${name} {`, `\treturn s.Statics(slot_${name}).(*statics_${name})`, "}", "");
+      out.push("\t}", "})", `func St_${name}(s *abap.Session) *statics_${name} {`, `\treturn s.Static(slot_${name}).(*statics_${name})`, "}", "");
     }
     if (chainCctor(cls)) {
       const sup = cls.super && CLASSES.get(cls.super) && chainCctor(CLASSES.get(cls.super)) ? `\tEnsure_${typeName(cls.super)}(s)` : null;
@@ -958,7 +958,8 @@ function method(cls, m) {
   if (m.returning && !isGoZero(zero(m.returning.type))) lines.push(`\t${ident(m.returning.name)} = ${zero(m.returning.type)}`);
   for (const f of m.fieldSymbols ?? []) lines.push(`\tvar ${ident(f.name)} ${f.type.k === "data" ? "abap.Data" : f.type.k === "struct" ? `*${goType(f.type)}` : `*abap.RowBinding[${goType(f.type)}]`}`, `\t_ = ${ident(f.name)}`);
   // A method can touch the same static repeatedly in a hot loop. Retain its
-  // stable session-owned class pointer instead of repeating the slot lookup.
+  // stable class pointer instead of repeating the slot lookup. A store never
+  // replaces an initialized slot, including when another class is initialized.
   const staticStores = new Map();
   const collectStatics = (node) => {
     if (!node || typeof node !== "object") return;
@@ -966,6 +967,7 @@ function method(cls, m) {
     for (const value of Object.values(node)) collectStatics(value);
   };
   collectStatics(m.body);
+  if (staticStores.size) lines.push("\t// The store never replaces class pointers; cache them for this method call.");
   for (const [owner, store] of staticStores) lines.push(`\t${store} := St_${typeName(owner)}(s)`);
   const ctx = {cls, loop: 0, inCtor: m.name === "CONSTRUCTOR", method: m, staticStores};
   const valueOutputs = m.params.filter((p) => p.dir !== "importing" && p.byValue);

@@ -1,9 +1,19 @@
 package main
 
 import (
-	"osg/gogen/abap"
+	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
+	"time"
+
+	"github.com/coder/websocket"
+
+	"osg/gogen/abap"
+	"osg/gogen/apc"
 )
 
 func TestSessionStatics(t *testing.T) {
@@ -78,6 +88,58 @@ func TestInheritedAndReferencedStatics(t *testing.T) {
 	for _, s := range []*abap.Session{a, b, a} {
 		if got := ZCL_RACE_READER_OWNED(s); got != 2 {
 			t.Fatalf("owned buffer/CLEAR: %d", got)
+		}
+	}
+}
+
+// Exercise the actual APC HTTP host: it creates a new Session per connection.
+type counterHost struct {
+	count  int32
+	closed chan struct{}
+}
+
+func (h *counterHost) Open(s *abap.Session) bool                        { return true }
+func (h *counterHost) Message(s *abap.Session, text string)             {}
+func (h *counterHost) Close(s *abap.Session, reason string, code int32) { close(h.closed) }
+func (h *counterHost) Drain(s *abap.Session) []string {
+	if h.count == 0 {
+		return nil
+	}
+	text := fmt.Sprint(h.count)
+	h.count = 0
+	return []string{text}
+}
+func TestHostStaticsAcrossRequests(t *testing.T) {
+	abap.WorkProcess.Lock()
+	ZCL_RACE_COUNTER_RESET(&abap.Session{Statics: abap.ProcessStatics})
+	abap.WorkProcess.Unlock()
+	closed := make(chan chan struct{}, 2)
+	channel := &apc.Channel{Name: "counter", New: func(s *abap.Session, r *http.Request) apc.Host {
+		h := &counterHost{count: ZCL_RACE_COUNTER_INCREMENT(s), closed: make(chan struct{})}
+		closed <- h.closed
+		return h
+	}, Logf: func(string, ...any) {}}
+	server := httptest.NewServer(channel)
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	for want := 1; want <= 2; want++ {
+		connection, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, message, err := connection.Read(ctx)
+		connection.Close(websocket.StatusNormalClosure, "")
+		select {
+		case <-<-closed:
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(message) != fmt.Sprint(want) {
+			t.Fatalf("request %d: got %s", want, message)
 		}
 	}
 }

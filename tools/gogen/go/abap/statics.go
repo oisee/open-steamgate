@@ -1,5 +1,16 @@
 package abap
 
+// Statics holds stable per-class pointers, including class-constructor state.
+// Slots never replace an initialized value, so a method may cache its pointer.
+// Only one goroutine may use a store at a time, even across different Sessions.
+type Statics struct {
+	slots []any
+}
+
+// ProcessStatics preserves class state across host requests. Hosts sharing it
+// serialize ABAP entry (concurrent hosts take WorkProcess). Unit classes use private stores.
+var ProcessStatics = &Statics{}
+
 // Factories are registered only during package initialization, before sessions run.
 var staticsFactories []func() any
 
@@ -10,25 +21,27 @@ func RegisterStatics(newFn func() any) int {
 	return slot
 }
 
-// Statics returns this session's stable class storage, creating it on first use.
-// After initialization the lookup allocates nothing. The Session has one user
-// at a time, so neither the slot store nor its contents need locks.
-func (s *Session) Statics(slot int) any {
-	var value any
-	if slot < len(s.statics) {
-		value = s.statics[slot]
+// Static returns stable class storage, lazily creating a private store if needed.
+// The cold path is separate; a hot lookup only reads existing slots and allocates nothing.
+func (s *Session) Static(slot int) any {
+	if s.Statics != nil && slot < len(s.Statics.slots) {
+		value := s.Statics.slots[slot]
+		if value != nil {
+			return value
+		}
 	}
-	if value == nil {
-		value = s.newStatics(slot)
-	}
-	return value
+	return s.newStatic(slot)
 }
 
-func (s *Session) newStatics(slot int) any {
-	if slot >= len(s.statics) {
-		s.statics = append(s.statics, make([]any, len(staticsFactories)-len(s.statics))...)
+func (s *Session) newStatic(slot int) any {
+	if s.Statics == nil {
+		s.Statics = &Statics{}
+	}
+	st := s.Statics
+	if slot >= len(st.slots) {
+		st.slots = append(st.slots, make([]any, len(staticsFactories)-len(st.slots))...)
 	}
 	value := staticsFactories[slot]()
-	s.statics[slot] = value
+	st.slots[slot] = value
 	return value
 }

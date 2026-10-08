@@ -335,7 +335,7 @@ Format adapted from `larshp/hithub` (MIT).
 - Exact command: `node --test tools/gogen/session-statics.test.mjs` (Go driver runs with `-race`)
 - Expected behaviour: each session reads 42 after initialization and finishes its own 10,000 increments
 - Actual behaviour before the fix: package globals shared values and constructor flags; the race detector reports concurrent access in `Ensure_ZCL_RACE_INIT`
-- Fix: stable class storage and constructor flags in lazy `abap.Session` slots, inherited attributes in the declaring class's slot
+- Fix: stable class storage and constructor flags in lazy `abap.Statics` slots selected by `Session.Statics`, inherited attributes in the declaring class's slot. Nil selects private state; serialized HTTP/APC hosts select `ProcessStatics` to retain caches across requests. The host regression test observes counter values 1 then 2 on separate connections.
 - Regression location: `tools/gogen/session-statics.test.mjs` and its generated-code Go driver; wired into `gogen.yml`
 - Upstream issue: none; this is our Go emitter
 

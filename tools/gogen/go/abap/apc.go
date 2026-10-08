@@ -9,7 +9,7 @@ import (
 // process and the dialog step. The socket part lives in package apc, so a
 // program that serves no push channel does not link a WebSocket library.
 
-// WorkProcess is the process's one work process: class data and the
+// WorkProcess is the process's one work process: ProcessStatics and the
 // database transaction of a step (luw.go) are per process, so every host
 // that runs ABAP holds it for the length of a step. The default Step of an
 // APC channel takes it; an HTTP host of the same process must take it too
