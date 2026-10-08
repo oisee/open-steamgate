@@ -199,3 +199,17 @@ func (k *Kernel) retireNow(sid int64, key string) {
 	delete(k.retired, sid)
 	k.server.End(sid)
 }
+
+// KeyForHandle identifies live or retired ADT contexts; holder sessions
+// outside this kernel stay foreign and must not be ended by ADT.
+func (k *Kernel) KeyForHandle(sid int64) (string, bool) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	for key, handle := range k.sessions {
+		if handle == sid {
+			return key, true
+		}
+	}
+	key, ok := k.retired[sid]
+	return key, ok
+}

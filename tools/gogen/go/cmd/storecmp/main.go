@@ -122,6 +122,7 @@ func main() {
 	root := flag.String("root", "", "the tree")
 	config := flag.String("config", "", "the build's facts about it (tools/gogen/store.mjs)")
 	sidecar := flag.Bool("compiler", false, "enable the lazy compiler provider")
+	flagSystem := flag.String("system", "", "synthetic ADT session JSON for SYSTEM parity")
 	flag.Parse()
 	cfg, err := os.ReadFile(*config)
 	if err != nil {
@@ -135,6 +136,7 @@ func main() {
 		defer client.Close()
 		objstore.SetCompiler(storecompiler.Adapter{Client: client}, "test")
 	}
+	provider := systemProvider(*flagSystem)
 	var input json.RawMessage
 	if err := json.NewDecoder(os.Stdin).Decode(&input); err != nil {
 		log.Fatal(err)
@@ -147,7 +149,7 @@ func main() {
 		}
 		answers := make([]abap.StoreAnswer, len(calls))
 		for i, call := range calls {
-			answers[i] = abap.StoreCall(call)
+			answers[i] = objstore.CallWithSystem(call, provider)
 		}
 		out = answers
 	} else {

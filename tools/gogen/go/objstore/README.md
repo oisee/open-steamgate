@@ -13,15 +13,19 @@ CHECK and unknown-PARSE behavior. Indexed objects without active proof still rec
 adapter. CHECK with `IV_SOURCE` is deliberately unsupported in round 2 because contract-v1 snapshots can
 pin only on-disk files, not Node's in-memory unsaved buffer; the gap is ratcheted in `tools/gogen/storecmp.mjs`.
 
-API: `SetStore(root string, cfg []byte, reason string) error`; `Call(in map[string]*string) Answer`;
-`Config`/`Root` (the build's facts), `Answer` with `Row`, `Issue`, `Tally`, `Revision`; `Capabilities`.
-SYSTEM is tree-independent: IDENTITY answers
-the installed three-field ADT identity; other known kinds refuse with Node's no-answer text and unknown
-kinds refuse with Node's unknown-kind text.
+SYSTEM is tree-independent. `CallWithSystem(in, provider)` uses the explicitly
+passed request's `SystemProvider`, whose `System(kind, name, input)` method
+returns the value Node's withSystem callback would return, or an error. Nil
+preserves `Call` byte for byte: only the installed IDENTITY answers; other
+known kinds keep their existing refusals. The callback runs outside the store
+mutex, so it can call back into ABAP or yield without holding the store.
+The provider is never cached on the store or installed as a current request.
 
-API: `SetStore(root string, cfg []byte, reason string) error`; `SetSystemIdentity(Identity)`;
-`Call(in map[string]*string) Answer`; `Config`/`Root` (the build's facts), `Answer` with `Row`, `Issue`,
-`Tally`, `Revision`; `Identity`; `Capabilities`.
+API: `SetStore(root string, cfg []byte, reason string) error`;
+`SetSystemIdentity(Identity)`; `Call(in map[string]*string) Answer`;
+`CallWithSystem(in map[string]*string, SystemProvider) Answer`;
+`Config`/`Root`, `Answer` with `Row`, `Issue`, `Tally`, `Revision`;
+`Identity`; `Capabilities`.
 
 Invariants: the files are the truth and git the history, no second copy; the index is rebuilt per call; a
 WRITE touches only a file inside a writable root; answers and their order match the Node destination field

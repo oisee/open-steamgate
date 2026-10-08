@@ -240,7 +240,7 @@ describe('shared ADT conformance runner contracts', function () {
     const server = await new Promise(resolve => {const s = app.listen(0, '127.0.0.1', () => resolve(s));});
     try {
       const result = await run({target: 'osgo', base: `http://127.0.0.1:${server.address().port}`,
-        expectedFile: new URL('./expected/osgo.json', import.meta.url), only: ['L2-repeat-lock'], output, say: () => {}});
+        expectedFile: allGaps(output), only: ['L2-repeat-lock'], output, say: () => {}});
       assert.equal(result.summary['known-gap'], 1);
       assert.equal(result.discoverySucceeded, true); assert.equal(result.executedCases, 0);
       assert.equal(result.cases[0].observed, false); assert.equal(result.exitCode, 1);

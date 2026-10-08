@@ -429,3 +429,19 @@ func (srv *Server) Read(f Filter) (rows []Row) {
 	})
 	return rows
 }
+
+// Holder returns the first colliding lock, as the host's enqHolder does.
+// It opens no session and changes no lock state.
+func (srv *Server) Holder(r Request) (held Row, found bool) {
+	srv.do(func(st *state) {
+		arg := garg(r.Client, r.Fields)
+		for _, w := range st.rows {
+			if w.Table == r.Table && collide(w.Arg, arg) {
+				held = w.Row
+				found = true
+				return
+			}
+		}
+	})
+	return
+}

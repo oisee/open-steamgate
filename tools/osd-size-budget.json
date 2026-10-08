@@ -23,8 +23,8 @@
       "reason": "recorded by --update"
     },
     "go:adtenq": {
-      "lines": 244,
-      "reason": "ADT ENQ owner and session-kernel bridge over enq public API; adds Node-exact handle-scoped pins and retired dump contexts so replacement binds do not release parked steps, with no generated ABAP dependency"
+      "lines": 258,
+      "reason": "Expose the ADT key of a live or retired ENQ handle for SYSTEM LOCK_HOLDER; foreign contexts remain opaque."
     },
     "go:amc": {
       "lines": 506,
@@ -75,12 +75,12 @@
       "reason": "sy-sysid from the one system id (go/sysid, tools/osd-identity.mjs), 2026-10-02; rebased over #453"
     },
     "go:cmd/osgo": {
-      "lines": 1324,
-      "reason": "ADT on osgo: /sap/bc/adt mount behind -adt, compiler sidecar status and storecompiler wiring, the ADT session bound per request (adt_session.go: USE_SESSION around the dialog step; generated symbols keep it in cmd/osgo), SYSTEM IDENTITY from the selected SID with Node's ADT client/user/full-name/language derivation; the ADT logoff route and the ENQ kernel hooks over go/adtenq (adt_enq.go) Fix critic findings: generated-only ADT session binding fallback for echo builds, and request-local ENQ handle retention with Pin/Unpin/DropContext around the complete dialog step.; ADT steps keyed by their *abap.Session for the ENQ hooks (carving the ADT host glue into its own package is queued)"
+      "lines": 1356,
+      "reason": "OSGo STORE adapter keeps the calling Session and projects SYSTEM scalars; generated bindings and session adapters remain outside handwritten host code."
     },
     "go:cmd/storecmp": {
-      "lines": 171,
-      "reason": "#653 store parity: RFC-signature adapter mode (typed scalar/table adapters) beside the raw protocol, required by stoker before merge"
+      "lines": 220,
+      "reason": "Synthetic bound-session mode for full Node/Go SYSTEM scalar and table parity, including ended-session refusals."
     },
     "go:cmd/sxmlbench": {
       "lines": 67,
@@ -99,8 +99,8 @@
       "reason": "baseline 2026-10-01"
     },
     "go:enq": {
-      "lines": 431,
-      "reason": "baseline 2026-10-01"
+      "lines": 447,
+      "reason": "Read-only Holder over the server collision rules, shared by the ADT SYSTEM provider including generic locks."
     },
     "go:enqseam": {
       "lines": 160,
@@ -135,8 +135,8 @@
       "reason": "recorded by --update"
     },
     "go:objstore": {
-      "lines": 2048,
-      "reason": "Store parity with Node: layers, retained active reads, packages, HISTORY; injectable compiler for CHECK/PARSE OUTLINE (conversion lives in storecompiler), JavaScript Number-compatible SEARCH limits, and advertised PARSE discovery; SYSTEM IDENTITY and Node-exact kind refusals. Carving SYSTEM into its own package is queued. Fix SEARCH destination parity: JSON scalar Number conversion (ECMAScript whitespace, booleans, radix strings, decimal grammar and NaN), and negative limits stopping after the first match as on Node."
+      "lines": 2116,
+      "reason": "Per-request SYSTEM provider, passed explicitly and called outside the store mutex; nil preserves the existing protocol byte for byte."
     },
     "go:reportargs": {
       "lines": 209,
@@ -541,6 +541,10 @@
     "go:yieldsleep": {
       "lines": 18,
       "reason": "#39 dispatches yield sleep through a narrow Session interface so the package does not import go/abap."
+    },
+    "go:adtsystem": {
+      "lines": 103,
+      "reason": "Request-bound SYSTEM facts and ENQ holder lookup through narrow session interfaces; providers are keyed by the calling step, with no ABAP import."
     }
   },
   "readmeMissing": [
