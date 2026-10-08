@@ -75,7 +75,7 @@
       "reason": "sy-sysid from the one system id (go/sysid, tools/osd-identity.mjs), 2026-10-02; rebased over #453"
     },
     "go:cmd/osgo": {
-      "lines": 1357,
+      "lines": 1324,
       "reason": "ADT on osgo: /sap/bc/adt mount behind -adt, compiler sidecar status and storecompiler wiring, the ADT session bound per request (adt_session.go: USE_SESSION around the dialog step; generated symbols keep it in cmd/osgo), SYSTEM IDENTITY from the selected SID with Node's ADT client/user/full-name/language derivation; the ADT logoff route and the ENQ kernel hooks over go/adtenq (adt_enq.go) Fix critic findings: generated-only ADT session binding fallback for echo builds, and request-local ENQ handle retention with Pin/Unpin/DropContext around the complete dialog step.; ADT steps keyed by their *abap.Session for the ENQ hooks (carving the ADT host glue into its own package is queued)"
     },
     "go:cmd/storecmp": {
@@ -521,6 +521,10 @@
     "tools/gogen/go/abap/statics.go": {
       "lines": 47,
       "reason": "osgo 026/029 (#658, #659, 2026-10-08): UTF-16 units with the surrogate-half invariant and class statics per Session; carving utf16/statics out of go/abap is queued (stoker QUEUE #33)"
+    },
+    "go:adtlock": {
+      "lines": 246,
+      "reason": "The ADT host side of stoker's KERNEL_LOCK seam: ENQUEUE/DEQUEUE over the osd lock server keyed by the calling step, holder per step, retry with the yielding sleep, as tools/osd-enq-host.mjs"
     },
     "go:compiler": {
       "lines": 935,

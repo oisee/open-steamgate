@@ -257,7 +257,7 @@ func (st *state) enqueue(sid int64, r Request) Result {
 // that stays held fails after about 4.7 s, one released after about 1 s is
 // granted after about 1.0 s; the interval itself was not measured).
 func (srv *Server) Enqueue(sid int64, r Request, wait bool) Result {
-	return srv.enqueueWith(sid, r, wait, time.Sleep)
+	return srv.EnqueueWith(sid, r, wait, time.Sleep)
 }
 
 const (
@@ -265,7 +265,7 @@ const (
 	waitTries    = 5
 )
 
-func (srv *Server) enqueueWith(sid int64, r Request, wait bool, sleep func(time.Duration)) (res Result) {
+func (srv *Server) EnqueueWith(sid int64, r Request, wait bool, sleep func(time.Duration)) (res Result) {
 	for try := 0; ; try++ {
 		if !srv.do(func(st *state) { res = st.enqueue(sid, r) }) {
 			return Result{Subrc: 2} // SYSTEM_FAILURE: the server is gone

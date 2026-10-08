@@ -235,13 +235,27 @@ func step(x *abap.ICFExchange, base string) (dump any, frames []string) {
 		}()
 		s := &abap.Session{Statics: abap.ProcessStatics}
 		dialog := func() { abap.DialogStepIn(s, func() { runShim(s, x, base) }) }
-		if base == "/sap/bc/adt" || base == "/sap/public/bc/icf/logoff" {
-			withADTSession(s, dialog)
-		} else {
-			dialog()
-		}
+		runDialogStep(s, dialog, base == "/sap/bc/adt" || base == "/sap/public/bc/icf/logoff")
 	}()
 	return dump, frames
+}
+
+func runDialogStep(s *abap.Session, dialog func(), adt bool) {
+	adtHost.Begin(s)
+	dumped := false
+	func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				dumped = true
+			}
+			adtHost.Finish(s, dumped)
+		}()
+		if adt {
+			withADTSession(s, dialog)
+			return
+		}
+		dialog()
+	}()
 }
 
 // icfHandler answers a request with the shim and a handler class, as
