@@ -803,7 +803,10 @@ function classInterface(program, cls) {
  */
 const accessorName = (attr) => `Ptr_${typeName(attr)}`;
 
-const interfaceMarker = (intf) => `implements_${typeName(intf)}`;
+// Exported methods have the same identity in every Go package. The Greek
+// letter cannot come from an ABAP name: ident() and typeName() emit ASCII
+// only, so no user method/accessor can collide with this generated marker.
+const interfaceMarker = (intf) => `AbapΩImplements_${typeName(intf)}`;
 
 function implementedInterfaces(program, cls) {
   const out = new Set();
