@@ -71,8 +71,8 @@
       "reason": "sy-sysid from the one system id (go/sysid, tools/osd-identity.mjs), 2026-10-02; rebased over #453"
     },
     "go:cmd/osgo": {
-      "lines": 1178,
-      "reason": "baseline 2026-10-01"
+      "lines": 1205,
+      "reason": "ADT on osgo slice 1a: /sap/bc/adt mount behind -adt / OSD_OSGO_ADT=1 through runShim + DialogStep, NotCompiled -> 501"
     },
     "go:cmd/storecmp": {
       "lines": 41,
@@ -123,8 +123,8 @@
       "reason": "recorded by --update"
     },
     "go:objstore": {
-      "lines": 1039,
-      "reason": "S0b: tree-independent COMMANDS discovery and typed NOT_SUPPORTED errors for absent commands"
+      "lines": 1627,
+      "reason": "ADT on osgo slice 1a: ZOSD_STORE OBJECT/PACKAGE/PACKAGES/SEARCH, ADT READ metadata and HISTORY state, matched field for field with the Node destination (18 goldens); candidate to carve the package index into its own package later"
     },
     "go:reportargs": {
       "lines": 209,
