@@ -50,7 +50,7 @@ export const COMMANDS = ["LIST", "READ", "WRITE", "CREATE", "DELETE", "CHECK", "
  *  no button that would only be refused (host-tools review 2026-09-25, D2). */
 export const CAPABILITIES = ["LIST", "READ", "WRITE", "CREATE", "DELETE", "CHECK", "ACTIVATE", "ACTIVATION_STATUS", "RUN_TESTS", "HISTORY", "REVISION", "CHECKRUN", "PARSE"];
 
-const PARSE_KINDS = {
+export const PARSE_KINDS = {
   CREATE_VALIDATION: async (store, input) => {
     const {validateCreation} = await import("./adt-create-validation.mjs");
     return validateCreation(store, {...input, kind: input.resource});

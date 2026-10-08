@@ -1,4 +1,4 @@
-# Compiler sidecar (skeleton)
+# Compiler sidecar
 
 `osd compiler --stdio` implements the compiler-provider
 [contract v1](../../../adt-osgo/SIDECAR-contract.md). In a source checkout,
@@ -13,7 +13,7 @@ no recoverable id has no response id). EOF closes the process successfully.
 
 `hello` requires `contract: 1` and returns `contract`, `osd` (the local
 `osd-version.json` version, otherwise `source`), `transpiler` (the commit pin
-in the bundled `libs.lock.json`), `capabilities: ["check"]`, and `limits`:
+in the bundled `libs.lock.json`), `capabilities: ["check", "outline"]`, and `limits`:
 `maxSnapshotBytes: 16777216`, `maxConcurrentRequests: 1`. Requests are serial.
 
 `check` requires the contract's snapshot root, generation, objects, versions,
@@ -54,8 +54,42 @@ identity, include path, and A4H coordinates: lines start at 1, columns at 0,
 and the end points to the last character. All other operations receive
 `UNSUPPORTED_OP`; future capabilities remain unimplemented.
 
+| op | request | response |
+|---|---|---|
+| `hello` | `contract: 1` | versions, capabilities, limits |
+| `check` | snapshot | diagnostics, registryHash, configSha, inputCount, virtualFiles |
+| `outline` | snapshot (one object), object `{type, name, version}` | outline, registryHash, configSha, inputCount, virtualFiles |
+
+`outline` returns exactly the JSON produced by STORE `PARSE` kind `OUTLINE`,
+under `outline`, including `{found:false}` for an unknown object. It calls the
+same handler and `structureOf` over a store view of a fresh snapshot-only
+abaplint registry. Both active and inactive requests read the files the snapshot
+names; the object identity and version must match the snapshot object. Active
+copies and the working tree outside that snapshot cannot supply coordinates.
+The same hash checks, realpath containment and final snapshot verification as
+`check` apply. Outline also reads `abaplint.jsonc` through the same configured
+registry construction used by the Node store, because syntax settings can
+change declaration facts and coordinates.
+
+For outline, `registryHash` uses the same sorted `[filename, sha256(raw)]`
+encoding as check, but covers only the supplied parser files; `inputCount`
+counts them and `virtualFiles` is empty. `configSha` hashes the raw
+`abaplint.jsonc` bytes used to configure that parser registry, and is re-hashed
+before answering. This identity describes the actual outline inputs without
+claiming the validation registry or the generation covers them.
+
+Example NDJSON request (replace the digest with SHA-256 of the named file):
+
+```json
+{"id":2,"op":"outline","snapshot":{"root":"/tmp/outline-system","generation":"fixture","objects":[{"type":"CLAS","name":"ZCL_EXAMPLE","version":"inactive","files":[{"path":"src/zcl_example.clas.abap","sha256":"<64 lowercase hex characters>"}]}]},"object":{"type":"CLAS","name":"ZCL_EXAMPLE","version":"inactive"}}
+```
+
+The answer is `{"id":2,"outline":{"found":true,...},"registryHash":"...",
+"configSha":"...","inputCount":1,"virtualFiles":[]}`. Links use the existing A4H coordinates:
+lines start at 1, columns at 0, and ends point to the last character.
+
 Light verification:
 
 ```sh
-node node_modules/mocha/bin/mocha.js test/osd-compiler-sidecar.mjs
+OSD_HEAVY_RANGE=90-99 OSD_HEAVY_SLOTS=4 tools/osd-heavy.sh node node_modules/mocha/bin/mocha.js --require tools/osd-test-isolation.cjs test/osd-compiler-sidecar.mjs
 ```
