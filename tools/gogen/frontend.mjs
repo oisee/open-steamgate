@@ -1479,8 +1479,10 @@ function classIr(ctx0, obj) {
   const sup = def.getSuperClass() ? upper(def.getSuperClass()) : null;
   const typed = new Map([...signatures].filter(([, v]) => !v.unsupported));
   if (HOST_REPLACED.has(className)) {
+    // a method the frontend cannot type would be dropped, and its hook with it
+    for (const sig of signatures.values()) if (sig.unsupported) throw new Unsupported(`${className}=>${sig.name}: a host-replaced method must compile (${sig.unsupported})`);
     for (const sig of typed.values()) {
-      for (const p of [...sig.params, ...(sig.returning ? [sig.returning] : [])]) {
+      for (const p of [...sig.params, ...(sig.returning ? [sig.returning] : [])].filter((p) => !p.suppliedOf)) {
         const basic = p.type.k === "string" || p.type.k === "i" || p.type.k === "int8"
           || (p.type.k === "c" && (p.type.len ?? 1) === 1);
         if (!basic) throw new Unsupported(`${className}=>${sig.name} ${p.name}: a host-replaced method may use only string, c LENGTH 1, i, or int8`);

@@ -996,7 +996,8 @@ function hostMethod(cls, m) {
   const field = m.name === "SESSION_ID" ? "SessionID" : m.name.split("_").map((part, i) => i === 0 ? part[0] + part.slice(1).toLowerCase() : part[0] + part.slice(1).toLowerCase()).join("");
   const hook = `hHostclass.${cls.name}.${field}`;
   const ret = m.returning;
-  const call = `${hook}(${m.params.map((p) => ident(p.name)).join(", ")})`;
+  // the IS SUPPLIED flags are the emitter's, not the hook's
+  const call = `${hook}(${m.params.filter((p) => !p.suppliedOf).map((p) => ident(p.name)).join(", ")})`;
   const lines = [`\tif ${hook} != nil {`];
   if (ret) lines.push(`\tresult, err := ${call}`);
   else lines.push(`\terr := ${call}`);

@@ -207,3 +207,31 @@ ENDCLASS.
     rmSync(sourceDir, {recursive: true, force: true}); rmSync(goDir, {recursive: true, force: true});
   }
 });
+
+// critic round 2: a host method's own signature, not the emitter's view of it
+function kernelVariant(edit) {
+  const sourceDir = mkdtempSync(join(tmpdir(), "gogen-hostclass-variant-"));
+  writeFileSync(join(sourceDir, "zcl_osd_enq_kernel.clas.abap"), edit(readFileSync(join(here, "../../src/adt/zcl_osd_enq_kernel.clas.abap"), "utf8")));
+  writeFileSync(join(sourceDir, "zcx_osd_adt.clas.abap"), readFileSync(join(here, "../../src/adt/zcx_osd_adt.clas.abap")));
+  return sourceDir;
+}
+
+test("an OPTIONAL host parameter reaches the hook without its IS SUPPLIED flag", () => {
+  const sourceDir = kernelVariant((s) => s
+    .replace(/(CLASS-METHODS session_id\s+IMPORTING iv_id TYPE string)/, "$1 OPTIONAL")
+    .replace(/(METHOD session_id\.)/, "$1\n    IF iv_id IS SUPPLIED.\n    ENDIF."));
+  try {
+    const generated = emitGo(compileProgram({folders: [core, join(home, "src/adt"), sourceDir], objects: ["ZCL_OSD_ENQ_KERNEL", "ZCX_OSD_ADT"]}));
+    const call = generated.match(/hHostclass\.ZCL_OSD_ENQ_KERNEL\.SessionID\(([^)]*)\)/);
+    assert.ok(call, "the SessionID hook is called");
+    assert.equal(call[1].split(",").length, 1, `one argument, got ${call[1]}`);
+  } finally { rmSync(sourceDir, {recursive: true, force: true}); }
+});
+
+test("a host-replaced method whose signature does not compile is refused, not dropped", () => {
+  const sourceDir = kernelVariant((s) => s.replace("CLASS-METHODS end IMPORTING iv_id TYPE string.", "CLASS-METHODS end IMPORTING iv_id TYPE decfloat34."));
+  try {
+    assert.throws(() => compileProgram({folders: [core, join(home, "src/adt"), sourceDir], objects: ["ZCL_OSD_ENQ_KERNEL", "ZCX_OSD_ADT"]}),
+      /ZCL_OSD_ENQ_KERNEL=>END/);
+  } finally { rmSync(sourceDir, {recursive: true, force: true}); }
+});
