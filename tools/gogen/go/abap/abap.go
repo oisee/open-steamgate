@@ -77,6 +77,8 @@ type Session struct {
 	// store on first access. Shared stores require serialized access.
 	Statics *Statics
 	Sy      Sy
+	// UpdateTask records an update-task module called in this session LUW.
+	UpdateTask bool
 	// Handlers: the CATCH clauses of the TRYs active in this session,
 	// outermost first, each asking whether it takes a recovered value. A
 	// CLEANUP runs only when one of them does (see Handled).

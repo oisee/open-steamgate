@@ -16,7 +16,7 @@ test("generated LUW statements notify the host with session-local update state",
     writeFileSync(join(dir, "zz_generated.go"), emitGo(program));
     writeFileSync(join(dir, "seam_test.go"), String.raw`
 package main
-import ("testing"; "errors"; "time"; "osg/gogen/abap"; "osg/gogen/hostclass"; "osg/gogen/enqseam")
+import ("testing"; "errors"; "time"; "osg/gogen/abap"; "osg/gogen/hostclass"; "osg/gogen/enqseam"; "osg/gogen/yieldsleep")
 func TestLUWSeam(t *testing.T) {
  s, other := &abap.Session{}, &abap.Session{}
  h := &hostclass.LUW
@@ -49,11 +49,11 @@ func TestLUWSeam(t *testing.T) {
  enqseam.DequeueAll(s, hostclass.KERNEL_LOCK.DequeueAll)
  if lockStep!=steps[0] {t.Fatal("LUW and ENQ session differ")}
  ZCL_GOGEN_LUW_SEAM_UPDATE(s)
- ZCL_GOGEN_LUW_SEAM_WAIT(s)
+ yieldsleep.Sleep(s, time.Nanosecond)
  s.YieldSleep(time.Nanosecond)
  abap.DialogStep(func(){abap.CommitWork(s); abap.RollbackWork(s)})
  abap.WorkProcess.Lock()
- abap.DialogStepIn(s,func(){s.YieldSleep(time.Nanosecond)})
+ abap.DialogStepIn(s,func(){yieldsleep.Sleep(s, time.Nanosecond)})
  abap.WorkProcess.Unlock()
  if len(flags)!=len(want)||rollbacks!=1 {t.Fatal("yield or step end notified LUW")}
  ZCL_GOGEN_LUW_SEAM_COMMIT(s)
@@ -74,6 +74,35 @@ func TestLUWSeam(t *testing.T) {
   h.Commit=func(_ any,u bool)error{if u {t.Fatal("dump did not clear flag")}; return nil}
   ZCL_GOGEN_LUW_SEAM_COMMIT(s)
  }
+}
+func TestDatabaseBeforeGeneratedHook(t *testing.T) {
+ if err:=abap.OpenDB([]byte("[\"CREATE TABLE zgogen_luw_tab (id INTEGER PRIMARY KEY)\"]")); err!=nil {t.Fatal(err)}
+ defer func(){hostclass.LUW.Commit=nil; hostclass.LUW.Rollback=nil; abap.DB().Close()}()
+ s:=&abap.Session{}
+ for _,commit:=range []func(*abap.Session){ZCL_GOGEN_LUW_SEAM_COMMIT,ZCL_GOGEN_LUW_SEAM_COMMIT_WAIT} {
+  abap.DialogStep(func(){
+   // Remove the preceding committed row, then write one in this LUW.
+   abap.ExecWrite(s,"DELETE FROM zgogen_luw_tab",nil,nil)
+   ZCL_GOGEN_LUW_SEAM_PUT(s)
+   calls:=0
+   hostclass.LUW.Commit=func(step any,u bool)error {
+    calls++
+    abap.RollbackWork(s)
+    if step!=any(s)||u||ZCL_GOGEN_LUW_SEAM_ROWS(s)!=1 {t.Fatal("commit hook ran before database commit")}
+    return nil
+   }
+   commit(s)
+   if calls!=1 {t.Fatalf("commit calls: %d",calls)}
+  })
+ }
+ abap.DialogStep(func(){
+  abap.ExecWrite(s,"DELETE FROM zgogen_luw_tab",nil,nil)
+  hostclass.LUW.Rollback=func(step any)error {
+   if step!=any(s)||ZCL_GOGEN_LUW_SEAM_ROWS(s)!=1 {t.Fatal("rollback hook ran before database rollback")}
+   return nil
+  }
+  ZCL_GOGEN_LUW_SEAM_ROLLBACK(s)
+ })
 }
 `);
     const run = spawnSync("go", ["test", "-timeout=20s", `./cmd/${basename(dir)}`], {

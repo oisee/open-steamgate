@@ -580,6 +580,8 @@ function functionGroupSignatures(ctx0, g) {
   try { spaghetti = new abaplint.SyntaxLogic(reg, g).run().spaghetti; } catch { spaghetti = undefined; }
   const top = spaghetti?.getTop();
   const globalData = g.getABAPFiles().some((f) => /top\.abap$/i.test(f.getFilename()) && f.getStatements().some((st) => st.get() instanceof Statements.Data || st.get() instanceof Statements.DataBegin || st.get() instanceof Statements.Tables));
+  const updateModules = new Set([...(g.getXMLFile()?.getRaw() ?? "").matchAll(/<item>([\s\S]*?)<\/item>/g)]
+    .filter((m) => /<UPDATE_TASK>/.test(m[1])).map((m) => upper(/<FUNCNAME>([^<]*)<\/FUNCNAME>/.exec(m[1])?.[1] ?? "")));
   for (const m of g.getModules()) {
     const name = upper(m.getName());
     const where = `${owner}=>${name}`;
@@ -611,7 +613,7 @@ function functionGroupSignatures(ctx0, g) {
       if (!(e instanceof Unsupported)) throw e;
       sig = {name, unsupported: e.message};
     }
-    program.functionModules.set(name, {owner, group: g, module: m, sig, top, spaghetti});
+    program.functionModules.set(name, {owner, group: g, module: m, sig, top, spaghetti, updateTask: updateModules.has(name)});
   }
 }
 
@@ -1131,7 +1133,7 @@ function lockArguments(node, ctx, name, params) {
  * values, a TABLES table keeps what the module appended). Without
  * EXCEPTIONS sy-subrc is 0 afterwards and a RAISE dumps. */
 function compiledFunctionCall(node, ctx, text, name) {
-  const {owner, sig} = ctx.program.functionModules.get(name);
+  const {owner, sig, updateTask} = ctx.program.functionModules.get(name);
   if (/\b(IN\s+UPDATE\s+TASK|STARTING\s+NEW\s+TASK|IN\s+BACKGROUND|DESTINATION|PARAMETER-TABLE|EXCEPTION-TABLE)\b/i.test(text)) throw new Unsupported(`CALL FUNCTION '${name}' form: ${text}`);
   if (sig.unsupported) throw new Unsupported(`CALL FUNCTION '${name}': ${sig.unsupported}`);
   const fp = node.findDirectExpression(Expressions.FunctionParameters);
@@ -1207,7 +1209,7 @@ function compiledFunctionCall(node, ctx, text, name) {
   const tail = exceptions
     ? (after.length ? [{s: "if", branches: [{cond: {c: "cmp", op: "=", l: subrc, r: {e: "int", value: 0, type: I}, type: I}, body: after}], else: null}] : [])
     : [...after, {s: "assign", target: subrc, value: {e: "int", value: 0, type: I}}];
-  return {s: "seq", body: [...before, call, ...tail]};
+  return {s: "seq", body: [...(updateTask ? [{s: "note_update_task"}] : []), ...before, call, ...tail]};
 }
 
 /**
