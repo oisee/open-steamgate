@@ -23,8 +23,8 @@
       "reason": "recorded by --update"
     },
     "go:adtenq": {
-      "lines": 244,
-      "reason": "ADT ENQ owner and session-kernel bridge over enq public API; adds Node-exact handle-scoped pins and retired dump contexts so replacement binds do not release parked steps, with no generated ABAP dependency"
+      "lines": 262,
+      "reason": "Expose the ADT key of a live or retired ENQ handle for SYSTEM LOCK_HOLDER; foreign contexts remain opaque."
     },
     "go:amc": {
       "lines": 506,
@@ -67,20 +67,20 @@
       "reason": "re-taken after #418 (metrics) merged after the baseline was recorded; a cmd, not runtime code"
     },
     "go:cmd/o4dserve": {
-      "lines": 83,
-      "reason": "baseline 2026-10-01"
+      "lines": 95,
+      "reason": "baseline 2026-10-01; 95 as measured on main 2026-10-08 (grown there before this record); the APC step adapter now passes the channel session"
     },
     "go:cmd/osabap": {
       "lines": 1120,
       "reason": "sy-sysid from the one system id (go/sysid, tools/osd-identity.mjs), 2026-10-02; rebased over #453"
     },
     "go:cmd/osgo": {
-      "lines": 1358,
-      "reason": "ADT on osgo: /sap/bc/adt mount behind -adt, compiler sidecar status and storecompiler wiring, the ADT session bound per request (adt_session.go: USE_SESSION around the dialog step; generated symbols keep it in cmd/osgo), SYSTEM IDENTITY from the selected SID with Node's ADT client/user/full-name/language derivation; the ADT logoff route and the ENQ kernel hooks over go/adtenq (adt_enq.go) Fix critic findings: generated-only ADT session binding fallback for echo builds, and request-local ENQ handle retention with Pin/Unpin/DropContext around the complete dialog step.; ADT steps keyed by their *abap.Session for the ENQ hooks (carving the ADT host glue into its own package is queued) Sidecar round 2 injects the lazy storecompiler adapter beside the existing compiler status wiring; six lines in cmd/osgo are the only host-lifecycle growth. #39 round 2: bind the status refresh Session to DialogStepIn."
+      "lines": 1366,
+      "reason": "ADT on osgo: /sap/bc/adt mount behind -adt, compiler sidecar status and storecompiler wiring, the ADT session bound per request (adt_session.go: USE_SESSION around the dialog step; generated symbols keep it in cmd/osgo), SYSTEM IDENTITY from the selected SID with Node's ADT client/user/full-name/language derivation; the ADT logoff route and the ENQ kernel hooks over go/adtenq (adt_enq.go) Fix critic findings: generated-only ADT session binding fallback for echo builds, and request-local ENQ handle retention with Pin/Unpin/DropContext around the complete dialog step.; ADT steps keyed by their *abap.Session for the ENQ hooks (carving the ADT host glue into its own package is queued) Sidecar round 2 injects the lazy storecompiler adapter beside the existing compiler status wiring; six lines in cmd/osgo are the only host-lifecycle growth. #39 round 2: bind the status refresh Session to DialogStepIn.; ADT steps: KERNEL_LOCK host lifecycle (go/adtlock) around HTTP and APC steps, the dump re-panicked after cleanup, SYSTEM facts through abap.StoreHook (go/adtsystem)"
     },
     "go:cmd/storecmp": {
-      "lines": 171,
-      "reason": "#653 store parity: RFC-signature adapter mode (typed scalar/table adapters) beside the raw protocol, required by stoker before merge"
+      "lines": 220,
+      "reason": "Synthetic bound-session mode for full Node/Go SYSTEM scalar and table parity, including ended-session refusals."
     },
     "go:cmd/sxmlbench": {
       "lines": 67,
@@ -99,8 +99,12 @@
       "reason": "baseline 2026-10-01"
     },
     "go:enq": {
-      "lines": 431,
-      "reason": "baseline 2026-10-01"
+      "lines": 447,
+      "reason": "Read-only Holder over the server collision rules, shared by the ADT SYSTEM provider including generic locks."
+    },
+    "go:enqseam": {
+      "lines": 160,
+      "reason": "#39 builds the lock request from generated DDIC metadata, maps classic results through a narrow Session interface, and keeps go/abap out of the package."
     },
     "go:enqseam": {
       "lines": 170,
@@ -135,8 +139,8 @@
       "reason": "recorded by --update"
     },
     "go:objstore": {
-      "lines": 2048,
-      "reason": "Store parity with Node: layers, retained active reads, packages, HISTORY; injectable compiler for CHECK/PARSE OUTLINE (conversion lives in storecompiler), JavaScript Number-compatible SEARCH limits, and advertised PARSE discovery; SYSTEM IDENTITY and Node-exact kind refusals. Carving SYSTEM into its own package is queued. Fix SEARCH destination parity: JSON scalar Number conversion (ECMAScript whitespace, booleans, radix strings, decimal grammar and NaN), and negative limits stopping after the first match as on Node."
+      "lines": 2116,
+      "reason": "Per-request SYSTEM provider, passed explicitly and called outside the store mutex; nil preserves the existing protocol byte for byte."
     },
     "go:reportargs": {
       "lines": 209,
@@ -521,6 +525,14 @@
     "tools/gogen/go/abap/statics.go": {
       "lines": 47,
       "reason": "osgo 026/029 (#658, #659, 2026-10-08): UTF-16 units with the surrogate-half invariant and class statics per Session; carving utf16/statics out of go/abap is queued (stoker QUEUE #33)"
+    },
+    "go:adtlock": {
+      "lines": 276,
+      "reason": "The ADT host side of stoker's KERNEL_LOCK seam: ENQUEUE/DEQUEUE over the osd lock server keyed by the calling step, holder per step, retry with the yielding sleep, as tools/osd-enq-host.mjs. Locks fix 1 preserves non-error retry panics, cleans up rebinding/pre-bind holders, and bounds ended keys."
+    },
+    "go:adtsystem": {
+      "lines": 103,
+      "reason": "SYSTEM SESSION, LOCK_HANDLE, LOCK_RELEASE and LOCK_HOLDER of an ADT request answered as tools/osd-store-destination.mjs, bound per calling step, no go/abap import"
     },
     "go:compiler": {
       "lines": 935,

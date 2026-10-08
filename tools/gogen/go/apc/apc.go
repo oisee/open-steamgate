@@ -87,7 +87,7 @@ type Channel struct {
 	// the socket is not opened, nil (no host class) answers 500.
 	New func(s *abap.Session, r *http.Request) Host
 	// Step runs one dialog step; nil is abap.APCStep.
-	Step func(name string, work func()) error
+	Step func(s *abap.Session, name string, work func()) error
 	// OriginPatterns are the cross-origin pages allowed to connect, as
 	// github.com/coder/websocket's AcceptOptions.OriginPatterns (host
 	// patterns of path.Match, or scheme://host). Empty is same origin only:
@@ -117,7 +117,7 @@ func (ch *Channel) logf(format string, args ...any) {
 func (ch *Channel) step(s *abap.Session, name, text string, work func()) error {
 	run := ch.Step
 	if run == nil {
-		run = func(name string, work func()) error { return abap.APCStep(name, work, s) }
+		run = func(_ *abap.Session, name string, work func()) error { return abap.APCStep(name, work, s) }
 	} else {
 		// Custom Step hosts also hold the work process around the callback.
 		body := work
@@ -127,7 +127,7 @@ func (ch *Channel) step(s *abap.Session, name, text string, work func()) error {
 			body()
 		}
 	}
-	err := run(name, work)
+	err := run(s, name, work)
 	if err != nil {
 		ch.logf("%s: %v (%.80s)", ch.Name, err, text)
 	}

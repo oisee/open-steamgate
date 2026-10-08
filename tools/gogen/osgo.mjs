@@ -129,18 +129,34 @@ const has = (fn) => go.includes(`\nfunc ${fn}(`);
 }
 // Keep generated ADT references out of handwritten cmd/osgo and echo tests.
 const adtSessionAdapter = has("New_ZCL_OSD_ADT_SESSION") && has("ZCL_OSD_ADT_HANDLER_USE_SESSION") ? `
+type adtSystemSession struct {
+ *ZCL_OSD_ADT_SESSION
+ step *abap.Session
+ resolved ZIF_OSD_ADT_SESSION__TY_SESSION
+}
+func (a *adtSystemSession) ZIF_OSD_ADT_SESSION__RESOLVE(s *abap.Session, cookies, headers *[]*IHTTPNVP) ZIF_OSD_ADT_SESSION__TY_SESSION {
+ a.resolved = a.ZCL_OSD_ADT_SESSION.ZIF_OSD_ADT_SESSION__RESOLVE(s, cookies, headers)
+ return a.resolved
+}
+func (a *adtSystemSession) View() (string, bool) { return a.resolved.id, a.resolved.stateful == "X" }
+func (a *adtSystemSession) Alive(id string) bool { return a.ZIF_OSD_ADT_SESSION__ALIVE(a.step, id) == "X" }
+func (a *adtSystemSession) Adopt(id, typ, name string) string { return a.ZIF_OSD_ADT_SESSION__ADOPT_HANDLE(a.step, id, typ, name) }
+func (a *adtSystemSession) Forget(id, handle string) (typ, name string) { a.ZIF_OSD_ADT_SESSION__RELEASE_HANDLE(a.step, id, handle, &typ, &name); return }
 func init() {
  hasADTSession = true
  bindADTSession = func(s *abap.Session) func() {
-  session := New_ZCL_OSD_ADT_SESSION(s, 1800, "0")
+  session := &adtSystemSession{ZCL_OSD_ADT_SESSION: New_ZCL_OSD_ADT_SESSION(s, 1800, "0"), step: s}
+  clear := adtSystems.Bind(s, adtsystem.Provider{Sessions: session, Holders: adtsystem.ENQHolders{Server: adtLocks, Kernel: adtKernel, Client: abap.Mandt}, Identity: adtIdentity(abap.SysID, os.LookupEnv)})
   ZCL_OSD_ADT_HANDLER_USE_SESSION(s, session)
-  return func() { ZCL_OSD_ADT_HANDLER_USE_SESSION(s, nil) }
+  return func() { clear(); ZCL_OSD_ADT_HANDLER_USE_SESSION(s, nil) }
  }
 }
 ` : "// ADT session classes are absent; use the handwritten no-op binding.\n";
 writeFileSync(join(dir, "zz_adt_session.go"), `package main
-import "osg/gogen/abap"
+import ("osg/gogen/abap"; "osg/gogen/adtsystem"; "os")
 var _ *abap.Session
+var _ adtsystem.Provider
+var _ = os.LookupEnv
 ${adtSessionAdapter}`);
 const boots = ["ZCL_STG_SEGW_REGISTRY_REGISTER", "ZCL_STG_SHLP_REGISTRY_REGISTER"].filter(has);
 // the synthetic demo rows: ZCL_OSD_DEMO_DATA=>BOOT with the knob the Node

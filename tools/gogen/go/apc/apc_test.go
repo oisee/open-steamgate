@@ -66,7 +66,7 @@ func (f *fakeHost) Drain(s *abap.Session) []string {
 	return q
 }
 
-func serve(t *testing.T, f *fakeHost, steps ...func(string, func()) error) (*httptest.Server, string) {
+func serve(t *testing.T, f *fakeHost, steps ...func(*abap.Session, string, func()) error) (*httptest.Server, string) {
 	ch := &Channel{Name: "t", New: func(s *abap.Session, r *http.Request) Host { f.news++; return f }, Logf: func(string, ...any) {}}
 	if len(steps) > 0 {
 		ch.Step = steps[0]
@@ -275,9 +275,9 @@ func TestAPCYieldSleep(t *testing.T) {
 	for _, custom := range []bool{false, true} {
 		t.Run(fmt.Sprint("custom=", custom), func(t *testing.T) {
 			f := &fakeHost{yield: true, closed: make(chan string, 1)}
-			var step func(string, func()) error
+			var step func(*abap.Session, string, func()) error
 			if custom {
-				step = func(name string, work func()) error { return abap.APCStep(name, work) }
+				step = func(_ *abap.Session, name string, work func()) error { return abap.APCStep(name, work) }
 			}
 			_, url := serve(t, f, step)
 			c, _, err := websocket.Dial(context.Background(), url, nil)

@@ -70,9 +70,9 @@ func main() {
 			ch.OriginPatterns = append(ch.OriginPatterns, o)
 		}
 	}
-	ch.Step = func(name string, work func()) error {
+	ch.Step = func(s *abap.Session, name string, work func()) error {
 		t0 := time.Now()
-		err := abap.APCStep(name, work)
+		err := abap.APCStep(name, work, s)
 		if d := time.Since(t0); d > 200*time.Millisecond {
 			log.Printf("slow step %s %v", name, d)
 		}

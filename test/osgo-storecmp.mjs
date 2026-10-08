@@ -50,3 +50,41 @@ describe("OSGo store command parity", function() {
     assert.match(result.stdout, /compiler absent: original CHECK and PARSE refusals/);
   });
 });
+
+// Bind one synthetic session on both sides; compare every scalar and table
+// from the destination, not only the parsed JSON values.
+describe("OSGo request SYSTEM parity", function() {
+  this.timeout(120000);
+  it("matches Node's session, handles, holders and ended-session errors", async () => {
+    const {StoreDestination, withSystem} = await import("../tools/osd-store-destination.mjs");
+    const {abapSession} = await import("../tools/adt-enq.mjs");
+    const handle = "a".repeat(40);
+    const calls = [
+      ["SESSION", ""], ["LOCK_HOLDER", "CLAS Z"], ["LOCK_HANDLE", "CLAS Z"],
+      ["LOCK_HANDLE", "CLAS Z"], ["LOCK_HOLDER", "CLAS Z"],
+      ["LOCK_RELEASE", "unknown"], ["LOCK_RELEASE", handle],
+      ["LOCK_RELEASE", handle], ["LOCK_HOLDER", "CLAS Z"], ["BUILD", ""],
+    ].map(([IV_TYPE, IV_NAME]) => ({IV_COMMAND: "SYSTEM", IV_TYPE, IV_NAME}));
+    for (const snapshot of [{id: "id", stateful: true, live: true}, {id: "id", stateful: false, live: false}, {id: "", stateful: false, live: false}]) {
+      const locks = new Map();
+      const session = snapshot.id ? snapshot : undefined;
+      const sessions = {
+        async adopt(s, type, name) { if (!snapshot.live) throw new Error("ADT session ended"); locks.set(handle, {type, name}); return handle; },
+        async forget(s, h) { const lock = locks.get(h); locks.delete(h); return lock; },
+        async holderOf(type, name) { return snapshot.live && [...locks.values()].some(o => o.type === type && o.name === name) ? {session} : undefined; },
+      };
+      const provider = abapSession(sessions, () => undefined);
+      const destination = new StoreDestination();
+      const node = [];
+      for (const call of calls) node.push(await withSystem((k, n, j) => provider.system(k, n, {adt: {session}}, j), () => destination.execute(call)));
+      const result = spawnSync("go", ["run", "./cmd/storecmp", "-root", root, "-config", "/dev/null", "-system", JSON.stringify(snapshot)],
+        {cwd: resolve(root, "tools/gogen/go"), input: JSON.stringify(calls), encoding: "utf8", env: {...process.env, GOCACHE: "/tmp/osgo-gocache"}});
+      assert.equal(result.status, 0, result.stdout + result.stderr);
+      const go = JSON.parse(result.stdout);
+      for (let i = 0; i < calls.length; i++) {
+        assert.deepEqual(go[i].Scalars, Object.fromEntries(Object.entries(node[i]).filter(([k]) => k.startsWith("EV_"))), JSON.stringify(calls[i]));
+        for (const [g, n] of [["Objects", "ET_OBJECT"], ["Issues", "ET_ISSUE"], ["Types", "ET_TYPE"], ["Revisions", "ET_REVISION"]]) assert.deepEqual(go[i][g] ?? [], node[i][n]);
+      }
+    }
+  });
+});

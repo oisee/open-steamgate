@@ -148,7 +148,7 @@ func (h *harness) step(owner, call string, p map[string]string, expect map[strin
 		}
 		start := h.now
 		r := h.request(call, p)
-		res := h.srv.enqueueWith(sid, r, p["_WAIT"] == "X", h.advance)
+		res := h.srv.EnqueueWith(sid, r, p["_WAIT"] == "X", h.advance)
 		// the GUSRVB the row just taken carries, against the one before the
 		// last COMMIT or ROLLBACK: new after a ROLLBACK or a COMMIT that ran
 		// an update, the same after a COMMIT that had nothing to update
