@@ -33,8 +33,9 @@ func TestADTStatefulDumpRetiresContext(t *testing.T) {
 				t.Fatal("dump changed")
 			}
 		}()
-		withADTSession(&abap.Session{}, func() {
-			ok, err := hostclass.ZCL_OSD_ENQ_KERNEL.Bind(id, "USER")
+		s := &abap.Session{}
+		withADTSession(s, func() {
+			ok, err := hostclass.ZCL_OSD_ENQ_KERNEL.Bind(s, id, "USER")
 			if !ok || err != nil {
 				t.Fatalf("bind: %v %v", ok, err)
 			}
@@ -45,8 +46,9 @@ func TestADTStatefulDumpRetiresContext(t *testing.T) {
 	if adtKernel.ContextAlive(id) {
 		t.Fatal("dumped context is still alive")
 	}
-	withADTSession(&abap.Session{}, func() {
-		ok, err := hostclass.ZCL_OSD_ENQ_KERNEL.Bind(id, "USER")
+	s := &abap.Session{}
+	withADTSession(s, func() {
+		ok, err := hostclass.ZCL_OSD_ENQ_KERNEL.Bind(s, id, "USER")
 		next, _ := adtKernel.Handle(id)
 		if !ok || err != nil || next == old {
 			t.Fatalf("replacement: %v %v %d -> %d", ok, err, old, next)
@@ -159,5 +161,39 @@ func TestADTSessionBindingCleanup(t *testing.T) {
 	}()
 	if bound || count != 2 {
 		t.Fatalf("bound=%v requests=%d", bound, count)
+	}
+}
+
+// Two ADT steps interleave (as a WAIT-like sleep will let them): each Bind
+// pins into its own step, found by the session the seam passes, so the step
+// that dumps retires only its own context.
+func TestADTStepsAreKeyedBySession(t *testing.T) {
+	const a, b = "test-step-a", "test-step-b"
+	defer adtKernel.End(a)
+	defer adtKernel.End(b)
+	sa, sb := &abap.Session{}, &abap.Session{}
+	func() {
+		defer func() {
+			if recover() != "a dumps" {
+				t.Fatal("dump changed")
+			}
+		}()
+		withADTSession(sa, func() {
+			withADTSession(sb, func() {
+				if ok, err := hostclass.ZCL_OSD_ENQ_KERNEL.Bind(sb, b, "USER"); !ok || err != nil {
+					t.Fatalf("bind b: %v %v", ok, err)
+				}
+			})
+			if ok, err := hostclass.ZCL_OSD_ENQ_KERNEL.Bind(sa, a, "USER"); !ok || err != nil {
+				t.Fatalf("bind a: %v %v", ok, err)
+			}
+			panic("a dumps")
+		})
+	}()
+	if adtKernel.ContextAlive(a) {
+		t.Fatal("a's dumped context is still alive")
+	}
+	if !adtKernel.ContextAlive(b) {
+		t.Fatal("b's context was retired by a's dump")
 	}
 }

@@ -9,8 +9,14 @@ var hasADTSession bool
 
 func withADTSession(s *abap.Session, work func()) {
 	step := &adtENQStep{handles: make(map[int64]string)}
-	adtCurrentStep = step // all dialog steps hold the work-process lock
-	defer func() { adtCurrentStep = nil }()
+	adtStepsMu.Lock()
+	adtSteps[s] = step
+	adtStepsMu.Unlock()
+	defer func() {
+		adtStepsMu.Lock()
+		delete(adtSteps, s)
+		adtStepsMu.Unlock()
+	}()
 	defer func() {
 		dumped := recover()
 		for sid, id := range step.handles {
