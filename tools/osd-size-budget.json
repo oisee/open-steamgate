@@ -343,8 +343,8 @@
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/go/abap/move.go": {
-      "lines": 223,
-      "reason": "ADT batch 1 (adt-i5 cases 1-7): Bind integer-to-character MOVE to existing packed signed formatting and expose the existing UTF-16 operations through the narrow CharacterOps adapter."
+      "lines": 214,
+      "reason": "ADT batch 1 (adt-i5 cases 1-7): signed MOVE and date/time calculation-type adapters"
     },
     "tools/gogen/go/abap/movecorr.go": {
       "lines": 34,
@@ -519,7 +519,7 @@
       "reason": "Fix1: adapter owns availability, saved-registry CHECK mode, explicit per-file logical mappings, active hash proof and all diagnostic-to-Issue conversion outside objstore."
     },
     "go:timestamp": {
-      "lines": 58,
+      "lines": 52,
       "reason": "ADT batch 1 (adt-i5 cases 1-7): Independent UTC/initial-zone timestamp conversion with validation, subrc results and explicit unsupported-zone errors; no runtime imports."
     }
   },
