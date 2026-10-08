@@ -6,35 +6,30 @@ import (
 )
 
 func TestConvertUTC(t *testing.T) {
-	for _, zone := range []string{"UTC", ""} {
-		s := &Session{}
-		d, tm, ok := ConvertTimestamp(s, "20261007231500", zone)
-		if !ok || d != "20261007" || tm != "231500" {
-			t.Fatalf("%s: %s/%s/%v", zone, d, tm, ok)
-		}
-		wantRC := int32(0)
-		if zone == "" {
-			wantRC = 4
-		}
-		if s.Sy.Subrc != wantRC {
-			t.Fatalf("%s: subrc %d", zone, s.Sy.Subrc)
-		}
-		ts, ok := ConvertDateTime(s, d, tm, zone)
-		if !ok || ts != "20261007231500" || s.Sy.Subrc != wantRC {
-			t.Fatalf("reverse %s: %s/%v", zone, ts, ok)
-		}
-	}
 	s := &Session{}
-	if _, _, ok := ConvertTimestamp(s, "20260230231500", "UTC"); ok || s.Sy.Subrc != 12 {
-		t.Fatal("invalid timestamp accepted")
+	d, tm, ts := "before", "before", "before"
+	date, clock, stamp := Data{P: &d, T: TD}, Data{P: &tm, T: TT}, Data{P: &ts, T: TString}
+	ConvertTimestampInto(s, "20261007231500", "UTC", date, clock)
+	if d != "20261007" || tm != "231500" || s.Sy.Subrc != 0 {
+		t.Fatalf("%s/%s/%d", d, tm, s.Sy.Subrc)
 	}
-	if _, ok := ConvertDateTime(s, "20261007", "250000", "UTC"); ok || s.Sy.Subrc != 12 {
-		t.Fatal("invalid clock accepted")
+	ConvertDateTimeInto(s, d, tm, "", stamp)
+	if ts != "20261007231500" || s.Sy.Subrc != 4 {
+		t.Fatalf("%s/%d", ts, s.Sy.Subrc)
 	}
-	d, tm, ok := ConvertTimestamp(s, "0", "UTC")
-	if !ok || d != "00000000" || tm != "000000" {
+	ConvertTimestampInto(s, "20260230231500", "UTC", date, clock)
+	if d != "20261007" || tm != "231500" || s.Sy.Subrc != 12 {
+		t.Fatal("invalid timestamp changed targets")
+	}
+	ConvertDateTimeInto(s, d, "250000", "UTC", stamp)
+	if ts != "20261007231500" || s.Sy.Subrc != 12 {
+		t.Fatal("invalid clock changed target")
+	}
+	ConvertTimestampInto(s, "0", "UTC", date, clock)
+	if d != "00000000" || tm != "000000" {
 		t.Fatal("initial timestamp")
 	}
+	ConvertTimestampInto(s, "20261007231500", "UTC", Data{}, Data{})
 }
 
 func TestConvertRefusesNamedZone(t *testing.T) {
@@ -44,5 +39,5 @@ func TestConvertRefusesNamedZone(t *testing.T) {
 			t.Fatalf("zone refusal: %v", r)
 		}
 	}()
-	ConvertTimestamp(&Session{}, "20261007231500", "CET")
+	ConvertTimestampInto(&Session{}, "20261007231500", "CET", Data{}, Data{})
 }

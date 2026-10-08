@@ -1,6 +1,10 @@
-package charsection
+package charsection_test
 
-import "testing"
+import (
+	"osg/gogen/abap"
+	"osg/gogen/charsection"
+	"testing"
+)
 
 func TestReplace(t *testing.T) {
 	for _, c := range []struct {
@@ -17,7 +21,7 @@ func TestReplace(t *testing.T) {
 		{"abcd", "", 1, 2, -1, "ad", 0},
 		{"abcd", "X", 1, -2147483648, -1, "aX", 0},
 	} {
-		got, rc := Replace(c.base, c.with, c.off, c.n, c.limit)
+		got, rc := charsection.Replace(abap.CharacterOps{}, c.base, c.with, c.off, c.n, c.limit)
 		if got != c.want || rc != c.rc {
 			t.Fatalf("%+v: got %q, %d", c, got, rc)
 		}
@@ -32,7 +36,7 @@ func TestBoundsBeforeSplice(t *testing.T) {
 					t.Errorf("no bounds error for %v", c)
 				}
 			}()
-			Replace("abcd", "X", c[0], c[1], -1)
+			charsection.Replace(abap.CharacterOps{}, "abcd", "X", c[0], c[1], -1)
 		}()
 	}
 }
@@ -49,7 +53,7 @@ func TestReplaceUTF16(t *testing.T) {
 		{"😀A", "X", 1, 1, -1, "\xed\xa0\xbdXA", 0},
 		{"😀A", "😀", 2, 1, 3, "😀\xed\xa0\xbd", 2},
 	} {
-		got, rc := Replace(tc.base, tc.with, tc.off, tc.n, tc.limit)
+		got, rc := charsection.Replace(abap.CharacterOps{}, tc.base, tc.with, tc.off, tc.n, tc.limit)
 		if got != tc.want || rc != tc.rc {
 			t.Fatalf("%+v: %x %d", tc, got, rc)
 		}

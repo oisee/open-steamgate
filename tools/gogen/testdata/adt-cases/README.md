@@ -94,3 +94,43 @@ returned exit status 128. A focused reproduction confirmed that error; the
 complete rerun with GOFLAGS=-buildvcs=false passed all 23 tests. No test was
 disabled. Commands and raw results are in .local/adt/round2-*.log and
 round2-results.json.
+
+## Round 3 size-budget structure
+
+Timestamp conversion now lives in `go/timestamp`: it takes Go strings and returns
+validated values, subrc, validity and a named-zone error. Its README records the
+UTC/initial-zone contract, and its tests cover both directions, initial values,
+fractional timestamps, invalid inputs and unsupported zones. The existing
+`go/abap/datesplit.go` contains only the statement binding: session subrc,
+NotCompiled on an unsupported zone and target MOVE after successful validation.
+The ABAP adapter tests additionally verify that invalid inputs leave targets
+unchanged and that omitted date/time targets work.
+
+MESSAGE RAISING is binding glue, since it assigns Session message fields and
+raises the existing ClassicException. It now sits beside that type and handler
+in `go/abap/registry.go`. The ADT availability functions bind constant answers
+to ABAP output parameters; they live beside host information in
+`go/abap/sysinfo.go`. Neither needs a separate capability package.
+
+The budget check also attributed the inherited charsection-to-abap dependency
+to this branch because it changes Go code. `go/charsection` now takes a narrow
+`Text` interface for the existing UTF-16 operations. The runtime supplies
+CharacterOps, and the emitter passes it explicitly. Existing supplementary and
+unpaired-surrogate tests still run through those same runtime operations.
+`go list -deps ./timestamp ./charsection` contains no `osg/gogen/abap`.
+
+Budget edits name the ADT cases and each binding's purpose. They touch only
+this branch's affected existing keys and the new timestamp package. Global
+fileLimits and the importsAbap/readmeMissing exemption lists are unchanged.
+The changed-branch check exits 0; it separately reports 12 inherited breaches
+on untouched main files/packages, which remain outside this round's scope.
+ONE_RUNTIME still answers false, and CALL_CLASSRUN and non-UTC named zones
+retain the refusals documented above.
+
+Round 3 regressions: frontend/emission trio 49/49; semantics 369/369; fixture
+34/34 classes compiled and 115/115 SUCCESS; unit harness 23/23, zero skipped.
+Go runtime: 118 listed top-level tests, normal and race passed. Timestamp and
+charsection: three top-level tests each, normal and race passed. Heavy runs
+used range 50-59; GOFLAGS=-buildvcs=false retains the documented round 2
+workaround. Commands/results are in `.local/adt/round3-*.log` and
+`round3-results.json`; the final budget check exited 0.

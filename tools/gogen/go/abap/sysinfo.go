@@ -85,3 +85,16 @@ func TstmpSubtract(s *Session, t1, t2 string) int32 {
 
 // RandomInt31 is CL_ABAP_RANDOM->INT as open-abap-core has it: 0 .. 2^31-2.
 func RandomInt31(s *Session) int32 { return int32(rand.Int64N(2147483647)) }
+
+// ADTOneRuntime answers "" for now: no conformance case touches datapreview;
+// it becomes "X" once the datapreview classes run on osgo.
+func ADTOneRuntime(_ *Session, on *string) {
+	*on = ""
+}
+
+// ADTUnavailable answers like Node's parent kernel / non-one-runtime case:
+// neither seeded serving application tables nor generation is available.
+func ADTUnavailable(_ *Session, available *string) {
+	// Fixed CHAR values store trailing blanks implicitly in this runtime.
+	*available = ""
+}
