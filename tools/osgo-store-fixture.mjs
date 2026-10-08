@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import {cpSync, mkdirSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync} from "node:fs";
+import {cpSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync} from "node:fs";
 import {join} from "node:path";
 import {spawnSync} from "node:child_process";
 
@@ -31,8 +31,18 @@ function git(root, date, ...args) {
   return result.stdout;
 }
 
+// A repository's .abapgit.xml is stored as dot-abapgit.fixture (two dots would
+// make it an abapGit object): a real one under test/ breaks every build of test/.
 function copyIfPresent(from, to) {
   cpSync(from, to, {recursive: true, filter: path => !path.includes("/.git/")});
+  const visit = dir => {
+    for (const entry of readdirSync(dir, {withFileTypes: true})) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) visit(path);
+      else if (entry.name === "dot-abapgit.fixture") renameSync(path, join(dir, ".abapgit.xml"));
+    }
+  };
+  if (statSync(to).isDirectory()) visit(to);
 }
 
 function setTimes(root) {

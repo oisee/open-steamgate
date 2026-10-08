@@ -18,9 +18,27 @@ ACTIVATE enters the compiler and publication journal even for a missing
 object. CHECK/ACTIVATE capability refusals remain explicit Go-only checks
 in the write list; compiler execution is outside this store-read parity gate.
 
+That full-answer mode is necessary but not sufficient. An ABAP front does not
+receive Node's `execute()` object: `CALL FUNCTION 'ZOSD_STORE' DESTINATION
+'STORE'` reaches `StoreDestination.call()`, which fills only the importing
+scalars and typed tables that caller declared. The harness therefore runs a
+second mode through the RFC signature as well. Node uses typed output boxes
+and table row types; Go uses the session-first `abap.ZOSD_STORE` adapter that
+`cmd/osgo` installs with `abap.SetStore`, not a direct `objstore.Call`. It
+compares the union of importing scalars and tables declared by the ADT call
+sites: `EV_SOURCE`, `EV_FILE`, `EV_STATE`, `EV_CHANGED`, `EV_PACKAGE`,
+`EV_VERSION`, `EV_NOTE`, `EV_JSON`, `EV_ERROR`, `ET_OBJECT`, and
+`ET_REVISION`, field by field.
+
+The gogen host signature does not yet carry `IV_JSON`, `EV_JSON`,
+`EV_STATE`, or `EV_CHANGED` (`core case batch1 #1`). Those fields are an
+explicit per-command expected-gap report, not a silent pass: every other
+signature-visible difference fails, and a gap that the gogen host begins to
+carry also fails until removed from the ratchet list.
+
 `test/osgo-storecmp.mjs` runs the harness over
 `tools/gogen/testdata-store/tree` and requires exit 0 plus equal, nonzero read
-and write totals. It is registered in the existing `gogen` group of
+and write totals in both modes. It is registered in the existing `gogen` group of
 `test/suites.d/gogen-osgo.json`, run by the `gogen` job at
 `.github/workflows/gogen.yml:130`. No workflow change is needed.
 

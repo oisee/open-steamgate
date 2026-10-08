@@ -28,6 +28,15 @@ mkdirSync(out, {recursive: true});
 const {StoreDestination} = await import(`${tools}/tools/osd-store-destination.mjs`);
 const {ObjectStore} = await import(`${tools}/tools/osd-store.mjs`);
 
+const box = (v = "") => ({v, get() { return this.v; }, set(x) { this.v = x; }});
+const table = (fields) => {
+  const t = {rows: [], array() { return this.rows; }, clear() { this.rows = []; }, append(r) { this.rows.push(r); },
+    getRowType() { return {clone() { const inner = Object.fromEntries(fields.map((f) => [f, box()])); return {get: () => inner}; }}; }};
+  return t;
+};
+const rowsOf = (signature, name) => signature.tables[name.toLowerCase()].rows
+  .map((row) => Object.fromEntries(Object.entries(row.get()).map(([field, value]) => [field.toUpperCase(), value.get()])));
+
 // Compare the keys Node returns for each command, including JSON and history
 // state. A reduced RFC importing signature would silently hide these fields.
 async function nodeCall(destination, call) {
@@ -36,11 +45,27 @@ async function nodeCall(destination, call) {
   return {scalars, objects: answer.ET_OBJECT, issues: answer.ET_ISSUE, types: answer.ET_TYPE};
 }
 
-function goCalls(tree, config, calls) {
+async function nodeAdapterCall(destination, call) {
+  const signature = {
+    exporting: Object.fromEntries(Object.entries(call).map(([key, value]) => [key.toLowerCase(), box(value)])),
+    importing: Object.fromEntries(ADT_SCALARS.map((key) => [key.toLowerCase(), box()])),
+    tables: Object.fromEntries(Object.entries(ADT_TABLES).map(([key, fields]) => [key.toLowerCase(), table(fields)])),
+  };
+  await destination.call("ZOSD_STORE", signature);
+  return {
+    scalars: Object.fromEntries(ADT_SCALARS.map((key) => [key, String(signature.importing[key.toLowerCase()].get())])),
+    objects: rowsOf(signature, "ET_OBJECT"),
+    revisions: rowsOf(signature, "ET_REVISION"),
+  };
+}
+
+function goCalls(tree, config, calls, signature = null) {
   const configFile = join(out, `config-${Date.now()}.json`);
   writeFileSync(configFile, JSON.stringify(config));
+  const input = signature === null ? calls : {calls, ...signature};
   const raw = execFileSync("go", ["run", "./cmd/storecmp", "-root", tree, "-config", configFile],
-    {cwd: join(here, "go"), input: JSON.stringify(calls), maxBuffer: 1 << 30}).toString();
+    {cwd: join(here, "go"), input: JSON.stringify(input), maxBuffer: 1 << 30}).toString();
+  if (signature !== null) return JSON.parse(raw).map((answer) => ({scalars: answer.Scalars, objects: answer.Objects, revisions: answer.Revisions}));
   return JSON.parse(raw).map((a) => ({scalars: a.Scalars, objects: a.Objects ?? [], issues: a.Issues ?? [],
     types: (a.Types ?? []).map((t) => ({TYPE: t.TYPE, COUNT: t.COUNT}))}));
 }
@@ -64,6 +89,75 @@ function compare(label, node, go, touched) {
   while (at < n.length && n[at] === g[at]) at += 1;
   console.log(`FAIL ${label}\n     node: ...${n.slice(Math.max(0, at - 120), at + 200)}\n     go:   ...${g.slice(Math.max(0, at - 120), at + 200)}`);
   return false;
+}
+
+// exactly the importing parameters the ADT front declares at its
+// CALL FUNCTION 'ZOSD_STORE' sites, not the wider function-module signature
+const ADT_SCALARS = ["EV_SOURCE", "EV_FILE", "EV_STATE", "EV_CHANGED", "EV_PACKAGE", "EV_VERSION", "EV_NOTE", "EV_JSON", "EV_ERROR"];
+const ADT_TABLES = {
+  ET_OBJECT: ["type", "name", "package", "file", "writable", "version", "changed_at"],
+  ET_REVISION: ["revision", "author", "short", "date", "time", "subject"],
+};
+
+const frontend = readFileSync(join(here, "frontend.mjs"), "utf8");
+const frontendStart = frontend.indexOf('["STORE ZOSD_STORE"');
+const frontendSignature = frontend.slice(frontendStart, frontend.indexOf("}],", frontendStart) + 3);
+const goHostParams = new Map([...frontendSignature.matchAll(/\b([A-Z][A-Z0-9_]+):\s*"(exporting|importing|tables)"/g)]
+  .map((match) => [match[1], match[2]]));
+const KNOWN_GAPS = new Map([
+  ["IV_JSON", "core case batch1 #1"],
+  ["EV_JSON", "core case batch1 #1"],
+  ["EV_STATE", "core case batch1 #1"],
+  ["EV_CHANGED", "core case batch1 #1"],
+]);
+for (const field of KNOWN_GAPS.keys()) {
+  if (goHostParams.has(field)) {
+    bad += 1;
+    console.log(`FAIL ratchet ${field}: the gogen host signature now carries it; remove its expected gap`);
+  }
+}
+const adapterSignature = {
+  inputs: Object.fromEntries([...goHostParams].filter(([, kind]) => kind === "exporting").map(([key]) => [key, true])),
+  imports: Object.fromEntries([...goHostParams].filter(([, kind]) => kind === "importing").map(([key]) => [key, true])),
+  tables: Object.fromEntries([...goHostParams].filter(([, kind]) => kind === "tables").map(([key]) => [key, true])),
+};
+const adapterInput = (call) => Object.fromEntries(Object.entries(call)
+  .filter(([key]) => adapterSignature.inputs[key] === true));
+
+function adapterComparable(answer, touched = new Set()) {
+  const stable = (row) => Object.fromEntries(Object.keys(row).sort()
+    .map((key) => [key, touched.has(row.FILE) && key === "CHANGED_AT" ? "(written)" : row[key]]));
+  return JSON.stringify({
+    scalars: Object.fromEntries(ADT_SCALARS.filter((key) => !KNOWN_GAPS.has(key)).sort()
+      .map((key) => [key, answer.scalars[key] ?? ""])),
+    objects: answer.objects.map(stable),
+    revisions: answer.revisions.map(stable),
+  });
+}
+
+function expectedGaps(call, node) {
+  const gaps = [];
+  if (call.IV_JSON !== undefined && !goHostParams.has("IV_JSON")) gaps.push("IV_JSON");
+  if (node.scalars.EV_JSON !== "" && !goHostParams.has("EV_JSON")) gaps.push("EV_JSON");
+  if (call.IV_COMMAND?.toUpperCase() === "HISTORY") {
+    if (!goHostParams.has("EV_STATE")) gaps.push("EV_STATE");
+    if (!goHostParams.has("EV_CHANGED")) gaps.push("EV_CHANGED");
+  }
+  return gaps;
+}
+
+function compareAdapter(label, node, go, call, touched = new Set()) {
+  const n = adapterComparable(node, touched);
+  const g = adapterComparable(go, touched);
+  if (n !== g) {
+    bad += 1;
+    let at = 0;
+    while (at < n.length && n[at] === g[at]) at += 1;
+    console.log(`FAIL adapter ${label}\n     node: ...${n.slice(Math.max(0, at - 120), at + 200)}\n     go:   ...${g.slice(Math.max(0, at - 120), at + 200)}`);
+    return false;
+  }
+  for (const field of expectedGaps(call, node)) console.log(`KNOWN adapter gap ${label}: ${field} (${KNOWN_GAPS.get(field)})`);
+  return true;
 }
 
 // ------------------------------------------------------------------ reads
@@ -100,13 +194,21 @@ const reads = [
 ];
 const nodeDest = new StoreDestination({store: () => new ObjectStore({root})});
 const config = await storeConfig(root, {storeModule: `${tools}/tools/osd-store.mjs`});
-const goReads = goCalls(root, config, reads);
+const goExecuteReads = goCalls(root, config, reads);
+const adapterReads = reads.map(adapterInput);
+const goAdapterReads = goCalls(root, config, adapterReads, adapterSignature);
 let same = 0;
+let adapterSame = 0;
 for (let i = 0; i < reads.length; i += 1) {
-  if (compare(`read #${i} ${JSON.stringify(reads[i])}`, await nodeCall(nodeDest, reads[i]), goReads[i])) same += 1;
+  const label = `read #${i} ${JSON.stringify(reads[i])}`;
+  const nodeAnswer = await nodeCall(nodeDest, reads[i]);
+  if (compare(label, nodeAnswer, goExecuteReads[i])) same += 1;
+  const nodeAdapterAnswer = await nodeAdapterCall(nodeDest, reads[i]);
+  if (compareAdapter(label, nodeAdapterAnswer, goAdapterReads[i], reads[i])) adapterSame += 1;
 
 }
-console.log(`reads: ${same} of ${reads.length} answers the same (${all.length} objects in the tree)`);
+console.log(`execute reads: ${same} of ${reads.length} answers the same (${all.length} objects in the tree)`);
+console.log(`adapter reads: ${adapterSame} of ${reads.length} answers the same`);
 
 // ----------------------------------------------------------------- writes
 // two scratch trees: src/ copied, the rest linked, so the writes land in a
@@ -148,26 +250,41 @@ const writes = [
 ];
 const nodeTree = scratch("node");
 const goTree = scratch("go");
+const nodeAdapterTree = scratch("node-rfc");
+const goAdapterTree = scratch("go-rfc");
 const nodeWriter = new StoreDestination({store: () => new ObjectStore({root: nodeTree})});
+const nodeAdapterWriter = new StoreDestination({store: () => new ObjectStore({root: nodeAdapterTree})});
 const nodeWrites = [];
+const nodeAdapterWrites = [];
 for (const call of writes) {
   // CHECK and ACTIVATE are the compiler's on Node: not compared, only run on Go
   if (call.IV_COMMAND === "CHECK" || call.IV_COMMAND === "ACTIVATE") { nodeWrites.push(undefined); continue; }
   nodeWrites.push(await nodeCall(nodeWriter, call));
 }
+for (const call of writes) {
+  if (call.IV_COMMAND === "CHECK" || call.IV_COMMAND === "ACTIVATE") { nodeAdapterWrites.push(undefined); continue; }
+  nodeAdapterWrites.push(await nodeAdapterCall(nodeAdapterWriter, call));
+}
 const goWrites = goCalls(goTree, config, writes);
+const goAdapterWrites = goCalls(goAdapterTree, config, writes.map(adapterInput), adapterSignature);
 // the files the writes wrote, as the Node store named them
 const touched = new Set(nodeWrites.filter((a, i) => a !== undefined && writes[i].IV_COMMAND === "WRITE" && a.scalars.EV_ERROR === "")
   .map((a) => a.scalars.EV_FILE));
 let wsame = 0;
+let adapterWsame = 0;
+const comparableWrites = writes.filter((write) => write.IV_COMMAND !== "CHECK" && write.IV_COMMAND !== "ACTIVATE").length;
 for (let i = 0; i < writes.length; i += 1) {
+  const label = `write #${i} ${JSON.stringify(writes[i]).slice(0, 120)}`;
   if (nodeWrites[i] === undefined) {
     console.log(`go only #${i} ${writes[i].IV_COMMAND}: ${goWrites[i].scalars.EV_ERROR} | issues ${goWrites[i].issues.length}`);
+    console.log(`go only adapter #${i} ${writes[i].IV_COMMAND}: ${goAdapterWrites[i].scalars.EV_ERROR}`);
     continue;
   }
-  if (compare(`write #${i} ${JSON.stringify(writes[i]).slice(0, 120)}`, nodeWrites[i], goWrites[i], touched)) wsame += 1;
+  if (compare(label, nodeWrites[i], goWrites[i], touched)) wsame += 1;
+  if (compareAdapter(label, nodeAdapterWrites[i], goAdapterWrites[i], writes[i], touched)) adapterWsame += 1;
 }
-console.log(`writes: ${wsame} of ${writes.filter((w) => w.IV_COMMAND !== "CHECK" && w.IV_COMMAND !== "ACTIVATE").length} answers the same`);
+console.log(`execute writes: ${wsame} of ${comparableWrites} answers the same`);
+console.log(`adapter writes: ${adapterWsame} of ${comparableWrites} answers the same`);
 // the files the writes left behind, byte for byte
 for (const file of [...touched, "../ZOSD_ESCAPE", "src/osd/..#..#zosd_escape.prog.abap"]) {
   const n = existsSync(join(nodeTree, file)) ? readFileSync(join(nodeTree, file)) : undefined;
