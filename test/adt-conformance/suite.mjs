@@ -143,7 +143,7 @@ describe('shared ADT conformance runner contracts', function () {
       const result = await run({target: 'osgo', base: `http://127.0.0.1:${server.address().port}`,
         expectedFile: allGaps(output), output, say: () => {}});
       assert.equal(result.exitCode, 0, JSON.stringify(result));
-      assert.equal(result.summary['known-gap'], 23); assert.equal(result.summary.fail, 0);
+      assert.equal(result.summary['known-gap'], 24); assert.equal(result.summary.fail, 0);
       assert.equal(result.targetAnswered, true); assert.equal(result.handshakeStatus, 501);
       assert.equal(result.discoverySucceeded, false); assert.equal(result.executedCases, 0);
       assert.ok(result.cases.every(c => c.observed && c.actual?.status === 501));
@@ -198,7 +198,7 @@ describe('shared ADT conformance runner contracts', function () {
       const expectedFile = join(output, 'expected.json');
       writeFileSync(expectedFile, JSON.stringify(Object.fromEntries((await loadCases()).map(c => [c.id, 'n/a: synthetic exclusion']))));
       const result = await run({target: 'osgo', base: 'http://127.0.0.1:0', expectedFile, output, say: () => {}});
-      assert.equal(result.exitCode, 1); assert.equal(result.summary['not-applicable'], 23);
+      assert.equal(result.exitCode, 1); assert.equal(result.summary['not-applicable'], 24);
       assert.equal(result.executedCases, 0); assert.equal(result.discoverySucceeded, false);
       assert.ok(result.cases.every(c => !c.observed));
       assert.deepEqual(result.runErrors, ['no executed cases', 'no successful discovery request']);
@@ -284,6 +284,6 @@ describe('shared ADT conformance runner contracts', function () {
   it('runs every read and lock case through the existing JS server helper', async () => {
     const result = await runJS();
     assert.equal(result.exitCode, 0, JSON.stringify(result.summary));
-    assert.equal(result.executedCases, 23); assert.equal(result.discoverySucceeded, true);
+    assert.equal(result.executedCases, 24); assert.equal(result.discoverySucceeded, true);
   });
 });

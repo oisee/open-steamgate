@@ -512,6 +512,7 @@ jobs:
           chmod +x tools/gogen/.out/osd || infra "launcher chmod failed"
           test -x tools/gogen/.out/osd || infra "compiler launcher is not executable"
           node tools/gogen/osgo.mjs || infra "the osgo build failed"
+          node tools/osd-adt-gogen-gate.mjs tools/gogen/.out/osgo-compile-report.json tools/osd-adt-gogen-allowlist.json || exit 1
           tools/gogen/.out/osgo -adt -port "$STG_PORT" -root "$PWD" > "$RUNNER_TEMP/osgo-adt.log" 2>&1 &
           pid=$!
           for _ in $(seq 1 60); do curl -fsS "http://127.0.0.1:$STG_PORT/health" >/dev/null 2>&1 && break; sleep 1; done

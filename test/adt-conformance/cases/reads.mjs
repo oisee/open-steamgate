@@ -1,6 +1,7 @@
 const object = '/oo/classes/zcl_osd_adt_uri';
 const source = /CLASS zcl_osd_adt_uri DEFINITION/i;
 const atom = /application\/(?:atomsvc|atom)\+xml/;
+const nodeStructureExpect = {status: 200, xml: [{xpath: '/asx:abap/asx:values/DATA/TREE_CONTENT', regexp: /^[\s\S]*$/}], body: /ZCL_OSD_ADT_URI/};
 export default [
   ...['/discovery', '/core/discovery'].map((path, i) => ({id: `C${i + 1}-discovery`, point: `C${i + 1}`,
     title: 'Discovery advertises repository and source collections', request: {path},
@@ -12,7 +13,16 @@ export default [
     expect: {status: 200, contentType: /application\/(?:json|vnd\.sap\.adt\.core\.http\.systeminformation\.v1\+json)/, json: {systemID: /\S+/, userName: /\S+/, client: /^\d{3}$/, language: /\S+/}}},
   {id: 'C4-nodestructure', point: 'C4', title: 'POST browses our ADT package',
     request: {method: 'POST', path: '/repository/nodestructure', query: {parent_name: '$STG_ADT', parent_type: 'DEVC/K'}},
-    expect: {status: 200, xml: [{xpath: '/asx:abap/asx:values/DATA/TREE_CONTENT', regexp: /^[\s\S]*$/}], body: /ZCL_OSD_ADT_URI/}},
+    expect: nodeStructureExpect},
+  {id: 'C4b-nodestructure-xml-body', point: 'C4b', title: 'POST accepts a real IDE XML body',
+    request: {method: 'POST', path: '/repository/nodestructure',
+      query: {parent_name: '$STG_ADT', parent_tech_name: '$STG_ADT', parent_type: 'DEVC/K', withShortDescriptions: true},
+      headers: {
+        'content-type': 'application/vnd.sap.as+xml; charset=UTF-8; dataname=null',
+        accept: 'application/vnd.sap.as+xml;charset=UTF-8;dataname=com.sap.adt.RepositoryObjectTreeContent'
+      },
+      body: '<?xml version="1.0" encoding="UTF-8" ?><asx:abap version="1.0" xmlns:asx="http://www.sap.com/abapxml"><asx:values><DATA><TV_NODEKEY>000000</TV_NODEKEY></DATA></asx:values></asx:abap>'},
+    expect: nodeStructureExpect},
   {id: 'C5-search', point: 'C5', title: 'Search points to the matching class',
     request: {path: '/repository/informationsystem/search', query: {query: 'ZCL_OSD_ADT_URI'}},
     expect: {status: 200, xml: [{xpath: '/adtcore:objectReferences/adtcore:objectReference/@adtcore:name', value: 'ZCL_OSD_ADT_URI'}]}},

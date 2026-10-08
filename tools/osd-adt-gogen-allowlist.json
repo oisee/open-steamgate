@@ -1,0 +1,77 @@
+[
+  {
+    "kind": "statement stub",
+    "entry": "ZCL_OSD_ADT_CLASSRUN=>RUN (zcl_osd_adt_classrun.clas.abap:105): conversion exc -> ref",
+    "reason": "Pre-existing gogen statement stub on the ADT build baseline; retain until the gogen owner compiles the conversion."
+  },
+  {
+    "kind": "statement stub",
+    "entry": "ZCL_OSD_ADT_XREF=>EDGES (zcl_osd_adt_xref.clas.abap:40): SELECT form: SELECT DISTINCT include FROM wbcrossgt INTO TABLE lt_rows UP TO 5000 ROWS WHERE otype = 'TY' AND name = iv_name AND include <> iv_name ORDER BY include.",
+    "reason": "Pre-existing gogen statement stub on the ADT build baseline; retain until the SELECT form is compiled."
+  },
+  {
+    "kind": "statement stub",
+    "entry": "ZCL_OSD_ADT_XREF=>EDGES (zcl_osd_adt_xref.clas.abap:42): SELECT form: SELECT DISTINCT include FROM wbcrossgtx INTO TABLE lt_extra UP TO 5000 ROWS WHERE otype = 'TY' AND name = iv_name AND include <> iv_name ORDER BY include.",
+    "reason": "Pre-existing gogen statement stub on the ADT build baseline; retain until the SELECT form is compiled."
+  },
+  {
+    "kind": "statement stub",
+    "entry": "ZCL_OSD_ADT_XREF=>EDGES (zcl_osd_adt_xref.clas.abap:45): SELECT form: SELECT DISTINCT include FROM wbcrossgt INTO TABLE lt_rows UP TO 5000 ROWS WHERE otype = 'TY' AND name = iv_name ORDER BY include.",
+    "reason": "Pre-existing gogen statement stub on the ADT build baseline; retain until the SELECT form is compiled."
+  },
+  {
+    "kind": "statement stub",
+    "entry": "ZCL_OSD_ADT_XREF=>EDGES (zcl_osd_adt_xref.clas.abap:47): SELECT form: SELECT DISTINCT include FROM wbcrossgtx INTO TABLE lt_extra UP TO 5000 ROWS WHERE otype = 'TY' AND name = iv_name ORDER BY include.",
+    "reason": "Pre-existing gogen statement stub on the ADT build baseline; retain until the SELECT form is compiled."
+  },
+  {
+    "kind": "statement stub",
+    "entry": "ZCL_OSD_ADT_XREF=>EDGES (zcl_osd_adt_xref.clas.abap:54): DELETE form: DELETE ADJACENT DUPLICATES FROM lt_rows.",
+    "reason": "Pre-existing gogen statement stub on the ADT build baseline; retain until the DELETE form is compiled."
+  },
+  {
+    "kind": "statement stub",
+    "entry": "ZCL_OSD_ADT_XREF=>READERS (zcl_osd_adt_xref.clas.abap:222): DELETE form: DELETE ADJACENT DUPLICATES FROM lt_ids.",
+    "reason": "Pre-existing gogen statement stub on the ADT build baseline; retain until the DELETE form is compiled."
+  },
+  {
+    "kind": "statement stub",
+    "entry": "ZCL_OSD_ADT_XREF=>ZIF_OSD_ADT_ROUTE~HANDLE (zcl_osd_adt_xref.clas.abap:313): DELETE form: DELETE ADJACENT DUPLICATES FROM lt_objects COMPARING name.",
+    "reason": "Pre-existing gogen statement stub on the ADT build baseline; retain until the DELETE form is compiled."
+  },
+  {
+    "kind": "statement stub",
+    "entry": "ZCL_OSD_KERNEL_GUARD=>CALL_CLASSRUN (zcl_osd_kernel_guard.clas.abap:30): @KERNEL: host code of the transpiler runtime",
+    "reason": "Pre-existing JS @KERNEL classrun host-error boundary, newly exposed by src/adt source coverage. OSGo does not compile these host statements; retain this exact gap until its classrun error boundary is implemented."
+  },
+  {
+    "kind": "statement stub",
+    "entry": "ZCL_OSD_KERNEL_GUARD=>CALL_CLASSRUN (zcl_osd_kernel_guard.clas.abap:33): @KERNEL: host code of the transpiler runtime",
+    "reason": "Pre-existing JS @KERNEL classrun host-error boundary, newly exposed by src/adt source coverage. OSGo does not compile these host statements; retain this exact gap until its classrun error boundary is implemented."
+  },
+  {
+    "kind": "statement stub",
+    "entry": "ZCL_OSD_KERNEL_GUARD=>CALL_CLASSRUN (zcl_osd_kernel_guard.clas.abap:34): @KERNEL: host code of the transpiler runtime",
+    "reason": "Pre-existing JS @KERNEL classrun host-error boundary, newly exposed by src/adt source coverage. OSGo does not compile these host statements; retain this exact gap until its classrun error boundary is implemented."
+  },
+  {
+    "kind": "statement stub",
+    "entry": "ZCL_OSD_KERNEL_GUARD=>CALL_CLASSRUN (zcl_osd_kernel_guard.clas.abap:35): @KERNEL: host code of the transpiler runtime",
+    "reason": "Pre-existing JS @KERNEL classrun host-error boundary, newly exposed by src/adt source coverage. OSGo does not compile these host statements; retain this exact gap until its classrun error boundary is implemented."
+  },
+  {
+    "kind": "statement stub",
+    "entry": "ZCL_OSD_KERNEL_GUARD=>CALL_CLASSRUN (zcl_osd_kernel_guard.clas.abap:36): @KERNEL: host code of the transpiler runtime",
+    "reason": "Pre-existing JS @KERNEL classrun host-error boundary, newly exposed by src/adt source coverage. OSGo does not compile these host statements; retain this exact gap until its classrun error boundary is implemented."
+  },
+  {
+    "kind": "statement stub",
+    "entry": "ZCL_OSD_KERNEL_GUARD=>CALL_CLASSRUN (zcl_osd_kernel_guard.clas.abap:37): @KERNEL: host code of the transpiler runtime",
+    "reason": "Pre-existing JS @KERNEL classrun host-error boundary, newly exposed by src/adt source coverage. OSGo does not compile these host statements; retain this exact gap until its classrun error boundary is implemented."
+  },
+  {
+    "kind": "statement stub",
+    "entry": "ZCL_OSD_KERNEL_GUARD=>CALL_CLASSRUN (zcl_osd_kernel_guard.clas.abap:38): @KERNEL: host code of the transpiler runtime",
+    "reason": "Pre-existing JS @KERNEL classrun host-error boundary, newly exposed by src/adt source coverage. OSGo does not compile these host statements; retain this exact gap until its classrun error boundary is implemented."
+  }
+]
