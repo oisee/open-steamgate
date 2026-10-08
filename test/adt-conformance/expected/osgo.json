@@ -9,6 +9,7 @@
   "C3-head": "pass",
   "C9-systeminformation": "pass",
   "C4-nodestructure": "pass",
+  "C4b-nodestructure-xml-body": "known-gap: osgo gogen does not compile DELETE TABLE in ZCL_OSD_ADT_REQUEST_XML=>RESTORE",
   "C5-search": "pass",
   "C6-class-document": "pass",
   "R1-source-default": "pass",

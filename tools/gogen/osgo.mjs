@@ -12,7 +12,7 @@
 // zz_boot.go (what boots, which SICF nodes are mounted, the launchpad tiles
 // and the pack folders, as read from the checkout now).
 import {execFileSync} from "node:child_process";
-import {existsSync, writeFileSync} from "node:fs";
+import {existsSync, mkdirSync, writeFileSync} from "node:fs";
 import {join, relative} from "node:path";
 import {columnRegistry, compileProgram} from "./frontend.mjs";
 import {emitGo} from "./emit-go.mjs";
@@ -247,6 +247,9 @@ var packWebapps = map[string]string{
 ${webapps.map((w) => `\t${JSON.stringify(w.path)}: ${JSON.stringify(relative(home, w.dir))},`).join("\n")}
 }
 `);
+mkdirSync(join(here, ".out"), {recursive: true});
+writeFileSync(join(here, ".out", `${echo ? "osgo-echo" : "osgo"}-compile-report.json`),
+  JSON.stringify({statementStubs: program.partial, methodsNotCompiled: program.skipped}, null, 2) + "\n");
 try { execFileSync("gofmt", ["-w", dir], {stdio: ["ignore", "pipe", "pipe"]}); } catch (e) { console.log(`gofmt: ${String(e.stderr).split("\n").slice(0, 10).join("\n")}`); process.exit(1); }
 const t1 = performance.now();
 try {
