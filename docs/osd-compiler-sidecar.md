@@ -93,3 +93,35 @@ Light verification:
 ```sh
 OSD_HEAVY_RANGE=90-99 OSD_HEAVY_SLOTS=4 tools/osd-heavy.sh node node_modules/mocha/bin/mocha.js --require tools/osd-test-isolation.cjs test/osd-compiler-sidecar.mjs
 ```
+
+## Go client (round 1)
+
+`tools/gogen/go/compiler` provides a lazy client with one child per Client and
+serialized requests. Discovery tries `OSGO_SIDECAR`, then `osd` beside the osgo
+executable, and never searches PATH. `BuildSnapshot` hashes regular files
+relative to the root, refuses lexical or symlink escapes and special files,
+honors its context between files, and bounds the source bytes it reads.
+`Check` returns diagnostics and the registry identity, or a typed refusal
+preserving the protocol code.
+The default check deadline is 30 seconds and covers admission, handshake, stdin
+writes and response reads. Protocol anomalies, timeout and cancellation during
+an operation stop the process group; cleanup waits at most 2 seconds for the
+child (configurable with `KillGrace`). Idle deaths detected by the next request
+use the same cleanup and backoff. Buffered final answers survive EOF. Sidecar
+stderr is discarded. Both hello limits must be positive integers; response lines
+are capped at 1 MiB before hello and `MaxResponseBytes` afterward, including
+the newline; the client default is 64 MiB. Canceled admissions return without
+updating the last error.
+
+`osgo -compiler-status [-root <tree>]` performs hello and prints JSON containing
+discovery, versions, contract, capabilities, limits, restarts and the last error.
+It exits successfully even when the sidecar is absent (`found:false`).
+`Status()` itself only reads state; `Hello` starts the child. Call `Close` when
+the client is no longer needed. No ADT or serving path uses this client yet.
+Round 2 will connect ZOSD_STORE CHECK on osgo through the client after PR #653
+merges.
+
+The Go unit tests re-execute their own test binary as a fake sidecar and need
+no Node. The gogen suite registers `test/osgo-compiler.mjs`, which drives the
+real Node CLI through the Go client on a single-class fixture. It checks a
+clean verdict, syntax coordinates and a false snapshot hash.
