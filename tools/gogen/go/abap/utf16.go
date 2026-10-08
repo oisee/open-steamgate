@@ -381,3 +381,18 @@ func index16(v, sub string) int {
 	}
 	return -1
 }
+
+// runesWTF8 preserves lone units while decoding supplementary scalars for
+// case folding in pattern matching. Valid UTF-8 keeps Go's ordinary path.
+func runesWTF8(v string) []rune {
+	if !hasHalf(v) {
+		return []rune(v)
+	}
+	out := make([]rune, 0, len(v))
+	for i := 0; i < len(v); {
+		r, w := decode16(v[i:])
+		out = append(out, r)
+		i += w
+	}
+	return out
+}

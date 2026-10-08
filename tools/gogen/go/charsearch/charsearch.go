@@ -43,15 +43,38 @@ func Reverse(v string) string {
 	return abap.UTF16String(r)
 }
 
-// WithPos records the uppercased UTF-16 position, including a miss.
+// WithPos folds case without losing WTF-8 halves and records the position
+// in the original subject. Sharp-s expansion is retained for matching only.
 func WithPos(s *abap.Session, a, b string) bool {
-	upper := func(v string) string { return strings.ToUpper(strings.ReplaceAll(v, "ß", "SS")) }
+	upper := func(v string) string { return abap.ToUpper(strings.ReplaceAll(v, "ß", "SS")) }
 	left, right := upper(a), upper(b)
-	pos := strings.Index(left, right)
+	pos := int32(0)
+	if b != "" {
+		pos = abap.Find(left, right, 0)
+	}
 	if pos < 0 {
-		s.Sy.Fdpos = abap.Strlen(left)
+		s.Sy.Fdpos = abap.Strlen(a)
 		return false
 	}
-	s.Sy.Fdpos = abap.Strlen(left[:pos])
+	if strings.Contains(a, "ß") {
+		units := abap.UTF16Units(a)
+		folded := int32(0)
+		for i, u := range units {
+			if folded >= pos {
+				pos = int32(i)
+				break
+			}
+			if u == 'ß' {
+				folded += 2
+			} else {
+				folded++
+			}
+			if folded > pos {
+				pos = int32(i)
+				break
+			}
+		}
+	}
+	s.Sy.Fdpos = pos
 	return true
 }

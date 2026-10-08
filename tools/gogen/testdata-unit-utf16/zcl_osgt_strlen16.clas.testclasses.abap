@@ -19,6 +19,7 @@ METHODS join_loop FOR TESTING.
 METHODS join_replace FOR TESTING.
 METHODS egress_pair FOR TESTING.
 METHODS binary_body FOR TESTING.
+METHODS half_operators FOR TESTING.
 ENDCLASS.
 CLASS ltcl_test IMPLEMENTATION.
 METHOD len.
@@ -196,5 +197,27 @@ DATA entity TYPE REF TO if_http_response.
 CREATE OBJECT entity TYPE cl_http_entity.
 entity->set_data( CONV xstring( 'ED00FF' ) ).
 cl_abap_unit_assert=>assert_equals( act = entity->get_data( ) exp = CONV xstring( 'ED00FF' ) ).
+ENDMETHOD.
+METHOD half_operators.
+DATA(s) = zcl_osgt_strlen16=>emoji( ).
+DATA(hi) = s+0(1).
+DATA(lo) = s+1(1).
+DATA(emoji) = s+0(2).
+DATA(r) = hi && `A`.
+IF r CS `a`.
+ cl_abap_unit_assert=>assert_equals( act = sy-fdpos exp = 1 ).
+ELSE.
+ cl_abap_unit_assert=>fail( ).
+ENDIF.
+IF r NS `b`.
+ cl_abap_unit_assert=>assert_equals( act = sy-fdpos exp = 2 ).
+ELSE.
+ cl_abap_unit_assert=>fail( ).
+ENDIF.
+IF r CP `+a`.
+ cl_abap_unit_assert=>assert_equals( act = 1 exp = 1 ).
+ELSE.
+ cl_abap_unit_assert=>fail( msg = `CP half wildcard` ).
+ENDIF.
 ENDMETHOD.
 ENDCLASS.

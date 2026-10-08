@@ -753,7 +753,7 @@ func CP(a, p string, cpat bool) bool {
 	}
 	n := len(a)
 	if !ascii {
-		ar = []rune(a)
+		ar = runesWTF8(a)
 		n = len(ar)
 	}
 	at := func(i int) rune {
@@ -814,7 +814,7 @@ func cpTokens(p string) []cpTok {
 		return v.([]cpTok)
 	}
 	var ps []cpTok
-	pr := []rune(p)
+	pr := runesWTF8(p)
 	for i := 0; i < len(pr); i++ {
 		switch {
 		case pr[i] == '#' && i+1 < len(pr):
