@@ -326,6 +326,19 @@ Format adapted from `larshp/hithub` (MIT).
 - Regression-test location: `docs/probes/dsl-l2/zcl_l2_aggregate_probe.clas.testclasses.abap` distinguishes ABAP assignment from the direct API; `test/dsl-l2.mjs` covers aggregate alert text, including a negative DEC minimum
 - Upstream version containing a fix: `unknown`
 
+### ANOMALY-2026-10-07-osgo-session-statics -- Go class state shared between internal sessions
+
+- Status: fixed locally in the Go emitter; Node daemon state remains the separate entry below
+- Discovery date: `2026-10-07`
+- Affected statement: `CLASS-DATA` and `CLASS_CONSTRUCTOR` in generated Go
+- Reproducer: `tools/gogen/fixtures/session-statics/`, eight goroutines with separate zero Sessions
+- Exact command: `node --test tools/gogen/session-statics.test.mjs` (Go driver runs with `-race`)
+- Expected behaviour: each session reads 42 after initialization and finishes its own 10,000 increments
+- Actual behaviour before the fix: package globals shared values and constructor flags; the race detector reports concurrent access in `Ensure_ZCL_RACE_INIT`
+- Fix: stable class storage and constructor flags in lazy `abap.Statics` slots selected by `Session.Statics`, inherited attributes in the declaring class's slot. Nil selects private state; serialized HTTP/APC hosts select `ProcessStatics` to retain caches across requests. The host regression test observes counter values 1 then 2 on separate connections.
+- Regression location: `tools/gogen/session-statics.test.mjs` and its generated-code Go driver; wired into `gogen.yml`
+- Upstream issue: none; this is our Go emitter
+
 ### ANOMALY-2026-09-24-daemon-statics -- a daemon's class data is its own session's on a system, and the process's here
 
 - Status: `open` (by design; decision D4 in `docs/abap-daemons.md`)

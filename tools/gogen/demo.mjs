@@ -177,7 +177,7 @@ func one(r run) (res result) {
 		}
 	}()
 	{
-		s := &abap.Session{}
+		s := &abap.Session{Statics: abap.ProcessStatics}
 		h := New_ZCL_O4D_APC_HANDLER(s)
 		h.INIT_ALL_DEMOS(s)
 		h.LOAD_DEMO(s, "main")

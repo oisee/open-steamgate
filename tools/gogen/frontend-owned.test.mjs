@@ -191,7 +191,7 @@ func TestGeneratedStore(t *testing.T) {
   s := &abap.Session{}
   me := &ZCL_OWNED{}
   me.INIT(s, strings.Repeat("\\x00", 16*65536))
-  if ${staticMemory ? "ZCL_OWNED__MV_MEM" : "me.mv_mem"}.Len() != 16*65536 { t.Fatal("buffer is not 16 pages") }
+  if ${staticMemory ? "St_ZCL_OWNED(s).mv_mem" : "me.mv_mem"}.Len() != 16*65536 { t.Fatal("buffer is not 16 pages") }
   if allocations := testing.AllocsPerRun(1000, func() { me.RUN(s) }); allocations != 0 {
     t.Fatalf("generated store allocations: %g", allocations)
   }
@@ -208,10 +208,10 @@ test("private statics qualify in static/instance methods and the class construct
   assert.deepEqual(p.partial, []);
   assert.ok(analyzeOwnership(p).declarations.has(p.classes[0].attributes[0]));
   const go = emitGo(p);
-  assert.match(go, /ZCL_OWNED__MV_MEM hXbuf.Buffer/);
-  assert.match(go, /ZCL_OWNED__MV_MEM.Sub/);
-  assert.match(go, /ZCL_OWNED__MV_MEM.StoreByte/);
-  assert.match(go, /ZCL_OWNED__MV_MEM.Append/);
+  assert.match(go, /mv_mem hXbuf.Buffer/);
+  assert.match(go, /static_ZCL_OWNED\.mv_mem\.Sub/);
+  assert.match(go, /static_ZCL_OWNED\.mv_mem\.StoreByte/);
+  assert.match(go, /static_ZCL_OWNED\.mv_mem\.Append/);
   assert.doesNotMatch(go, /func\(\) \*string \{ Ensure_ZCL_OWNED/);
 });
 

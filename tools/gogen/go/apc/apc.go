@@ -211,7 +211,7 @@ func (ch *Channel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "origin not allowed for this APC channel", http.StatusForbidden)
 		return
 	}
-	s := &abap.Session{}
+	s := &abap.Session{Statics: abap.ProcessStatics}
 	var host Host
 	// a dump while the handler starts: 503 and why, in text (Node's answer)
 	unavailable := func(err error) {
