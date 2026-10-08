@@ -33,7 +33,9 @@ sites: `EV_SOURCE`, `EV_FILE`, `EV_STATE`, `EV_CHANGED`, `EV_PACKAGE`,
 The gogen host signature carries `IV_JSON`, `EV_JSON`, `EV_STATE` and
 `EV_CHANGED`, and the adapter maps `ET_REVISION-SUBJECT_FULL`, since ADT
 batch 1 (#672), so the expected-gap lists are empty and those fields are
-compared like every other. A gap added back to the lists is reported per
+compared like every other; the harness also fails if the frontend signature
+stops carrying one of the four scalars, since no read or write call here
+supplies `IV_JSON`. A gap added back to the lists is reported per
 command, never passed silently, and one the gogen host starts to carry fails
 until it is removed again.
 

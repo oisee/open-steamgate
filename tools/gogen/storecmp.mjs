@@ -107,6 +107,15 @@ const goHostParams = new Map([...frontendSignature.matchAll(/\b([A-Z][A-Z0-9_]+)
 // batch 1 (#672) closed IV_JSON, EV_JSON, EV_STATE and EV_CHANGED: no
 // scalar of the ADT front is an expected gap any more
 const KNOWN_GAPS = new Map();
+// and they stay closed: IV_JSON reaches no read or write call of this
+// harness (only the compiler cases, which build their own signature), so a
+// frontend that dropped one of them would otherwise pass unnoticed
+for (const field of ["IV_JSON", "EV_JSON", "EV_STATE", "EV_CHANGED"]) {
+  if (!goHostParams.has(field)) {
+    bad += 1;
+    console.log(`FAIL ${field}: the gogen host signature (frontend.mjs STORE ZOSD_STORE) no longer carries it`);
+  }
+}
 for (const field of KNOWN_GAPS.keys()) {
   if (goHostParams.has(field)) {
     bad += 1;
