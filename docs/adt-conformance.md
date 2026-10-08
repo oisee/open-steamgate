@@ -3,8 +3,9 @@
 The runner uses one case list for JS, osgo and an explicitly requested reference
 system. This first slice covers discovery, HEAD, identity, package browsing,
 search, class documents, default/active/inactive source, includes, versions,
-objectstructure and five lock/session contracts. It never writes source or
-activates an object. X2 ABAP Unit and activation are later slices.
+objectstructure and five lock/session contracts. W1–W5 create disposable
+classes, write inactive source, check it and delete with a lock handle.
+Activation and ABAP Unit are later slices. X2 ABAP Unit and activation are later slices.
 
 Run heavy commands one at a time, waiting for the wrapper's slot:
 
@@ -27,8 +28,8 @@ repository and built source evidence; fixture snapshots exist only in the
 temporary view, so active requests can read the same synthetic bytes. It
 pins the already-transpiled output so adding parser fixtures does not publish a
 new live generation. It restores the working directory and layer/output settings
-and closes the server on success or failure; the
-private `.local/lars` is never relinked. `suite.mjs` runs the same HTTP cases
+and closes the server on success or failure. Temporary runtime state is
+separate; only the dependency tree `.local/lars` is linked for reading. `suite.mjs` runs the same HTTP cases
 plus focused checks for the harness. The manifest registers it as required;
 the group entry is a small import wrapper for selecting this fragment alone.
 
@@ -87,8 +88,9 @@ response so a wrong handle length cannot pass.
 An assertion inside a case's `after()` checks that case's own contract (L4:
 another session can reacquire after UNLOCK; L5: a lock survives a stateless
 read), so it is case evidence like the request's assertions and is reported
-as `after: ...`; only a non-assertion error there, or a failing session
-close, is cleanup and keeps the case unobserved.
+as `after: ...`; write cleanup assertions are explicitly marked as cleanup
+failures, as are transport errors and failing session close. Cleanup failures
+always fail, including cases expected to be known gaps.
 
 **osgo, 2026-10-08** (stoker's packed-column WHERE and hostclass seam,
 osgo's ADT session per request, SYSTEM IDENTITY, the ENQ kernel over
@@ -206,3 +208,25 @@ including O1–O5 against #642's fixture and exact request URL. The measured
 OSGo run answers 501 at every case's CSRF handshake; those are 23 observed
 known gaps. The focused fragment checks the harness and the same JS HTTP cases.
 No six-shard run or workflow edit is part of this slice.
+
+Write contracts follow measured class responses: empty CREATE 200, duplicate
+CREATE 400 AlreadyExists, and missing or bogus PUT/DELETE handles 423
+InvalidLockHandle. W1 compares active source before and after PUT. W5 requires
+a processed report for the object and source coordinates on an error; clean
+means zero E messages, so warnings are allowed. Same-user cross-session handles
+work on A4H, while local hosts intentionally bind handles to sessions; that
+divergence is outside the shared cases. JS uses a real disposable $ADT_WRITES
+package and unique class names, and checks that Git status is unchanged. Its
+default report directory is `.local/suite-results`; callers may supply `output`.
+
+Write cases require a target-owned writable disposable package. Supply it with
+`--write-package '$DISPOSABLE'` (or `ADT_WRITE_PACKAGE`) when running by URL,
+including operator-run reference checks. JS provisions and supplies its own
+package in a temporary tree. The osgo CI job stages its package alongside the
+outline fixture before transpile and in the retained source snapshot, and
+passes its name explicitly. No reference system package is assumed.
+
+Before CREATE, W cases retain the attempted identity and require GET 404.
+Cleanup reconciles the attempted path even after a lost response or an error:
+GET, LOCK if present, DELETE with the handle, and GET 404. Pre-existing objects
+and clean duplicate refusals are never deleted; unresolved cleanup fails the run.

@@ -29,9 +29,9 @@ const refs = `<adtcore:objectReferences xmlns:adtcore="${core}"><adtcore:objectR
 const envelopes = [
   ["activation?method=activate", refs, 200],
   ["checkruns", `<chkrun:checkObjectList xmlns:chkrun="http://www.sap.com/adt/checkrun" xmlns:adtcore="${core}"><chkrun:checkObject adtcore:uri="${uri}"><chkrun:content>REPORT zxml.</chkrun:content></chkrun:checkObject></chkrun:checkObjectList>`, 200],
-  // SAP observed duplicate programs as XI 001 / 500 (2026-10-04); other types retain 409.
+  // SAP observed duplicate programs as XI 001 / 500 (2026-10-04); classes return 400 AlreadyExists; unmeasured types retain 409.
   ["programs/programs", `<program:abapProgram xmlns:program="http://www.sap.com/adt/programs/programs" xmlns:adtcore="${core}" adtcore:name="ZXML" adtcore:description="XML"><adtcore:packageRef adtcore:name="$TMP"/></program:abapProgram>`, 500],
-  ["oo/classes", `<class:abapClass xmlns:class="http://www.sap.com/adt/oo/classes" xmlns:adtcore="${core}" adtcore:name="ZCL_XML"/>`, 409],
+  ["oo/classes", `<class:abapClass xmlns:class="http://www.sap.com/adt/oo/classes" xmlns:adtcore="${core}" adtcore:name="ZCL_XML"/>`, 400],
   ["oo/interfaces", `<intf:abapInterface xmlns:intf="http://www.sap.com/adt/oo/interfaces" xmlns:adtcore="${core}" adtcore:name="ZIF_XML"/>`, 409],
   ["programs/includes", `<include:abapInclude xmlns:include="http://www.sap.com/adt/programs/includes" xmlns:adtcore="${core}" adtcore:name="ZINCL_XML"/>`, 409],
   ["ddic/ddl/sources", `<ddl:ddlSource xmlns:ddl="http://www.sap.com/adt/ddic/ddlsources" xmlns:adtcore="${core}" adtcore:name="ZDDL_XML"/>`, 409],
@@ -39,6 +39,7 @@ const envelopes = [
   ["programs/programs/zxml?_action=LOCK", refs, 400],
   ["programs/programs/zxml?_action=UNLOCK", refs, 200],
   ["packages", `<pack:package xmlns:pack="http://www.sap.com/adt/packages" xmlns:adtcore="${core}" adtcore:name="$TMP"><pack:superPackage adtcore:name="$TMP"/></pack:package>`, 409],
+  // Unlocked include POST is unmeasured; retain the previous 409 contract.
   ["oo/classes/zcl_xml/includes", `<class:abapClassInclude xmlns:class="http://www.sap.com/adt/oo/classes" xmlns:adtcore="${core}" adtcore:name="ZCL_XML" class:includeType="testclasses"/>`, 409],
   ["cts/transportchecks", `<asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0"><asx:values><DATA><URI>${uri}</URI><DEVCLASS>$TMP</DEVCLASS><OPERATION>I</OPERATION></DATA></asx:values></asx:abap>`, 200],
   ["repository/nodestructure?parent_type=DEVC/K&parent_name=%24TMP", `<asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0"><asx:values><DATA><TV_NODEKEY>000002</TV_NODEKEY></DATA></asx:values></asx:abap>`, 200],
@@ -167,6 +168,8 @@ for (const front of ["node", "abap"]) describe(`T12/T13 XML requests ${front} mo
   for(const [path,xml,status] of envelopes) for(const [kind,transform] of Object.entries(variants)) it(`T12 ${path} ${kind}`,async () => {
     const baseline = await post(path,xml); expect(baseline.status,baseline.body).to.equal(status);
     // Unobserved collection duplicates retain 409; class includes require a lock.
+    if (status === 400 && path === "oo/classes") expect(baseline.body).to.contain("ExceptionResourceAlreadyExists");
+    if (status === 423) expect(baseline.body).to.contain("ExceptionResourceInvalidLockHandle");
     if (status === 409) expect(baseline.body).to.contain(`type id="${path.endsWith("/includes") && path.startsWith("oo/classes/")
       ? "ExceptionResourceNotLocked" : "ExceptionResourceIsModified"}"`);
     const key = `baseline ${path}`;
@@ -197,7 +200,7 @@ for (const front of ["node", "abap"]) describe(`T12/T13 XML requests ${front} mo
     for(const transform of [x => x,...Object.values(variants)]) {
       try {
         const r = await post(path,transform(body));
-        const program = path === "programs/programs";
+        const program = ["programs/programs", "oo/classes"].includes(path);
         expect(r.status,r.body).to.equal(program ? 200 : 201);
         if(program) expect(r).to.deep.equal({status:200,type:null,location:null,body:""});
         else expect(r.location).to.equal(base+path+"/"+encodeURIComponent(name.toLowerCase()));

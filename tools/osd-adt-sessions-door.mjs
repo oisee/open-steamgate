@@ -8,7 +8,7 @@ import {withStoreIPC} from "./osd-store-ipc.mjs";
 import {sendIPC} from "./osd-ipc.mjs";
 
 const ARITY = {get: 1, logoff: 1, holderOf: 2, holds: 4, lock: 3,
-  unlock: 2, release: 2, whileHeld: 4, deleteObject: 3};
+  unlock: 2, release: 2, whileHeld: 4, deleteObject: 4};
 export function sessionsDoor(identity) {
   return async (req, res) => {
     const address = req.socket.remoteAddress ?? "";
@@ -39,10 +39,10 @@ export function sessionsDoor(identity) {
         const callback = parameters => globalThis.abap.context.RFCDestinations.STORE
           .request(parameters, "OSD_SESSION_CALLBACK");
         if (input.method === "whileHeld") return sessions.whileHeld(...args, () => callback({action: "work"}));
-        if (input.method === "deleteObject") return sessions.deleteObject(...args, {
+        if (input.method === "deleteObject") return sessions.deleteObject(...args.slice(0, 3), {
           find: (type, name) => callback({action: "find", type, name}),
           delete: (type, name) => callback({action: "delete", type, name}),
-        });
+        }, args[3]);
         return sessions[input.method](...args);
       }, "ADT session compatibility"));
       return res.json({value: sessionJSON(value ?? null)});

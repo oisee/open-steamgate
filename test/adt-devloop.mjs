@@ -12,6 +12,7 @@ import {undoOnExit} from "./helpers/undo-on-exit.mjs";
 import {adtAbap} from "./helpers/adt-abap.mjs";
 import {SESSION_COOKIE} from "../tools/adt-session.mjs";
 import {activeFixture} from "./helpers/source-snapshot.mjs";
+import {ActivationJournal} from "../tools/osd-activation-journal.mjs";
 import {liveHash} from "../tools/osd-build.mjs";
 
 // The state-changing half of the façade: lock, write, unlock, activate.
@@ -58,6 +59,7 @@ describe("tools/adt-facade: the development loop", () => {
   let token;
   let context;
   let data;
+  let journalRoot;
 
   before(async function () {
     this.timeout(120000);
@@ -103,6 +105,8 @@ describe("tools/adt-facade: the development loop", () => {
     data = new Data({client});
     const facade = adtRouter({transpileOnActivate: false, data, abap: await adtAbap()});
     store = facade.store;
+    journalRoot = mkdtempSync(join(tmpdir(), "adt-devloop-journal-"));
+    store.activationJournal = new ActivationJournal(journalRoot);
     // registered here, not at load, so a run that filters this suite out
     // installs no signal listener on its behalf
     dropUndo = undoOnExit(removeScratch);
@@ -140,6 +144,7 @@ describe("tools/adt-facade: the development loop", () => {
     await server.close();
     removeScratch();
     dropUndo();
+    if (journalRoot) rmSync(journalRoot, {recursive: true, force: true});
   });
 
   const base = () => `http://localhost:${port}/sap/bc/adt`;
@@ -233,7 +238,7 @@ describe("tools/adt-facade: the development loop", () => {
   describe("writing", () => {
     it("a write needs the handle, and refuses without one", async () => {
       const res = await call(`/oo/classes/${SCRATCH}/source/main`, {method: "PUT", body: SOURCE});
-      expect(res.status).to.equal(409);
+      expect(res.status).to.equal(423);
       expect(await res.text()).to.contain("no lock handle");
     });
 
@@ -241,7 +246,7 @@ describe("tools/adt-facade: the development loop", () => {
       const {handle} = await lock();
       store.write("CLAS", "ZCL_OSD_SCRATCH_TWO", SOURCE.replaceAll("zcl_osd_scratch", "zcl_osd_scratch_two"));
       const res = await call(`/oo/classes/ZCL_OSD_SCRATCH_TWO/source/main?lockHandle=${handle}`, {method: "PUT", body: SOURCE});
-      expect(res.status).to.equal(409);
+      expect(res.status).to.equal(423);
       const other = store.find("CLAS", "ZCL_OSD_SCRATCH_TWO");
       if (other !== undefined && existsSync(other.file)) {
         rmSync(other.file);
@@ -305,7 +310,7 @@ describe("tools/adt-facade: the development loop", () => {
       const unlocked = await call(`/oo/classes/${SCRATCH}?_action=UNLOCK&lockHandle=${handle}`, {method: "POST"});
       expect(unlocked.status).to.equal(200);
       const res = await call(`/oo/classes/${SCRATCH}/source/main?lockHandle=${handle}`, {method: "PUT", body: SOURCE});
-      expect(res.status).to.equal(409);
+      expect(res.status).to.equal(423);
     });
   });
 
@@ -369,6 +374,44 @@ describe("tools/adt-facade: the development loop", () => {
       expect(res.status).to.equal(200);
       expect(await res.text()).to.contain("<chkrun:checkReport");
       expect(store.exists("CLAS", "ZCL_OSD_NEVER_WRITTEN"), "asking created nothing").to.equal(false);
+    });
+
+    const includeBody = (objects) => `<?xml version="1.0" encoding="UTF-8"?>
+<chkrun:checkObjectList xmlns:chkrun="http://www.sap.com/adt/checkrun" xmlns:adtcore="http://www.sap.com/adt/core">
+${objects.map(([uri, source]) => `  <chkrun:checkObject adtcore:uri="${uri}" chkrun:version="active">
+    <chkrun:artifacts>
+      <chkrun:artifact chkrun:contentType="text/plain; charset=utf-8" chkrun:uri="${uri}">
+        <chkrun:content>${Buffer.from(source).toString("base64")}</chkrun:content>
+      </chkrun:artifact>
+    </chkrun:artifacts>
+  </chkrun:checkObject>`).join("\n")}
+</chkrun:checkObjectList>`;
+
+    it("checks a program include as its own object and source resource", async function () {
+      this.timeout(60000);
+      const uri = "/sap/bc/adt/programs/includes/zosd_program_include";
+      const res = await call("/checkruns?reporters=abapCheckRun", {
+        method: "POST", body: includeBody([[uri, "THIS IS INVALID ABAP"]]),
+      });
+      const xml = await res.text();
+      expect(res.status).to.equal(200);
+      expect(xml.match(/<chkrun:checkReport /g)).to.have.lengthOf(1);
+      expect(xml).to.include(`chkrun:triggeringUri="${uri}"`);
+      expect(xml).to.include(`chkrun:uri="${uri}#start=`);
+    });
+
+    it("checks a mixed class and program-include request without dropping the include", async function () {
+      this.timeout(60000);
+      const classUri = `/sap/bc/adt/oo/classes/${SCRATCH.toLowerCase()}`;
+      const includeUri = "/sap/bc/adt/programs/includes/zosd_program_include";
+      const res = await call("/checkruns?reporters=abapCheckRun", {
+        method: "POST", body: includeBody([[classUri, SOURCE], [includeUri, "THIS IS INVALID ABAP"]]),
+      });
+      const xml = await res.text();
+      expect(res.status).to.equal(200);
+      expect(xml.match(/<chkrun:checkReport /g)).to.have.lengthOf(2);
+      expect(xml).to.include(`chkrun:triggeringUri="${includeUri}"`);
+      expect(xml).to.include(`chkrun:uri="${includeUri}#start=`);
     });
 
     it("a wildcard content type is a request like any other", async function () {
@@ -1244,17 +1287,43 @@ describe("tools/adt-facade: create and delete over the wire", () => {
 </${el}>`;
   };
 
-  it("POST to the class collection creates the object on disk and answers 201 with its URI", async () => {
+  it("POST to the class collection creates the object on disk and answers empty 200", async () => {
     const res = await call("/oo/classes", {method: "POST", headers: {"content-type": "application/*"}, body: createBody("CLAS", "ZCL_MADE_ADT", "made over the wire", "$STG_DEMO")});
-    expect(res.status, await res.text().catch(() => "")).to.equal(201);
-    expect(res.headers.get("location")).to.equal("/sap/bc/adt/oo/classes/zcl_made_adt");
+    expect(res.status, await res.text().catch(() => "")).to.equal(200);
+    expect(res.headers.get("location")).to.equal(null);
     // it is on disk, in the folder of its package, with the header beside it
     expect(existsSync(join(root, "src/demo/zcl_made_adt.clas.abap"))).to.equal(true);
     expect(readFileSync(join(root, "src/demo/zcl_made_adt.clas.xml"), "utf8")).to.contain("made over the wire");
-    // and the façade now reads it back, inactive until activated
+    // and the façade now reads back the created class
     const doc = await call("/oo/classes/zcl_made_adt");
     expect(doc.status).to.equal(200);
     expect(await doc.text()).to.contain('adtcore:name="ZCL_MADE_ADT"');
+  });
+
+  it("a recreated class keeps its new active skeleton across a save and store restart", async () => {
+    const name = "ZCL_RECREATE_ADT", path = "/oo/classes/zcl_recreate_adt";
+    await store.write("CLAS", name, "* previous generation\n", "main", {root: "src"});
+    activeFixture(root);
+    await store.delete("CLAS", name);
+    const made = await call("/oo/classes", {method: "POST", headers: {"content-type": "application/xml"},
+      body: createBody("CLAS", name, "recreated", "$STG_DEMO")});
+    expect(made.status).to.equal(200);
+    let handle;
+    try {
+      const active = store.read("CLAS", name, "main", "active").source;
+      expect(active).to.contain(`CLASS ${name.toLowerCase()} DEFINITION`);
+      expect(active).not.to.contain("previous generation");
+      const locked = await call(path + "?_action=LOCK&accessMode=MODIFY", {method: "POST"});
+      expect(locked.status).to.equal(200);
+      handle = /<LOCK_HANDLE>([^<]+)<\/LOCK_HANDLE>/.exec(await locked.text())[1];
+      expect((await call(path + "/source/main?lockHandle=" + handle, {method: "PUT", body: active + "* draft\n"})).status).to.equal(200);
+      const restarted = new ObjectStore({root, libs: []});
+      expect(restarted.read("CLAS", name, "main", "active").source).to.equal(active);
+      expect(restarted.read("CLAS", name, "main", "inactive").source).to.equal(active + "* draft\n");
+    } finally {
+      if (handle) expect((await call(path + "?lockHandle=" + handle, {method: "DELETE"})).status).to.equal(200);
+      else if (store.find("CLAS", name)) store.delete("CLAS", name);
+    }
   });
 
   it("a create for a package that is not there is a refusal a client can read", async () => {
@@ -1333,7 +1402,7 @@ describe("tools/adt-facade: create and delete over the wire", () => {
 
     before(async () => {
       const made = await call("/oo/classes", {method: "POST", headers: {"content-type": "application/*"}, body: createBody("CLAS", LOCKED, "locked", "$STG_DEMO")});
-      expect(made.status).to.equal(201);
+      expect(made.status).to.equal(200);
     });
 
     it("a stateless request in between keeps the lock, as A4H does", async () => {
@@ -1402,18 +1471,17 @@ describe("tools/adt-facade: create and delete over the wire", () => {
     it("another session cannot delete what one session holds", async () => {
       const DOOMED = "ZCL_MADE_DOOMED";
       const made = await call("/oo/classes", {method: "POST", headers: {"content-type": "application/*"}, body: createBody("CLAS", DOOMED, "doomed", "$STG_DEMO")});
-      expect(made.status).to.equal(201);
+      expect(made.status).to.equal(200);
       const {id, other} = await otherSession("OTHERDEV");
       const locked = await other(`/oo/classes/${DOOMED}?_action=LOCK&accessMode=MODIFY`, {method: "POST"});
       expect(locked.status).to.equal(200);
+      const handle = /<LOCK_HANDLE>([^<]+)<\/LOCK_HANDLE>/.exec(await locked.text())[1];
       const refused = await call(`/oo/classes/${DOOMED.toLowerCase()}`, {method: "DELETE"});
-      expect(refused.status).to.equal(403);
-      const xml = await refused.text();
-      expect(xml).to.contain('<type id="ExceptionResourceNoAccess"/>');
-      expect(xml).to.contain('<entry key="T100KEY-V1">OTHERDEV</entry>');
+      expect(refused.status).to.equal(423);
+      expect(await refused.text()).to.contain("ExceptionResourceInvalidLockHandle");
       expect(existsSync(join(root, "src/demo/zcl_made_doomed.clas.abap")), "still there").to.equal(true);
       // the holder may, and its lock goes with the object
-      const gone = await other(`/oo/classes/${DOOMED.toLowerCase()}`, {method: "DELETE"});
+      const gone = await other(`/oo/classes/${DOOMED.toLowerCase()}?lockHandle=${handle}`, {method: "DELETE"});
       expect(gone.status).to.equal(200);
       expect(existsSync(join(root, "src/demo/zcl_made_doomed.clas.abap"))).to.equal(false);
       await fetch(`http://localhost:${port}/sap/public/bc/icf/logoff`, {headers: {cookie: `${SESSION_COOKIE}=${id}`}});
@@ -1456,17 +1524,10 @@ describe("tools/adt-facade: create and delete over the wire", () => {
       await unlockIt(mine.handle);
     });
 
-    // Only a host without a body parser reads the body inside the route,
-    // after the lock was checked (this suite's app parses first, which
-    // closes the window); the façade is mounted bare for this one.
-    it("a lock released while the PUT's body is still arriving does not write", async () => {
+    const releaseDuringBody = async (withAbap) => {
       // Synchronised on the request itself, not on a timer: the first chunk
-      // reaching a "data" listener proves the body is being read. Without
-      // the ABAP front that listener is the PUT handler's, attached after
-      // its first lock check; with it (slice 3) it is the front's, which
-      // reads the body before the handler's step, so the PUT route checks
-      // the lock only after the whole body is in. Either way the lock goes
-      // while the body is still arriving, and nothing is written.
+      // reaching the body reader proves enough of the request has started to
+      // release the lock before its remaining chunks arrive.
       let bodyReached;
       const reached = new Promise((resolve) => {
         bodyReached = resolve;
@@ -1484,7 +1545,7 @@ describe("tools/adt-facade: create and delete over the wire", () => {
         }
         next();
       });
-      bare.use(adtRouter({store, transpileOnActivate: false, abap: await adtAbap()}).router);
+      bare.use(adtRouter({store, transpileOnActivate: false, ...(withAbap ? {abap: await adtAbap()} : {})}).router);
       const server2 = await new Promise((resolve) => {
         const s = bare.listen(0, () => resolve(s));
       });
@@ -1514,24 +1575,26 @@ describe("tools/adt-facade: create and delete over the wire", () => {
             put.end("* and the rest\n");
           }).catch(reject);
         });
-        expect(await status).to.equal(409);
+        expect(await status, withAbap ? "ABAP front" : "host").to.equal(withAbap ? 423 : 409);
         expect(store.read("CLAS", LOCKED).source, "nothing written").to.equal(before);
       } finally {
         await new Promise((resolve) => server2.close(resolve));
       }
-    });
+    };
+    it("host: a lock released while the PUT's body is still arriving does not write", () => releaseDuringBody(false));
+    it("ABAP front: a lock released while the PUT's body is still buffering does not write", () => releaseDuringBody(true));
   });
 
   it("POST on a class's includes creates the test include, under the class's lock", async () => {
     const made = await call("/oo/classes", {method: "POST", headers: {"content-type": "application/*"}, body: createBody("CLAS", "ZCL_MADE_INCL", "gets tests", "$STG_DEMO")});
-    expect(made.status).to.equal(201);
+    expect(made.status).to.equal(200);
     const body = `<?xml version="1.0" encoding="UTF-8"?>
 <class:abapClassInclude xmlns:class="http://www.sap.com/adt/oo/classes" xmlns:adtcore="http://www.sap.com/adt/core"
   adtcore:name="ZCL_MADE_INCL" class:includeType="testclasses"/>`;
     const include = "/oo/classes/zcl_made_incl/includes";
     // no lock, no include
     const unlocked = await call(include, {method: "POST", headers: {"content-type": "application/*"}, body});
-    expect(unlocked.status).to.equal(409);
+    expect(unlocked.status).to.equal(409); // unmeasured; keeps the previous answer
     expect(existsSync(join(root, "src/demo/zcl_made_incl.clas.testclasses.abap"))).to.equal(false);
 
     const locked = await call("/oo/classes/zcl_made_incl?_action=LOCK&accessMode=MODIFY", {method: "POST"});

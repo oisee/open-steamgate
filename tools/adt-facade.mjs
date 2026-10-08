@@ -1993,8 +1993,8 @@ export function adtRouter(options = {}) {
   // The create body is the object's own document with nothing in it but a
   // name, a description and the package it goes to (vsp!crud.go
   // buildCreateObjectBody; Eclipse's wizards send the same). Programs answer
-  // an untyped empty 200, observed on SAP on 2026-10-03. Other collections
-  // retain 201 + Location until observed. The client's next move is
+  // an untyped empty 200, observed on SAP on 2026-10-03. Classes do too
+  // (observed 2026-10-08). Other collections retain 201 + Location until observed. The client's next move is
   // the ordinary lock / PUT / activate, which is why a create writes a
   // skeleton and not a source. A package is created the same way under
   // /packages, with its parent in pack:superPackage. Function groups and
@@ -2026,8 +2026,13 @@ export function adtRouter(options = {}) {
             package: home ?? "",
             // an object of $TMP carries who made it (tools/osd-tmp.mjs)
             author: req.adt.session.user,
+            activeSkeleton: type === "CLAS",
           });
         } catch (error) {
+          if (type === "CLAS" && error instanceof Conflict) {
+            refuse(res, 400, "ExceptionResourceAlreadyExists", `Class ${name.toUpperCase()} already exists`);
+            return;
+          }
           // SAP observation 2026-10-04, program v2/v3 only. Keep the
           // store's conflict and every other collection's answer unchanged.
           if (adt !== "programs/programs" || !(error instanceof Conflict)) throw error;
@@ -2043,6 +2048,7 @@ export function adtRouter(options = {}) {
           else res.status(200).end();
           return;
         }
+        if (type === "CLAS") return void res.status(200).end();
         res.status(201)
           .set("Location", `${BASE}/${adt}/${encodeURIComponent(made.name.toLowerCase())}`)
           .end();
@@ -2051,14 +2057,22 @@ export function adtRouter(options = {}) {
     router.delete(`${BASE}/${adt}/:name`, (req, res) => {
       answer(res, async () => {
         const name = decodeURIComponent(req.params.name);
+        if (type === "CLAS") {
+          const handle = String(req.query.lockHandle ?? "");
+          const held = req.adt.session.locks.get(handle);
+          if (!held || held.type !== type || held.name !== name.toUpperCase()) {
+            return void refuse(res, 423, "ExceptionResourceInvalidLockHandle", "DELETE requires the object's lock handle");
+          }
+        }
         if (req.adt.sessions.deleteObject !== undefined) {
-          const result = await req.adt.sessions.deleteObject(req.adt.session, type, name, store);
+          const result = await req.adt.sessions.deleteObject(req.adt.session, type, name, store, type === "CLAS" ? String(req.query.lockHandle ?? "") : undefined);
           // the caller's session ended after the front resolved it (its own
           // logoff, queued behind the verdict): it may delete nothing
           if (result.ended === true) {
             refuseToken(res);
             return;
           }
+          if (result.invalidHandle) return void refuse(res, 423, "ExceptionResourceInvalidLockHandle", "DELETE lock handle is no longer held");
           if (result.holder !== undefined) {
             res.status(403).type("application/xml").send(lockedByOtherDocument(result.holder.session.user, String(name).toUpperCase()));
             return;
@@ -2072,7 +2086,12 @@ export function adtRouter(options = {}) {
           res.status(403).type("application/xml").send(lockedByOtherDocument(holder.session.user, String(name).toUpperCase()));
           return;
         }
-        const gone = await store.delete(type, name);
+        let gone;
+        if (type === "CLAS") {
+          const held = await req.adt.sessions.whileHeld(req.adt.session, String(req.query.lockHandle ?? ""), type, name,
+            async () => {gone = await store.delete(type, name);});
+          if (!held) return void refuse(res, 423, "ExceptionResourceInvalidLockHandle", "DELETE lock handle is no longer held");
+        } else gone = await store.delete(type, name);
         // and a lock on an object that is gone holds nothing
         await req.adt.sessions.release(gone.type, gone.name);
         res.status(200).end();
@@ -2163,7 +2182,8 @@ export function adtRouter(options = {}) {
       if (lock === undefined || lock.type !== (entry?.type ?? type) || lock.name !== (entry?.name ?? String(req.params.name).toUpperCase())) {
         // the handle is the client's proof it owns the object right now, and
         // a handle from another session or another object is neither
-        res.status(409).type("application/xml").send(exceptionDocument("ExceptionResourceNotLocked", handle === "" ? "no lock handle was given" : `lock handle ${handle} does not hold this object in this session`));
+        const measuredClass = type === "CLAS" && (req.params.include === undefined || req.params.include === "testclasses");
+        res.status(measuredClass ? 423 : 409).type("application/xml").send(exceptionDocument(measuredClass ? "ExceptionResourceInvalidLockHandle" : "ExceptionResourceNotLocked", handle === "" ? "no lock handle was given" : `lock handle ${handle} does not hold this object in this session`));
         return false;
       }
       return true;
@@ -2177,6 +2197,7 @@ export function adtRouter(options = {}) {
       const handle = String(req.query.lockHandle ?? "");
       const lock = session.locks.get(handle);
       if (lock === undefined || await sessions.whileHeld(session, handle, lock.type, lock.name, write) === false) {
+        // A release race is unmeasured; preserve its previous refusal.
         res.status(409).type("application/xml").send(exceptionDocument("ExceptionResourceNotLocked",
           `lock handle ${handle} was released before the source arrived`));
         return false;
@@ -2186,6 +2207,9 @@ export function adtRouter(options = {}) {
     // WRITE. The file only: the transpile belongs to activation, where the
     // verdict is what the client waits for and the modules follow after.
     const writeSource = (req, res) => {
+      if (type === "CLAS" && req.params.include === "testclasses" && !req.query.lockHandle) {
+        return void refuse(res, 400, "ExceptionParameterNotFound", "Parameter lockHandle could not be found");
+      }
       if (mayWrite(req, res) === false) {
         return;
       }
@@ -2248,6 +2272,13 @@ export function adtRouter(options = {}) {
       // empty; its source is the client's next PUT.
       router.post(`${BASE}/${adt}/:name/includes`, async (req, res) => {
         const body = await rawBody(req);
+        // Measured locked-class include CREATE without a handle: 403 NoAccess.
+        if (!req.query.lockHandle && await req.adt.sessions.holderOf("CLAS", String(req.params.name).toUpperCase())) {
+          return void refuse(res, 403, "ExceptionResourceNoAccess", "The class is currently being edited");
+        }
+        if (!req.query.lockHandle) {
+          return void refuse(res, 409, "ExceptionResourceNotLocked", "no lock handle was given");
+        }
         if (mayWrite(req, res) === false) {
           return;
         }

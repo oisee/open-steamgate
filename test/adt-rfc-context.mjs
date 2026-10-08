@@ -63,7 +63,7 @@ describe("RFC editing context without client sessiontype headers", function () {
     let made = false;
     try {
       const created = await one.call("POST", "/sap/bc/adt/oo/classes", body, {Authorization:"Basic " + Buffer.from("SPOOFED:ignored").toString("base64")});
-      expect(created.status).to.equal(201); made = true;
+      expect(created.status).to.equal(200); made = true;
       expect(store.authorOf("CLAS", "ZCL_RFC_OWNED")).to.equal("DEVELOPER");
       for (const suffix of ["", "/source/main"]) {
         const path = await one.call("POST", "/sap/bc/adt/repository/nodepath?uri=" + encodeURIComponent(uri + suffix));
@@ -89,12 +89,12 @@ describe("RFC editing context without client sessiontype headers", function () {
     const read=await one.call("GET",object+"/source/main","",{"x-sap-adt-sessiontype":"stateless"});
     expect(read.status).to.equal(200); expect(read.body).to.equal(source);
     const path=object+"/source/main?lockHandle="+held.handle;
-    expect((await foreign.call("PUT",path,source+"* foreign\n",{"Content-Type":"text/plain"})).status).to.equal(409);
+    expect((await foreign.call("PUT",path,source+"* foreign\n",{"Content-Type":"text/plain"})).status).to.equal(423);
     // UNLOCK is idempotent even for an unowned handle; it must leave the
     // owner's lock intact rather than routing a foreign RFC user to it.
     expect((await foreign.call("POST",object+"?_action=UNLOCK&lockHandle="+held.handle)).status).to.equal(200);
     expect((await two.call("POST",lock)).status).to.equal(403);
-    expect((await two.call("PUT",object+"/source/main?lockHandle="+"0".repeat(40),source,{"Content-Type":"text/plain"})).status).to.equal(409);
+    expect((await two.call("PUT",object+"/source/main?lockHandle="+"0".repeat(40),source,{"Content-Type":"text/plain"})).status).to.equal(423);
     const edited=source+"* saved over RFC\n";
     const saved=await two.call("PUT",path,edited,{"Content-Type":"text/plain"});
     expect(saved.status).to.equal(200); expect(saved.body).to.equal("");
@@ -102,7 +102,7 @@ describe("RFC editing context without client sessiontype headers", function () {
     expect(saved.responseXml).to.match(/<NAME>etag<\/NAME>/i);
     expect((await one.call("GET",object+"/source/main")).body).to.equal(edited);
     expect((await two.call("POST",object+"?_action=UNLOCK&lockHandle="+held.handle)).status).to.equal(200);
-    expect((await one.call("PUT",path,source,{"Content-Type":"text/plain"})).status).to.equal(409);
+    expect((await one.call("PUT",path,source,{"Content-Type":"text/plain"})).status).to.equal(423);
     const other=await two.call("POST",lock); expect(other.status).to.equal(200);
     expect(other.handle).not.to.equal(held.handle);
     expect((await two.call("GET","/sap/public/bc/icf/logoff")).status).to.equal(200);

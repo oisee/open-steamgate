@@ -10,6 +10,7 @@ import {Session} from './session.mjs';
 import {loadCases, classify, validateExpected, run, recordUnavailable} from './run.mjs';
 import {mergeSquare} from './square.mjs';
 import lockCases from './cases/locks.mjs';
+import writeCases from './cases/writes.mjs';
 
 describe('shared ADT conformance runner contracts', function () {
   this.timeout(180000);
@@ -80,6 +81,76 @@ describe('shared ADT conformance runner contracts', function () {
     await c.after(ctx, undefined);
     assert.deepEqual(calls, ['LOCK', 'UNLOCK', 'other LOCK', 'other UNLOCK']);
   });
+  it('never deletes a pre-existing object or a clean duplicate refusal', async () => {
+    const c = writeCases.find(c => c.point === 'W2');
+    for (const existing of [true, false]) {
+      const calls = [];
+      const ctx = {writePackage: '$FIXTURE', session: {request: async req => {
+        calls.push(req.method ?? 'GET');
+        return {status: req.method === 'POST' ? 400 : existing ? 200 : 404, body: 'ExceptionResourceAlreadyExists'};
+      }}};
+      await assert.rejects(c.setup(ctx)); await c.after(ctx);
+      assert.deepEqual(calls, existing ? ['GET'] : ['GET', 'POST']);
+    }
+  });
+  it('reconciles lost CREATE responses and unexpected statuses after confirmed absence', async () => {
+    const c = writeCases.find(c => c.point === 'W2'), handle = 'a'.repeat(40);
+    for (const outcome of ['lost', '500', 'absent', 'unresolved']) {
+      let reads = 0; const calls = [];
+      const ctx = {writePackage: '$FIXTURE', session: {request: async req => {
+        calls.push(req.method ?? 'GET');
+        if (!req.method) return {status: ++reads === 1 || reads === 3 || outcome === 'absent' ? 404 : outcome === 'unresolved' ? 503 : 200};
+        if (req.method === 'DELETE') {assert.equal(req.query.lockHandle, handle); return {status: 200};}
+        if (req.query?._action === 'LOCK') return {status: 200, body: `<LOCK_HANDLE>${handle}</LOCK_HANDLE>`};
+        if (outcome === '500') return {status: 500, body: ''};
+        throw new Error('CREATE response lost');
+      }}};
+      await assert.rejects(c.setup(ctx));
+      if (outcome === 'unresolved') await assert.rejects(c.after(ctx), e => e.cleanupFailure === true);
+      else await c.after(ctx);
+      assert.deepEqual(calls, outcome === 'absent' || outcome === 'unresolved' ? ['GET', 'POST', 'GET'] : ['GET', 'POST', 'GET', 'POST', 'DELETE', 'GET']);
+    }
+  });
+  it('retains W4 ownership and its handle after a failed cleanup DELETE', async () => {
+    const c = writeCases.find(c => c.point === 'W4'), handle = 'a'.repeat(40), calls = [];
+    const ctx = {createAttempted: true, absentBeforeAttempt: true, attemptedPath: '/oo/classes/synthetic', path: '/oo/classes/synthetic', name: 'SYNTHETIC', session: {request: async req => {
+      calls.push(req);
+      if (!req.method) return {status: 200};
+      if (req.method === 'POST') return {status: 400, body: 'ExceptionResourceAlreadyExists'};
+      return {status: req.query?.lockHandle ? 500 : 423, body: 'ExceptionResourceInvalidLockHandle'};
+    }}};
+    await assert.rejects(c.after(ctx, {status: 200, body: `<LOCK_HANDLE>${handle}</LOCK_HANDLE>`}), error => {
+      assert.equal(error.cleanupFailure, true); return /cleanup DELETE/.test(error.message);
+    });
+    assert.equal(ctx.handle, handle); assert.equal(ctx.path, '/oo/classes/synthetic');
+    assert.equal(calls.at(-1).query.lockHandle, handle);
+  });
+  it('acquires a cleanup lock, deletes with it, and verifies absence', async () => {
+    const c = writeCases.find(c => c.point === 'W2'), calls = [], handle = 'b'.repeat(40);
+    let reads = 0;
+    const ctx = {createAttempted: true, absentBeforeAttempt: true, attemptedPath: '/oo/classes/synthetic', path: '/oo/classes/synthetic', session: {request: async req => {
+      calls.push(req);
+      return req.method === 'POST' ? {status: 200, body: `<LOCK_HANDLE>${handle}</LOCK_HANDLE>`}
+        : {status: req.method === 'DELETE' || ++reads === 1 ? 200 : 404};
+    }}};
+    await c.after(ctx);
+    assert.deepEqual(calls.map(r => r.method ?? 'GET'), ['GET', 'POST', 'DELETE', 'GET']);
+    assert.equal(calls[2].query.lockHandle, handle); assert.equal(ctx.path, undefined);
+  });
+  it('checks processed reports with arbitrary prefixes and allows warnings but rejects clean errors', async () => {
+    const c = writeCases.find(c => c.point === 'W5'), path = '/oo/classes/synthetic';
+    const xml = (status, messages) => `<q:checkRunReports xmlns:q="http://www.sap.com/adt/checkrun"><q:checkReport q:triggeringUri="/sap/bc/adt${path}" q:status="${status}"><q:checkMessageList>${messages}</q:checkMessageList></q:checkReport></q:checkRunReports>`;
+    const message = type => `<q:checkMessage q:type="${type}" q:uri="/sap/bc/adt${path}/source/main#start=8,5"/>`;
+    for (const [status, type, rejected] of [['processed', 'W', false], ['notProcessed', 'W', true], ['processed', 'E', true]]) {
+      const ctx = {createAttempted: true, absentBeforeAttempt: true, attemptedPath: path, path, name: 'SYNTHETIC', handle: 'c'.repeat(40), session: {request: async req => ({
+        status: req.method === 'DELETE' || req.method === 'PUT' || req.path === '/checkruns' ? 200 : 404,
+        body: req.path === '/checkruns' ? xml(status, message(type)) : '',
+      })}};
+      const checked = c.after(ctx, {status: 200, body: xml('processed', message('E'))});
+      if (rejected) await assert.rejects(checked, /CHECK processed|zero E messages/); else await checked;
+      assert.equal(ctx.path, undefined, 'cleanup runs even after report failure');
+    }
+  });
   it('selects namespace-aware XML paths and rejects unsupported XPath', () => {
     const xml = '<q:root xmlns:q="urn:fixture"><q:item id="1">a&amp;b</q:item><q:item id="2">other</q:item></q:root>';
     assert.deepEqual(xpath(xml, '/p:root/p:item[@id="1"]/text()', {p: 'urn:fixture'}), ['a&b']);
@@ -143,7 +214,7 @@ describe('shared ADT conformance runner contracts', function () {
       const result = await run({target: 'osgo', base: `http://127.0.0.1:${server.address().port}`,
         expectedFile: allGaps(output), output, say: () => {}});
       assert.equal(result.exitCode, 0, JSON.stringify(result));
-      assert.equal(result.summary['known-gap'], 24); assert.equal(result.summary.fail, 0);
+      assert.equal(result.summary['known-gap'], 29); assert.equal(result.summary.fail, 0);
       assert.equal(result.targetAnswered, true); assert.equal(result.handshakeStatus, 501);
       assert.equal(result.discoverySucceeded, false); assert.equal(result.executedCases, 0);
       assert.ok(result.cases.every(c => c.observed && c.actual?.status === 501));
@@ -198,7 +269,7 @@ describe('shared ADT conformance runner contracts', function () {
       const expectedFile = join(output, 'expected.json');
       writeFileSync(expectedFile, JSON.stringify(Object.fromEntries((await loadCases()).map(c => [c.id, 'n/a: synthetic exclusion']))));
       const result = await run({target: 'osgo', base: 'http://127.0.0.1:0', expectedFile, output, say: () => {}});
-      assert.equal(result.exitCode, 1); assert.equal(result.summary['not-applicable'], 24);
+      assert.equal(result.exitCode, 1); assert.equal(result.summary['not-applicable'], 29);
       assert.equal(result.executedCases, 0); assert.equal(result.discoverySucceeded, false);
       assert.ok(result.cases.every(c => !c.observed));
       assert.deepEqual(result.runErrors, ['no executed cases', 'no successful discovery request']);
@@ -281,9 +352,9 @@ describe('shared ADT conformance runner contracts', function () {
     assert.equal(square[0].js.status, 'pass'); assert.equal(square[0].a4h.status, 'not-measured');
     assert.throws(() => mergeSquare(cases, [report('2026-01-02', 'pass'), report('2026-01-02', 'fail')]), /conflicting/);
   });
-  it('runs every read and lock case through the existing JS server helper', async () => {
+  it('runs every conformance case through the existing JS server helper', async () => {
     const result = await runJS();
     assert.equal(result.exitCode, 0, JSON.stringify(result.summary));
-    assert.equal(result.executedCases, 24); assert.equal(result.discoverySucceeded, true);
+    assert.equal(result.executedCases, 29); assert.equal(result.discoverySucceeded, true);
   });
 });

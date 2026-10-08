@@ -92,6 +92,49 @@ describe("C1 checkruns live Node byte diff",function () {
     expect(bad.body.toString()).not.to.include(Buffer.from(invalid).toString("base64"));
   });
   it("2 broken entity overlay never writes disk",async () => { await post(block(uri,"CLASS zcl_check DEFINITION. &lt;bad&gt; &amp; ENDCLASS.")); expect(readFileSync(join(root,"src/zcl_check.clas.abap"),"utf8")).to.equal(clean); });
+  it("diagnostics use source/main or the include while triggeringUri echoes the sent URI", async () => {
+    for (const [sent, include, resource] of [[uri + "/source/main", "", uri + "/source/main"],
+      [uri + "/includes/testclasses", "", uri + "/includes/testclasses"],
+      [uri, "testclasses", uri + "/includes/testclasses"]]) {
+      const r = await post(block(sent, "THIS IS INVALID ABAP.", include));
+      const xml = r.body.toString();
+      expect(xml).to.include(`chkrun:triggeringUri="${sent}"`);
+      expect(xml).to.include(`chkrun:uri="${resource}#start=`);
+      expect(xml).not.to.include("/source/main/source/main");
+      expect(xml).not.to.include("/includes/testclasses/source/main");
+    }
+  });
+  it("single and mixed program-include checks keep the INCL resource", async () => {
+    const object = (uri, source) => `<chkrun:checkObject adtcore:uri="${uri}">
+      <chkrun:artifacts><chkrun:artifact chkrun:uri="${uri}"><chkrun:content>${Buffer.from(source).toString("base64")}</chkrun:content></chkrun:artifact></chkrun:artifacts>
+    </chkrun:checkObject>`;
+    const includeUri = base + "programs/includes/zinclude";
+    const single = await post(`<chkrun:checkObjectList xmlns:chkrun="http://www.sap.com/adt/checkrun" xmlns:adtcore="http://www.sap.com/adt/core">${object(includeUri, "THIS IS INVALID ABAP")}</chkrun:checkObjectList>`);
+    expect(single.body.toString().match(/<chkrun:checkReport /g)).to.have.lengthOf(1);
+    expect(single.body.toString()).to.include(`chkrun:triggeringUri="${includeUri}"`);
+    expect(single.body.toString()).to.include(`chkrun:uri="${includeUri}#start=`);
+
+    const mixed = await post(`<chkrun:checkObjectList xmlns:chkrun="http://www.sap.com/adt/checkrun" xmlns:adtcore="http://www.sap.com/adt/core">${object(uri, clean)}${object(includeUri, "THIS IS INVALID ABAP")}</chkrun:checkObjectList>`);
+    expect(mixed.body.toString().match(/<chkrun:checkReport /g)).to.have.lengthOf(2);
+    expect(mixed.body.toString()).to.include(`chkrun:uri="${includeUri}#start=`);
+  });
+  it("warm program-include diagnostics keep the INCL resource", async () => {
+    const original = store.checkWarm;
+    store.checkWarm = async () => ({type: "INCL", name: "ZINCLUDE", warm: true, issues: [{
+      type: "PROG", name: "ZINCLUDE", severity: "E", line: 2, column: 3, message: "warm include error",
+    }, {
+      type: "PROG", name: "ZDEPENDENT", severity: "E", line: 4, column: 5, message: "warm dependent error",
+    }]});
+    try {
+      const body = `<chkrun:checkObject xmlns:chkrun="http://www.sap.com/adt/checkrun" xmlns:adtcore="http://www.sap.com/adt/core" adtcore:uri="${base}programs/includes/zinclude"/>`;
+      const xml = (await post(body)).body.toString();
+      expect(xml).to.include(`chkrun:uri="${base}programs/includes/zinclude#start=2,3"`);
+      expect(xml).to.include(`chkrun:uri="${base}programs/programs/zdependent/source/main#start=4,5"`);
+      expect(xml).not.to.include(`${base}programs/programs/zinclude`);
+    } finally {
+      store.checkWarm = original;
+    }
+  });
   it("3 testclasses include",async () => { await post(block(uri,"CLASS ltcl_check DEFINITION FOR TESTING. ENDCLASS.","testclasses")); });
   it("4 AMDP warnings follow errors and count as messages",async () => {
     const source = `CLASS zcl_check DEFINITION PUBLIC.
@@ -150,7 +193,8 @@ describe("C1 CHECKRUN bound destination",() => {
     for (const filter of ["SOURCE",""]) {
       const signature = {exporting:{iv_command:box("CHECKRUN"),iv_type:box("CLAS"),iv_name:box("ZCL_BOUND"),iv_source:box(""),iv_filter:box(filter)},importing:{ev_json:box(""),ev_error:box("")}};
       await withSystem(() => ({}),() => destination.call("ZOSD_STORE",signature),{store});
-      const result = answerOf(signature); expect(result.EV_ERROR).to.equal(""); expect(JSON.parse(result.EV_JSON).issues[0]).to.deep.equal({severity:"E",line:1,column:1,message:"ZCL_BOUND"});
+      // Measured diagnostic URIs identify the source resource independently of triggeringUri.
+      const result = answerOf(signature); expect(result.EV_ERROR).to.equal(""); expect(JSON.parse(result.EV_JSON).issues[0]).to.deep.equal({severity:"E",line:1,column:1,message:"ZCL_BOUND",uri:"/sap/bc/adt/oo/classes/zcl_bound/source/main"});
     }
     expect(overlays).to.deep.equal(["",undefined]);
   });

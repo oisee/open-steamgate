@@ -958,7 +958,7 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
             expect((await send(one, "GET", `${at(LOCKED)}/source/main`)).body).to.equal(source);
             expect((await unlock(one, locked.handle)).status).to.equal(200);
             expect((await send(one, "PUT", `${at(LOCKED)}/source/main?lockHandle=${locked.handle}`,
-              {body: source})).status).to.equal(409);
+              {body: source})).status).to.equal(423);
             const fresh = await lockOffer(two, result);
             expectResult(fresh);
             expect(fresh.handle).not.to.equal(locked.handle);
@@ -982,7 +982,7 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
           const first = await lockOffer(one, result);
           expect(first.status).to.equal(200);
           const path = `${at(LOCKED)}/source/main?lockHandle=${first.handle}`;
-          expect((await send(two, "PUT", path, {body: "* foreign write\n"})).status).to.equal(409);
+          expect((await send(two, "PUT", path, {body: "* foreign write\n"})).status).to.equal(423);
           const source = "* owner write\n";
           expect((await send(one, "PUT", path, {body: source})).status).to.equal(200);
           expect((await send(two, "GET", `${at(LOCKED)}/source/main`)).body).to.equal(source);
@@ -1092,7 +1092,7 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
         const two = await logon(server, "DEVTWO");
         const held = await lock(two, DOOMED);
         const refused = await send(one, "DELETE", at(DOOMED.toLowerCase()));
-        const gone = await send(two, "DELETE", at(DOOMED.toLowerCase()));
+        const gone = await send(two, "DELETE", at(DOOMED.toLowerCase()) + "?lockHandle=" + held.handle);
         const missing = await lock(two, DOOMED);
         await logoff(one);
         await logoff(two);
@@ -1144,13 +1144,13 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
     };
 
     const STATUSES = {
-      "lock, a stateless read, the PUT, UNLOCK, and a PUT after it": [200, 200, 200, 200, 409],
+      "lock, a stateless read, the PUT, UNLOCK, and a PUT after it": [200, 200, 200, 200, 423],
       "both foreign and same-session locks are refused with EU 510, UNLOCK hands it over": [200, 403, 403, 200, 200, 403],
       "a logoff releases the session's locks": [200, 403, 200, 200],
       "the session DELETE releases them too, a stateless request does not": [200, 403, 200, 200],
       "lowercase security DELETE releases the lock": [200, 403, 200, 200],
       "two-cookie logoff preserves the session-cookie holder's lock": [200, 200, 403, 200],
-      "DELETE respects the holder, and the holder's DELETE takes the lock with it": [200, 403, 200, 404],
+      "DELETE respects the holder, and the holder's DELETE takes the lock with it": [200, 423, 200, 404],
       "the same user in another session is refused, because the lock is the session's": [200, 403, 200],
       "a package locks like a source object": [200, 403, 200],
       "the refusals: no object, no action, another action; the dataname a client asks for": [404, 400, 400, 200, 200],
@@ -1278,7 +1278,7 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
       // the ENQ session). That is an ENQ context that ended, not a session
       // that ended: the next RESOLVE drops the handles, revives the key
       // and keeps the session and its token (#471), so the write with the
-      // old handle is the 409 it is on main. Pending until #471
+      // old class handle is refused with 423. Pending until #471
       // (ZCL_OSD_ENQ_KERNEL=>REVIVE) is in the tree.
       if (readFileSync(new URL("../output/zcl_osd_enq_kernel.clas.mjs", import.meta.url), "utf8").includes("async revive(") === false) {
         this.skip();
@@ -1289,10 +1289,10 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
       sessions.owners.end(one.id);
       expect((await sessions.get(one.id)).locks.has(handle), "the handle is still in the table").to.equal(true);
       const put = await send(one, "PUT", `${at(LOCKED)}/source/main?lockHandle=${handle}`, {headers: {"content-type": "text/plain"}, body: "* no\n"});
-      expect(put.status).to.equal(409);
+      expect(put.status).to.equal(423);
       const include = await send(one, "POST", `${at(LOCKED)}/includes?lockHandle=${handle}`,
         {body: `<class:abapClassInclude xmlns:class="http://www.sap.com/adt/oo/classes" xmlns:adtcore="http://www.sap.com/adt/core" adtcore:name="${LOCKED}" class:includeType="testclasses"/>`});
-      expect(include.status).to.equal(409);
+      expect(include.status).to.equal(423);
       expect((await sessions.get(one.id))?.token, "the session and its token stay").to.equal(one.token);
       await logoff(one);
     });
@@ -1300,7 +1300,7 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
     it("a step that dumps in a stateful session leaves no handle, and the object goes free", async () => {
       // #433: a dump ends the bound ENQ context and tells the host
       // (onEnqContextEnded); the façade drops the handles that context gave
-      // out, so the old one is a 409 and not a write
+      // out, so the old class handle is a 423 and not a write
       const {sessions, server} = await withSessions();
       const {bindEnqSession} = await import("../tools/osd-enq-host.mjs");
       const one = await logon(server);
@@ -1314,7 +1314,7 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
       expect(await rows(), "no lock left").to.deep.equal([]);
       // the next RESOLVE sees the ended context and clears the handles first
       const put = await send(one, "PUT", `${at(LOCKED)}/source/main?lockHandle=${handle}`, {headers: {"content-type": "text/plain"}, body: "* no\n"});
-      expect(put.status).to.equal(409);
+      expect(put.status).to.equal(423);
       expect((await sessions.get(one.id)).locks.size, "no handle left").to.equal(0);
       const two = await logon(server, "DEVTWO");
       expect((await lock(two)).status).to.equal(200);
@@ -1368,7 +1368,7 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
       await logoff(two);
     });
 
-    it("a live session whose ENQ context the lock server ended: GET 200, a PUT with the old handle 409, and it locks again", async () => {
+    it("a live session whose ENQ context the lock server ended: GET 200, a PUT with the old class handle 423, and it locks again", async () => {
       const {server, sessions} = await withSessions();
       const one = await logon(server);
       const locked = await lock(one);
@@ -1380,13 +1380,13 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
       expect(read.status, read.body).to.equal(200);
       const put = await send(one, "PUT", `${at(LOCKED)}/source/main?lockHandle=${locked.handle}`,
         {headers: {"content-type": "text/plain"}, body: "* no\n"});
-      expect(put.status, put.body).to.equal(409);
+      expect(put.status, put.body).to.equal(423);
       const again = await lock(one);
       expect(again.status, again.body).to.equal(200);
       expect(again.handle, "a relock gives a new handle").to.not.equal(locked.handle);
       const stale = await send(one, "PUT", `${at(LOCKED)}/source/main?lockHandle=${locked.handle}`,
         {headers: {"content-type": "text/plain"}, body: "* no\n"});
-      expect(stale.status, "the old handle stays dead after the relock").to.equal(409);
+      expect(stale.status, "the old handle stays dead after the relock").to.equal(423);
       await logoff(one);
       expect((await rows()).map((r) => r.arg), "logoff released the new context").to.deep.equal([]);
     });

@@ -87,7 +87,17 @@ CLASS zcl_osd_adt_checkrun IMPLEMENTATION.
   METHOD object.
     DATA ls_object TYPE zcl_osd_adt_types=>ty_object.
     DATA lx_error TYPE REF TO zcx_osd_adt.
-    ls_object = zcl_osd_adt_types=>object_from_uri( iv_uri ).
+    DATA lv_offset TYPE i.
+    DATA lv_found TYPE abap_bool.
+    DATA lv_object_uri TYPE string.
+    lv_object_uri = iv_uri.
+    IF lv_object_uri CP `/sap/bc/adt/oo/classes/*/includes/*`.
+      FIND FIRST OCCURRENCE OF `/includes/` IN lv_object_uri MATCH OFFSET lv_offset.
+      IF sy-subrc = 0.
+        lv_object_uri = lv_object_uri(lv_offset).
+      ENDIF.
+    ENDIF.
+    ls_object = zcl_osd_adt_types=>object_from_uri( lv_object_uri ).
     IF ls_object-ok = abap_false.
       lx_error = zcx_osd_adt=>internal( `URI malformed` ).
       RAISE EXCEPTION lx_error.
@@ -96,6 +106,9 @@ CLASS zcl_osd_adt_checkrun IMPLEMENTATION.
       rs_object-type = ls_object-type.
       rs_object-name = ls_object-name.
       rs_object-uri = iv_uri.
+      lv_offset = 0.
+      take( EXPORTING iv_text = iv_uri && `/` iv_open = `/includes/` iv_close = `/`
+        IMPORTING ev_value = rs_object-include ev_found = lv_found CHANGING cv_offset = lv_offset ).
       IF iv_canonical = abap_true.
         rs_object-uri = uri( iv_type = rs_object-type iv_name = rs_object-name ).
       ENDIF.
@@ -267,10 +280,12 @@ CLASS zcl_osd_adt_checkrun IMPLEMENTATION.
           ls_object-has_source = abap_true.
           ls_object-source = decode_content( iv_text = ls_child-text iv_decoded = abap_true ).
         ELSEIF ls_child-local = `artifact`.
-          lv_uri = zcl_osd_adt_request_xml=>attribute( is_element = ls_child iv_uri = `http://www.sap.com/adt/checkrun` iv_local = `uri` ).
-          lv_offset = 0.
-          take( EXPORTING iv_text = lv_uri iv_open = `/includes/` iv_close = `/`
-            IMPORTING ev_value = ls_object-include ev_found = lv_found CHANGING cv_offset = lv_offset ).
+          IF ls_object-type = `CLAS`.
+            lv_uri = zcl_osd_adt_request_xml=>attribute( is_element = ls_child iv_uri = `http://www.sap.com/adt/checkrun` iv_local = `uri` ).
+            lv_offset = 0.
+            take( EXPORTING iv_text = lv_uri iv_open = `/includes/` iv_close = `/`
+              IMPORTING ev_value = ls_object-include ev_found = lv_found CHANGING cv_offset = lv_offset ).
+          ENDIF.
         ENDIF.
       ENDLOOP.
       APPEND ls_object TO lt_objects.
