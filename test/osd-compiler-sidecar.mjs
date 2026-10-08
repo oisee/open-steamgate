@@ -129,6 +129,20 @@ describe("osd compiler --stdio", function () {
         expect(response.virtualFiles).to.deep.equal([]);
       });
     }
+    it("refuses a logical path that names another object's file", async () => {
+      const own = "ZCL_OUTLINE_OWN";
+      const text = `CLASS ${own.toLowerCase()} DEFINITION PUBLIC.\nENDCLASS.\nCLASS ${own.toLowerCase()} IMPLEMENTATION.\nENDCLASS.\n`;
+      const snap = snapshotFor(own, text);
+      const target = {type: "CLAS", name: own, version: "inactive"};
+      for (const logicalPath of ["src/zcl_outline_other.clas.abap", "src/zcl_outline_own.prog.abap", "src/zcl_outline_own"]) {
+        const aliased = {...snap, objects: [{...snap.objects[0], files: [{...snap.objects[0].files[0], logicalPath}]}]};
+        let error;
+        try { await outlineSnapshot(aliased, target); } catch (e) { error = e; }
+        expect(error?.protocolCode, logicalPath).to.equal("BAD_REQUEST");
+      }
+      const own2 = {...snap, objects: [{...snap.objects[0], files: [{...snap.objects[0].files[0], logicalPath: "src/sub/zcl_outline_own.clas.abap"}]}]};
+      expect((await outlineSnapshot(own2, target)).outline.found).to.equal(true);
+    });
     it("uses the configured syntax version for a DEFAULT IGNORE declaration", async () => {
       const name = "ZCL_OUTLINE_DEFAULT";
       const text = `CLASS ${name.toLowerCase()} DEFINITION PUBLIC.\n  PUBLIC SECTION.\n    METHODS run DEFAULT IGNORE.\nENDCLASS.\nCLASS ${name.toLowerCase()} IMPLEMENTATION.\n  METHOD run.\n  ENDMETHOD.\nENDCLASS.\n`;

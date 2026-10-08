@@ -1,7 +1,7 @@
 // Compiler-provider contract v1. Check and outline: no publication or execution.
 import {createHash} from "node:crypto";
 import {readFileSync, realpathSync} from "node:fs";
-import {isAbsolute, join, relative, resolve} from "node:path";
+import {basename, isAbsolute, join, relative, resolve} from "node:path";
 import {createInterface} from "node:readline";
 import {once} from "node:events";
 import lock from "../libs.lock.json" with {type: "json"};
@@ -21,6 +21,19 @@ function realContainedPath(root, path) {
     throw refusal("BAD_REQUEST", `file resolves outside snapshot root: ${path}`);
   }
   return {realRoot, realPath};
+}
+
+// An abapGit file name says its object: <name>.<type>[.<part>...], with '#'
+// for '/' in a namespace; a package's file is package.devc.xml. A logical
+// path may only name a file of the object it is listed under, so a mapping
+// cannot put one object's bytes under another's name.
+function namesObject(logicalPath, object) {
+  const parts = basename(logicalPath).toLowerCase().split(".");
+  if (parts.length < 3) return false;
+  const type = parts[1].toUpperCase();
+  if (type !== object.type.toUpperCase()) return false;
+  if (type === "DEVC") return parts[0] === "package";
+  return parts[0].replace(/#/g, "/") === object.name.toLowerCase();
 }
 
 function snapshotFiles(snapshot) {
@@ -43,6 +56,9 @@ function snapshotFiles(snapshot) {
       if (file.logicalPath !== undefined && (typeof file.logicalPath !== "string" || !file.logicalPath
           || isAbsolute(file.logicalPath) || file.logicalPath.split(/[\\/]/).includes(".."))) {
         throw refusal("BAD_REQUEST", "invalid logical snapshot path");
+      }
+      if (file.logicalPath !== undefined && !namesObject(file.logicalPath, object)) {
+        throw refusal("BAD_REQUEST", `logical path ${file.logicalPath} is not a file of ${object.type} ${object.name}`);
       }
       let bytes;
       try { bytes = readFileSync(realContainedPath(root, file.path).realPath); }

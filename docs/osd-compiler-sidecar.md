@@ -176,7 +176,7 @@ digest storage, archive sources backing overlays, legacy retained snapshots and
 legacy working sources copied after digest proof. Thus a digest-only physical
 filename or an archive filename never substitutes for the overlay's ABAP name.
 For example: `{"path":"build/source-by-digest/<digest>",
-"logicalPath":"src/zcl_example.clas.abap","sha256":"<digest>"}`.
+"logicalPath":"src/zcl_example.clas.abap","sha256":"<digest>"}`. A `logicalPath` must name a file of the object it is listed under (abapGit name `<name>.<type>...`, `#` for `/`, `package.devc.xml` for a package), so one object's bytes cannot be mapped under another object's name; otherwise the answer is `BAD_REQUEST`.
 
 `test/osgo-storecmp.mjs` compares ten direct Go store answers with Node execute,
 including saved inactive dependency CHECK, syntax issues, class includes,
