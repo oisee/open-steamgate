@@ -517,3 +517,30 @@ test("integer power and numeric/logical built-ins run through ABAP Unit", {timeo
   assert.equal(run.result.rows.length,10);
   assert.ok(run.result.rows.every((row)=>row.status === "SUCCESS"),run.stdout);
 });
+
+test("GOGEN_UNIT_TIMEOUT_MS bounds a test process, and a value that is not a positive whole number is refused", {timeout: 60000}, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "gogen-unit-timeout-"));
+  const wrapper = join(dir, "runner.mjs");
+  writeFileSync(wrapper, "#!/usr/bin/env node\nsetTimeout(() => {}, 60000);\n");
+  chmodSync(wrapper, 0o755);
+  const ready = [{class: "SLOW", testclass: "LOCAL", method: "CHECK", status: "READY", message: ""}];
+  const groups = [{key: "SLOW:LOCAL", methods: ready}];
+  const oldRunner = process.env.GOGEN_UNIT_RUNNER, oldTimeout = process.env.GOGEN_UNIT_TIMEOUT_MS;
+  try {
+    process.env.GOGEN_UNIT_RUNNER = wrapper;
+    process.env.GOGEN_UNIT_TIMEOUT_MS = "300";
+    const out = join(dir, "run"); mkdirSync(out);
+    const started = Date.now();
+    const result = await runUnit({bin: wrapper, groups, ready, jobs: 1, out, runDir: out});
+    assert.ok(Date.now() - started < 20000);
+    assert.deepEqual(reconcile(ready, result.actual).map((row) => row.message), ["runner died: timeout after 300 ms"]);
+    for (const bad of ["0", "-5", "1.5", "abc", ""]) {
+      process.env.GOGEN_UNIT_TIMEOUT_MS = bad;
+      await assert.rejects(runUnit({bin: wrapper, groups, ready, jobs: 1, out, runDir: out}), /GOGEN_UNIT_TIMEOUT_MS/);
+    }
+  } finally {
+    if (oldRunner === undefined) delete process.env.GOGEN_UNIT_RUNNER; else process.env.GOGEN_UNIT_RUNNER = oldRunner;
+    if (oldTimeout === undefined) delete process.env.GOGEN_UNIT_TIMEOUT_MS; else process.env.GOGEN_UNIT_TIMEOUT_MS = oldTimeout;
+    rmSync(dir, {recursive: true, force: true});
+  }
+});

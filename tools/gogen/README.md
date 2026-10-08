@@ -1577,6 +1577,9 @@ test classes are checkpointed after teardown. If a process dies, unfinished
 classes each retry once in their own process; completed results stay intact.
 An isolated death reports `runner died: <first stderr line>` and is ERROR
 with exit code 2 through `osgo:unit`.
+Each test process and the seed image get 120 s; `GOGEN_UNIT_TIMEOUT_MS`
+sets another limit in milliseconds (a long benchmark), and a value that is not
+a positive whole number refuses the run.
 
 Run `npm run transpile` first for the Node oracle, then
 `node tools/gogen/unit-compare.mjs --class ZCL_OSD_FORM_TEST --class ZCL_OSD_TIMER_TEST`.
