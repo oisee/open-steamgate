@@ -277,3 +277,42 @@ func TestEndedKeyLedgerIsBoundedAndRefreshed(t *testing.T) {
 		t.Fatal("the oldest distinct end was not evicted")
 	}
 }
+
+// A refused rebind must not release the step's current pin early: two steps
+// share retired context A; the first tries to rebind to a key ended with
+// trailing blanks (the kernel's trimEnd), is refused, and finishes; the second
+// step's lock on A must survive until that step ends.
+func TestRefusedRebindKeepsOnePin(t *testing.T) {
+	host, closeServer := newHost(t)
+	defer closeServer()
+	const shared, ended = "rebind-shared", "rebind-ended"
+	defer host.kernel.End(shared)
+	first, second := new(struct{ int }), new(struct{ int })
+	host.Begin(first)
+	host.Begin(second)
+	for _, step := range []any{first, second} {
+		if ok, err := host.bind(step, shared, "ALICE"); !ok || err != nil {
+			t.Fatalf("bind shared: %v %v", ok, err)
+		}
+	}
+	if _, err := host.Enqueue(second, request("KEPT"), nil); err != nil {
+		t.Fatal(err)
+	}
+	sid, _ := host.kernel.Handle(shared)
+	host.kernel.DropContext(shared, sid) // retired: ends with its last pin
+	host.end(ended + "  ")
+	if ok, err := host.bind(first, ended, "ALICE"); ok || err != nil {
+		t.Fatalf("bind to an ended key: %v %v", ok, err)
+	}
+	host.Finish(first, false)
+	kept := 0
+	for _, row := range host.server.Read(enq.Filter{Table: "ZOSD_TEST"}) {
+		if row.Arg == "KEPT" {
+			kept++
+		}
+	}
+	if kept != 1 {
+		t.Fatal("a refused rebind released the shared context under the other step")
+	}
+	host.Finish(second, false)
+}

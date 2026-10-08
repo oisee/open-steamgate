@@ -23,7 +23,7 @@
       "reason": "recorded by --update"
     },
     "go:adtenq": {
-      "lines": 258,
+      "lines": 262,
       "reason": "Expose the ADT key of a live or retired ENQ handle for SYSTEM LOCK_HOLDER; foreign contexts remain opaque."
     },
     "go:amc": {
@@ -523,7 +523,7 @@
       "reason": "osgo 026/029 (#658, #659, 2026-10-08): UTF-16 units with the surrogate-half invariant and class statics per Session; carving utf16/statics out of go/abap is queued (stoker QUEUE #33)"
     },
     "go:adtlock": {
-      "lines": 271,
+      "lines": 276,
       "reason": "The ADT host side of stoker's KERNEL_LOCK seam: ENQUEUE/DEQUEUE over the osd lock server keyed by the calling step, holder per step, retry with the yielding sleep, as tools/osd-enq-host.mjs. Locks fix 1 preserves non-error retry panics, cleans up rebinding/pre-bind holders, and bounds ended keys."
     },
     "go:compiler": {

@@ -36,6 +36,10 @@ func (k *Kernel) Owner() Owner { return k.owner }
 
 // text mirrors osd-enq-session's String(...).trimEnd(), including ECMAScript
 // whitespace (U+FEFF is whitespace, U+0085 is not). Leading spaces survive.
+// Text is the key normalization the kernel applies to every id (trimEnd), so
+// a host keeping its own ledger keys it the same way.
+func Text(s string) string { return text(s) }
+
 func text(s string) string {
 	return strings.TrimRightFunc(s, func(r rune) bool {
 		return r >= '\t' && r <= '\r' || r == ' ' || r == '\u00a0' || r == '\u1680' ||

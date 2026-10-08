@@ -101,6 +101,7 @@ func (h *Host) Finish(s any, dumped bool) {
 }
 
 func (h *Host) bind(caller any, id, user string) (bool, error) {
+	id = adtenq.Text(id)
 	s := caller
 	if s == nil {
 		return h.kernel.Bind(id, user)
@@ -120,11 +121,13 @@ func (h *Host) bind(caller any, id, user string) (bool, error) {
 	if current.boundID == id && current.sid != 0 {
 		return true, nil
 	}
-	if current.boundID != "" && current.sid != 0 {
-		h.kernel.Unpin(current.sid)
-	}
 	sid, ok, err := h.kernel.Pin(id, user)
 	if ok && err == nil {
+		// the previous binding is released only once the new one holds, so a
+		// refused rebind leaves exactly one pin for Finish to release
+		if current.boundID != "" && current.sid != 0 {
+			h.kernel.Unpin(current.sid)
+		}
 		if current.boundID == "" && current.sid != 0 {
 			current.holderSID = current.sid
 		}
@@ -135,6 +138,7 @@ func (h *Host) bind(caller any, id, user string) (bool, error) {
 }
 
 func (h *Host) end(id string) {
+	id = adtenq.Text(id)
 	h.mu.Lock()
 	if old := h.ended[id]; old != nil {
 		h.order.Remove(old)
@@ -150,6 +154,7 @@ func (h *Host) end(id string) {
 }
 
 func (h *Host) revive(id string) {
+	id = adtenq.Text(id)
 	h.mu.Lock()
 	if old := h.ended[id]; old != nil {
 		h.order.Remove(old)
