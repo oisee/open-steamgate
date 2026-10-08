@@ -174,6 +174,9 @@ func TestUTF16ConcatenationEgress(t *testing.T) {
 	if CmpS(hi+lo, emoji) != 0 {
 		t.Fatal("comparison sees adjacent surrogate halves as a different value")
 	}
+	if !CS(hi+lo, emoji) {
+		t.Fatal("CS sees adjacent surrogate halves as a different value")
+	}
 	if bytes := EncodeText("utf8", hi+lo); bytes != emoji {
 		t.Fatalf("utf8 egress: %x", bytes)
 	}

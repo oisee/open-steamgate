@@ -8,6 +8,7 @@ METHODS find_offset FOR TESTING.
 METHODS half_roundtrip FOR TESTING.
 METHODS numofchar_units FOR TESTING.
 METHODS concat_pair FOR TESTING.
+METHODS concat_cs FOR TESTING.
 METHODS search_half FOR TESTING.
 METHODS case_find FOR TESTING.
 METHODS json_escape FOR TESTING.
@@ -99,5 +100,19 @@ cl_abap_unit_assert=>assert_equals(
   act = escape( val = pair format = cl_abap_format=>e_json_string )
   exp = cl_abap_codepage=>convert_from( source = CONV xstring( 'F09F9880' )
     codepage = `UTF-8` ) ).
+ENDMETHOD.
+METHOD concat_cs.
+DATA(s) = zcl_osgt_strlen16=>emoji( ).
+DATA(hi) = s+0(1).
+DATA(lo) = s+1(1).
+CONCATENATE hi lo INTO DATA(r).
+DATA expected TYPE string.
+expected = cl_abap_codepage=>convert_from( source = CONV xstring( 'F09F9880' )
+  codepage = `UTF-8` ).
+IF r CS expected.
+  cl_abap_unit_assert=>assert_equals( act = 1 exp = 1 ).
+ELSE.
+  cl_abap_unit_assert=>fail( ).
+ENDIF.
 ENDMETHOD.
 ENDCLASS.

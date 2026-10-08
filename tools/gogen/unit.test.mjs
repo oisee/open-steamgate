@@ -24,7 +24,7 @@ test("UTF-16 lengths, sections and surrogate halves run through ABAP Unit", {tim
   assert.equal(run.status, 0, run.stderr || run.stdout);
   assert.equal(run.result.classes, 1);
   assert.equal(run.result.compiled, 1);
-  assert.equal(run.result.rows.length, 11);
+  assert.equal(run.result.rows.length, 12);
   assert.ok(run.result.rows.every((row) => row.status === "SUCCESS"), run.stdout);
 });
 test("a reused frontend registry keeps CDS to SQL view names", () => {
