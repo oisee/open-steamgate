@@ -3881,3 +3881,16 @@ Not an anomaly, recorded for porting: on 7.58, `FIND ... REGEX` (POSIX) raises a
 - Regression: none yet.
 - Upstream: https://github.com/abaplint/abaplint/issues/4393 (abaplint check_syntax accepts it; filed 2026-10-07).
 - Upstream version containing a fix: unknown.
+
+### ANOMALY-2026-10-08-instance-of-initial - IS INSTANCE OF ignores an initial reference's static type; object as the target throws
+
+- Status: `fixed locally` (pinned transpiler); `open` upstream (abaplint/transpiler#1975)
+- Discovery: abapiti's translated lexer on three runtimes (its case 032), measured on A4H by abapiti and stoker on 2026-10-08 in a throwaway package.
+- Affected path: the transpiler's `IS INSTANCE OF` (`packages/transpiler/src/expressions/compare.ts`, `packages/runtime/src/compare/instance_of.ts`); osgo has its own gap, handled in the osgo batch.
+- Reproducer: `DATA r TYPE REF TO zcl_a.` (initial) `ASSERT r IS INSTANCE OF zcl_a.`; and a bound `o`: `ASSERT o IS INSTANCE OF object.`
+- Expected SAP behaviour (7.58): an initial reference is decided by its static type: true when the static type is the target or a subtype (initial REF TO zcl_a / zcl_a: true; initial REF TO zif_x / zif_x: true; initial REF TO zcl_a / a subclass: false; initial REF TO object / zcl_a: false; an interface the static type does not implement: false); a bound reference `IS INSTANCE OF object` is true.
+- Actual local behaviour: OSG-JS gave false for every initial reference and threw "Right-hand side of 'instanceof' is not an object" for `object`.
+- Workaround: none needed after the pin; abapiti's generator also writes `x IS BOUND AND x IS INSTANCE OF c`.
+- Regression: abaplint/transpiler `test/operators/instance_of.ts` (18 cases, 16 fail before the fix), carried by the pin.
+- Upstream: https://github.com/abaplint/transpiler/pull/1975 (branch inside the repository; CI and Regression green, 64/64 rows); pinned 2026-10-08 as `libs.lock.json` transpiler oisee/transpiler `local/osd-build-2026-10-08` e2a459b1 = the previous pin 2ff0e801 plus a cherry-pick of #1975.
+- Upstream version containing a fix: unknown.
