@@ -230,6 +230,9 @@ export function compileProgram({folders, objects, tolerant = false, skip = () =>
       return false;
     }
   });
+  // lock objects must be known before methods compile: their key order is
+  // part of every generated ENQUEUE / DEQUEUE argument
+  program.lockObjects = lockObjectRegistry(reg, program);
   const lowerClass = (ctx, obj) => {
     const saved = PROGRAM;
     PROGRAM = ctx.program; // Global type helpers must use the tracked program too.
@@ -265,6 +268,7 @@ export function compileProgram({folders, objects, tolerant = false, skip = () =>
   program.exceptionSupers = exceptionSupers(reg, program);
   program.cdsViews = cdsViewsByRegistry.get(reg) ?? {};
   program.tables = tableRegistry(reg, program);
+  program.lockObjects = lockObjectRegistry(reg, program);
   finishSession(session, reg);
   return Object.assign(program, {amcChannels: samcOf(folders), ownershipSafety: session ? (session.ownershipSafety ??= sourceOwnershipSafety(reg)) : sourceOwnershipSafety(reg)});
 }
@@ -362,6 +366,37 @@ export function tableRegistry(reg, program) {
   // of them is refused by name, an unknown name is CX_SY_CREATE_DATA_ERROR
   program.ddicNames = [...program.rtti.known].filter((n) => !/=>/.test(n) && !out.some((t) => t.name === n)).sort();
   return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** each ENQU object's primary table, keyed by the object name */
+export function lockObjectRegistry(reg, program) {
+  const out = new Map();
+  for (const obj of reg.getObjects()) {
+    if (!(obj instanceof abaplint.Objects.LockObject)) continue;
+    const name = upper(obj.getName());
+    const table = upper(obj.getPrimaryTable() ?? "");
+    const tableObject = reg.getObject("TABL", table);
+    if (tableObject === undefined) continue;
+    try {
+      const key = (tableObject.listKeys?.(reg) ?? []).map(upper);
+      const structure = tableObject.parseType(reg);
+      const columns = new Map(structure.getComponents().map((c) => [upper(c.name), c.type]));
+      const fields = key.map((field) => {
+        const type = columns.get(field), kind = typeKindOf(type);
+        // Node request(): getLength() when supplied, otherwise the length
+        // of the component's initial value (integer zero is "0").
+        const length = ["C", "N", "X", "P"].includes(kind) ? type.getLength()
+          : ({D: 8, T: 6, I: 1, "8": 1})[kind];
+        if (!Number.isInteger(length) || length <= 0) throw new Unsupported(`lock table ${table} field ${field}: cannot size key kind ${kind}`);
+        return {name: field, kind, length};
+      });
+      out.set(name, {name, table, key, fields});
+    } catch (e) {
+      if (e instanceof Unsupported) throw e;
+      // an unreadable table is named by the call's normal dictionary refusal
+    }
+  }
+  return out;
 }
 
 /**
@@ -952,6 +987,8 @@ function callFunction(node, ctx, text) {
   const lit = /^'([^']+)'$/.exec(nameNode?.concatTokens() ?? "");
   if (lit === null) throw new Unsupported(`CALL FUNCTION by a name that is not a literal: ${text}`);
   const name = upper(lit[1]);
+  const lockCall = lockFunctionCall(node, ctx, text, name);
+  if (lockCall !== undefined) return lockCall;
   // DESTINATION 'AMDP' (tools/amdp-destination.mjs on Node): SQLScript runs
   // in a HANA, which the Go host has none of. Node without one raises
   // CX_SY_DYN_CALL_ILLEGAL_FUNC from the destination before any parameter
@@ -1017,6 +1054,71 @@ function callFunction(node, ctx, text) {
     }
   }
   return {s: "call_fm", name, fn: fm.fn, args, exceptions};
+}
+
+/** KERNEL_LOCK calls: the host seam behind ENQUEUE_ / DEQUEUE_ / DEQUEUE_ALL */
+function lockFunctionCall(node, ctx, text, name) {
+  if (name !== "DEQUEUE_ALL" && !/^(?:ENQUEUE|DEQUEUE)_/.test(name)) return undefined;
+  if (/\b(DESTINATION|IN\s+UPDATE\s+TASK|STARTING\s+NEW\s+TASK|IN\s+BACKGROUND|PARAMETER-TABLE|EXCEPTION-TABLE)\b/i.test(text)) {
+    throw new Unsupported(`CALL FUNCTION '${name}' form: ${text}`);
+  }
+  if (name === "DEQUEUE_ALL") {
+    rejectParameters(node, name, new Set());
+    return {s: "call_enq", kind: "all", name, args: []};
+  }
+  const object = name.replace(/^(?:ENQUEUE|DEQUEUE)_/, "");
+  const lock = ctx.program.lockObjects?.get(object);
+  if (lock === undefined) return undefined;
+  const params = new Set(["MANDT", "CLIENT", "_SCOPE", "_WAIT", "_COLLECT", `MODE_${lock.table}`]);
+  for (const key of lock.key) {
+    if (key !== "MANDT" && key !== "CLIENT") params.add(key);
+    params.add(`X_${key}`);
+  }
+  const {args, exceptions} = lockArguments(node, ctx, name, params);
+  return {s: "call_enq", kind: name.startsWith("ENQUEUE_") ? "enqueue" : "dequeue", name, table: lock.table, fields: lock.fields, object, args, exceptions};
+}
+
+function rejectParameters(node, name, params) {
+  const fp = node.findDirectExpression(Expressions.FunctionParameters);
+  if (fp === undefined) return;
+  for (const k of fp.getChildren()) {
+    if (isExpr(k, Expressions.FunctionExporting)) {
+      for (const p of k.findDirectExpressions(Expressions.FunctionExportingParameter)) {
+        const pname = upper(p.findDirectExpression(Expressions.ParameterName).concatTokens());
+        if (!params.has(pname)) throw new Unsupported(`CALL FUNCTION '${name}': parameter ${pname} is not in the lock module's signature`);
+      }
+    } else if (!(k instanceof Nodes.TokenNode) && !isExpr(k, Expressions.ParameterListExceptions)) {
+      throw new Unsupported(`CALL FUNCTION '${name}' form: ${k.concatTokens()}`);
+    }
+  }
+}
+
+function lockArguments(node, ctx, name, params) {
+  const fp = node.findDirectExpression(Expressions.FunctionParameters);
+  const args = [];
+  let exceptions = null;
+  if (fp === undefined) return {args, exceptions};
+  for (const k of fp.getChildren()) {
+    if (isExpr(k, Expressions.FunctionExporting)) {
+      for (const p of k.findDirectExpressions(Expressions.FunctionExportingParameter)) {
+        const pname = upper(p.findDirectExpression(Expressions.ParameterName).concatTokens());
+        if (!params.has(pname)) throw new Unsupported(`CALL FUNCTION '${name}': parameter ${pname} is not in the lock module's signature`);
+        args.push({name: pname, value: convert(source(p.findDirectExpression(Expressions.Source), ctx), {k: "data"})});
+      }
+    } else if (isExpr(k, Expressions.ParameterListExceptions)) {
+      exceptions = {map: {}, others: -1};
+      for (const x of k.findDirectExpressions(Expressions.ParameterException)) {
+        const value = x.findDirectExpression(Expressions.Integer);
+        if (!value) throw new Unsupported(`EXCEPTIONS with a value that is not a number: ${x.concatTokens()}`);
+        const exceptionName = x.findDirectExpression(Expressions.ParameterName);
+        if (exceptionName) exceptions.map[upper(exceptionName.concatTokens())] = Number(value.concatTokens());
+        else exceptions.others = Number(value.concatTokens());
+      }
+    } else if (!(k instanceof Nodes.TokenNode)) {
+      throw new Unsupported(`CALL FUNCTION '${name}' form: ${k.concatTokens()}`);
+    }
+  }
+  return {args, exceptions};
 }
 
 /** CALL FUNCTION of a module compiled with the program (functionGroupIr):
@@ -3811,9 +3913,9 @@ function source(node, ctx, outer, hint = outer) {
   // + 1 is 256, x8 ...000000FF is 255, x1 0A + p 1.5 is 11.50 in p, 07 / 2
   // into i is 4); arith converts such a leaf to i first
   const leaves = leafTypes(node, ctx).map((t) => (["x", "xstring", "d", "t"].includes(t.k) ? I : t));
-  // A character target does not take part: compute from the operands,
-  // then MOVE the result (JS oracle: adt-cases calculation probe).
-  const charTarget = target !== undefined && charlike(target);
+  // A character or numeric-text target does not take part: compute from the
+  // operands, then MOVE the result (JS oracle: adt-cases calculation probe).
+  const charTarget = target !== undefined && (charlike(target) || target.k === "n");
   const types = [...leaves, ...(target === undefined || charTarget ? [] : [target])];
   // ** computes in f when the operands are integers (measured on A4H:
   // 2 ** 31 into i overflows "converting from '2.14748e+09'")

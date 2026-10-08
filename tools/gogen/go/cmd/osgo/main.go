@@ -234,7 +234,7 @@ func step(x *abap.ICFExchange, base string) (dump any, frames []string) {
 			}
 		}()
 		s := &abap.Session{Statics: abap.ProcessStatics}
-		dialog := func() { abap.DialogStep(func() { runShim(s, x, base) }) }
+		dialog := func() { abap.DialogStepIn(s, func() { runShim(s, x, base) }) }
 		if base == "/sap/bc/adt" || base == "/sap/public/bc/icf/logoff" {
 			withADTSession(s, dialog)
 		} else {

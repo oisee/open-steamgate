@@ -15,8 +15,8 @@
   ],
   "budgets": {
     "go:abap": {
-      "lines": 11807,
-      "reason": "osgo 026/029 (#658, #659): UTF-16 units and class statics per Session (carve-out queued, stoker QUEUE #33). ADT batch 1 (adt-i5 cases 1-7): Session message fields (sy-msgno as NUMC 3), MESSAGE RAISING binding with scoped restoration, classic exceptions keyed by the resolved interface method, date/time and signed MOVE adapters, object-wrapper identity, STORE answer projection and conservative ADT host answers; timestamp conversion lives in go/timestamp."
+      "lines": 11878,
+      "reason": "osgo 026/029 (#658, #659): UTF-16 units and class statics per Session (carve-out queued, stoker QUEUE #33). ADT batch 1 (adt-i5 cases 1-7): Session message fields (sy-msgno as NUMC 3), MESSAGE RAISING binding with scoped restoration, classic exceptions keyed by the resolved interface method, date/time and signed MOVE adapters, object-wrapper identity, STORE answer projection and conservative ADT host answers; timestamp conversion lives in go/timestamp. #39 records WorkProcess ownership and exposes only the narrow Session methods needed by the abap-free lock/yield packages. #39 round 2: end and reopen the database transaction across yield, and mark APC step Session ownership."
     },
     "go:abaperr": {
       "lines": 13,
@@ -31,8 +31,8 @@
       "reason": "baseline 2026-10-01"
     },
     "go:apc": {
-      "lines": 436,
-      "reason": "baseline 2026-10-01"
+      "lines": 444,
+      "reason": "baseline 2026-10-01 #39 round 2: pass channel Session to the default step and mark ownership inside custom Step callbacks."
     },
     "go:byteops": {
       "lines": 37,
@@ -102,6 +102,10 @@
       "lines": 431,
       "reason": "baseline 2026-10-01"
     },
+    "go:enqseam": {
+      "lines": 160,
+      "reason": "#39 builds the lock request from generated DDIC metadata, maps classic results through a narrow Session interface, and keeps go/abap out of the package."
+    },
     "go:filepick": {
       "lines": 504,
       "reason": "baseline 2026-10-01"
@@ -115,8 +119,8 @@
       "reason": "baseline 2026-10-01"
     },
     "go:hostclass": {
-      "lines": 36,
-      "reason": "#36: dependency-free host callbacks and Raise values for generated class replacements. Hooks take the calling step (*abap.Session as any) first, agreed with adt-i5 for per-step host state."
+      "lines": 50,
+      "reason": "#36: dependency-free host callbacks and Raise values for generated class replacements. #39 adds the agreed KERNEL_LOCK callbacks while keeping this package free of go/abap. Hooks take the calling step (*abap.Session as any) first, agreed with adt-i5."
     },
     "go:inflate": {
       "lines": 499,
@@ -199,24 +203,24 @@
       "reason": "lowered 2026-10-02: the YAML line index went to tools/dsl-yaml-lines.mjs; holds the range: of L3 slice 3a"
     },
     "tools/gogen/emit-go.mjs": {
-      "lines": 2398,
-      "reason": "#36: generated host-class hook dispatch and ABAP Raise/error bridging on top of the merged emitter baseline."
+      "lines": 2409,
+      "reason": "#36: generated host-class hook dispatch and ABAP Raise/error bridging on top of the merged emitter baseline. #38/#39 add lock-call emission and trim the arithmetic string result only for arithmetic sources. Rebased on #675 (step-first host hooks)."
     },
     "tools/gogen/emit-js.mjs": {
       "lines": 1206,
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/frontend.mjs": {
-      "lines": 6890,
-      "reason": "#34/#36: packed DEC comparisons and the host-replaced class signature registry on top of the merged frontend baseline. #36 round 2: shared omitted-argument lowering for host exception factories, including OPTIONAL, DEFAULT and IS SUPPLIED; no second emitter call path. #36 critic r2: a host-replaced method whose signature does not compile is refused instead of dropped."
+      "lines": 6992,
+      "reason": "#34/#36: packed DEC comparisons and the host-replaced class signature registry on top of the merged frontend baseline. #36 round 2: shared omitted-argument lowering for host exception factories, including OPTIONAL, DEFAULT and IS SUPPLIED; no second emitter call path. #38/#39 add numeric-text/string calculation targets and the ENQUEUE/DEQUEUE lock-object registry. #36 critic r2: an untyped host-replaced method is refused instead of dropped. #39 round 2: size all supported lock key kinds as Node request() does and refuse unsized keys by table and field."
     },
     "tools/gogen/go/abap/abap.go": {
-      "lines": 246,
-      "reason": "osgo 026/029 (#658, #659, 2026-10-08): UTF-16 units with the surrogate-half invariant and class statics per Session; carving utf16/statics out of go/abap is queued (stoker QUEUE #33); ADT batch 1 (adt-i5 cases 1-7): Keep sy-msgid/msgno/msgty/msgv1-4 in the session alongside existing system fields. Critic round 1: immediate caller MESSAGE RAISING assignments and scoped restoration, including calls without EXCEPTIONS. ADT batch 1 (round 5 finding 4): normalize zero session message-number storage on typed NUMC(3) reads."
+      "lines": 276,
+      "reason": "osgo 026/029 (#658, #659, 2026-10-08): UTF-16 units with the surrogate-half invariant and class statics per Session; carving utf16/statics out of go/abap is queued (stoker QUEUE #33); ADT batch 1 (adt-i5 cases 1-7): Keep sy-msgid/msgno/msgty/msgv1-4 in the session alongside existing system fields. Critic round 1: immediate caller MESSAGE RAISING assignments and scoped restoration, including calls without EXCEPTIONS. ADT batch 1 (round 5 finding 4): normalize zero session message-number storage on typed NUMC(3) reads. #39 adds the narrow Session methods behind which enqseam stays abap-free."
     },
     "tools/gogen/go/abap/apc.go": {
-      "lines": 39,
-      "reason": "baseline 2026-10-01"
+      "lines": 44,
+      "reason": "baseline 2026-10-01 #39 round 2: APCStep accepts an optional Session and uses DialogStepIn."
     },
     "tools/gogen/go/abap/appendbytes.go": {
       "lines": 62,
@@ -347,8 +351,8 @@
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/go/abap/luw.go": {
-      "lines": 251,
-      "reason": "baseline 2026-10-01"
+      "lines": 287,
+      "reason": "#39: DialogStepIn records the known Session as owning the already-held WorkProcess, and Session.YieldSleep implements commit/yield/reacquire behind yieldsleep's narrow interface. #39 round 2: yielding ends the step transaction before unlocking and begins a fresh transaction after reacquiring."
     },
     "tools/gogen/go/abap/move.go": {
       "lines": 214,
@@ -529,6 +533,10 @@
     "go:timestamp": {
       "lines": 52,
       "reason": "ADT batch 1 (adt-i5 cases 1-7): Independent UTC/initial-zone timestamp conversion with validation, subrc results and explicit unsupported-zone errors; no runtime imports."
+    },
+    "go:yieldsleep": {
+      "lines": 18,
+      "reason": "#39 dispatches yield sleep through a narrow Session interface so the package does not import go/abap."
     }
   },
   "readmeMissing": [

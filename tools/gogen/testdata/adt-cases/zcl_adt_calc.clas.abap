@@ -22,6 +22,24 @@ CLASS zcl_adt_calc IMPLEMENTATION.
  DATA c TYPE c LENGTH 10.
  c = n - 1 + 1.
  cl_abap_unit_assert=>assert_equals( act = c exp = '        2 ' ).
+ DATA num6 TYPE n LENGTH 6.
+ DATA rows TYPE STANDARD TABLE OF string WITH EMPTY KEY.
+ num6 = lines( rows ) + 1.
+ cl_abap_unit_assert=>assert_equals( act = num6 exp = '000001' ).
+ DO 5 TIMES. APPEND `x` TO rows. ENDDO.
+ num6 = lines( rows ) + 1.
+ cl_abap_unit_assert=>assert_equals( act = num6 exp = '000006' ).
+ DATA num2 TYPE n LENGTH 2.
+ CLEAR rows.
+ DO 100 TIMES. APPEND `x` TO rows. ENDDO.
+ num2 = lines( rows ) + 1.
+ cl_abap_unit_assert=>assert_equals( act = num2 exp = '01' ).
+ DATA text TYPE string.
+ CLEAR rows.
+ DO 5 TIMES. APPEND `x` TO rows. ENDDO.
+ text = lines( rows ) + 1.
+ " the sign place stays, as MOVE i -> string keeps it (go/abap IToString)
+ cl_abap_unit_assert=>assert_equals( act = text exp = `6 ` ).
  n = -2.
  c = n - 1 + 1.
  cl_abap_unit_assert=>assert_equals( act = c exp = '        2-' ).

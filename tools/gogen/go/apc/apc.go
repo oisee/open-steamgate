@@ -114,10 +114,18 @@ func (ch *Channel) logf(format string, args ...any) {
 	log.Printf(format, args...)
 }
 
-func (ch *Channel) step(name, text string, work func()) error {
+func (ch *Channel) step(s *abap.Session, name, text string, work func()) error {
 	run := ch.Step
 	if run == nil {
-		run = abap.APCStep
+		run = func(name string, work func()) error { return abap.APCStep(name, work, s) }
+	} else {
+		// Custom Step hosts also hold the work process around the callback.
+		body := work
+		work = func() {
+			s.HoldsWorkProcess = true
+			defer func() { s.HoldsWorkProcess = false }()
+			body()
+		}
 	}
 	err := run(name, work)
 	if err != nil {
@@ -224,7 +232,7 @@ func (ch *Channel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		fmt.Fprintf(w, "%s: %s", ch.Handler, why)
 	}
-	if err := ch.step("CONSTRUCTOR", "", func() { host = ch.New(s, r) }); err != nil {
+	if err := ch.step(s, "CONSTRUCTOR", "", func() { host = ch.New(s, r) }); err != nil {
 		unavailable(err)
 		return
 	}
@@ -234,7 +242,7 @@ func (ch *Channel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	var accepted bool
 	var out []string
-	if err := ch.step("ON_START", "", func() { accepted = host.Open(s); out = host.Drain(s) }); err != nil {
+	if err := ch.step(s, "ON_START", "", func() { accepted = host.Open(s); out = host.Drain(s) }); err != nil {
 		unavailable(err)
 		return
 	}
@@ -248,7 +256,7 @@ func (ch *Channel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// checked above, so this is the hijack failing: the handler was
 		// started for a socket that never opened, and it ends
-		ch.step("ON_CLOSE", "", func() { host.Close(s, "upgrade failed", 1006) })
+		ch.step(s, "ON_CLOSE", "", func() { host.Close(s, "upgrade failed", 1006) })
 		return
 	}
 	ch.mu.Lock()
@@ -290,7 +298,7 @@ func (ch *Channel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		text := string(data)
 		out = nil
-		if ch.step("ON_MESSAGE", text, func() { host.Message(s, text); out = host.Drain(s) }) != nil {
+		if ch.step(s, "ON_MESSAGE", text, func() { host.Message(s, text); out = host.Drain(s) }) != nil {
 			// the Node host's queue: a callback that failed ends the socket
 			// 1011 "handler failed"; what the step had sent goes nowhere
 			if c.Close(websocket.StatusInternalError, "handler failed") == nil {
@@ -300,7 +308,7 @@ func (ch *Channel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			} else {
 				reason, code = "handler failed", 1006
 			}
-			ch.step("ON_CLOSE", "", func() { host.Close(s, reason, code) })
+			ch.step(s, "ON_CLOSE", "", func() { host.Close(s, reason, code) })
 			return
 		}
 		alive = write(out)
@@ -309,7 +317,7 @@ func (ch *Channel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// the connection broke under a write: no close frame was seen
 		reason, code = "write failed", 1006
 	}
-	ch.step("ON_CLOSE", "", func() { host.Close(s, reason, code) })
+	ch.step(s, "ON_CLOSE", "", func() { host.Close(s, reason, code) })
 }
 
 // RequestPath is the path an upgrade is matched on, as the Node host takes
