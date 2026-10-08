@@ -936,6 +936,15 @@ for (const f of demoDrift) { bad += 1; console.log(`FAIL testdata/${f} differs f
 const own = refused.broken.includes("zcl_gogen_t_rf_own");
 if (!own) bad += 1;
 console.log(`${own ? "ok  " : "FAIL"} refused ZCL_GOGEN_T_RF_OWN left out by abaplint's syntax check`);
+// DELETE TABLE itab FROM wa inside a LOOP over the same table (#688 critic)
+const DEL_REFUSED = {23: "DELETE TABLE lt FROM wa inside a LOOP over the same table: the loop index and its field symbol were not adjusted", 26: "DELETE TABLE lt FROM <row> inside a LOOP over the same table: the loop index and its field symbol were not adjusted", 30: "DELETE TABLE lt FROM wa inside a LOOP over the same table: the loop index and its field symbol were not adjusted"};
+const rdel = compileProgram({folders: [join(here, "testdata-refused"), core], objects: ["zcl_gogen_t_rf_delfrom"], tolerant: true});
+const dgot = new Map(rdel.partial.map((x) => [Number(/zcl_gogen_t_rf_delfrom\.clas\.abap:(\d+)\)/.exec(x)?.[1]), x.slice(x.indexOf("): ") + 3)]));
+for (const line of new Set([...Object.keys(DEL_REFUSED).map(Number), ...dgot.keys()])) {
+  const ok = dgot.get(line) === DEL_REFUSED[line];
+  if (!ok) bad += 1;
+  console.log(`${ok ? "ok  " : "FAIL"} refused delfrom :${line}: ${dgot.get(line) ?? "(compiled)"}${ok ? "" : `\n     want: ${DEL_REFUSED[line] ?? "(compiled)"}`}`);
+}
 const resumable = compileProgram({folders: [join(here, "testdata-refused"), core], objects: ["zcl_gogen_t_rf_resume", "CX_SY_ZERODIVIDE"], tolerant: true});
 const resumeRefused = resumable.partial.some((x) => x.includes("RAISE RESUMABLE:"));
 if (!resumeRefused) bad += 1;
