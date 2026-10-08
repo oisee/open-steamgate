@@ -13,7 +13,7 @@ import (
 
 // proc owns one child. Closing done publishes readErr; dead means Wait returned.
 type proc struct {
-	cmd        *exec.Cmd
+	kill       func()
 	stdin      io.WriteCloser
 	stdout     *os.File
 	answers    chan json.RawMessage
@@ -22,9 +22,9 @@ type proc struct {
 	maxLine    atomic.Int64
 }
 
-func newProc(cmd *exec.Cmd, stdin io.WriteCloser, stdout *os.File) *proc {
-	p := &proc{cmd: cmd, stdin: stdin, stdout: stdout, answers: make(chan json.RawMessage, 1), done: make(chan struct{}), dead: make(chan struct{})}
-	p.maxLine.Store(1024 * 1024) // bounded hello before negotiated limits are available
+func newProc(cmd *exec.Cmd, kill func(), stdin io.WriteCloser, stdout *os.File) *proc {
+	p := &proc{kill: kill, stdin: stdin, stdout: stdout, answers: make(chan json.RawMessage, 1), done: make(chan struct{}), dead: make(chan struct{})}
+	p.maxLine.Store(1024 * 1024) // bounded hello before the response budget applies
 	go func() { _ = cmd.Wait(); close(p.dead) }()
 	go p.read()
 	return p

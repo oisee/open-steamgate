@@ -503,8 +503,8 @@
       "reason": "#641 zip layers: user source layers (zip cache + overlay) enter the build inputs and the generation hash"
     },
     "go:compiler": {
-      "lines": 610,
-      "reason": "Fix2 lifecycle simplification: one proc owns pipes, bounded NDJSON reader and completion signals; cancellable admission, bounded group cleanup (including Windows taskkill), idle-death backoff, final-answer EOF drain and positive integer hello limits. Preserves Fix1 rooted snapshots, discovery, version checks and status JSON; no ABAP bindings."
+      "lines": 711,
+      "reason": "Fix3 preserves Fix2 lifecycle, admission, idle backoff and EOF drain; adds suspended Windows startup into a kill-on-close Job Object with owned cleanup, independent configurable response-line budget, and required check verdict field/hash validation. Rooted snapshots, discovery, version checks and status JSON remain; no ABAP bindings."
     }
   },
   "readmeMissing": [

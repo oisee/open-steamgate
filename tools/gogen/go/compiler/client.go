@@ -19,6 +19,7 @@ type Options struct {
 	RestartBackoff   time.Duration
 	KillGrace        time.Duration
 	ExpectTranspiler string
+	MaxResponseBytes int64
 }
 type Client struct {
 	mu        sync.Mutex
@@ -43,6 +44,9 @@ func New(options Options) *Client {
 	}
 	if options.KillGrace <= 0 {
 		options.KillGrace = 2 * time.Second
+	}
+	if options.MaxResponseBytes <= 0 {
+		options.MaxResponseBytes = 64 * 1024 * 1024
 	}
 	if options.Version == "" {
 		options.Version = "development"
@@ -174,7 +178,6 @@ func (c *Client) ensure(ctx context.Context) error {
 		return c.record(err)
 	}
 	cmd := exec.Command(path, "compiler", "--stdio")
-	configureProcess(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return c.record(err)
@@ -187,14 +190,15 @@ func (c *Client) ensure(ctx context.Context) error {
 	// Tool logs must never be confused with NDJSON responses.
 	cmd.Stderr = nil
 	cmd.Stdout = stdoutWrite
-	if err = cmd.Start(); err != nil {
+	kill, err := startProcess(cmd)
+	if err != nil {
 		stdin.Close()
 		stdoutRead.Close()
 		stdoutWrite.Close()
 		return c.record(&Refusal{Code: "INTERNAL", Text: err.Error()})
 	}
 	stdoutWrite.Close()
-	c.proc = newProc(cmd, stdin, stdoutRead)
+	c.proc = newProc(cmd, kill, stdin, stdoutRead)
 	if c.starts > 0 {
 		c.status.Restarts++
 	}
@@ -207,7 +211,7 @@ func (c *Client) ensure(ctx context.Context) error {
 	}
 	c.status.Contract, c.status.OSD, c.status.Transpiler = hello.Contract, hello.OSD, hello.Transpiler
 	c.status.Capabilities, c.status.Limits = hello.Capabilities, hello.Limits
-	c.proc.maxLine.Store(hello.Limits.MaxSnapshotBytes)
+	c.proc.maxLine.Store(c.options.MaxResponseBytes)
 	if hello.Contract != Contract {
 		c.stop()
 		return c.record(&Refusal{Code: "CONTRACT_MISMATCH", Text: fmt.Sprintf("expected %d, got %d", Contract, hello.Contract)})
@@ -308,7 +312,7 @@ func (c *Client) stop() {
 	}
 	c.proc = nil
 	c.retryAt = c.now().Add(c.options.RestartBackoff)
-	killProcess(p.cmd)
+	p.kill()
 	_ = p.stdin.Close()
 	_ = p.stdout.Close()
 	select {

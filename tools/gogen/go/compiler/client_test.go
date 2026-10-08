@@ -20,6 +20,13 @@ import (
 func TestMain(m *testing.M) {
 	if mode := os.Getenv("COMPILER_FAKE"); mode != "" {
 		if mode == "descendant" {
+			marker := os.Getenv("COMPILER_MARKER")
+			if err := os.WriteFile(marker, []byte("ready"), 0600); err != nil {
+				os.Exit(9)
+			}
+			if err := os.WriteFile(marker+".pid", []byte(fmt.Sprint(os.Getpid())), 0600); err != nil {
+				os.Exit(9)
+			}
 			for {
 				_ = os.WriteFile(os.Getenv("COMPILER_MARKER"), []byte(fmt.Sprint(time.Now().UnixNano())), 0600)
 				time.Sleep(5 * time.Millisecond)
@@ -56,6 +63,12 @@ func TestMain(m *testing.M) {
 				}
 				response["contract"], response["osd"], response["transpiler"] = contract, "test-osd", "test-pin"
 				response["capabilities"], response["limits"] = caps, Limits{4 * 1024 * 1024, 1}
+				if mode == "small-snapshot" {
+					response["limits"] = Limits{1024, 1}
+				}
+				if mode == "descendant-exit" {
+					startDescendant()
+				}
 				if field, ok := strings.CutPrefix(mode, "hello-missing:"); ok {
 					delete(response, field)
 				}
@@ -66,6 +79,8 @@ func TestMain(m *testing.M) {
 					response["transpiler"] = "other-pin"
 				}
 			} else {
+				response["diagnostics"] = []Diagnostic{}
+				response["registryHash"], response["configSha"], response["inputCount"] = strings.Repeat("a", 64), strings.Repeat("b", 64), 2
 				if marker := os.Getenv("COMPILER_MARKER"); marker != "" && mode != "descendant-exit" {
 					_ = os.WriteFile(marker, []byte("sent"), 0600)
 				}
@@ -77,21 +92,8 @@ func TestMain(m *testing.M) {
 					_ = os.Stdout.Close()
 					time.Sleep(time.Hour)
 				case mode == "descendant-exit":
-					child := exec.Command(os.Args[0])
-					child.Env = append(os.Environ(), "COMPILER_FAKE=descendant")
-					child.Stdout = os.Stdout
-					if child.Start() != nil {
-						os.Exit(8)
-					}
-					// Wait until the descendant proves it is alive and owns stdout.
-					for {
-						if _, err := os.Stat(os.Getenv("COMPILER_MARKER")); err == nil {
-							break
-						}
-						time.Sleep(time.Millisecond)
-					}
 					os.Exit(0)
-				case mode == "fragmented" || mode == "large":
+				case mode == "fragmented" || mode == "large" || mode == "small-snapshot":
 					response["diagnostics"] = []Diagnostic{{Text: strings.Repeat("x", 128*1024)}}
 					raw, _ := json.Marshal(response)
 					if mode == "fragmented" {
@@ -122,7 +124,14 @@ func TestMain(m *testing.M) {
 					response["id"] = request.ID + 1
 				default:
 					response["diagnostics"] = []Diagnostic{{Severity: "E", Code: "ABAP_SYNTAX", Text: "fixture", Object: ObjectID{"CLAS", "ZCL_FIXTURE"}, Include: "src/fixture.clas.abap", Line: 3, Col: 12, EndLine: 3, EndCol: 42}}
-					response["registryHash"], response["configSha"], response["inputCount"], response["virtualFiles"] = "registry", "config", 2, []string{"virtual"}
+					response["registryHash"], response["configSha"], response["inputCount"], response["virtualFiles"] = strings.Repeat("a", 64), strings.Repeat("b", 64), 2, []string{"virtual"}
+				}
+				if field, ok := strings.CutPrefix(mode, "check-missing:"); ok {
+					delete(response, field)
+				}
+				if spec, ok := strings.CutPrefix(mode, "check-invalid:"); ok {
+					field, raw, _ := strings.Cut(spec, "=")
+					response[field] = json.RawMessage(raw)
 				}
 			}
 			_ = json.NewEncoder(os.Stdout).Encode(response)
@@ -136,6 +145,7 @@ func TestMain(m *testing.M) {
 		}
 		os.Exit(0)
 	}
+	enableDescendantReaping()
 	os.Exit(m.Run())
 }
 
@@ -148,7 +158,7 @@ func fake(t *testing.T, mode string) *Client {
 	t.Setenv("OSGO_SIDECAR", executable)
 	t.Setenv("COMPILER_FAKE", mode)
 	t.Setenv("GORACE", "atexit_sleep_ms=0")
-	c := New(Options{Root: "test-root", Version: "test-version", CheckTimeout: time.Second, RestartBackoff: time.Millisecond})
+	c := New(Options{Root: "test-root", Version: "test-version", CheckTimeout: 10 * time.Second, RestartBackoff: time.Millisecond})
 	t.Cleanup(func() { _ = c.Close() })
 	return c
 }
@@ -212,7 +222,7 @@ func TestHelloAndCheck(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.RegistryHash != "registry" || result.ConfigSha != "config" || result.InputCount != 2 || !reflect.DeepEqual(result.VirtualFiles, []string{"virtual"}) || len(result.Diagnostics) != 1 || result.Diagnostics[0].Col != 12 {
+	if result.RegistryHash != strings.Repeat("a", 64) || result.ConfigSha != strings.Repeat("b", 64) || result.InputCount != 2 || !reflect.DeepEqual(result.VirtualFiles, []string{"virtual"}) || len(result.Diagnostics) != 1 || result.Diagnostics[0].Col != 12 {
 		t.Fatalf("answer: %+v", result)
 	}
 	status := c.Status()
@@ -270,23 +280,15 @@ func TestAdmissionRespectsContext(t *testing.T) {
 	c := fake(t, "timeout")
 	marker := filepath.Join(t.TempDir(), "sent")
 	t.Setenv("COMPILER_MARKER", marker)
-	c.options.CheckTimeout = 2 * time.Second
+	c.options.CheckTimeout = 10 * time.Second
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	done := make(chan error, 1)
 	go func() {
 		_, err := c.Check(ctx, Snapshot{})
 		done <- err
 	}()
-	for range 100 {
-		if _, err := os.Stat(marker); err == nil {
-			break
-		}
-		select {
-		case err := <-done:
-			t.Fatalf("slow Hello ended early: %v", err)
-		case <-time.After(2 * time.Millisecond):
-		}
-	}
+	waitFile(t, marker)
 	start := time.Now()
 	shortCtx, shortCancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	err := c.Hello(shortCtx)
@@ -320,9 +322,9 @@ func TestIdleDeathRestart(t *testing.T) {
 	if err := c.Hello(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	cmd := c.proc.cmd
+	kill := c.proc.kill
 	dead := c.proc.dead
-	killProcess(cmd)
+	kill()
 	select {
 	case <-c.proc.done:
 	case <-time.After(time.Second):
@@ -342,13 +344,19 @@ func TestIdleDeathRestart(t *testing.T) {
 }
 func TestRestartBackoffDelay(t *testing.T) {
 	c := fake(t, "timeout")
-	c.options.CheckTimeout = 20 * time.Millisecond
+	marker := filepath.Join(t.TempDir(), "sent")
+	t.Setenv("COMPILER_MARKER", marker)
 	c.options.RestartBackoff = 37 * time.Millisecond
 	if err := c.Hello(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	_, err := c.Check(context.Background(), Snapshot{})
-	code(t, err, "TIMEOUT")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { _, err := c.Check(ctx, Snapshot{}); done <- err }()
+	waitFile(t, marker) // handshake and request reached the fixture before cancellation
+	cancel()
+	code(t, <-done, "TIMEOUT")
 	t.Setenv("COMPILER_FAKE", "answer")
 	base := c.retryAt.Add(-37 * time.Millisecond)
 	c.now = func() time.Time { return base }
@@ -357,7 +365,7 @@ func TestRestartBackoffDelay(t *testing.T) {
 		delays = append(delays, delay)
 		return time.After(0)
 	}
-	if _, err = c.Check(context.Background(), Snapshot{}); err != nil {
+	if _, err := c.Check(context.Background(), Snapshot{}); err != nil {
 		t.Fatal(err)
 	}
 	if len(delays) != 1 || delays[0] != 37*time.Millisecond {
@@ -477,5 +485,20 @@ func TestSnapshot(t *testing.T) {
 	var pathErr *SnapshotPathError
 	if errors.As(err, &pathErr) {
 		t.Fatalf("symlink escape used lexical error: %v", err)
+	}
+}
+
+func startDescendant() {
+	child := exec.Command(os.Args[0])
+	child.Env = append(os.Environ(), "COMPILER_FAKE=descendant")
+	child.Stdout = os.Stdout
+	if child.Start() != nil {
+		os.Exit(8)
+	}
+	for {
+		if raw, err := os.ReadFile(os.Getenv("COMPILER_MARKER") + ".pid"); err == nil && len(raw) > 0 {
+			return
+		}
+		time.Sleep(time.Millisecond)
 	}
 }

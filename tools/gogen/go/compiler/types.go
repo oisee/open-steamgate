@@ -1,7 +1,11 @@
 // Package compiler implements the v1 compiler-provider client without ADT wiring.
 package compiler
 
-import "fmt"
+import (
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+)
 
 const Contract = 1
 
@@ -75,4 +79,33 @@ type Status struct {
 	Limits       Limits   `json:"limits"`
 	Restarts     int      `json:"restarts"`
 	LastError    string   `json:"lastError"`
+}
+
+// UnmarshalJSON rejects incomplete successful verdicts as a local INTERNAL refusal.
+func (result *CheckResult) UnmarshalJSON(raw []byte) error {
+	fields := map[string]json.RawMessage{}
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return err
+	}
+	for _, field := range []string{"diagnostics", "registryHash", "configSha", "inputCount"} {
+		value, ok := fields[field]
+		if !ok || string(value) == "null" {
+			return fmt.Errorf("check result missing %s", field)
+		}
+	}
+	type wireResult CheckResult
+	var value wireResult
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return err
+	}
+	for _, hash := range []string{value.RegistryHash, value.ConfigSha} {
+		if _, err := hex.DecodeString(hash); err != nil || len(hash) != 64 {
+			return fmt.Errorf("check result requires 64-hex registryHash and configSha")
+		}
+	}
+	if value.Diagnostics == nil || value.InputCount < 0 {
+		return fmt.Errorf("check result requires diagnostics array and nonnegative inputCount")
+	}
+	*result = CheckResult(value)
+	return nil
 }
