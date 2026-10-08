@@ -2125,7 +2125,11 @@ function uniqueGuard(tableType, what) {
 function stringComparison(op, l, r) {
   const kinds = {CP: "cp", NP: "cp", CA: "ca", NA: "ca", CS: "cs", NS: "cs", CO: "co", CN: "co"};
   if (!kinds[op]) return null;
-  const c = {c: kinds[op], l: convert(l, S), r: convert(r, S), cpat: r.type.k === "c"};
+  const kind = kinds[op];
+  // CS keeps the subject's blanks; CA/CO keep both. CP keeps escaped
+  // pattern blanks and distinguishes fixed subjects from strings.
+  const c = {c: kind, l: padded(l), r: kind === "cs" ? convert(r, S) : padded(r),
+    cpat: r.type.k === "c", csubject: l.type.k === "c"};
   return ["NP", "NA", "NS", "CN"].includes(op) ? {c: "not", x: c} : c;
 }
 

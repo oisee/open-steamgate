@@ -15,8 +15,8 @@
   ],
   "budgets": {
     "go:abap": {
-      "lines": 11778,
-      "reason": "ADT batch 1 (adt-i5 cases 1-7): Session message fields, classic exception binding, date/time and signed MOVE adapters, object-wrapper identity, STORE answer projection and conservative ADT host answers; timestamp conversion lives in go/timestamp. Includes the merged main baseline and the narrow UTF-16 adapter required to remove charsection dependency on abap. Critic round 1: immediate caller MESSAGE RAISING assignments and scoped restoration, including calls without EXCEPTIONS."
+      "lines": 11793,
+      "reason": "ADT batch 1 (adt-i5 cases 1-7): Session message fields, classic exception binding, date/time and signed MOVE adapters, object-wrapper identity, STORE answer projection and conservative ADT host answers; timestamp conversion lives in go/timestamp. Includes the merged main baseline and the narrow UTF-16 adapter required to remove charsection dependency on abap. Critic round 1: immediate caller MESSAGE RAISING assignments and scoped restoration, including calls without EXCEPTIONS. Critic round 1: shared fixed-character comparison conversion and CP escaped/trailing blank binding semantics."
     },
     "go:abaperr": {
       "lines": 13,
@@ -199,8 +199,8 @@
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/frontend.mjs": {
-      "lines": 6858,
-      "reason": "ADT batch 1 (adt-i5 cases 1-7): Lower string WHERE predicates through existing logical IR; bind CONVERT, MESSAGE RAISING, sy-msg fields, STORE parameters, date/time calculation types, object re-raise and conservative ADT kernel answers."
+      "lines": 6862,
+      "reason": "ADT batch 1 (adt-i5 cases 1-7): Lower string WHERE predicates through existing logical IR; bind CONVERT, MESSAGE RAISING, sy-msg fields, STORE parameters, date/time calculation types, object re-raise and conservative ADT kernel answers. Critic round 1: shared fixed-character comparison conversion and CP escaped/trailing blank binding semantics."
     },
     "tools/gogen/go/abap/abap.go": {
       "lines": 237,

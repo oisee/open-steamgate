@@ -502,7 +502,7 @@ export function classic(s, e, method, map, others) {
 }
 
 // CP and CA: see the Go runtime (conv.go), measured on A4H
-export function CP(a, p, cpat) {
+export function CP(a, p, cpat, csubject = false) {
   if (cpat && p === "") p = " ";
   const ps = [];
   const pr = [...p];
@@ -512,10 +512,12 @@ export function CP(a, p, cpat) {
     else if (pr[i] === "+") ps.push({k: "+"});
     else ps.push({r: pr[i], k: "l"});
   }
+  if (cpat) while (ps.length > 1 && ps.at(-1).k === "l" && ps.at(-1).r === " ") ps.pop();
   const ar = [...a];
   const eq = (t, c) => (t.k === "+" ? true : t.k === "e" ? t.r === c : t.r.toUpperCase() === c.toUpperCase());
   let i = 0, j = 0, star = -1, mark = 0;
   while (i < ar.length) {
+    if (j === ps.length && csubject && ar.slice(i).every((c) => c === " ")) return true;
     if (j < ps.length && ps[j].k !== "*" && eq(ps[j], ar[i])) { i++; j++; }
     else if (j < ps.length && ps[j].k === "*") { star = j; mark = i; j++; }
     else if (star >= 0) { j = star + 1; mark++; i = mark; }
