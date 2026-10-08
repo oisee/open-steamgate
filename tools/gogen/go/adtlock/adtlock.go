@@ -25,7 +25,7 @@ type step struct {
 	holderSID int64
 }
 
-// Host maps calling dialog steps to lock-server sessions and installs both
+// Host maps calling dialog steps to lock-server sessions and installs the
 // hostclass seams over one server/kernel pair.
 type Host struct {
 	server *enq.Server
@@ -59,6 +59,9 @@ func (h *Host) Install() {
 	locks.Enqueue = h.Enqueue
 	locks.Dequeue = h.Dequeue
 	locks.DequeueAll = h.DequeueAll
+
+	hostclass.LUW.Commit = h.Commit
+	hostclass.LUW.Rollback = h.Rollback
 }
 
 // Begin registers a dialog step; it reports whether this call created it.
@@ -265,6 +268,28 @@ func (h *Host) DequeueAll(caller any) error {
 		return nil
 	}
 	h.server.DequeueAll(sid)
+	return nil
+}
+
+// Commit follows Node's explicit COMMIT WORK wrapper. The update ran inline,
+// so its ended owner is done before the statement returns. No session is opened.
+func (h *Host) Commit(caller any, updated bool) error {
+	_, sid, _, err := h.current(caller, false)
+	if err != nil || sid == 0 {
+		return nil
+	}
+	ended := h.server.Commit(sid, updated)
+	h.server.UpdateDone(sid, ended)
+	return nil
+}
+
+// Rollback releases the calling step's update locks, without opening a session.
+func (h *Host) Rollback(caller any) error {
+	_, sid, _, err := h.current(caller, false)
+	if err != nil || sid == 0 {
+		return nil
+	}
+	h.server.Rollback(sid)
 	return nil
 }
 
