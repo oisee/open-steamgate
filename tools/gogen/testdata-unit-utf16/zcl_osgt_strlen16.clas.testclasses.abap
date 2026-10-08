@@ -14,6 +14,7 @@ METHODS case_find FOR TESTING.
 METHODS json_escape FOR TESTING.
 METHODS supplementary_fold FOR TESTING.
 METHODS join_keys FOR TESTING.
+METHODS join_hash FOR TESTING.
 METHODS join_template FOR TESTING.
 METHODS join_loop FOR TESTING.
 METHODS join_replace FOR TESTING.
@@ -22,6 +23,7 @@ METHODS binary_body FOR TESTING.
 METHODS half_operators FOR TESTING.
 METHODS half_ignore_case FOR TESTING.
 METHODS json_half_parse FOR TESTING.
+METHODS egress_apc FOR TESTING.
 ENDCLASS.
 CLASS ltcl_test IMPLEMENTATION.
 METHOD len.
@@ -139,6 +141,13 @@ DATA(r) = hi && lo.
 IF r <> emoji.
  cl_abap_unit_assert=>fail( msg = `raw equality after &&` ).
 ENDIF.
+ENDMETHOD.
+METHOD join_hash.
+DATA(s) = zcl_osgt_strlen16=>emoji( ).
+DATA(hi) = s+0(1).
+DATA(lo) = s+1(1).
+DATA(emoji) = s+0(2).
+DATA(r) = hi && lo.
 TYPES: BEGIN OF ty_row, value TYPE string, END OF ty_row.
 DATA keys TYPE HASHED TABLE OF ty_row WITH UNIQUE KEY value.
 DATA row TYPE ty_row.
@@ -258,5 +267,16 @@ node = reader->read_next_node( ).
 node = reader->read_next_node( ).
 val ?= node.
 cl_abap_unit_assert=>assert_equals( act = val->get_value( ) exp = emoji ).
+ENDMETHOD.
+METHOD egress_apc.
+DATA(s) = zcl_osgt_strlen16=>emoji( ).
+DATA(hi) = s+0(1).
+DATA(lo) = s+1(1).
+DATA(emoji) = s+0(2).
+DATA msg TYPE REF TO if_apc_wsp_message.
+CREATE OBJECT msg TYPE zcl_apc_message.
+msg->set_text( hi && lo ).
+cl_abap_unit_assert=>assert_equals( act = msg->get_text( ) exp = emoji ).
+cl_abap_unit_assert=>assert_equals( act = msg->get_binary( ) exp = CONV xstring( 'F09F9880' ) ).
 ENDMETHOD.
 ENDCLASS.

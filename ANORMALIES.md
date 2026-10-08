@@ -29,6 +29,24 @@ Format adapted from `larshp/hithub` (MIT).
 - Upstream version containing a fix: `...` or `unknown`
 
 ## Open anomalies
+### ANOMALY-2026-10-08-lone-surrogate-egress -- Unmeasured text output of lone UTF-16 halves
+
+- Status: `open`
+- Affected runtime: OSGo's text DATASET, `CL_GUI_FRONTEND_SERVICES=>GUI_DOWNLOAD`
+  in ASC mode, and APC text messages.
+- Actual OSGo behaviour: a lone surrogate produced by a character section is
+  stored as WTF-8 and its bytes are written unchanged to UTF-8 text output
+  (for example, a high D83D unit is `ED A0 BD`). File output also writes its
+  configured newline; APC submits the same bytes as a text frame, which a
+  receiver requiring valid UTF-8 may reject. Adjacent high/low halves are
+  joined at string construction and leave as the normal supplementary character.
+- Expected SAP behaviour: unknown; A4H was not measured. No substitution,
+  rejection or encoding rule is inferred from the behaviour of this host.
+- Smallest safe workaround: avoid sending lone halves to text output.
+- Regression: `tools/gogen/go/abap/text_egress_test.go`,
+  `tools/gogen/go/apc/surrogate_test.go`, and the UTF-16 ABAP Unit fixture.
+- Upstream: not reported; kernel behaviour needs measurement first.
+
 ### ANOMALY-2026-10-07-aunit-comparison-sign -- E.2 type-blind comparison formatting
 
 - Status: `fixed locally`
