@@ -14,6 +14,7 @@ async function release(ctx) {
   if (ctx.handle) {
     const response = await ctx.session.request(unlock(ctx.handle));
     assert.equal(response.status, 200, 'cleanup UNLOCK');
+    ctx.handle = undefined;
   }
 }
 const conflict = {status: 403, body: /ExceptionResourceNoAccess/};
@@ -30,7 +31,10 @@ export default [
     request: {...lock, session: 'other'}, expect: conflict, after: release},
   {id: 'L4-unlock', point: 'L4', title: 'UNLOCK releases ownership for another session', setup: held,
     request: ctx => unlock(ctx.handle), expect: {status: 200, bodyBytes: ''},
-    after: async ctx => {ctx.handle = undefined; ctx.other = await ctx.newSession();
+    after: async (ctx, res) => {
+      if (res?.status === 200) ctx.handle = undefined;
+      await release(ctx);
+      ctx.other = await ctx.newSession();
       const response = await ctx.other.request(lock); const handle = handleOf(response);
       try {assert.equal(response.status, 200, 'reacquire after UNLOCK'); assert.match(handle ?? '', /^[0-9a-f]{40}$/);}
       finally {if (handle) assert.equal((await ctx.other.request(unlock(handle))).status, 200);}}},

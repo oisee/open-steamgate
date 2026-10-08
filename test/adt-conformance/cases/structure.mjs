@@ -13,5 +13,5 @@ export default [
 ].map(([point, title, accept, query]) => ({id: `${point}-${title}`, point, title,
   request: {path, query, headers: {accept}},
   expect: {status: 200, contentType: `application/vnd.sap.adt.objectstructure${['application/xml', 'application/vnd.sap.adt.objectstructure+xml'].includes(accept) ? '' : '.v2'}+xml; charset=utf-8`,
-    bodyBytes: outlineBytes(expected, {base: '/sap/bc/adt' + path})},
+    bodyBytes: outlineBytes(expected, {base: '/sap/bc/adt' + path + (Object.keys(query).length ? '?' + new URLSearchParams(query) : '')})},
 }));

@@ -36,7 +36,7 @@ function writeReport(target, results, output, extra = {}) {
   const report = {schema: 1, target, createdAt: new Date().toISOString(), ...extra, summary, cases: results};
   mkdirSync(output, {recursive: true});
   writeFileSync(join(output, `adt-conformance-${target}.json`), JSON.stringify(report, null, 2) + '\n');
-  return {...report, exitCode: summary.fail ? 1 : 0};
+  return {...report, exitCode: summary.fail || extra.runErrors?.length ? 1 : 0};
 }
 export async function run({target, base, expectedFile, only, output = 'suite-results', say = console.log}) {
   assert.ok(['js', 'osgo', 'a4h'].includes(target), 'unknown target');
@@ -50,6 +50,7 @@ export async function run({target, base, expectedFile, only, output = 'suite-res
   const cases = all.filter(c => !selected || selected.has(c.id));
   assert.ok(cases.length, 'no cases selected');
   const results = [];
+  let discoverySucceeded = false, executedCases = 0;
   for (const c of cases) {
     const wants = expected[c.id] ?? 'pass';
     let status, detail, actual, stage = 'login';
@@ -61,10 +62,17 @@ export async function run({target, base, expectedFile, only, output = 'suite-res
       let error;
       try {
         ctx.session = await ctx.newSession();
+        stage = 'discovery';
+        if (!discoverySucceeded) {
+          const discovery = await ctx.session.request({path: '/core/discovery'});
+          assert.equal(discovery.status, 200, 'discovery status');
+          discoverySucceeded = true;
+        }
         stage = 'setup'; await c.setup?.(ctx);
         stage = 'request';
         const request = typeof c.request === 'function' ? await c.request(ctx) : c.request;
         response = await (request.session ? ctx[request.session] : ctx.session).request(request);
+        executedCases++;
         actual = {status: response.status, contentType: response.headers.get('content-type'), bodyBytes: response.bytes.length};
         stage = 'assert'; assertResponse(response, c.expect);
       } catch (e) {error = e;}
@@ -77,11 +85,15 @@ export async function run({target, base, expectedFile, only, output = 'suite-res
       detail = cleanupError ? `cleanup: ${cleanupError.message.split('\n')[0]}` : error
         ? `${stage}: ${error.message.split('\n')[0]}` : wants.startsWith('known-gap: ') ? 'unexpected pass: update the expected file' : undefined;
     }
-    const row = {id: c.id, point: c.point, title: c.title, status, observed: status !== 'not-applicable',
+    const row = {id: c.id, point: c.point, title: c.title, status, observed: !!actual,
       ...(wants !== 'pass' ? {expected: wants} : {}), ...(actual ? {actual} : {}), ...(detail ? {detail} : {})};
     results.push(row); say(`${status.padEnd(14)} ${c.id}${detail ? ': ' + detail : ''}`);
   }
-  const report = writeReport(target, results, output);
+  const runErrors = [];
+  if (!executedCases) runErrors.push('no executed cases');
+  if (!discoverySucceeded) runErrors.push('no successful discovery request');
+  const report = writeReport(target, results, output, {executedCases, discoverySucceeded, runErrors});
+  for (const error of runErrors) say(`run failure: ${error}`);
   say(`${target}: ${Object.entries(report.summary).map(([s, n]) => `${n} ${s}`).join(', ')}`);
   return report;
 }

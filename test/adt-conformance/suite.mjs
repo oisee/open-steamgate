@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import express from 'express';
-import {mkdtempSync, rmSync, readFileSync} from 'node:fs';
+import {mkdtempSync, rmSync, readFileSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {runJS} from './js.mjs';
@@ -9,6 +9,7 @@ import {xpath, assertResponse} from './assertions.mjs';
 import {Session} from './session.mjs';
 import {loadCases, classify, validateExpected, run, recordUnavailable} from './run.mjs';
 import {mergeSquare} from './square.mjs';
+import lockCases from './cases/locks.mjs';
 
 describe('shared ADT conformance runner contracts', function () {
   this.timeout(180000);
@@ -19,6 +20,55 @@ describe('shared ADT conformance runner contracts', function () {
     assert.equal(normalize("<x session-id='abc123' client='123'><a:changedBy xmlns:a='urn:x'>synthetic</a:changedBy></x>"),
       "<x session-id='******' client='{client}'><a:changedBy xmlns:a='urn:x'>{changedby}</a:changedBy></x>");
     assert.equal(xml, '<LOCK_HANDLE>******</LOCK_HANDLE><x href="{host}/a#start=2,6;end=2,28" etag="****" changedBy="{changedby}"/>');
+  });
+  it('preserves systemID and matches complete volatile XML attribute names', () => {
+    assert.notDeepEqual(normalize({systemID: 'ABC'}), normalize({systemID: 'XYZ'}));
+    const xml = '<x systemID="ABC" objectclient="001" objectclientXYZ="002" clientXYZ="003" client="004" a:client="005"/>';
+    assert.equal(normalize(xml), '<x systemID="ABC" objectclient="001" objectclientXYZ="002" clientXYZ="003" client="{client}" a:client="{client}"/>');
+    assert.notEqual(normalize('<x objectclient="001"/>'), normalize('<x objectclient="999"/>'));
+    assert.notEqual(normalize('<systemID>ABC</systemID>'), normalize('<systemID>XYZ</systemID>'));
+  });
+  it('retains a failed UNLOCK handle and releases it before reacquisition', async () => {
+    const c = lockCases.find(c => c.point === 'L4');
+    const handle = 'a'.repeat(40), otherHandle = 'b'.repeat(40), calls = [];
+    let attempts = 0;
+    const ctx = {session: {request: async req => {
+      calls.push(req.query._action);
+      if (req.query._action === 'LOCK') return {status: 200, body: `<LOCK_HANDLE>${handle}</LOCK_HANDLE>`};
+      assert.equal(ctx.handle, handle);
+      assert.equal(req.query.lockHandle, handle);
+      return {status: ++attempts < 3 ? 500 : 200};
+    }}, newSession: async () => {
+      assert.equal(ctx.handle, undefined, 'release before opening the competing session');
+      return {request: async req => {
+        calls.push('other ' + req.query._action);
+        return {status: 200, body: `<LOCK_HANDLE>${otherHandle}</LOCK_HANDLE>`};
+      }};
+    }};
+    await c.setup(ctx);
+    const failed = await ctx.session.request(c.request(ctx));
+    await assert.rejects(c.after(ctx, failed), /cleanup UNLOCK/);
+    assert.equal(ctx.handle, handle, 'failed cleanup retains the handle');
+    await c.after(ctx, failed);
+    assert.equal(ctx.handle, undefined);
+    assert.deepEqual(calls, ['LOCK', 'UNLOCK', 'UNLOCK', 'UNLOCK', 'other LOCK', 'other UNLOCK']);
+  });
+  it('cleans up an L4 handle captured before a setup assertion failed', async () => {
+    const c = lockCases.find(c => c.point === 'L4'), handle = 'c'.repeat(40), calls = [];
+    const ctx = {session: {request: async req => {
+      calls.push(req.query._action);
+      return {status: req.query._action === 'LOCK' ? 500 : 200, body: `<LOCK_HANDLE>${handle}</LOCK_HANDLE>`};
+    }}, newSession: async () => {
+      assert.equal(ctx.handle, undefined);
+      return {request: async req => {
+        calls.push('other ' + req.query._action);
+        return {status: 200, body: `<LOCK_HANDLE>${handle}</LOCK_HANDLE>`};
+      }};
+    }};
+    await assert.rejects(c.setup(ctx), /setup LOCK/);
+    assert.equal(ctx.handle, handle);
+    await c.after(ctx, undefined);
+    assert.deepEqual(calls, ['LOCK', 'UNLOCK', 'other LOCK', 'other UNLOCK']);
   });
   it('selects namespace-aware XML paths and rejects unsupported XPath', () => {
     const xml = '<q:root xmlns:q="urn:fixture"><q:item id="1">a&amp;b</q:item><q:item id="2">other</q:item></q:root>';
@@ -67,9 +117,63 @@ describe('shared ADT conformance runner contracts', function () {
         expectedFile: new URL('./expected/osgo.json', import.meta.url), only: ['C3-head'], output, say: () => {}});
       assert.equal(result.exitCode, 1); assert.equal(result.cases[0].status, 'fail');
       assert.match(result.cases[0].detail, /login/);
+      assert.equal(result.executedCases, 0); assert.equal(result.discoverySucceeded, false);
+      assert.equal(result.cases[0].observed, false);
       const unavailable = await recordUnavailable({expectedFile: new URL('./expected/osgo.json', import.meta.url), output,
         reason: 'osgo: not mountable on this main'});
       assert.ok(unavailable.cases.every(c => c.observed === false && c.status === 'known-gap'));
+    } finally {await new Promise(resolve => server.close(resolve)); rmSync(output, {recursive: true, force: true});}
+  });
+  it('fails all-n/a runs with zero observations, even without contacting a server', async () => {
+    const output = mkdtempSync(join(tmpdir(), 'adt-empty-'));
+    try {
+      const expectedFile = join(output, 'expected.json');
+      writeFileSync(expectedFile, JSON.stringify(Object.fromEntries((await loadCases()).map(c => [c.id, 'n/a: synthetic exclusion']))));
+      const result = await run({target: 'osgo', base: 'http://127.0.0.1:0', expectedFile, output, say: () => {}});
+      assert.equal(result.exitCode, 1); assert.equal(result.summary['not-applicable'], 23);
+      assert.equal(result.executedCases, 0); assert.equal(result.discoverySucceeded, false);
+      assert.ok(result.cases.every(c => !c.observed));
+      assert.deepEqual(result.runErrors, ['no executed cases', 'no successful discovery request']);
+    } finally {rmSync(output, {recursive: true, force: true});}
+  });
+  it('fails an unreachable HTTP target and requires GET discovery after a successful handshake', async () => {
+    const output = mkdtempSync(join(tmpdir(), 'adt-discovery-'));
+    const app = express();
+    app.head('/sap/bc/adt/core/discovery', (req, res) => {
+      res.setHeader('set-cookie', 'session=synthetic; Path=/');
+      res.setHeader('x-csrf-token', 'synthetic-token'); res.end();
+    });
+    app.use((req, res) => res.sendStatus(req.path.endsWith('/logoff') ? 200 : 503));
+    const server = await new Promise(resolve => {const s = app.listen(0, '127.0.0.1', () => resolve(s));});
+    try {
+      const opts = {target: 'osgo', expectedFile: new URL('./expected/osgo.json', import.meta.url),
+        only: ['C3-head'], output, say: () => {}};
+      for (const base of ['http://127.0.0.1:0', `http://127.0.0.1:${server.address().port}`]) {
+        const result = await run({...opts, base});
+        assert.equal(result.exitCode, 1); assert.equal(result.summary.fail, 1);
+        assert.equal(result.executedCases, 0); assert.equal(result.discoverySucceeded, false);
+        assert.ok(result.cases.every(c => !c.observed));
+        assert.match(result.cases[0].detail, base.endsWith(':0') ? /login/ : /discovery/);
+      }
+    } finally {await new Promise(resolve => server.close(resolve)); rmSync(output, {recursive: true, force: true});}
+  });
+  it('fails zero-observation runs even when discovery succeeds and setup is a known gap', async () => {
+    const output = mkdtempSync(join(tmpdir(), 'adt-no-observations-'));
+    const app = express();
+    app.head('/sap/bc/adt/core/discovery', (req, res) => {
+      res.setHeader('set-cookie', 'session=synthetic; Path=/');
+      res.setHeader('x-csrf-token', 'synthetic-token'); res.end();
+    });
+    app.get('/sap/bc/adt/core/discovery', (req, res) => res.end('<discovery/>'));
+    app.use((req, res) => res.sendStatus(req.path.endsWith('/logoff') ? 200 : 403));
+    const server = await new Promise(resolve => {const s = app.listen(0, '127.0.0.1', () => resolve(s));});
+    try {
+      const result = await run({target: 'osgo', base: `http://127.0.0.1:${server.address().port}`,
+        expectedFile: new URL('./expected/osgo.json', import.meta.url), only: ['L2-repeat-lock'], output, say: () => {}});
+      assert.equal(result.summary['known-gap'], 1);
+      assert.equal(result.discoverySucceeded, true); assert.equal(result.executedCases, 0);
+      assert.equal(result.cases[0].observed, false); assert.equal(result.exitCode, 1);
+      assert.deepEqual(result.runErrors, ['no executed cases']);
     } finally {await new Promise(resolve => server.close(resolve)); rmSync(output, {recursive: true, force: true});}
   });
   it('merges latest evidence without inventing A4H observations', () => {
@@ -82,5 +186,6 @@ describe('shared ADT conformance runner contracts', function () {
   it('runs every read and lock case through the existing JS server helper', async () => {
     const result = await runJS();
     assert.equal(result.exitCode, 0, JSON.stringify(result.summary));
+    assert.equal(result.executedCases, 23); assert.equal(result.discoverySucceeded, true);
   });
 });

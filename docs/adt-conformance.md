@@ -15,10 +15,13 @@ OSD_HEAVY_RANGE=90-99 OSD_HEAVY_SLOTS=4 tools/osd-heavy.sh node tools/osd-suites
 ```
 
 `js.mjs` starts the existing `test/start.mjs` server helper and places the
-synthetic #642 outline fixture in a disposable additional source layer. It
+synthetic #642 outline fixture in a disposable repository view with an additional
+source layer and matching active-source snapshots. The view links the existing
+repository and built source evidence; fixture snapshots exist only in the
+temporary view, so active requests can read the same synthetic bytes. It
 pins the already-transpiled output so adding parser fixtures does not publish a
-new live generation. It restores the layer/output settings and closes the server
-on success or failure; the
+new live generation. It restores the working directory and layer/output settings
+and closes the server on success or failure; the
 private `.local/lars` is never relinked. `suite.mjs` runs the same HTTP cases
 plus focused checks for the harness. The manifest registers it as required;
 the group entry is a small import wrapper for selecting this fragment alone.
@@ -62,6 +65,8 @@ Normalization masks host, client, user, ISO timestamps, ETags, lock handles,
 session and generation IDs. JSON identity keys are masked recursively. For XML,
 volatile attributes and handle/ID elements are masked; `normalize.values` allows
 explicit identity substitutions and `normalize.host` replaces the target origin.
+Only complete attribute names (optionally namespace-qualified) are matched;
+`objectclient`, `clientXYZ` and stable `systemID` facts are retained.
 Opaque identifiers keep their length. Protocol namespaces, object names and
 source coordinates are retained. Assertions for handle shape use the unmasked
 response so a wrong handle length cannot pass.
@@ -73,7 +78,13 @@ entry is reported as not-applicable without running it. The suite writes
 `suite-results/adt-conformance-<target>.json`; reports retain only status,
 content type, byte count and assertion messages, never payloads, cookies,
 credentials, tokens or handles. Exit codes: 0 expectations satisfied, 1 failed
-cases (including unexpected passes), 2 invalid invocation or harness startup.
+cases (including unexpected passes) or missing execution/discovery evidence,
+2 invalid invocation or harness startup. Every HTTP run requires at least one
+completed case request and a successful GET `/core/discovery`, after the CSRF
+handshake. All-n/a runs, unreachable servers and zero-observation runs fail.
+Reports include `executedCases`, `discoverySucceeded` and `runErrors`; a case is
+observed only when its case request produced a response. The explicit unavailable
+inventory below is distinct from an HTTP run.
 
 At base main `0de1f89b`, osgo has no `-adt` flag or ADT mount. The 2026-10-07
 measurement found host route 404s; stoker case #5 identifies the router trap.
@@ -95,7 +106,9 @@ with each implementation change. No osgo build is claimed for this base.
 O1–O5 reuse PR #642's synthetic source and hand-entered A4H 7.58 coordinates,
 attributes and links. `fixtures/bytes.mjs` deterministically serializes those
 facts independently of the serving serializer. Each response is compared in
-full, across media negotiation and active-version requests. These are our own
+full, across media negotiation and active-version requests. The expected
+`xml:base` is derived from the exact request path and query, so O5 includes
+`?version=active` as #642 serves it. These are our own
 facts and synthetic code; no SAP-captured payload is tracked. The byte contracts
 require #642's implementation, which is not on the starting main. The runner
 does not replace that implementation or silently soften those assertions.
@@ -108,17 +121,32 @@ never infers A4H pass from JS pass. No live SAP call is part of this runner's
 local/CI verification. Future reference fixtures must use this same normalization
 and clean-room facts rather than tracked captures.
 
-Proposed CI job (no workflow change in this slice): keep the JS integration
-fragment required after transpile. Add a separate initially advisory osgo job
-which builds the current tree, starts its binary with `-adt` once available,
-runs the common list with `expected/osgo.json`, uploads both result artifacts
-and prints the merged square. Decide when to require this job with the owners;
-unexpected improvements must continue to fail until their gap data is updated.
+CI wiring belongs to dell's separate PR; this slice changes no workflows.
+That PR must keep required checks exactly `test` and `scan`, and implement
+Alice's ratchet as follows:
 
-Verification on the starting main: transpile exits 0. JS passes all 18 read/lock
-cases outside objectstructure; O1–O5 fail because #642 is not merged (three byte
-mismatches and two media-negotiation mismatches). These remain required failures,
-not skipped tests or JS gap expectations. The permitted file scope cannot apply
-that product fix. osgo is recorded as not mountable, with all 23 cases unobserved
-known gaps. The focused suite runs only this fragment; no six-shard run or
-workflow edit is part of this slice.
+- Keep the JS integration fragment in required `test`, after transpile; any JS
+  case failure fails `test`.
+- Add an osgo job that builds the tested tree, starts its binary with `-adt`
+  and the assigned `STG_PORT` once mounting is available, and runs the common
+  cases with `expected/osgo.json`. Until then, publish the explicit unavailable
+  inventory with all cases unobserved; never substitute it for an HTTP run.
+- Keep known-gap results advisory. Promote each implemented case to expected
+  `pass` in the expected file, alongside its implementation change.
+- Propagate any failure of an osgo case whose expectation is `pass` into the
+  required `test` verdict. Making the osgo job advisory with
+  `continue-on-error` alone is insufficient: `test` must consume its report
+  (and captured exit status) before completing, and fail on those regressions.
+  Missing/malformed reports, HTTP infrastructure failures, unsuccessful
+  discovery and zero executed cases must also fail `test` for a mountable
+  target; they cannot provide evidence that expected passes were retained.
+- Preserve the runner's non-zero status for an unexpected known-gap pass and
+  surface it in the advisory osgo result until its expectation is updated.
+  Upload both target reports even on failure and print the merged square;
+  artifact upload or advisory handling must not erase the required verdict.
+
+Round-1 verification on this branch: JS passes all 23 read/lock cases,
+including O1–O5 against #642's fixture and exact request URL. osgo remains
+not mountable on this main: all 23 inventory cases are unobserved known gaps.
+The focused fragment checks the harness and the same JS HTTP cases. No
+six-shard run or workflow edit is part of this slice.
