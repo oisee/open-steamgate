@@ -108,6 +108,9 @@ function callsIn(node, out) {
     if (node.receiver?.type?.k === "ref" && !node.receiver.type.intf) out.add(node.receiver.type.name);
   }
   if (node.e === "new") out.add(node.cls);
+  // IS INSTANCE OF a class: the class must be compiled, an object of a
+  // subclass of it can exist (a stub would answer false for it)
+  if (node.c === "instance_of" && !node.type?.intf && node.type?.name !== "OBJECT") out.add(node.type.name);
   for (const [k, v] of Object.entries(node)) if (k !== "type") callsIn(v, out);
   return out;
 }
