@@ -123,8 +123,8 @@
       "reason": "recorded by --update"
     },
     "go:objstore": {
-      "lines": 1755,
-      "reason": "ADT on osgo slice 1a round 1: Node-parity layer metadata, retained active reads, package ordering/empty descriptions, and deterministic HISTORY semantics; package index extraction remains a later carve-out; round 2: Node's VFS object order"
+      "lines": 1772,
+      "reason": "ADT on osgo slice 1a round 1: Node-parity layer metadata, retained active reads, package ordering/empty descriptions, and deterministic HISTORY semantics; package index extraction remains a later carve-out; round 2: Node's VFS object order; round 3: Node-exact state without a live generation and repository-name refusal"
     },
     "go:reportargs": {
       "lines": 209,
