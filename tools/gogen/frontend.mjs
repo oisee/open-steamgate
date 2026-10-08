@@ -380,13 +380,19 @@ export function lockObjectRegistry(reg, program) {
     try {
       const key = (tableObject.listKeys?.(reg) ?? []).map(upper);
       const structure = tableObject.parseType(reg);
-      const columns = new Map(structure.getComponents().map((column) => {
-        const kind = typeKindOf(column.type);
-        return [upper(column.name), {kind, length: ["C", "N", "X"].includes(kind) ? column.type.getLength() : 0}];
-      }));
-      out.set(name, {name, table, key,
-        fields: key.map((field) => ({name: field, kind: columns.get(field)?.kind ?? 0, length: columns.get(field)?.length ?? 0}))});
-    } catch {
+      const columns = new Map(structure.getComponents().map((c) => [upper(c.name), c.type]));
+      const fields = key.map((field) => {
+        const type = columns.get(field), kind = typeKindOf(type);
+        // Node request(): getLength() when supplied, otherwise the length
+        // of the component's initial value (integer zero is "0").
+        const length = ["C", "N", "X", "P"].includes(kind) ? type.getLength()
+          : ({D: 8, T: 6, I: 1, "8": 1})[kind];
+        if (!Number.isInteger(length) || length <= 0) throw new Unsupported(`lock table ${table} field ${field}: cannot size key kind ${kind}`);
+        return {name: field, kind, length};
+      });
+      out.set(name, {name, table, key, fields});
+    } catch (e) {
+      if (e instanceof Unsupported) throw e;
       // an unreadable table is named by the call's normal dictionary refusal
     }
   }

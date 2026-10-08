@@ -116,17 +116,10 @@ func Request(s Session, table Table, object string, args Args) enq.Request {
 	if r.Mode == "" {
 		r.Mode = "E"
 	}
-	if scope, ok := args["_SCOPE"]; ok {
-		if text := strings.TrimSpace(scope); text != "" {
-			parsed, err := strconv.Atoi(text)
-			if err != nil {
-				s.EnqRefuse("ENQUEUE_"+r.Object, "_SCOPE "+text+" is not a number")
-			}
-			r.Scope = parsed
-		}
-	}
-	if r.Scope == 0 {
-		r.Scope = 2
+	// Node's Number(trimmed text): only 1 and 3 override the default 2.
+	r.Scope = 2
+	if scope, err := strconv.ParseFloat(strings.TrimSpace(args["_SCOPE"]), 64); err == nil && (scope == 1 || scope == 3) {
+		r.Scope = int(scope)
 	}
 	return r
 }
