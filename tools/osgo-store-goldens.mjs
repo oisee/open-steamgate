@@ -3,7 +3,7 @@ import {mkdir, readFile, rm, writeFile} from "node:fs/promises";
 import {readdirSync} from "node:fs";
 import {spawnSync} from "node:child_process";
 import {dirname, resolve} from "node:path";
-import {StoreDestination} from "./osd-store-destination.mjs";
+import {StoreDestination, withSystem} from "./osd-store-destination.mjs";
 import {ObjectStore} from "./osd-store.mjs";
 import {buildFixture} from "./osgo-store-fixture.mjs";
 
@@ -27,6 +27,9 @@ export const cases = [
   ["search-json", {IV_COMMAND: "SEARCH", IV_JSON: JSON.stringify({seed: "Z", limit: 100})}, "EV_JSON"],
   ["search-zero", {IV_COMMAND: "SEARCH", IV_JSON: JSON.stringify({seed: "Z", limit: 0})}, "EV_JSON"],
   ["search-lines", {IV_COMMAND: "SEARCH", IV_JSON: JSON.stringify({seed: "Z", type: "PROG", format: "lines"})}, "EV_SOURCE"],
+  ["system-identity", {IV_COMMAND: "SYSTEM", IV_TYPE: "IDENTITY"}, "EV_JSON"],
+  ["system-known-kind", {IV_COMMAND: "SYSTEM", IV_TYPE: "LOCK_HANDLE"}, "EV_ERROR"],
+  ["system-unknown-kind", {IV_COMMAND: "SYSTEM", IV_TYPE: "NOPE"}, "EV_ERROR"],
   ["read-main", {IV_COMMAND: "READ", IV_TYPE: "CLAS", IV_NAME: "ZCLASS"}, "EV_SOURCE"],
   ["read-include", {IV_COMMAND: "READ", IV_TYPE: "CLAS", IV_NAME: "ZCLASS", IV_INCLUDE: "definitions"}, "EV_JSON"],
   ["read-zero-include", {IV_COMMAND: "READ", IV_TYPE: "CLAS", IV_NAME: "ZEMPTY", IV_INCLUDE: "definitions"}, "EV_JSON"],
@@ -71,7 +74,8 @@ async function answersIn(root) {
   const destination = new StoreDestination({store});
   const answers = {};
   for (const [name, parameters, proof] of cases) {
-    const answer = await destination.execute(parameters);
+    const answer = await withSystem(kind => kind === "IDENTITY" ? {systemID: "OSD", client: "001", userName: "OSD"} : undefined,
+      () => destination.execute(parameters));
     if (Object.keys(answer).length !== 19) throw new Error(`${name} answered ${Object.keys(answer).length} fields, expected 19`);
     if (proof === "EV_ERROR") {
       if (answer.EV_ERROR === "") throw new Error(`${name} was expected to refuse`);

@@ -101,24 +101,14 @@ const frontendStart = frontend.indexOf('["STORE ZOSD_STORE"');
 const frontendSignature = frontend.slice(frontendStart, frontend.indexOf("}],", frontendStart) + 3);
 const goHostParams = new Map([...frontendSignature.matchAll(/\b([A-Z][A-Z0-9_]+):\s*"(exporting|importing|tables)"/g)]
   .map((match) => [match[1], match[2]]));
-const KNOWN_GAPS = new Map([
-  ["IV_JSON", "core case batch1 #1"],
-  ["EV_JSON", "core case batch1 #1"],
-  ["EV_STATE", "core case batch1 #1"],
-  ["EV_CHANGED", "core case batch1 #1"],
-]);
+const KNOWN_GAPS = new Map();
 for (const field of KNOWN_GAPS.keys()) {
   if (goHostParams.has(field)) {
     bad += 1;
     console.log(`FAIL ratchet ${field}: the gogen host signature now carries it; remove its expected gap`);
   }
 }
-const ROW_GAPS = new Map([["ET_REVISION-SUBJECT_FULL", "core: adapter row mapping"]]);
-const adapterMapping = readFileSync(join(here, "go/abap/store.go"), "utf8");
-if (/set\("SUBJECT_FULL",/.test(adapterMapping)) {
-  bad += 1;
-  console.log("FAIL ratchet ET_REVISION-SUBJECT_FULL: adapter now maps it; remove its expected gap");
-}
+const ROW_GAPS = new Map();
 const adapterSignature = {
   inputs: Object.fromEntries([...goHostParams].filter(([, kind]) => kind === "exporting").map(([key]) => [key, true])),
   imports: Object.fromEntries([...goHostParams].filter(([, kind]) => kind === "importing").map(([key]) => [key, true])),
@@ -141,21 +131,16 @@ function adapterComparable(answer, touched = new Set()) {
 
 function expectedGaps(call, node) {
   const gaps = [];
-  if (node.revisions.some((r) => r.SUBJECT_FULL !== "")) gaps.push("ET_REVISION-SUBJECT_FULL");
-  if (call.IV_JSON !== undefined && !goHostParams.has("IV_JSON")) gaps.push("IV_JSON");
-  if (node.scalars.EV_JSON !== "" && !goHostParams.has("EV_JSON")) gaps.push("EV_JSON");
+  if (call.IV_JSON !== undefined && !goHostParams.has("IV_JSON") && KNOWN_GAPS.has("IV_JSON")) gaps.push("IV_JSON");
+  if (node.scalars.EV_JSON !== "" && !goHostParams.has("EV_JSON") && KNOWN_GAPS.has("EV_JSON")) gaps.push("EV_JSON");
   if (call.IV_COMMAND?.toUpperCase() === "HISTORY") {
-    if (!goHostParams.has("EV_STATE")) gaps.push("EV_STATE");
-    if (!goHostParams.has("EV_CHANGED")) gaps.push("EV_CHANGED");
+    if (!goHostParams.has("EV_STATE") && KNOWN_GAPS.has("EV_STATE")) gaps.push("EV_STATE");
+    if (!goHostParams.has("EV_CHANGED") && KNOWN_GAPS.has("EV_CHANGED")) gaps.push("EV_CHANGED");
   }
   return gaps;
 }
 
 function compareAdapter(label, node, go, call, touched = new Set()) {
-  if (go.revisions.some((r) => r.SUBJECT_FULL !== "")) {
-    bad += 1;
-    console.log(`FAIL ratchet ${label}: ET_REVISION-SUBJECT_FULL now reaches the caller; remove its expected gap`);
-  }
   const n = adapterComparable(node, touched);
   const g = adapterComparable(go, touched);
   if (n !== g) {
@@ -173,6 +158,9 @@ function compareAdapter(label, node, go, call, touched = new Set()) {
 const store = new ObjectStore({root});
 const all = store.list();
 const reads = [
+  {IV_COMMAND: "SYSTEM", IV_TYPE: "IDENTITY"},
+  {IV_COMMAND: "SYSTEM", IV_TYPE: "LOCK_HANDLE"},
+  {IV_COMMAND: "SYSTEM", IV_TYPE: "NOPE"},
   {IV_COMMAND: "LIST", IV_LIMIT: "100000"},
   {IV_COMMAND: "LIST"},
   {IV_COMMAND: "list", IV_FILTER: "osd", IV_LIMIT: "300"},

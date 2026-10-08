@@ -4,10 +4,13 @@ What: the object store of the Go host, `CALL FUNCTION 'ZOSD_STORE' DESTINATION '
 files the Node host answers it over (tools/osd-store.mjs, tools/osd-store-destination.mjs); filesystem reads
 (LIST, READ, OBJECT, PACKAGE, PACKAGES, SEARCH), history from git, and writes; CHECK/ACTIVATE/TOKENS refused
 (this binary carries no compiler). go/abap keeps `SetStore`, `StoreCall`, the `Store*` type aliases and the
-session-first `ZOSD_STORE` adapter (Data in, tables filled).
+session-first `ZOSD_STORE` adapter (Data in, tables filled). SYSTEM is tree-independent: IDENTITY answers
+the installed three-field ADT identity; other known kinds refuse with Node's no-answer text and unknown
+kinds refuse with Node's unknown-kind text.
 
-API: `SetStore(root string, cfg []byte, reason string) error`; `Call(in map[string]*string) Answer`;
-`Config`/`Root` (the build's facts), `Answer` with `Row`, `Issue`, `Tally`, `Revision`; `Capabilities`.
+API: `SetStore(root string, cfg []byte, reason string) error`; `SetSystemIdentity(Identity)`;
+`Call(in map[string]*string) Answer`; `Config`/`Root` (the build's facts), `Answer` with `Row`, `Issue`,
+`Tally`, `Revision`; `Identity`; `Capabilities`.
 
 Invariants: the files are the truth and git the history, no second copy; the index is rebuilt per call; a
 WRITE touches only a file inside a writable root; answers and their order match the Node destination field

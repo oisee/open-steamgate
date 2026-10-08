@@ -78,6 +78,9 @@ var goldenCases = []struct {
 	{"search-json", map[string]string{"IV_COMMAND": "SEARCH", "IV_JSON": `{"seed":"Z","limit":100}`}},
 	{"search-zero", map[string]string{"IV_COMMAND": "SEARCH", "IV_JSON": `{"seed":"Z","limit":0}`}},
 	{"search-lines", map[string]string{"IV_COMMAND": "SEARCH", "IV_JSON": `{"seed":"Z","type":"PROG","format":"lines"}`}},
+	{"system-identity", map[string]string{"IV_COMMAND": "SYSTEM", "IV_TYPE": "IDENTITY"}},
+	{"system-known-kind", map[string]string{"IV_COMMAND": "SYSTEM", "IV_TYPE": "LOCK_HANDLE"}},
+	{"system-unknown-kind", map[string]string{"IV_COMMAND": "SYSTEM", "IV_TYPE": "NOPE"}},
 	{"read-main", map[string]string{"IV_COMMAND": "READ", "IV_TYPE": "CLAS", "IV_NAME": "ZCLASS"}},
 	{"read-include", map[string]string{"IV_COMMAND": "READ", "IV_TYPE": "CLAS", "IV_NAME": "ZCLASS", "IV_INCLUDE": "definitions"}},
 	{"read-zero-include", map[string]string{"IV_COMMAND": "READ", "IV_TYPE": "CLAS", "IV_NAME": "ZEMPTY", "IV_INCLUDE": "definitions"}},
@@ -106,6 +109,7 @@ func TestStoreDestinationGoldens(t *testing.T) {
 	if err := SetStore(root, config, ""); err != nil {
 		t.Fatal(err)
 	}
+	SetSystemIdentity(Identity{SystemID: "OSD", Client: "001", UserName: "OSD"})
 	defer SetStore("", nil, "")
 	goldenBytes, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "test", "fixtures", "osgo-store", "destination-golden.json"))
 	if err != nil {
@@ -201,6 +205,37 @@ func TestStoreReadExistingIncludeErrorPropagates(t *testing.T) {
 	answer := Call(map[string]*string{"IV_COMMAND": str("READ"), "IV_TYPE": str("CLAS"), "IV_NAME": str("ZCLASS"), "IV_INCLUDE": str("definitions")})
 	if answer.Scalars["EV_ERROR"] == "" || !strings.Contains(answer.Scalars["EV_ERROR"], "zclass.clas.locals_def.abap") {
 		t.Fatalf("existing include read error was swallowed: %v", answer.Scalars)
+	}
+}
+
+func TestSystemIdentity(t *testing.T) {
+	SetSystemIdentity(Identity{SystemID: "XYZ", Client: "001", UserName: "OSD"})
+	defer SetSystemIdentity(Identity{})
+	str := func(value string) *string { return &value }
+	answer := Call(map[string]*string{"IV_COMMAND": str("SYSTEM"), "IV_TYPE": str("IDENTITY")})
+	if answer.Scalars["EV_ERROR"] != "" || answer.Scalars["EV_JSON"] != `{"systemID":"XYZ","client":"001","userName":"OSD"}` {
+		t.Fatalf("identity answer: %v", answer.Scalars)
+	}
+}
+
+func TestSystemKindRefusals(t *testing.T) {
+	SetSystemIdentity(Identity{SystemID: "XYZ", Client: "001", UserName: "OSD"})
+	defer SetSystemIdentity(Identity{})
+	str := func(value string) *string { return &value }
+	tests := []struct {
+		kind  string
+		error string
+	}{
+		{"LOCK_HANDLE", "SYSTEM LOCK_HANDLE has no answer here"},
+		{"XREF_WARM", "SYSTEM XREF_WARM has no answer here"},
+		{"NOPE", "unknown SYSTEM kind NOPE"},
+		{"", "unknown SYSTEM kind (none)"},
+	}
+	for _, test := range tests {
+		answer := Call(map[string]*string{"IV_COMMAND": str("SYSTEM"), "IV_TYPE": str(test.kind)})
+		if answer.Scalars["EV_ERROR"] != test.error {
+			t.Fatalf("SYSTEM %q: got %q, want %q", test.kind, answer.Scalars["EV_ERROR"], test.error)
+		}
 	}
 }
 

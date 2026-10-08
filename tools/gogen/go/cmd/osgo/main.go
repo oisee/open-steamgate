@@ -40,6 +40,7 @@ import (
 
 	"osg/gogen/abap"
 	"osg/gogen/apc"
+	"osg/gogen/objstore"
 	"osg/gogen/osdbind"
 	"osg/gogen/sysid"
 )
@@ -52,6 +53,26 @@ var dbScript []byte
 //
 //go:embed zz_store.json
 var storeConfig []byte
+
+func adtIdentity(sid string, lookup func(string) (string, bool)) objstore.Identity {
+	clientValue, _ := lookup("OSD_ADT_CLIENT")
+	client := strings.TrimSpace(clientValue)
+	if client == "" {
+		client = "001"
+	} else if len(client) > 3 {
+		client = client[:3]
+	}
+	userValue, _ := lookup("OSD_USER")
+	user := strings.TrimSpace(userValue)
+	if user == "" {
+		user = "OSD"
+	}
+	user = strings.ToUpper(user)
+	if runes := []rune(user); len(runes) > 12 {
+		user = string(runes[:12])
+	}
+	return objstore.Identity{SystemID: sid, Client: client, UserName: user}
+}
 
 // one work process: class statics are per process (see the package comment).
 // It is abap.WorkProcess, the lock the APC channels' steps take as well
@@ -455,6 +476,7 @@ func main() {
 	binds := osdbind.Selected(*addr, addrExplicit, os.Getenv)
 	sid, sidSource := sysid.Must(os.LookupEnv)
 	abap.SysID = sid
+	objstore.SetSystemIdentity(adtIdentity(sid, os.LookupEnv))
 	log.Printf("system id: %s (%s)", sid, sysid.Describe(sidSource))
 	*dbFile = selectedDB(*dbFile, *homeDir, dbExplicit, os.Getenv)
 	if *homeDir != "" {

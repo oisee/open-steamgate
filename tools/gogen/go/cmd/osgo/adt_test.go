@@ -85,9 +85,12 @@ func TestADTMountMatchesUnsuffixedPathThroughRouteMatcher(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		body, _ := io.ReadAll(response.Body)
 		response.Body.Close()
-		if response.StatusCode != http.StatusNotImplemented {
-			t.Fatalf("%s status %d, want 501", path, response.StatusCode)
+		// The mount reaches ZCL_OSD_ADT_HANDLER (its trap, refusal or answer),
+		// never the router's 404, whatever the handler's first gap is today.
+		if response.StatusCode == http.StatusNotFound && !strings.Contains(string(body), "ZCL_OSD_ADT") {
+			t.Fatalf("%s: router 404, the ADT handler was not reached: %q", path, body)
 		}
 	}
 }

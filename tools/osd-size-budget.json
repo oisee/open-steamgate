@@ -71,8 +71,8 @@
       "reason": "sy-sysid from the one system id (go/sysid, tools/osd-identity.mjs), 2026-10-02; rebased over #453"
     },
     "go:cmd/osgo": {
-      "lines": 1229,
-      "reason": "ADT session binding per request (adt_session.go: USE_SESSION around the ADT dialog step); it calls generated ADT symbols, so it lives in cmd/osgo"
+      "lines": 1251,
+      "reason": "ADT session binding per request (adt_session.go: USE_SESSION around the ADT dialog step); it calls generated ADT symbols, so it lives in cmd/osgo; SYSTEM IDENTITY installs osgo's selected SID and Node's ADT client/user derivation"
     },
     "go:cmd/storecmp": {
       "lines": 171,
@@ -123,8 +123,8 @@
       "reason": "recorded by --update"
     },
     "go:objstore": {
-      "lines": 1772,
-      "reason": "ADT on osgo slice 1a round 1: Node-parity layer metadata, retained active reads, package ordering/empty descriptions, and deterministic HISTORY semantics; package index extraction remains a later carve-out; round 2: Node's VFS object order; round 3: Node-exact state without a live generation and repository-name refusal"
+      "lines": 1825,
+      "reason": "ADT on osgo slice 1a round 1: Node-parity layer metadata, retained active reads, package ordering/empty descriptions, and deterministic HISTORY semantics; package index extraction remains a later carve-out; round 2: Node's VFS object order; round 3: Node-exact state without a live generation and repository-name refusal; SYSTEM IDENTITY and Node-exact kind refusals"
     },
     "go:reportargs": {
       "lines": 209,
