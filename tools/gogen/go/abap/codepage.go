@@ -27,7 +27,7 @@ var utf16Memos [4]atomic.Pointer[encodedMemo]
 func EncodeText(encoding, text string) string {
 	switch encoding {
 	case "utf8":
-		return text
+		return JoinSurrogates(text)
 	case "utf16le", "utf-16le":
 		if len(text) >= 256 {
 			for i := range utf16Memos {

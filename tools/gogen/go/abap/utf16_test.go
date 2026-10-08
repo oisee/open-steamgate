@@ -126,6 +126,25 @@ func TestUTF16Bounds(t *testing.T) {
 	}
 }
 
+func TestUTF16ConcatenationEgress(t *testing.T) {
+	emoji := "😀"
+	hi := SubS(emoji, 0, 1)
+	lo := SubS(emoji, 1, 1)
+	got, rc := ConcatFit(hi+lo, -1)
+	if got != emoji || rc != 0 {
+		t.Fatalf("concat: %x rc=%d", got, rc)
+	}
+	if CmpS(hi+lo, emoji) != 0 {
+		t.Fatal("comparison sees adjacent surrogate halves as a different value")
+	}
+	if bytes := EncodeText("utf8", hi+lo); bytes != emoji {
+		t.Fatalf("utf8 egress: %x", bytes)
+	}
+	if units := EncodeText("utf16le", hi+lo); units != "\x3d\xd8\x00\xde" {
+		t.Fatalf("utf16 egress: %x", units)
+	}
+}
+
 func TestUTF16MemoConcurrency(t *testing.T) {
 	v := strings.Repeat("Ж😀界𝄞A", 300)
 	units := utf16.Encode([]rune(v))

@@ -21,6 +21,8 @@ type (
 // the number of rows.
 func Select(s *Session, text string, args []any, preds []HostPred, row func(scan func(dest ...any) error)) int {
 	text, bound := SpliceRanges(text, args, preds)
+	text = JoinSurrogates(text)
+	bound = joinSQLValues(bound)
 	rows, err := conn().Query(text, bound...)
 	if err != nil {
 		panic(ArithmeticError{Class: "CX_SY_OPEN_SQL_DB", Op: err.Error()})

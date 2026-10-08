@@ -427,6 +427,7 @@ func ToMixed(v, sep string, hasCase bool, cs string, min int32) string {
 // characters takes the first n and sy-subrc is 4 when something was cut;
 // n < 0 is a string. A c is held without trailing blanks.
 func ConcatFit(v string, n int) (string, int32) {
+	v = JoinSurrogates(v)
 	if n < 0 {
 		return v, 0
 	}

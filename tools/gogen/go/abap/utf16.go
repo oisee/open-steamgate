@@ -237,10 +237,17 @@ func UTF16String(u []uint16) string {
 }
 func JoinUTF16(parts ...string) string {
 	v := strings.Join(parts, "")
-	if strings.Contains(v, "\xed") {
-		return UTF16String(UTF16Units(v))
+	return JoinSurrogates(v)
+}
+
+// JoinSurrogates makes every value that leaves the ABAP world valid UTF-8:
+// adjacent high/low halves become their supplementary character. The byte
+// scan keeps every ASCII and ordinary UTF-8 path unchanged.
+func JoinSurrogates(v string) string {
+	if strings.IndexByte(v, 0xed) < 0 {
+		return v
 	}
-	return v
+	return UTF16String(UTF16Units(v))
 }
 func index16(v, sub string) int {
 	if !strings.Contains(sub, "\xed") && !strings.Contains(v, "\xed") {

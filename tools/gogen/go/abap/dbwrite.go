@@ -300,6 +300,8 @@ func ModifyRows(s *Session, w WriteSpec, rows [][]any) {
 // ranges filled now: sy-subrc 0 with rows, 4 without, sy-dbcnt the rows.
 func ExecWrite(s *Session, text string, args []any, preds []HostPred) {
 	text, bound := SpliceRanges(text, args, preds)
+	text = JoinSurrogates(text)
+	bound = joinSQLValues(bound)
 	res, err := conn().Exec(text, bound...)
 	if err != nil {
 		panic(ArithmeticError{Class: "CX_SY_OPEN_SQL_DB", Op: err.Error()})

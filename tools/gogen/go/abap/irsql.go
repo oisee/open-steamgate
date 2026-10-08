@@ -503,7 +503,26 @@ func LowerWrite(w *IRWrite) (sql string, params []Param, err error) {
 func values(params []Param) []any {
 	out := make([]any, len(params))
 	for i, p := range params {
-		out[i] = p.Value
+		out[i] = joinSQLValue(p.Value)
 	}
 	return out
+}
+
+func joinSQLValues(values []any) []any {
+	out := make([]any, len(values))
+	for i, value := range values {
+		out[i] = joinSQLValue(value)
+	}
+	return out
+}
+
+func joinSQLValue(value any) any {
+	switch v := value.(type) {
+	case string:
+		return JoinSurrogates(v)
+	case []any:
+		return joinSQLValues(v)
+	default:
+		return value
+	}
 }

@@ -7,6 +7,7 @@ METHODS shift_places FOR TESTING.
 METHODS find_offset FOR TESTING.
 METHODS half_roundtrip FOR TESTING.
 METHODS numofchar_units FOR TESTING.
+METHODS concat_pair FOR TESTING.
 ENDCLASS.
 CLASS ltcl_test IMPLEMENTATION.
 METHOD len.
@@ -42,6 +43,8 @@ cl_abap_unit_assert=>assert_equals( act = find( val = s sub = `A` off = 1 ) exp 
 ENDMETHOD.
 METHOD half_roundtrip.
 DATA(s) = zcl_osgt_strlen16=>emoji( ).
+DATA pair TYPE string.
+pair = s+0(1).
 DATA(hi) = s+0(1).
 cl_abap_unit_assert=>assert_equals( act = strlen( hi ) exp = 1 ).
 DATA c TYPE c LENGTH 3.
@@ -53,5 +56,14 @@ ENDMETHOD.
 METHOD numofchar_units.
 DATA(s) = zcl_osgt_strlen16=>emoji( ) && `  `.
 cl_abap_unit_assert=>assert_equals( act = numofchar( s ) exp = 3 ).
+ENDMETHOD.
+METHOD concat_pair.
+DATA(s) = zcl_osgt_strlen16=>emoji( ).
+DATA(hi) = s+0(1).
+DATA(lo) = s+1(1).
+CONCATENATE hi lo INTO DATA(r).
+cl_abap_unit_assert=>assert_equals( act = strlen( r ) exp = 2 ).
+cl_abap_unit_assert=>assert_equals( act = cl_abap_codepage=>convert_to( r )
+  exp = CONV xstring( 'F09F9880' ) ).
 ENDMETHOD.
 ENDCLASS.
