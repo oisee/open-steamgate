@@ -2227,6 +2227,10 @@ function fn(e, ctx) {
   return emitBuiltinGo(e, e.args.map((a) => expr(a, ctx)), FN_F, HELPER_IMPORTS);
 }
 
+// Keep the current initial-reference predicate policy until A4H measurement.
+// The predicate carries both static types if that policy later needs them.
+const initialReferenceInstanceOf = (_predicate) => "false";
+
 function cond(c, ctx) {
   const fast = emitPackedComparison(c, (n) => expr(n, ctx));
   if (fast !== null) return fast;
@@ -2271,8 +2275,9 @@ function cond(c, ctx) {
     case "instance_of": {
       const value = expr(c.x, ctx);
       const target = goType(c.type);
-      if (c.type.name === "OBJECT" && c.type.intf) return `(${value} != nil)`;
-      return `func() bool { value := ${value}; if value == nil { return false }; _, ok := any(value).(${target}); return ok }()`;
+      const initial = initialReferenceInstanceOf(c);
+      if (c.type.name === "OBJECT" && c.type.intf) return `func() bool { value := ${value}; if value == nil { return ${initial} }; return true }()`;
+      return `func() bool { value := ${value}; if value == nil { return ${initial} }; _, ok := any(value).(${target}); return ok }()`;
     }
     // ultra/events: line_exists( ) (frontend lineExists)
     case "line_exists": {
