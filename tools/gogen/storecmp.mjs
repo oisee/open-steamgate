@@ -28,32 +28,12 @@ mkdirSync(out, {recursive: true});
 const {StoreDestination} = await import(`${tools}/tools/osd-store-destination.mjs`);
 const {ObjectStore} = await import(`${tools}/tools/osd-store.mjs`);
 
-// a signature as the transpiled runtime hands one over: typed boxes the
-// destination sets, tables it clears and appends to
-const box = (v = "") => ({v, get() { return this.v; }, set(x) { this.v = x; }});
-const FIELDS = {
-  ET_OBJECT: ["type", "name", "package", "file", "writable", "version", "changed_at"],
-  ET_ISSUE: ["obj_type", "obj_name", "line", "col", "rule", "message"],
-  ET_TYPE: ["type", "count"],
-  ET_TOKEN: ["line", "col", "len", "kind"],
-};
-const table = (fields) => {
-  const t = {rows: [], array() { return this.rows; }, clear() { this.rows = []; }, append(r) { this.rows.push(r); },
-    getRowType() { return {clone() { const inner = Object.fromEntries(fields.map((f) => [f, box()])); return {get: () => inner}; }}; }};
-  return t;
-};
-const SCALARS = ["EV_SOURCE", "EV_FILE", "EV_PACKAGE", "EV_VERSION", "EV_WRITABLE", "EV_ACTIVE", "EV_LIVE", "EV_NOTE", "EV_COUNT", "EV_MS", "EV_ERROR"];
-
+// Compare the keys Node returns for each command, including JSON and history
+// state. A reduced RFC importing signature would silently hide these fields.
 async function nodeCall(destination, call) {
-  const signature = {
-    exporting: Object.fromEntries(Object.entries(call).map(([k, v]) => [k.toLowerCase(), box(v)])),
-    importing: Object.fromEntries(SCALARS.map((k) => [k.toLowerCase(), box()])),
-    tables: Object.fromEntries(Object.entries(FIELDS).map(([k, f]) => [k.toLowerCase(), table(f)])),
-  };
-  await destination.call("ZOSD_STORE", signature);
-  const scalars = Object.fromEntries(SCALARS.map((k) => [k, String(signature.importing[k.toLowerCase()].get())]));
-  const rows = (k) => signature.tables[k.toLowerCase()].rows.map((r) => Object.fromEntries(Object.entries(r.get()).map(([f, b]) => [f.toUpperCase(), b.get()])));
-  return {scalars, objects: rows("ET_OBJECT"), issues: rows("ET_ISSUE"), types: rows("ET_TYPE")};
+  const answer = await destination.execute(call);
+  const scalars = Object.fromEntries(Object.entries(answer).filter(([key]) => key.startsWith("EV_")));
+  return {scalars, objects: answer.ET_OBJECT, issues: answer.ET_ISSUE, types: answer.ET_TYPE};
 }
 
 function goCalls(tree, config, calls) {
@@ -106,7 +86,9 @@ const reads = [
   {IV_COMMAND: "READ", IV_TYPE: "CLAS", IV_NAME: "ZCL_OSD_EDIT", IV_INCLUDE: "nonsense"},
   {IV_COMMAND: "BOGUS"},
   {IV_COMMAND: "CHECK", IV_TYPE: "CLAS", IV_NAME: "ZCL_NO_SUCH_CLASS"},
-  {IV_COMMAND: "ACTIVATE", IV_TYPE: "CLAS", IV_NAME: "ZCL_NO_SUCH_CLASS"},
+  // Compiler/publication calls belong to the explicit Go-only checks below.
+  // HISTORY exercises the host read path and its EV_STATE/EV_CHANGED scalars.
+  {IV_COMMAND: "HISTORY", IV_TYPE: "CLAS", IV_NAME: "ZCL_ST_A"},
   // the calls of testdata/zcl_gogen_t_store over testdata-store/tree
   {IV_COMMAND: "list", IV_FILTER: "st_", IV_TYPE: "clas"},
   {IV_COMMAND: "READ", IV_TYPE: "CLAS", IV_NAME: "zcl_st_a"},
@@ -122,7 +104,7 @@ const goReads = goCalls(root, config, reads);
 let same = 0;
 for (let i = 0; i < reads.length; i += 1) {
   if (compare(`read #${i} ${JSON.stringify(reads[i])}`, await nodeCall(nodeDest, reads[i]), goReads[i])) same += 1;
-  if (bad > 20) break;
+
 }
 console.log(`reads: ${same} of ${reads.length} answers the same (${all.length} objects in the tree)`);
 

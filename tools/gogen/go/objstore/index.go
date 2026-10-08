@@ -456,15 +456,17 @@ func storeStateOf(e *storeEntry, file string) (version, changedAt string) {
 	if storeState.written[e.Type+" "+e.Name] {
 		version = "inactive"
 	} else if storeSourceTypes[e.Type] {
-		if storeState.cfg.Built == nil {
+		if len(storeState.cfg.Active) == 0 {
 			version = "inactive"
 		} else {
 			version = "active"
 		}
 	}
-	if storeSourceTypes[e.Type] && version == "active" && storeState.cfg.Built != nil {
+	if storeSourceTypes[e.Type] && version == "active" {
 		for _, f := range storeFilesOf(e) {
-			if storeDigest(f) != storeState.cfg.Built[f] {
+			working := storeDigest(f)
+			bytes, proven := storeActiveBytes(f)
+			if working != "" && (!proven || working != storeDigestBytes(bytes)) || working == "" && proven && len(bytes) != 0 {
 				version = "inactive"
 				break
 			}

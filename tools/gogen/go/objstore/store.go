@@ -253,6 +253,7 @@ func Call(in map[string]*string) Answer {
 		src, ok := in["IV_SOURCE"]
 		if !ok || src == nil {
 			a.Scalars["EV_ERROR"] = "WRITE without IV_SOURCE: nothing was written"
+			a.Scalars["EV_JSON"] = storeJSONRefusal(a.Scalars["EV_ERROR"], "INTERNAL")
 			return a
 		}
 		err = storeWrite(ix, &a, typ, name, include, *src)
@@ -375,6 +376,10 @@ func Call(in map[string]*string) Answer {
 			code := "INTERNAL"
 			if strings.HasSuffix(err.Error(), " does not exist") {
 				code = "NOT_FOUND"
+			} else if strings.Contains(err.Error(), "is not a repository name") {
+				code = "INVALID_NAME"
+			} else if strings.HasSuffix(err.Error(), " is not supported") {
+				code = "NOT_SUPPORTED"
 			} else if strings.Contains(err.Error(), "comes from a library and cannot be changed here") {
 				code = "READ_ONLY"
 			}
@@ -479,14 +484,10 @@ func storeRead(ix *storeIndex, a *Answer, typ, name, include, version string) er
 		if proven {
 			source = string(b)
 		} else {
-			digest, built := storeState.cfg.Built[file]
-			proven = built && len(digest) == 64 && digest == storeDigest(file)
-			if !proven {
-				if !classInclude {
-					return storeNotFound(typ, name+" active version ("+include+")")
-				}
-				source = ""
+			if !classInclude {
+				return storeNotFound(typ, name+" active version ("+include+")")
 			}
+			source = ""
 		}
 		includePresent = proven
 	}
@@ -539,6 +540,9 @@ func storeWrite(ix *storeIndex, a *Answer, typ, name, include, source string) er
 		return storeRefusal(e.Type + " " + e.Name + " comes from a library and cannot be changed here")
 	}
 	if e == nil {
+		if !regexp.MustCompile(`^(/[A-Z0-9_]{1,10}/)?[A-Z0-9_]{1,40}$`).MatchString(name) {
+			return storeRefusal(fmt.Sprintf(`%s "%s" is not a repository name (A-Z, 0-9, _, an optional /NAMESPACE/)`, typ, name))
+		}
 		var root *Root
 		for i := range storeState.cfg.Roots {
 			if storeState.cfg.Roots[i].Writable {
@@ -580,6 +584,17 @@ func storeWrite(ix *storeIndex, a *Answer, typ, name, include, source string) er
 	a.Scalars["EV_PACKAGE"] = e.Package
 	a.Scalars["EV_VERSION"] = version
 	a.Scalars["EV_WRITABLE"] = "X"
+	revision := sha256.New()
+	for _, f := range storeFilesOf(e) {
+		revision.Write([]byte(f + "\x00" + storeDigest(f) + "\x00"))
+	}
+	value, _ := json.Marshal(struct {
+		Written  bool   `json:"written"`
+		Type     string `json:"type"`
+		Name     string `json:"name"`
+		Revision string `json:"revision"`
+	}{true, typ, name, hex.EncodeToString(revision.Sum(nil))})
+	a.Scalars["EV_JSON"] = string(value)
 	return nil
 }
 

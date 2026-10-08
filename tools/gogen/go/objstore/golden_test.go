@@ -224,6 +224,7 @@ func TestStoreReadActiveVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 	storeState.cfg.Built = map[string]string{"src/active.prog.abap": storeDigest("src/active.prog.abap")}
+	storeState.cfg.Active = map[string]string{"src/active.prog.abap": "src/active.prog.abap"}
 	str := func(value string) *string { return &value }
 	answer := Call(map[string]*string{"IV_COMMAND": str("READ"), "IV_TYPE": str("PROG"), "IV_NAME": str("ACTIVE"), "IV_REVISION": str("active")})
 	if answer.Scalars["EV_ERROR"] != "" || answer.Scalars["EV_SOURCE"] != "REPORT active.\n" {
