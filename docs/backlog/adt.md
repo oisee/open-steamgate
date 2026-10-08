@@ -607,3 +607,26 @@ Parked ideas, in the archive:
 - vscode.dev to a real SAP;
 - time travel;
 - package "capsules".
+
+## The last stage: the ABAP front on a system, under real clients (2026-10-08)
+
+Planned after ADT on osgo passes the whole shared suite on `main` and the
+suite has grown to writes, activation and the DDIC objects abapGit needs.
+The ABAP front (variant C, `ZCL_OSD_ADT_HANDLER` and its routes) is deployed
+to the sandbox system as an ICF service of its own, beside the system's own
+ADT, in a disposable package; then:
+
+- the shared conformance runner runs against that service by URL, a fourth
+  column next to the reference system, JS and osgo: the same ABAP on a real
+  kernel, compared with the real ADT of that kernel;
+- HTTP ADT clients run their ordinary work cycle against it (logon, browse,
+  search, read, lock, edit, check, activate, versions, unit tests, create and
+  delete in the disposable package); what the front does not support answers
+  with a clean refusal;
+- a bridge that carries ADT requests made over RFC to this service is built
+  and documented for manual use only: it is not part of any automated run.
+
+Before it, a slice of its own: the host jumps of the front (`ZCL_OSD_ADT_HOST`:
+store, locks, system facts) answered by the system itself. The sandbox is
+used only on explicit request, with disposable objects whose cleanup is
+verified, and no capture is committed.
