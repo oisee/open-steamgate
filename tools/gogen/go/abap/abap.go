@@ -33,7 +33,7 @@ type Sy struct {
 // puts it down: nothing ties a Session to the goroutine that ran it last.
 // Only one goroutine may use a Session at a time. Its zero value is ready to use.
 type Session struct {
-	// Statics holds class attributes and constructor flags. Nil creates a private
+	// Statics holds class attributes, constructor flags and event registrations. Nil creates a private
 	// store on first access. Shared stores require serialized access.
 	Statics *Statics
 	Sy      Sy
@@ -45,7 +45,8 @@ type Session struct {
 	// headers and the answer of a SEND), by the object (httpc.go)
 	httpc map[any]*httpcClient
 	// inflate: the decoders of ZCL_OSD_INFLATE=>HOST_* by handle (inflate.go)
-	inflate *inflate.Registry
+	inflate           *inflate.Registry
+	localDestinations map[string]bool
 }
 
 // ArithmeticError retains the identity of errors from pure packages.
