@@ -1,0 +1,257 @@
+{
+  "client": {
+    "name": "abap-adt-api",
+    "version": "8.4.3",
+    "integrity": "sha512-/DXovX+xjqycHyrcSEQnbuDQqlmegdIDfJpfL38i5vYRfjiBoEHzxfKOzB3/gvYxbuAfxKzytwLdSQG2leh8sA=="
+  },
+  "scenarios": {
+    "connect.login": {
+      "status": "PASS",
+      "feature": "Connect (login, CSRF token)"
+    },
+    "connect.statelessClone": {
+      "status": "PASS",
+      "feature": "Second (stateless) session for reads"
+    },
+    "connect.discovery": {
+      "status": "PASS",
+      "feature": "Discovery (feature gates)"
+    },
+    "tree.tmp": {
+      "status": "PASS",
+      "feature": "Browse $TMP"
+    },
+    "tree.package": {
+      "status": "PASS",
+      "feature": "Browse a package ($ZOSD_TEST)"
+    },
+    "tree.systemLibrary": {
+      "status": "PASS",
+      "feature": "Browse System Library (root)"
+    },
+    "tree.nodepath": {
+      "status": "PASS",
+      "feature": "Reveal object in tree (nodepath)"
+    },
+    "tree.objecttypes": {
+      "status": "PASS",
+      "feature": "Object type registry"
+    },
+    "object.CLAS": {
+      "status": "PASS",
+      "feature": "Open CLAS (structure + source)"
+    },
+    "object.INTF": {
+      "status": "PASS",
+      "feature": "Open INTF (structure + source)"
+    },
+    "object.PROG": {
+      "status": "PASS",
+      "feature": "Open PROG (structure + source)"
+    },
+    "object.INCL": {
+      "status": "PASS",
+      "feature": "Open INCL (structure + source)"
+    },
+    "object.FUGR": {
+      "status": "MISSING",
+      "feature": "Open FUGR (structure + source)",
+      "reason": "GET /sap/bc/adt/functions/groups/zosd_test_fg is not served by ABAP here."
+    },
+    "object.FM": {
+      "status": "MISSING",
+      "feature": "Open FM (structure + source)",
+      "reason": "GET /sap/bc/adt/functions/groups/zosd_test_fg/fmodules/z_osd_test_status_text is not served by ABAP here."
+    },
+    "object.DDLS": {
+      "status": "PASS",
+      "feature": "Open DDLS (structure + source)"
+    },
+    "object.MSAG": {
+      "status": "MISSING",
+      "feature": "Open MSAG (structure + source)",
+      "reason": "GET /sap/bc/adt/messageclass/zosd_test_msg is not served by ABAP here."
+    },
+    "object.TABL": {
+      "status": "PASS",
+      "feature": "Open TABL (structure + source)"
+    },
+    "object.CLAS.includes": {
+      "status": "PASS",
+      "feature": "Class includes (locals, test classes)"
+    },
+    "object.CLAS.outline": {
+      "status": "PASS",
+      "feature": "Outline (objectstructure)"
+    },
+    "object.INCL.mainprograms": {
+      "status": "MISSING",
+      "feature": "Include main program",
+      "reason": "GET /sap/bc/adt/programs/includes/zosd_test_demo_inc/mainprograms is not served by ABAP here."
+    },
+    "write.lockWriteUnlock": {
+      "status": "FAIL",
+      "feature": "Edit + save (lock, PUT source, unlock)",
+      "reason": "Not exercised: osgo has no source save; a failed restore is fatal. Omitted from the default groups so reads still run. Re-enable write when save is implemented."
+    },
+    "check.syntax": {
+      "status": "MISSING",
+      "feature": "Syntax check (checkruns)",
+      "reason": "CHECKRUN has no osgo host implementation yet (501 unknown store command); branch feat/osgo-adt-checkrun."
+    },
+    "activate.object": {
+      "status": "MISSING",
+      "feature": "Activate",
+      "reason": "POST /sap/bc/adt/activation is not served on osgo; activation needs save first (slice 2-3)."
+    },
+    "activate.inactiveObjects": {
+      "status": "MISSING",
+      "feature": "Inactive objects list",
+      "reason": "GET /sap/bc/adt/activation/inactiveobjects is not served by ABAP here."
+    },
+    "unit.run": {
+      "status": "MISSING",
+      "feature": "ABAP Unit (Test Explorer)",
+      "reason": "POST /sap/bc/adt/abapunit/testruns is not served on osgo."
+    },
+    "search.quick": {
+      "status": "PASS",
+      "feature": "Object search (quickSearch)"
+    },
+    "whereused.references": {
+      "status": "MISSING",
+      "feature": "Where-used / find references",
+      "reason": "POST /sap/bc/adt/repository/informationsystem/usageReferences is not served by ABAP here."
+    },
+    "editor.completion": {
+      "status": "MISSING",
+      "feature": "Code completion",
+      "reason": "POST /sap/bc/adt/abapsource/codecompletion/proposal is not served by ABAP here."
+    },
+    "editor.definition": {
+      "status": "MISSING",
+      "feature": "Go to definition (navigation/target)",
+      "reason": "POST /sap/bc/adt/navigation/target is not served by ABAP here."
+    },
+    "editor.elementinfo": {
+      "status": "MISSING",
+      "feature": "Hover (completion elementinfo)",
+      "reason": "POST /sap/bc/adt/abapsource/codecompletion/elementinfo is not served by ABAP here."
+    },
+    "editor.prettyprinter": {
+      "status": "MISSING",
+      "feature": "Format (pretty printer)",
+      "reason": "POST /sap/bc/adt/abapsource/prettyprinter is not served by ABAP here."
+    },
+    "editor.typehierarchy": {
+      "status": "MISSING",
+      "feature": "Type hierarchy",
+      "reason": "POST /sap/bc/adt/abapsource/typehierarchy is not served by ABAP here."
+    },
+    "versions.list": {
+      "status": "PASS",
+      "feature": "Versions / revisions"
+    },
+    "data.freestyle": {
+      "status": "MISSING",
+      "feature": "SQL query (datapreview freestyle)",
+      "reason": "Datapreview freestyle route is enabled only in one-runtime mode, which this osgo -adt host does not enable."
+    },
+    "data.table": {
+      "status": "MISSING",
+      "feature": "Table contents (datapreview ddic)",
+      "reason": "Datapreview ddic route is enabled only in one-runtime mode, which this osgo -adt host does not enable."
+    },
+    "transport.check": {
+      "status": "PASS",
+      "feature": "Transport check on save/create"
+    },
+    "transport.userTransports": {
+      "status": "MISSING",
+      "feature": "Transport organizer view",
+      "reason": "GET /sap/bc/adt/cts/transportrequests is not served by ABAP here."
+    },
+    "transport.configurations": {
+      "status": "MISSING",
+      "feature": "Transport search configuration",
+      "reason": "GET /sap/bc/adt/cts/transportrequests/searchconfiguration/configurations is not served by ABAP here."
+    },
+    "atc.customizing": {
+      "status": "MISSING",
+      "feature": "ATC customizing",
+      "reason": "GET /sap/bc/adt/atc/customizing is not served by ABAP here."
+    },
+    "atc.run": {
+      "status": "MISSING",
+      "feature": "ATC run on an object",
+      "reason": "POST /sap/bc/adt/atc/runs is not served by ABAP here."
+    },
+    "debugger.coreDiscovery": {
+      "status": "FAIL",
+      "feature": "Debug session start (core discovery)",
+      "reason": "Core discovery returns HTTP 200, but the pinned client cannot parse it (missing category @_term)."
+    },
+    "debugger.listeners": {
+      "status": "PASS",
+      "feature": "Debugger listener probe"
+    },
+    "debugger.breakpoints": {
+      "status": "MISSING",
+      "feature": "Set breakpoints",
+      "reason": "POST /sap/bc/adt/debugger/breakpoints is not served by ABAP here."
+    },
+    "misc.feeds": {
+      "status": "PASS",
+      "feature": "Feeds / dumps / users"
+    },
+    "create.validate": {
+      "status": "MISSING",
+      "feature": "New object wizard: name validation",
+      "reason": "POST /sap/bc/adt/programs/validation is not served by ABAP here."
+    },
+    "create.createDelete": {
+      "status": "MISSING",
+      "feature": "Create + delete in $TMP",
+      "reason": "POST /sap/bc/adt/programs/programs (create) is not served on osgo; create/save are slice 2."
+    },
+    "create.createDeleteInPackage": {
+      "status": "MISSING",
+      "feature": "Create + delete in a package ($ZOSD_TEST)",
+      "reason": "POST /sap/bc/adt/programs/programs (create) is not served on osgo; create/save are slice 2."
+    }
+  },
+  "target": "osgo",
+  "ratchet": true,
+  "only": [
+    "connect",
+    "tree",
+    "objects",
+    "check",
+    "activate",
+    "unit",
+    "search",
+    "whereused",
+    "editor",
+    "versions",
+    "data",
+    "transports",
+    "atc",
+    "debugger",
+    "misc",
+    "create"
+  ],
+  "measured": {
+    "revision": "16b999ad72b1e5b4b6eb0753d8fdcc3d4ae07abe",
+    "build": "osgo-host fixture staging, npm run transpile, node tools/gogen/osgo.mjs; -adt",
+    "counts": {
+      "PASS": 21,
+      "FAIL": 1,
+      "MISSING": 24
+    },
+    "exercised": 46,
+    "omitted": [
+      "write.lockWriteUnlock"
+    ],
+    "note": "Measured after PR #689 merged. The exercised FAIL is debugger.coreDiscovery; write.lockWriteUnlock retains its FAIL expectation while omitted."
+  }
+}

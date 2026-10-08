@@ -1,15 +1,16 @@
+import {createServer} from "node:http";
 import {expect} from "chai";
 import {readFileSync} from "node:fs";
 import {Fatal, PIN, SCENARIOS, STATUSES, ensureGone, parseArgs, requireHandle, snapshotDiff, writeRoundTrip} from "../tools/abapfs-conformance.mjs";
-import {compare, nextExpectations, treeSnapshot} from "../tools/abapfs-conformance.mjs";
+import {compare, nextExpectations, treeSnapshot, selectedScenarios, verdict, waitServing} from "../tools/abapfs-conformance.mjs";
 import {spawnSync} from "node:child_process";
 import {chmodSync, mkdtempSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 
 // The conformance run itself is on demand (npm run conformance:abapfs); this
-// suite only keeps its expectations file and its command line honest, and
-// needs neither the ADT client nor a server.
+// suite checks expectations, command-line and safety behavior offline.
+// Readiness uses synthetic HTTP servers; no ADT client or SAP access is needed.
 const expected = JSON.parse(readFileSync(new URL("./fixtures/abapfs-conformance/expected.json", import.meta.url), "utf8"));
 const lock = JSON.parse(readFileSync(new URL("../tools/abapfs-conformance/package-lock.json", import.meta.url), "utf8"));
 
@@ -218,5 +219,106 @@ describe("tools/abapfs-conformance: safety paths, offline", () => {
     } finally {
       rmSync(root, {recursive: true, force: true});
     }
+  });
+});
+
+
+describe("tools/abapfs-conformance: target policy", () => {
+  const osgo = JSON.parse(readFileSync(new URL("./fixtures/abapfs-conformance/expected-osgo.json", import.meta.url), "utf8"));
+  it("covers every scenario and explains each osgo gap", () => {
+    expect(Object.keys(osgo.scenarios).sort()).to.deep.equal(SCENARIOS.map(s => s.id).sort());
+    for (const [id, e] of Object.entries(osgo.scenarios)) {
+      expect(STATUSES, id).to.include(e.status);
+      if (e.status !== "PASS") expect(e.reason, id).to.be.a("string").and.not.empty;
+    }
+  });
+  it("omits the unsafe write but exercises every later group, with explicit overrides", () => {
+    const selected = selectedScenarios(parseArgs([]), osgo);
+    expect(selected.map(s => s.id)).to.deep.equal(SCENARIOS.filter(s => s.group !== "write").map(s => s.id));
+    expect(selectedScenarios(parseArgs(["--only", "write"]), osgo).map(s => s.group)).to.include("write");
+    expect(() => selectedScenarios(parseArgs([]), {only: ["typo"]})).to.throw(/known scenario groups/);
+  });
+  it("ratchets both regressions and unexpected passes for osgo, retaining Node policy", () => {
+    const gap = [{id: "gap", status: "PASS"}];
+    const e = {scenarios: {gap: {status: "MISSING"}}};
+    expect(verdict(compare(gap, e), e)).to.equal(0);
+    expect(verdict(compare(gap, e), {...e, ratchet: true})).to.equal(1);
+    expect(verdict(compare([{id: "gap", status: "FAIL"}], e), osgo)).to.equal(1);
+    expect(verdict(compare([{id: "gap", status: "MISSING"}], e), osgo)).to.equal(0);
+  });
+  it("fails osgo on FAIL->MISSING and MISSING->FAIL status drift", () => {
+    const expected = {ratchet: true, scenarios: {gap: {status: "FAIL"}, gone: {status: "MISSING"}}};
+    const missing = compare([{id: "gap", status: "MISSING"}, {id: "gone", status: "MISSING"}], expected);
+    const failed = compare([{id: "gap", status: "FAIL"}, {id: "gone", status: "FAIL"}], expected);
+    expect(missing.changed).to.deep.equal(["gap: FAIL -> MISSING"]);
+    expect(failed.regressions).to.deep.equal(["gone: MISSING -> FAIL"]);
+    expect(verdict(missing, expected)).to.equal(1);
+    expect(verdict(failed, expected)).to.equal(1);
+  });
+  it("preserves target metadata and gap reasons when updating expectations", () => {
+    const results = SCENARIOS.map(s => ({id: s.id, status: osgo.scenarios[s.id].status}));
+    const next = nextExpectations(results, osgo);
+    expect(next.only).to.deep.equal(osgo.only);
+    expect(next.ratchet).to.equal(true);
+    expect(next.scenarios["write.lockWriteUnlock"].reason).to.equal(osgo.scenarios["write.lockWriteUnlock"].reason);
+  });
+});
+
+describe("tools/abapfs-conformance: readiness, synthetic servers", () => {
+  async function probe(serving, discovery, ready, options = {}) {
+    const paths = [];
+    let stallDiscovery = false;
+    stallDiscovery = Boolean(options.stall);
+    const server = createServer((req, res) => {
+      paths.push(req.url);
+      if (req.url !== "/osd/serving") {
+        if (stallDiscovery) {
+          res.writeHead(200, {"content-type": "application/atomsvc+xml"});
+          return;
+        }
+        const [status, body, headers] = discovery;
+        res.writeHead(status, headers); res.end(body);
+        return;
+      }
+      const [status, body] = serving;
+      res.writeHead(status); res.end(body);
+    });
+    await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const result = waitServing(`http://127.0.0.1:${server.address().port}`, 150, 10, options.requestTimeoutMs ?? 150);
+      if (ready) expect((await result).ready).to.equal(true);
+      else {
+        let error;
+        try { await result; } catch (e) { error = e; }
+        expect(error?.message).to.match(/did not become ready/);
+      }
+      return paths;
+    } finally {
+      stallDiscovery = false;
+      server.closeAllConnections?.();
+      await new Promise(resolve => server.close(resolve));
+    }
+  }
+  it("keeps Node readiness authoritative, including ready=false", async () => {
+    expect(await probe([200, '{"ready":true}'], [404, 'missing'], true)).to.deep.equal(["/osd/serving"]);
+    expect(await probe([200, '{"ready":false}'], [200, 'discovery'], false)).not.to.include("/sap/bc/adt/discovery");
+  });
+  it("falls back only from a JSON 404 or non-JSON response to an ADT service document or 401", async () => {
+    for (const serving of [[404, '{}'], [200, 'html']]) {
+      expect(await probe(serving, [401, ""], true)).to.include("/sap/bc/adt/discovery");
+      expect(await probe(serving, [200, '<service xmlns="atom"/>', {"content-type": "application/atomsvc+xml"}], true))
+        .to.include("/sap/bc/adt/discovery");
+    }
+  });
+  it("does not accept an unrelated HTML 200 as ADT discovery", async () => {
+    expect(await probe([404, 'missing'], [200, '<html><body>hello</body></html>', {"content-type": "text/html"}], false))
+      .to.include("/sap/bc/adt/discovery");
+  });
+  it("times out a stalled discovery response instead of waiting forever", async () => {
+    const paths = await probe([404, 'missing'], [404, 'missing'], false, {stall: true, requestTimeoutMs: 40});
+    expect(paths).to.include("/sap/bc/adt/discovery");
+  });
+  it("waits when discovery is unavailable", async () => {
+    for (const status of [404, 503]) await probe([404, 'missing'], [status, 'missing'], false);
   });
 });
