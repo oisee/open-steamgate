@@ -154,6 +154,12 @@ const statusODataPath = odataBase + "/ZOSD_STATUS_SRV"
 // odataBase is where test/start.mjs mounts the OData front.
 const odataBase = "/sap/opu/odata/sap"
 
+type route struct {
+	prefix string
+	exact  bool
+	h      http.HandlerFunc
+}
+
 // the ABAP frames of a dump, innermost first (as gateway.mjs prints them)
 func abapStack(r any) []string {
 	stack := string(debug.Stack())
@@ -226,6 +232,23 @@ func icfHandler(class, base string, onDump func(w http.ResponseWriter, r *http.R
 		}
 		x.Write(w, r.Method)
 	}
+}
+
+func adtDump(w http.ResponseWriter, r *http.Request, dump any, frames []string) {
+	text := dumpText(dump)
+	status := 500
+	if strings.Contains(text, "NOT_COMPILED in ") {
+		status = 501
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(status)
+	if r.Method != "HEAD" {
+		fmt.Fprintf(w, "ZCL_OSD_ADT_HANDLER: %s", text)
+	}
+}
+
+func adtEnabled(flag bool, getenv func(string) string) bool {
+	return flag || getenv("OSD_OSGO_ADT") == "1"
 }
 
 // the OData front's 500 (tools/osd-serve.mjs)
@@ -393,6 +416,7 @@ func main() {
 	dbFile := flag.String("db", "", "an SQLite file (WAL) instead of the in-memory database; seeded once, when it has no tables, and refused when another build seeded it")
 	homeDir := flag.String("home", "", "data directory; defaults -db to <home>/osgo.sqlite and makes a fresh directory a full database reset")
 	version := flag.Bool("version", false, "print release tag and commit")
+	adtFlag := flag.Bool("adt", false, "mount /sap/bc/adt through ZCL_OSD_ADT_HANDLER (also OSD_OSGO_ADT=1; default off)")
 	root := flag.String("root", osgRoot, "the checkout whose webapp/ is served")
 	media := flag.String("media", "", "the SMW0 media directory (w3mi.json and the data files); default media/ beside the binary when it is there")
 	// HTTPS beside HTTP, the way a system answers on 443nn next to 80nn: the
@@ -509,12 +533,10 @@ func main() {
 	}
 
 	webapp := filepath.Join(*root, "webapp")
-	type route struct {
-		prefix string
-		exact  bool
-		h      http.HandlerFunc
-	}
 	var routes []route
+	if adtEnabled(*adtFlag, os.Getenv) {
+		routes = append(routes, route{"/sap/bc/adt", false, icfHandler("ZCL_OSD_ADT_HANDLER", "/sap/bc/adt", adtDump)})
+	}
 	// the port's front door is the launchpad when there is one (test/start.mjs root)
 	routes = append(routes, route{"/", true, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "GET" && r.Method != "HEAD" {
@@ -590,33 +612,7 @@ func main() {
 	sort.SliceStable(routes, func(i, j int) bool { return len(routes[i].prefix) > len(routes[j].prefix) })
 
 	upgrade := channelRoutes()
-	mux := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if upgrade(w, r) {
-			return
-		}
-		p := r.URL.EscapedPath()
-		for _, rt := range routes {
-			switch {
-			case rt.exact:
-				if strings.EqualFold(p, rt.prefix) || strings.EqualFold(p, rt.prefix+"/") {
-					rt.h(w, r)
-					return
-				}
-			case strings.HasSuffix(rt.prefix, "/"):
-				if hasPrefixFold(p, rt.prefix) {
-					rt.h(w, r)
-					return
-				}
-			default:
-				// a mount: the path itself or anything below it
-				if strings.EqualFold(p, rt.prefix) || hasPrefixFold(p, rt.prefix+"/") {
-					rt.h(w, r)
-					return
-				}
-			}
-		}
-		notFound(w, r)
-	})
+	mux := routeMatcher(routes, notFound, upgrade)
 
 	for _, svc := range icfServices {
 		log.Printf("ICF service  on http://localhost:%d%s  (%s)", *port, svc.Path, svc.Handler)
@@ -665,6 +661,36 @@ func main() {
 		log.Printf("Listening on https://localhost:%d/  (bound to %s)", *tlsPort, osdbind.Describe(tlns))
 	}
 	log.Fatal(server.Serve(ln))
+}
+
+func routeMatcher(routes []route, notFound http.HandlerFunc, upgrade func(http.ResponseWriter, *http.Request) bool) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if upgrade != nil && upgrade(w, r) {
+			return
+		}
+		p := r.URL.EscapedPath()
+		for _, rt := range routes {
+			switch {
+			case rt.exact:
+				if strings.EqualFold(p, rt.prefix) || strings.EqualFold(p, rt.prefix+"/") {
+					rt.h(w, r)
+					return
+				}
+			case strings.HasSuffix(rt.prefix, "/"):
+				if hasPrefixFold(p, rt.prefix) {
+					rt.h(w, r)
+					return
+				}
+			default:
+				// a mount: the path itself or anything below it
+				if strings.EqualFold(p, rt.prefix) || hasPrefixFold(p, rt.prefix+"/") {
+					rt.h(w, r)
+					return
+				}
+			}
+		}
+		notFound(w, r)
+	})
 }
 
 func fileExists(p string) bool {

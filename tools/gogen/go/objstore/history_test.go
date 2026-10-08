@@ -27,13 +27,14 @@ func TestStoreHistoryFollowsRenames(t *testing.T) {
 	run("mv", "src/zold.prog.abap", "src/znew.prog.abap")
 	os.WriteFile(filepath.Join(root, "src", "znew.prog.abap"), []byte("REPORT zold.\nWRITE 'one'.\nWRITE 'two'.\n"), 0o644)
 	run("add", ".")
-	run("commit", "-q", "-m", "second")
+	subject := strings.Repeat("é", 100) + " full title"
+	run("commit", "-q", "-m", subject)
 
 	revs, reason := storeHistory(root, "src/znew.prog.abap", 50)
 	if reason != "" || len(revs) != 2 {
 		t.Fatalf("history: %d versions, reason %q", len(revs), reason)
 	}
-	if revs[0].SUBJECT != "second" || revs[1].path != "src/zold.prog.abap" || revs[0].AUTHOR != "TESTAUTHOR" || len(revs[0].SHORT) != 12 || revs[0].DATE == "00000000" {
+	if revs[0].SUBJECT != strings.Repeat("é", 80) || revs[0].SUBJECT_FULL != subject || revs[1].SUBJECT_FULL != "first" || revs[1].path != "src/zold.prog.abap" || revs[0].AUTHOR != "TESTAUTHOR" || revs[0].SHORT != revs[0].REVISION[:len(revs[0].SHORT)] || revs[0].DATE == "00000000" {
 		t.Fatalf("versions: %+v", revs)
 	}
 	src, path, err := storeRevisionAt(root, "src/znew.prog.abap", revs[1].REVISION)
