@@ -41,6 +41,10 @@ CLASS zcl_osd_adt_ris_static IMPLEMENTATION.
       WHEN `/sap/bc/adt/repository/informationsystem/objecttypes`.
         lt_types = zcl_osd_adt_types=>all( ).
         LOOP AT lt_types INTO ls_type.
+          " Store support does not add unmeasured RIS entries.
+          IF ls_type-type = `SICF` OR ls_type-type = `SAPC` OR ls_type-type = `SAMC`.
+            CONTINUE.
+          ENDIF.
           CLEAR ls_item.
           ls_item-name = ls_type-type.
           ls_item-description = ls_type-plural.

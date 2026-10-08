@@ -89,6 +89,13 @@ export function ooParameters(param) {
 }
 
 // one *.tran.xml -> what SE93 would show for it
+// what this generator reads of a class: whether its raw source names the
+// contract. The warm rule asks the same question (tools/osd-warm.mjs), so an
+// edit that changes the answer is never built warm.
+export function implementsContract(source) {
+  return new RegExp(`INTERFACES\\s+${CONTRACT}`, "i").test(source);
+}
+
 export function transactionOf(xml, file) {
   const tstc = block(xml, "TSTC");
   if (tstc === undefined) {
@@ -147,7 +154,7 @@ export function transactions(folders) {
         const source = readFileSync(file, "utf8");
         classes.set(name, {
           file,
-          implementsContract: new RegExp(`INTERFACES\\s+${CONTRACT}`, "i").test(source),
+          implementsContract: implementsContract(source),
         });
         continue;
       }

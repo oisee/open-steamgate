@@ -40,7 +40,7 @@ describe("standalone binary home and layers", () => {
       assert.deepEqual(folders, ["first", "second", "third"].map((name) => join(root, name)));
       const stack = inputFoldersOf(root, {input_folder: ["src", "gen"]}, {OSD_LAYERS: folders.join(delimiter)});
       assert.deepEqual(stack, ["src", "gen", "first", "second", "third"]);
-      assert.throws(() => layerList(["--layer", "missing"], {}, root), /not a directory/);
+      assert.throws(() => layerList(["--layer", "missing"], {}, root), /not a folder or ZIP/);
     } finally {
       rmSync(root, {recursive: true, force: true});
     }

@@ -19,14 +19,16 @@
 // switched to the same way. Whether its bytes are a cold transpile's is not
 // assumed: verify() transpiles the same inputs cold in a child process and
 // compares, and until that has passed the generation is "warm-unverified".
-// verify() runs no generators, so it checks this build against today's
-// gen/, not the rule below against the generators.
+// verify() reads frozen source/gen/library inputs, without running generators,
+// so it checks this build, not the rule below against the generators.
 //
 // What is warm is decided file by file, and anything else is cold -- the
 // generators read the tree too, and a change they would see has to reach
 // them (see warmRule below).
+import {keepCompileInputs} from "./osd-compile-snapshot.mjs";
+import {verifyGeneration} from "./osd-warm-verify.mjs";
 import {keepSourceInputs, linkGeneratedSources, completeSourceSnapshot, logicalSourcePath} from "./osd-source-snapshot.mjs";
-import {spawn} from "./osd-child-process.mjs";
+import {startVerification, pruneVerification} from "./osd-warm-verification.mjs";
 import {createHash} from "node:crypto";
 import {copyFileSync, existsSync, linkSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, watch, writeFileSync} from "node:fs";
 import {basename, dirname, join, relative, resolve, sep} from "node:path";
@@ -36,10 +38,13 @@ import {sourceBuildOverlay, sourceBuildStore} from "./osd-source-build-view.mjs"
 import {assertToolchain} from "./osd-transpiler.mjs";
 import {mapStatementStarts} from "./osd-source-map-starts.mjs";
 import {runsAs} from "./osd-main.mjs";
-import {toolCommand} from "./osd-host.mjs";
 import {isBinaryFilename, listFiles, loadLibs, selectedModules, outputFiles, readAll} from "./osd-transpile.mjs";
 import {lowerNarrowSubmit} from "./osd-narrow-submit.mjs";
+import {orderRegistry} from "./osd-warm-order.mjs";
+import {updateRegistry} from "./osd-warm-update.mjs";
 import {warmVerdict} from "./osd-hot.mjs";
+import {interfacesLines, interfacesOf} from "./osd-warm-interfaces.mjs";
+import {implementsContract} from "./osd-tran-registry.mjs";
 
 import {checkView, checkRead} from "./osd-store-compile-view.mjs";
 import {rowsFromRegistry} from "./osd-xref-seed.mjs";
@@ -87,10 +92,6 @@ export const GENERATORS_READ = [
 
 const SOURCE = /\.(clas(\.(locals_imp|locals_def|testclasses|macros))?\.abap|intf\.abap|prog\.abap)$/i;
 const AMDP = /BY\s+DATABASE\s+(PROCEDURE|FUNCTION)/i;
-// every INTERFACES statement, the chained form (`INTERFACES: a, b.`) too,
-// as the words it names; a changed addition counts as a change
-const interfacesOf = (text) => [...text.matchAll(/^\s*INTERFACES\b\s*:?([^.]*)\./gim)]
-  .flatMap((m) => m[1].split(/[\s,]+/).filter(Boolean).map((w) => w.toUpperCase())).sort().join(",");
 
 /** why a content edit may not be built warm, or undefined when it may */
 export function warmRule({path, before, after, amdpText = ""}) {
@@ -110,7 +111,8 @@ export function warmRule({path, before, after, amdpText = ""}) {
   if (AMDP.test(before) || AMDP.test(after)) {
     return `${name}: an AMDP body (amdp-gen reads it)`;
   }
-  if (interfacesOf(before) !== interfacesOf(after)) {
+  if (interfacesOf(before) !== interfacesOf(after) || interfacesLines(before) !== interfacesLines(after)
+    || implementsContract(before) !== implementsContract(after)) {
     return `${name}: its INTERFACES lines changed (osd-tran-registry reads them)`;
   }
   if (/\.intf\.abap$/i.test(name)) {
@@ -225,6 +227,7 @@ export class WarmCompiler {
     // generations this made that verify() has not yet compared with a cold
     // transpile of the same inputs
     this.unverified = new Set();
+    this.verifyDeadlineMs = options.verifyDeadlineMs ?? Number(process.env.OSD_WARM_VERIFY_LIFETIME_MS ?? 180000);
     // the same, on disk beside the generation (<hash>.warm.json), so a warm
     // generation found again later is still known to be unchecked
     this.swaps = 0;
@@ -241,8 +244,6 @@ export class WarmCompiler {
     this.keyOf = options.keyOf ?? (() => undefined);
     // the inactive objects and their copies (ObjectStore#inactiveSources)
     this.inactiveSources = options.inactiveSources ?? (() => []);
-    // the view each generation this made was built from, for its comparison
-    this.views = new Map();
   }
 
   // A file is known by where it lives in the tree, whichever copy the view
@@ -392,6 +393,7 @@ export class WarmCompiler {
     const reg = new core.Registry();
     for (const f of this.files.values()) reg.addFile(new core.MemoryFile(f.filename, f.contents));
     for (const l of libs) reg.addDependency(new core.MemoryFile(l.filename, l.contents));
+    orderRegistry(reg, core, this.files.values(), libs);
     const settings = {...own.options};
     if (own.write_source_map !== true) settings.ignoreSourceMap = true;
     const output = await new Transpiler(settings).run(reg);
@@ -405,13 +407,14 @@ export class WarmCompiler {
       throw new NotWarm(`a full run of the kept registry differs from the live generation in ${differing.length} files (${differing.slice(0, 3).join(", ")})`);
     }
 
+    this.libs = libs;
     this.Transpiler = Transpiler;
     this.core = core;
     this.config = config;
     this.own = own;
     this.settings = settings;
     this.hash = live;
-    this.identity = {config: readFileSync(layout(root).config, "utf8"), transpiler, generators: generatorIdentity(root)};
+    this.identity = {config: readFileSync(layout(root).config, "utf8"), transpiler, generators: generatorIdentity(root), layers: JSON.stringify(inputsOf(root, config))};
     this.amdpText = [...this.files.values()].filter((f) => AMDP.test(f.contents)).map((f) => f.contents).join("\n");
     this.pending = new Set();
     // a file's text in the registry, where it differs from the last
@@ -424,6 +427,20 @@ export class WarmCompiler {
     this.wanted = rootsWanted(join(paths.byInput, live), config);
     this.log(`warm: primed ${this.files.size} files in ${Date.now() - started} ms`);
     return {ms: Date.now() - started, files: this.files.size, objects: output.objects.length};
+  }
+
+  // Advance after a cold publication; a failed proof invalidates the registry.
+  async update(activating = new Set()) {
+    try {
+      return await updateRegistry(this, activating, {
+        viewOf: (...args) => this.#view(...args), closure: objects => this.#closure(objects),
+        index: () => this.#index(), rule: warmRule, importersOf, NotWarm,
+      });
+    } catch (error) {
+      this.log(`warm: re-prime: ${error.message}`);
+      this.drop();
+      throw error;
+    }
   }
 
   // A library folder's walk is kept for as long as its watcher has heard
@@ -522,6 +539,7 @@ export class WarmCompiler {
   // forget the registry; the next build is cold, and prime() starts again
   drop() {
     this.reg = undefined;
+    this.unverified.clear();
     this.close();
   }
 
@@ -538,10 +556,12 @@ export class WarmCompiler {
       for (const o of this.reg.getObjects()) for (const f of o.getFiles()) this.owner.set(f.getFilename(), o);
       this.reads = new Map();
       this.readers = new Map();
+      this.unresolved = new Set();
     }
     const objects = only === undefined ? [...this.reg.getObjects()] : only;
     for (const o of objects) {
       if (!(o instanceof core.ABAPObject)) continue;
+      this.unresolved.delete(o);
       for (const t of this.reads.get(key(o)) ?? []) this.readers.get(t)?.delete(o);
       const reads = new Set();
       // INCLUDE is a dependency even when its body declares no identifier
@@ -557,6 +577,7 @@ export class WarmCompiler {
       while (stack.length > 0) {
         const n = stack.pop();
         for (const r of n.getData().references) {
+          if (r.resolved === undefined) this.unresolved.add(o);
           const t = this.owner.get(r.resolved?.getFilename?.());
           if (t !== undefined && t !== o) reads.add(key(t));
         }
@@ -600,13 +621,44 @@ export class WarmCompiler {
     const hash = hashOf(root, inputsOf(root, config), {digests: raw, folders: this.folders, transpiler, overlay});
     const view = this.#view(overlay, raw, config, stack);
     const digests = view.digests;
+    // First save into a ZIP overlay relocates an existing complete object.
+    // Retain its registry file and old digest while rebuilding source maps
+    // for the new physical source. Other additions still require cold build.
+    let relocated = false;
+    for (const layer of inputsOf(root, config).sourceLayers ?? []) {
+      if (!layer.overlayOf) continue;
+      for (const path of view.actual.keys()) {
+        const prefix = resolve(root, layer.path) + sep;
+        if (!path.startsWith(prefix) || this.files.has(path)) continue;
+        const base = resolve(root, layer.overlayOf, relative(prefix, path));
+        if (!this.files.has(base) || view.actual.has(base)) continue;
+        relocated = true;
+        this.files.set(path, this.files.get(base)); this.files.delete(base);
+        if (this.digests.has(base)) this.digests.set(path, this.digests.get(base));
+        if (this.actual.has(base)) this.actual.set(path, this.actual.get(base));
+        this.actual.delete(base);
+        if (this.held.has(base)) {this.held.set(path, this.held.get(base)); this.held.delete(base);}
+      }
+    }
+    if (relocated) {
+      // Enumeration determines init script order. Match a fresh registry's
+      // input walk while retaining parsed objects and their dependency links.
+      const ordered = new Map();
+      for (const path of view.wanted) {
+        const file = this.files.get(this.#logical(path, overlay));
+        const object = file && this.owner.get(file.filename);
+        if (object) ordered.set(key(object), object);
+      }
+      for (const object of this.reg.getObjects()) if (!ordered.has(key(object))) ordered.set(key(object), object);
+      this.reg.getObjects = function* () {yield* ordered.values();};
+    }
     // what the digests say changed, and what the registry holds ahead of the
     // generation (an edit refused, since reverted: the same digest again)
     const changed = [...new Set([...[...digests.keys()].filter((p) => this.digests.get(p) !== digests.get(p)), ...this.held.keys()])];
     for (const p of this.digests.keys()) {
       if (!digests.has(p)) throw new NotWarm(`${relative(root, p)} is gone`);
     }
-    const identity = {config: readFileSync(layout(root).config, "utf8"), transpiler, generators: generatorIdentity(root)};
+    const identity = {config: readFileSync(layout(root).config, "utf8"), transpiler, generators: generatorIdentity(root), layers: JSON.stringify(inputsOf(root, config))};
     for (const k of Object.keys(identity)) {
       if (identity[k] !== this.identity[k]) throw new NotWarm(`the ${k} changed`);
     }
@@ -664,6 +716,8 @@ export class WarmCompiler {
     // a cold build holding the lock is refused with BUSY and nothing changed
     const unlock = lock(paths);
     let settled = false;
+    let mutated = false;
+    let preserve = false;
     try {
       const from = liveHash(root);
       if (from !== this.hash) {
@@ -675,6 +729,7 @@ export class WarmCompiler {
       const {hash, edits, digests, transpiler, overlay, actual} = this.#changes(activating);
       mark("changes");
       const changed = [];
+      mutated = true;
       for (const {path, file, after, held} of edits) {
         if (after !== held) {
           this.reg.updateFile(new this.core.MemoryFile(file.filename, after));
@@ -686,10 +741,11 @@ export class WarmCompiler {
       // tree, an inactive one from its copy -- what its source map names,
       // as a cold build of the view would
       const out = resolve(root, this.own.output_folder);
-      const located = (path, f) => (actual.has(path) ? {...f, relative: relative(out, dirname(actual.get(path)))} : f);
+      const located = (path, f) => (actual.has(path) ? {...f, path: actual.get(path), relative: relative(out, dirname(actual.get(path)))} : f);
       const commit = () => {
         for (const {path, file, after} of edits) {
           file.contents = after;
+          file.sourceDigest = digests.get(path);
           file.relative = located(path, file).relative;
           this.held.delete(path);
         }
@@ -701,9 +757,18 @@ export class WarmCompiler {
       if (hash === from && stale.size === 0) {
         commit();
         settled = true;
-        return {ok: true, hash, cached: true, warm: true, live: true, ms: Date.now() - started, modules: [], hostHeld: [], stale: 0, from,
+        const unverified = warmVerdict(join(paths.byInput, hash)) === false;
+        if (unverified) this.unverified.add(hash);
+        this.pruneVerification();
+        return {ok: true, hash, cached: true, warm: true, unverified, live: true, ms: Date.now() - started, modules: [], hostHeld: [], stale: 0, from,
           closure: [], xrefRows: {CROSS: [], WBCROSSGT: [], WBCROSSGTX: [], D010INC: []}};
       }
+      const files = new Map([...actual.keys()].map(path => [path, this.files.get(path)]));
+      orderRegistry(this.reg, this.core, files.values(), this.libs);
+      const sources = [...files].map(([path, f]) => {
+        const edit = edits.find(e => e.path === path);
+        return located(path, edit ? {...f, contents: edit.after, sourceDigest: digests.get(path)} : f);
+      });
       const names = new Set([...stale].map(key));
       let output;
       try {
@@ -727,9 +792,7 @@ export class WarmCompiler {
 
       // the modules this replaces, and the check that nothing else holds one
       const liveOut = join(paths.byInput, from, "output");
-      const written = outputFiles(output, this.own, liveOut, [...this.files].map(([path, f]) => located(path, f)));
-      // the modules a serving process loads: not the scripts, and not the test
-      // classes, which only a unit run imports
+      const written = outputFiles(output, this.own, liveOut, sources);
       const modules = written.map((f) => basename(f.path))
         .filter((f) => f.endsWith(".mjs") && !SCRIPTS.has(f) && !f.endsWith(".testclasses.mjs"));
       const refusal = importerRefusal(this.importers, written.map((f) => basename(f.path)));
@@ -764,8 +827,6 @@ export class WarmCompiler {
             writeFileSync(join(tmp, "output", basename(f.path)), f.contents, isBinaryFilename(f.path) ? {encoding: "latin1"} : undefined);
           }
           linkOrCopy(join(paths.byInput, from, "abap_transpile.json"), join(tmp, "abap_transpile.json"), this.link);
-          // the manifest a cold build of these inputs writes: the same fields in
-          // the same order, so the comparison in verify() is of the output
           assertToolchain(root, this.loaded);
           const manifest = JSON.parse(readFileSync(join(paths.byInput, from, "manifest.json"), "utf8"));
           writeFileSync(join(tmp, "manifest.json"), JSON.stringify({
@@ -775,6 +836,7 @@ export class WarmCompiler {
           const sharedSources = keepSourceInputs(root, tmp, digests, actual, overlay,
             {generation: join(paths.byInput, from), digests: this.digests});
           if (!sharedSources) linkGeneratedSources(root, join(paths.byInput, from), tmp);
+          keepCompileInputs(root, tmp, this.own, sources, this.libs, overlay);
           completeSourceSnapshot(tmp);
           linkRoots(root, tmp, this.config, undefined, {wanted});
           mkdirSync(paths.byInput, {recursive: true});
@@ -788,8 +850,9 @@ export class WarmCompiler {
         }
       }
       mark("generation");
-      if (warmVerdict(target) === false) this.unverified.add(hash);
-      this.views.set(hash, overlay);
+      const unverified = warmVerdict(target) === false;
+      if (unverified) this.unverified.add(hash);
+      this.pruneVerification();
       if (this.switch !== false) switchTo(root, hash, undefined, {wanted});
       mark("switch");
       commit();
@@ -814,100 +877,40 @@ export class WarmCompiler {
         // Program modules execute at import time. Compile their closure warm,
         // but let a fresh runtime load it instead of executing it in a swap.
         modules, hostHeld: modules.filter((m) => HOST_HELD.includes(m) || m.endsWith(".prog.mjs")), stale: stale.size, from, steps,
-        closure, xrefRows};
+        closure, xrefRows, unverified};
+    } catch (error) {
+      preserve = !mutated && error.code === "NOT_WARM";
+      throw error;
     } finally {
       unlock();
       // anything that went wrong after the registry took the edit, other than
       // the transpiler's refusal, leaves nothing this can trust: prime again
-      if (!settled && this.reg !== undefined) {
+      if (!settled && !preserve && this.reg !== undefined) {
         this.drop();
       }
     }
   }
 
-  // A comparison of a generation the tree has left is inconclusive by the
-  // time it ends (verifyMain checks the hash before and after), and a cold
-  // transpile of the whole tree meanwhile is a second one beside the cold
-  // build that replaced it: the two share the cores, and the activation
-  // waiting on the build pays for both. So the cold build stops it, unless
-  // the tree is still the generation it compares (`keep`).
-  cancelVerify(keep, why = "a cold build replaced the tree it compared") {
+  pruneVerification() { pruneVerification(this); }
+  retainVerification(hashes) { pruneVerification(this, new Set(hashes)); }
+
+  // Explicit shutdown only; cold publications cannot invalidate frozen inputs.
+  cancelVerify(keep, why) {
     const child = this.verifying;
-    if (child === undefined || child.osdHash === keep || child.exitCode !== null) return false;
+    if (!why || child === undefined || child.osdHash === keep || child.exitCode !== null) return false;
     child.osdCancelled = why;
     child.kill("SIGTERM");
     return true;
   }
 
-  // Compare a generation this made with a cold transpile of the same inputs,
-  // in a child process so nobody waits for it. Inconclusive when the tree
-  // changed while it ran.
+  // Compare the generation with a fresh cold registry of its frozen inputs.
   verify(hash) {
-    return new Promise((done) => {
-      const [cmd, ...args] = toolCommand(join(TOOLS, "osd-warm.mjs"), ["verify", hash]);
-      // compared with a cold transpile of the same view, not of the raw tree
-      const view = this.views.get(hash);
-      const child = spawn(cmd, args, {cwd: this.root, stdio: ["ignore", "pipe", "pipe"],
-        env: {...process.env, OSD_ROOT: this.root, OSD_VERIFY_OVERLAY: view === undefined ? this.views.has(hash) ? "null" : ""
-          : JSON.stringify({exclude: [...(view.exclude ?? [])], folder: view.folder})}});
-      this.verifying = child;
-      child.osdHash = hash;
-      let out = "";
-      child.stdout.on("data", (d) => { out += d; });
-      child.stderr.on("data", (d) => { out += d; });
-      child.on("exit", (code) => {
-        this.verifying = undefined;
-        let result;
-        try {
-          result = child.osdCancelled !== undefined ? {verdict: "inconclusive", why: child.osdCancelled}
-            : JSON.parse(out.trim().split("\n").pop());
-        } catch {
-          result = {verdict: "failed", code, output: out.slice(-2000)};
-        }
-        if (result.verdict === "same") {
-          this.unverified.delete(hash);
-          const side = join(layout(this.root).byInput, `${hash}.warm.json`);
-          if (existsSync(side)) writeFileSync(side, JSON.stringify({...JSON.parse(readFileSync(side, "utf8")), verified: true, verifiedAt: new Date().toISOString()}, null, 2));
-        }
-        done(result);
-      });
-    });
-  }
-}
-
-// the verify child: a cold transpile of the tree into a scratch folder,
-// compared with the generation of the same name
-async function verifyMain(hash) {
-  const root = resolve(process.env.OSD_ROOT ?? process.cwd());
-  const paths = layout(root);
-  const {compareGenerations} = await import("./osd-generation-diff.mjs");
-  const {transpile} = await import("./osd-transpile.mjs");
-  const {config, stack} = prepare(root);
-  const overlay = await sourceBuildOverlay(root, process.env.OSD_VERIFY_OVERLAY
-    ? {overlay: JSON.parse(process.env.OSD_VERIFY_OVERLAY)} : {});
-  if (hashOf(root, inputsOf(root, config), {overlay}) !== hash) {
-    return {verdict: "inconclusive", why: "the tree is not that generation any more"};
-  }
-  const tmp = join(paths.tmp, `${hash}.${process.pid}.verify`);
-  try {
-    rmSync(tmp, {recursive: true, force: true});
-    mkdirSync(join(tmp, "output"), {recursive: true});
-    const started = Date.now();
-    await transpile({root, config: ownConfig(root, config, stack, join(tmp, "output"), overlay)});
-    if (hashOf(root, inputsOf(root, config), {overlay}) !== hash) {
-      return {verdict: "inconclusive", why: "the tree changed while it was compared"};
-    }
-    const v = compareGenerations(join(paths.byInput, hash, "output"), join(tmp, "output"));
-    const differing = [...v.differing, ...v.onlyInA, ...v.onlyInB];
-    return {verdict: differing.length === 0 ? "same" : "differs", files: v.files, differing: differing.slice(0, 20),
-      count: differing.length, ms: Date.now() - started};
-  } finally {
-    rmSync(tmp, {recursive: true, force: true});
+    return startVerification(this, hash, join(TOOLS, "osd-warm.mjs"));
   }
 }
 
 if (runsAs("osd-warm.mjs") && process.argv[2] === "verify") {
-  verifyMain(process.argv[3]).then((r) => {
+  verifyGeneration(process.argv[3]).then((r) => {
     console.log(JSON.stringify(r));
     process.exit(0);
   }, (error) => {

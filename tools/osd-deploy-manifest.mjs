@@ -150,13 +150,13 @@ export function objectOf(file, text) {
   const type = m[2].toUpperCase();
   const name = m[1].replace(/#/g, "/").replace(/\s+/g, " ").trim().toUpperCase();
   if (type === "SICF") {
-    // two nodes may share a name under different parents (the LSD player and
-    // its WebSocket are both ZOSD_011_LSD), so a node is known by its URL,
-    // and it is its ICF_NAME that has to be in the customer namespace
-    const body = text?.() ?? "";
-    const url = /<URL>([^<]*)/.exec(body)?.[1]?.replace(/\/+$/, "").toLowerCase();
-    const icf = /<ICF_NAME>([^<]*)/.exec(body)?.[1]?.trim().toUpperCase() ?? m[1].slice(0, 15).trim().toUpperCase();
-    return {type, name: icf, key: `SICF ${url ?? name}`};
+    const full = m[1].replace(/#/g, "/").toUpperCase();
+    const xml = text?.() ?? "";
+    const url = /<URL>([^<]*)/.exec(xml)?.[1]?.replace(/\/+$/, "").toLowerCase();
+    const nodeName = /<ICF_NAME>([^<]*)/.exec(xml)?.[1]?.trim().toUpperCase() ?? full.slice(0, 15).trim();
+    // Legacy deploy manifests select routes by URL. This is a selection
+    // alias only; repository identity always remains the complete filename.
+    return {type, name: full, key: `SICF ${full}`, nodeName, alias: url ? `SICF ${url}` : undefined};
   }
   return {type, name, key: `${type} ${name}`};
 }
@@ -231,7 +231,7 @@ const MODIFIES_SAP = new Set(["ENHO", "ENHS", "ENHC", "ENSC"]);
 
 /** Why the XML of `obj` does not name it, or undefined when it does. */
 export function nameTagProblem(obj, xml) {
-  if (obj.type === "SICF") return undefined; // known by URL, named by ICF_NAME
+  if (obj.type === "SICF") return undefined; // full filename identity; node name is checked separately
   const spec = NAME_TAGS[obj.type];
   if (spec === undefined) return `no rule says where a ${obj.type} names itself, so its name cannot be checked`;
   if (xml === undefined) return `the object has no .${obj.type.toLowerCase()}.xml, so nothing states its name`;
@@ -250,7 +250,7 @@ export function nameTagProblem(obj, xml) {
   }
   const version = spec.version === undefined ? undefined : new RegExp(`<${spec.version}>([^<]*)<`).exec(xml)?.[1]?.trim();
   const own = (v) => (version === undefined ? v : `${v} ${version}`);
-  const wrong = (spec.all === true ? values : values.slice(0, 1)).filter((v) => own(v) !== obj.name);
+  const wrong = (spec.all === true ? values : values.slice(0, 1)).filter((v) => own(v) !== (obj.nodeName ?? obj.name));
   return wrong.length === 0 ? undefined
     : `the file says ${obj.name} and its <${spec.tag}> says ${own(wrong[0])}; abapGit creates the one in the XML`;
 }
@@ -262,7 +262,7 @@ export function nameTagProblem(obj, xml) {
 const SENTINEL = "\u0001\u0002\u0001";
 
 /** The keys of every object of $TMP, made by the same objectOf the
- *  admission below uses, so a padded IWSV name or a SICF known by its URL
+ *  admission below uses, so a padded IWSV or SICF filename name
  *  is one key on both sides (tools/osd-tmp.mjs). A function group's modules
  *  and a view's SQL view are refused with it. */
 export function localObjectKeys(root) {
@@ -272,6 +272,7 @@ export function localObjectKeys(root) {
     const obj = objectOf(file, () => readFileSync(full, "utf8"));
     if (obj === undefined || obj.structural === true) continue;
     keys.add(obj.key);
+    if (obj.alias) keys.add(obj.alias); // route collision also refuses a renamed copy of a local node
     for (const c of createdNames(file, () => readFileSync(full, "utf8"))) keys.add(`${c.kind} ${c.name}`);
   }
   return keys;
@@ -281,7 +282,7 @@ export function localObjectKeys(root) {
  *  (three digits); a unit with `attempt: {from, to}` also accepts each name
  *  renamed the way `tools/osd-rename.mjs` renames an attempt. */
 function matcherOf(entry, attempt) {
-  const key = entry.replace(/\s+/g, " ").trim();
+  const key = /^SICF /i.test(entry) ? entry : entry.replace(/\s+/g, " ").trim();
   const forms = [key];
   if (attempt?.from !== undefined && attempt?.to !== undefined) {
     const [type, ...rest] = key.split(" ");
@@ -314,15 +315,15 @@ export function admit({files, read, tables = [], unit, customerNamespaces, root 
   const entries = entriesOf(unit);
   const refusals = [];
   const check = (file, obj) => {
-    if (local.has(obj.key)) {
+    if (local.has(obj.key) || obj.alias && local.has(obj.alias)) {
       refusals.push({file, key: obj.key, rule: "local-object",
         why: `${obj.key} is an object of ${TMP_PACKAGE} (${TMP_FOLDER}), which is never transported`});
     }
-    const entry = entries.find((e) => e.matches(obj.key));
+    const entry = entries.find((e) => e.matches(obj.key) || obj.alias && e.matches(obj.alias));
     if (entry === undefined) {
       refusals.push({file, key: obj.key, rule: "not-in-manifest", why: `unit "${unit.name}" does not list it`});
     }
-    const sap = sapNameRule(obj.name, namespaces);
+    const sap = sapNameRule(obj.nodeName ?? obj.name, namespaces);
     const intended = (entry?.intended ?? "").trim() !== "";
     if (sap !== undefined && !intended) {
       refusals.push({file, key: obj.key, ...sap});

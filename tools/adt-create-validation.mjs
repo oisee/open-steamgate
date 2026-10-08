@@ -15,7 +15,7 @@ export function validateCreation(store, input) {
   else {
     const home = store.find("DEVC", parent);
     if (!home) message = `Package ${parent || "(missing)"} does not exist`;
-    else if (home.writable === false) message = `Package ${parent} is read-only`;
+    else if (home.writable === false && !home.overlay) message = `Package ${parent} is read-only`;
     else if (type === "DEVC" && !packageChildName(parent, name)) message = `A package under ${parent} must be named ${parent}_<FOLDER>`;
   }
   return {success: message === undefined, message: message ?? ""};

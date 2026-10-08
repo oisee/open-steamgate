@@ -112,14 +112,16 @@ export function unitClasses(store, type, name) {
         const at = bodies.get(m.name.toUpperCase()) ?? m.identifier?.token?.start;
         return {
           name: m.name.toUpperCase(),
-          method: m.name,
+          // the transpiler keys FRIENDS_ACCESS_INSTANCE and the exports in lower case;
+          // ABAP names are case-insensitive, so `First_Test` must still be found
+          method: m.name.toLowerCase(),
           line: at?.getRow?.() ?? at?.row ?? 1,
           column: at?.getCol?.() ?? at?.col ?? 1,
         };
       });
       classes.push({
         name: definition.name.toUpperCase(),
-        localClass: definition.name,
+        localClass: definition.name.toLowerCase(),
         riskLevel: RISK[definition.riskLevel] ?? "harmless",
         durationCategory: DURATION[definition.duration] ?? "short",
         // ADT reports an undeclared level as harmless; a scheduler must

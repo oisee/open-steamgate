@@ -3,12 +3,12 @@
 import {expect} from "chai";
 import {spawn} from "node:child_process";
 import {once} from "node:events";
-import {cpSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
+import {readFileSync, rmSync, writeFileSync} from "node:fs";
 import {createRequire} from "node:module";
-import {tmpdir} from "node:os";
-import {join, resolve} from "node:path";
+import {join} from "node:path";
 import {randomUUID} from "node:crypto";
 import {build} from "../tools/osd-build.mjs";
+import {copyRuntimeRoot} from "./helpers/runtime-root.mjs";
 
 const {waitForServing} = createRequire(import.meta.url)("../editors/vscode/launcher.js");
 const {Osd} = createRequire(import.meta.url)("../editors/vscode/lib.js");
@@ -16,7 +16,7 @@ const {Osd} = createRequire(import.meta.url)("../editors/vscode/lib.js");
 describe("warm startup: ready means the front answers during priming", function () {
   this.timeout(180000);
   it("answers serving within 1 s and a classrun within 2 s immediately after Start resolves", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "osd-warm-ready-"));
+    const dir = copyRuntimeRoot();
     const port = Number(process.env.STG_PORT ?? 3030);
     const base = `http://127.0.0.1:${port}`;
     const identity = randomUUID();
@@ -25,9 +25,6 @@ describe("warm startup: ready means the front answers during priming", function 
     try {
       // Own the cold baseline: earlier suites may leave checkout live/gen
       // on another tree. Neither readiness nor cleanup should depend on that.
-      for (const folder of ["src", "gen", "packs", "data", "webapp"]) cpSync(resolve(folder), join(dir, folder), {recursive: true});
-      for (const folder of ["tools", "test", "node_modules", ".local"]) symlinkSync(resolve(folder), join(dir, folder));
-      for (const file of ["abap_transpile.json", "abaplint.jsonc", "libs.lock.json", "package.json"]) cpSync(resolve(file), join(dir, file));
       await build({root: dir});
       child = spawn(process.execPath, [join(dir, "test", "run.mjs")], {
         cwd: dir,

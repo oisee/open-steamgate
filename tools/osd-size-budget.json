@@ -451,8 +451,8 @@
       "reason": "baseline 2026-10-01"
     },
     "tools/osd-prove-inplace.mjs": {
-      "lines": 1057,
-      "reason": "baseline 2026-10-01 re-taken after #409 (merged before #407, same night): JSON reporting of the in-place snippets"
+      "lines": 1058,
+      "reason": "#641 zip layers: an abapGit SICF object name carries spaces (name padded to 15 + parent hash), so the manifest item split keeps the rest of the line"
     },
     "tools/osd-prove-on-system.mjs": {
       "lines": 1343,
@@ -497,6 +497,10 @@
     "go:packedint": {
       "lines": 32,
       "reason": "Profiled owned-memory checksum addition: checked integral fast path with the existing exact packed fallback; no growth in abap or the main emitter."
+    },
+    "tools/osd-build.mjs": {
+      "lines": 1006,
+      "reason": "#641 zip layers: user source layers (zip cache + overlay) enter the build inputs and the generation hash"
     }
   },
   "readmeMissing": [

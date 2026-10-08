@@ -204,3 +204,16 @@ function changedSource(path) {
   error.code = "INPUT_CHANGED";
   return error;
 }
+
+// a generation that is already built keeps the source snapshot complete: the
+// whole snapshot when it never finished, else only inputs it lacks
+export function keepCachedSources(root, target, digests, overlay) {
+  if (!existsSync(join(target, "source", ".complete"))) {
+    keepSourceInputs(root, target, digests, undefined, overlay);
+    keepGeneratedSources(root, target);
+    completeSourceSnapshot(target);
+  } else {
+    const missing = missingSourceInputs(root, target, digests, overlay);
+    if (missing.size) keepSourceInputs(root, target, missing, undefined, overlay);
+  }
+}

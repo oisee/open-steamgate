@@ -27,6 +27,12 @@ on:
 permissions:
   contents: read
 
+# A newer push to a pull request supersedes its run; pushes elsewhere are
+# never cancelled (the same rule as tests.yml, #602).
+concurrency:
+  group: queue-check-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   queue:
     runs-on: ubuntu-latest

@@ -18,10 +18,14 @@ CLASS ltcl_structure IMPLEMENTATION.
     DATA lo_json TYPE REF TO zcl_ajson.
     DATA lv_xml TYPE string.
     DATA lv_nl TYPE string.
+    DATA lv_offset TYPE i.
+    DATA lv_tail TYPE string.
     lv_nl = cl_abap_char_utilities=>newline.
     lo_json = zcl_ajson=>parse( `{"name":"Z","type":"INTF/OI","links":[{"rel":"definitionIdentifier","href":"source/main"}],"children":[]}` ).
     lv_xml = zcl_osd_adt_structure=>document( io_json = lo_json iv_base = `/a` ).
-    cl_abap_unit_assert=>assert_char_cp( act = lv_xml exp = `*href="source/main"/>` && lv_nl
+    FIND `href="source/main"/>` IN lv_xml MATCH OFFSET lv_offset.
+    lv_tail = lv_xml+lv_offset.
+    cl_abap_unit_assert=>assert_equals( act = lv_tail exp = `href="source/main"/>` && lv_nl
       && `</abapsource:objectStructureElement>` && lv_nl ).
   ENDMETHOD.
   METHOD nested.

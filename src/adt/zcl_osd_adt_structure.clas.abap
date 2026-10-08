@@ -21,6 +21,7 @@ CLASS zcl_osd_adt_structure IMPLEMENTATION.
     DATA lt_types TYPE zcl_osd_adt_types=>tt_type.
     DATA ls_type TYPE zcl_osd_adt_types=>ty_type.
     DATA ls_name TYPE zif_osd_adt_route=>ty_param.
+    DATA lv_version TYPE string.
     DATA lo_input TYPE REF TO zcl_osd_adt_json.
     DATA lo_json TYPE REF TO zcl_ajson.
     DATA ls_answer TYPE zcl_osd_adt_host=>ty_answer.
@@ -28,6 +29,7 @@ CLASS zcl_osd_adt_structure IMPLEMENTATION.
     DATA lx_json TYPE REF TO zcx_ajson_error.
     DATA lv_accept TYPE string.
     READ TABLE is_request-params WITH KEY name = `name` INTO ls_name.
+    zcl_osd_adt_package=>query( EXPORTING is_request = is_request iv_name = `version` IMPORTING ev_value = lv_version ).
     lt_types = zcl_osd_adt_types=>sources( ).
     LOOP AT lt_types INTO ls_type.
       IF is_request-pattern = zcl_osd_adt_router=>c_base && `/` && ls_type-collection && `/:name/objectstructure`
@@ -41,6 +43,11 @@ CLASS zcl_osd_adt_structure IMPLEMENTATION.
         lo_input->add( iv_name = `kind` iv_value = `OUTLINE` ).
         lo_input->add( iv_name = `type` iv_value = ls_type-type ).
         lo_input->add( iv_name = `name` iv_value = ls_name-value ).
+        IF lv_version IS INITIAL.
+          lo_input->add( iv_name = `version` iv_value = `inactive` ).
+        ELSE.
+          lo_input->add( iv_name = `version` iv_value = lv_version ).
+        ENDIF.
         ls_answer = zcl_osd_adt_host=>store( iv_command = `PARSE` iv_json = lo_input->document( ) ).
         lo_json = zcl_ajson=>parse( iv_json = ls_answer-json iv_keep_item_order = abap_true ).
         IF lo_json->get_boolean( `/found` ) = abap_false.

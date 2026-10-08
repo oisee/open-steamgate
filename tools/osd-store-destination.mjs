@@ -57,7 +57,7 @@ const PARSE_KINDS = {
   },
   OUTLINE: async (store, input) => {
     const {structureOf} = await import("./adt-documents.mjs");
-    const outline = structureOf(store, String(input.type ?? "").toUpperCase(), input.name ?? "");
+    const outline = structureOf(store, String(input.type ?? "").toUpperCase(), input.name ?? "", input.version ?? "inactive");
     const rows = (node) => ({...node,
       extra: Object.entries(node.extra ?? {}).map(([name, value]) => ({name, value})),
       links: node.links ?? [], children: (node.children ?? []).map(rows)});
@@ -322,7 +322,7 @@ export class StoreDestination {
     try {
       const entry = store.find(type, name);
       return {EV_JSON: JSON.stringify(entry === undefined ? {found: false}
-        : {found: true, type: entry.type, name: entry.name, writable: entry.writable !== false,
+        : {found: true, type: entry.type, name: entry.name, writable: entry.writable !== false || !!entry.overlay,
           package: entry.package, packages: entry.packages ?? [], ...store.stateOf(entry),
           changedBy: entry.changedBy, includes: entry.type === "CLAS" ? store.classIncludes(entry.name) : []})};
     } catch (error) {
@@ -404,7 +404,7 @@ export class StoreDestination {
       // `writable` is the layer's property: a library object is read-only
       // here however much a person would like to edit it, and the screen
       // has to know before it offers a text area
-      WRITABLE: entry.writable === false ? "" : "X",
+      WRITABLE: entry.writable === false && !entry.overlay ? "" : "X",
       VERSION: state.version,
       CHANGED_AT: String(state.changedAt ?? ""),
     };
@@ -465,7 +465,7 @@ export class StoreDestination {
       EV_JSON: JSON.stringify({name: read.name, changedBy: read.changedBy, empty: read.empty === true, etag: read.etag}),
       EV_FILE: String(read.file ?? ""),
       EV_PACKAGE: String(read.package ?? ""),
-      EV_WRITABLE: read.writable === false ? "" : "X",
+      EV_WRITABLE: read.writable === false && !read.overlay ? "" : "X",
       EV_VERSION: store.stateOf(read).version,
       ET_OBJECT: [this.#row(read, store)],
     };
@@ -636,7 +636,8 @@ export class StoreDestination {
  *  which files */
 function generatedRow(path, state) {
   const key = objectOf(basename(path));
-  const [type, name] = key === undefined ? ["", basename(path)] : key.split(" ");
+  const [type, ...parts] = key === undefined ? ["", basename(path)] : key.split(" ");
+  const name = parts.join(" ");
   return {
     TYPE: type,
     NAME: name,

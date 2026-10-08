@@ -140,6 +140,12 @@ describe("docs/registry-drift: what happens when the table and the objects disag
     only(plan(incoming, incoming, new Map([[key, {origin: SEEDED, hash}]])), "KEEP");
   });
 
+  it("consolidates stale rows from a previous layer into one count/path line", () => {
+    expect(report([
+      {action: 'REMOVE', url: '/old/b/'}, {action: 'REMOVE', url: '/old/a/'}
+    ])).to.deep.equal(['ICF registry: reconciled 2 stale rows from a previous layer/import; removed: /old/a/, /old/b/']);
+  });
+
   it("the report is empty when nothing was set aside, and that is not silence", () => {
     // a quiet start is quiet because nothing happened, not because the
     // reporting is optional

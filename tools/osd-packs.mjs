@@ -1,3 +1,4 @@
+import {userLayersOf} from "./osd-source-layers.mjs";
 import {cockpitAppsOf} from "./osd-cockpit-apps.mjs";
 // A pack is a directory, not a rebuild (backlog E.2).
 //
@@ -241,8 +242,7 @@ export function inputFoldersOf(root, config, env = process.env) {
 }
 
 export function userFoldersOf(root, env = process.env) {
-  return (env.OSD_LAYERS ?? "").split(delimiter).filter(Boolean)
-    .map((folder) => folderOf(root, isAbsolute(folder) ? folder : resolve(root, folder)));
+  return userLayersOf(root, env).map(layer => layer.path);
 }
 
 /** the roots a pack adds to the object store, with the package each lives in */

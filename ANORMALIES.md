@@ -3534,7 +3534,7 @@ point approximation and is format-checked before masking in wire tests.
 
 ### ANOMALY-2026-10-02-get-run-time-units — GET RUN TIME FIELD returns milliseconds since the previous call, not microseconds since the first
 
-- Status: `open` (osgo measures in monotonic microseconds since #473; the JS runtime does not)
+- Status: `fixed upstream: abaplint/transpiler#1956 (merged 2026-10-03), pinned 2026-10-07` (`libs.lock.json` transpiler oisee/transpiler `local/osd-build-2026-10-07` 2ff0e801 = the previous pin plus a cherry-pick of #1956; microseconds since the first call, monotonic, per ABAP instance; a host resets the origin with `context.runTime = undefined`)
 - Discovery date: `2026-10-02`
 - Affected versions: OSD `vscode-v0.6.1511` (JS runtime)
 - Affected ABAP statement, runtime API or adapter: `GET RUN TIME FIELD lv_t0. … GET RUN TIME FIELD lv_t1. lv_d = lv_t1 - lv_t0.`
@@ -3770,7 +3770,7 @@ SNAPSHOT_MISMATCH and the doctor retry.
 
 ### ANOMALY-2026-10-06-http-client-send-synchronous - cl_http_client send( ) blocks, receive( ) does nothing
 
-- Status: `open`
+- Status: `fixed in the pin, upstream PR pending` (oisee/open-abap-core `fix/http-client-async-send-upstream` on upstream main; the byte-identical patch (round 6 of review) is in the `osd-build-2026-10-07b` pin 22d31a35, on top of cherry-picks of upstream #1253, #1271, #1268, #1270, #1269 and #1289; `send( )` starts the request, `receive( )` awaits it, construction errors fail in send, request errors and timeouts in receive)
 - Discovery: PIA's fan-out probe (ZCL_PIA_PROBE_FAN), measured on A4H (SAP 7.58, background job) and on an OSG instance. It was reported by the PIA session on 2026-10-06; dell confirmed the source.
 - Affected path: open-abap-core `src/http/cl_http_client.clas.abap` (pin 8b397be). `if_http_client~send` awaits the whole request (`await postData(...)`, around line 195) and fills the response there. `if_http_client~receive` is empty ("handled in send()").
 - Reproducer: create three clients for `http://httpbin.org/delay/2`. Call `send( )` on each, then `receive( )` on each.
@@ -3779,12 +3779,12 @@ SNAPSHOT_MISMATCH and the doctor retry.
 - Possible fix: `send` keeps the pending promise without awaiting it; `receive` awaits it and fills the response. `http_communication_failure` then moves from `send` to `receive`, as on SAP. The per-client agent uses `maxSockets: 1`, which is fine per client.
 - Workaround: none in the tree. PIA runs its turn in a background unit and makes one LLM call per step. Whether two background units run concurrently in OSG has not been measured.
 - Regression: none yet.
-- Upstream: needs an issue in open-abap-core, after our critic pass; no upstream filing requested.
+- Upstream: [open-abap/open-abap-core#1299](https://github.com/open-abap/open-abap-core/pull/1299) (sent 2026-10-07 after three critic rounds; branch oisee:fix/http-client-async-send-upstream at 6c6dc15e).
 - Upstream version containing a fix: unknown.
 
 ### ANOMALY-2026-10-06-get-run-time-delta - GET RUN TIME returns ms since the previous call
 
-- Status: `open`
+- Status: `duplicate` of ANOMALY-2026-10-02-get-run-time-units: fixed upstream in abaplint/transpiler#1956, pinned 2026-10-07 (2ff0e801)
 - Discovery: the same probe printed "A sequential: 6525 ms" on A4H and "7 ms" on OSG, while the OSG wall clock was 13.6 s for six 2-second requests. dell confirmed the source.
 - Affected path: `@abaplint/runtime` `build/src/statements/get_run_time.js`. It keeps a module-level `prev`. The first call sets 0; every later call sets `Date.now() - prev` and moves `prev`.
 - Expected SAP behaviour: the first `GET RUN TIME FIELD` returns 0 and fixes the origin. Every later call returns the microseconds elapsed since that origin, so the value only grows. After `WAIT UP TO 1 SECONDS` twice, the three calls give 0, about 1000000 and about 2000000.
@@ -3798,7 +3798,7 @@ SNAPSHOT_MISMATCH and the doctor retry.
 
 ### ANOMALY-2026-10-06-uccpi-high-byte - cl_abap_conv_out_ce=>uccpi multiplies the high byte by 255
 
-- Status: `open`
+- Status: `duplicate` of ANOMALY-2026-09-24-uccpi-255. The defect was already fixed upstream in open-abap-core#1263 (merged 2026-09-25), but our pin 8b397be predates the fix. Remedy: cherry-pick or move the pin; no new upstream filing. Recorded here by dell without checking the older entry (2026-10-07 correction).
 - Discovery: PIA's first deployment to A4H 7.58 (zcl_pia_00_json_util, 29 tests, 29/29 on both systems after fixes), reported by the PIA session on 2026-10-06. dell confirmed the source.
 - Affected path: open-abap-core `src/conv/cl_abap_conv_out_ce.clas.abap`, method `uccpi`. It converts to encoding 4103 (UTF-16LE, low byte first), then computes `ret = lv_hex(1)` followed by `ret = ret + lv_hex+1(1) * 255`. The factor must be 256.
 - Reproducer: `cl_abap_conv_out_ce=>uccpi( 'Ж' )` and `cl_abap_conv_out_ce=>uccpi( '€' )`.
@@ -3806,7 +3806,7 @@ SNAPSHOT_MISMATCH and the doctor retry.
 - Actual local behaviour: 1042 and 8332, wrong by the high byte for every character above U+00FF. ASCII and Latin-1 are unaffected, because their high byte is 0.
 - Workaround: none in the tree; PIA does not use `uccpi`. ANOMALY-2026-10-04-sxml-supplementary-ref already avoids sXML numeric references, which convert through `cl_abap_conv_in_ce=>uccpi`.
 - Regression: none yet.
-- Upstream: needs an issue in open-abap-core, a one-character fix, after our critic pass; no upstream filing requested.
+- Upstream: already fixed in open-abap-core#1263; stoker brings it into our pin branch (osd-build-2026-10-07).
 - Upstream version containing a fix: unknown.
 
 ### ANOMALY-2026-10-06-data-value-variable - DATA ... VALUE accepts a variable
@@ -3819,14 +3819,14 @@ SNAPSHOT_MISMATCH and the doctor retry.
 - Actual local behaviour: it compiles and runs. Code built in OSG then fails to transport to SAP.
 - Workaround: none; authors must use a constant or a literal.
 - Regression: none yet.
-- Upstream: needs an issue in abaplint/abaplint (syntax check), after our critic pass; no upstream filing requested.
+- Upstream: filed as https://github.com/abaplint/abaplint/issues/4392 after the critic pass (2026-10-07). Measured with @abaplint/cli 2.120.70: the VALUE operand is not resolved at all; an undeclared name there also gives 0 issues.
 - Upstream version containing a fix: unknown.
 
 Not an anomaly, recorded for porting: on 7.58, `FIND ... REGEX` (POSIX) raises a deprecation that vsp deploy treats as an error. PIA moved to PCRE, which OSG supports.
 
 ### ANOMALY-2026-10-06-uccp-lone-surrogate - uccp drops a surrogate code unit
 
-- Status: `open`
+- Status: `fixed in the pin, upstream PR pending` (oisee/open-abap-core `fix/uccp-lone-surrogate`, carried by the pin since 2026-10-07, now `osd-build-2026-10-07b` 22d31a35; `uccp` builds the UTF-16 code unit directly, so a lone surrogate survives and the pair concatenates to U+1F60A)
 - Discovery: PIA's test escape_emoji_pair passes 30/30 on A4H 7.58 and fails only in OSG. It was triggered by an emoji in a model answer and reported by the PIA session on 2026-10-06. dell confirmed the path in source.
 - Affected path: open-abap-core `src/conv/cl_abap_conv_in_ce.clas.abap`. `uccp` turns the hex into an integer and calls `uccpi`, which decodes the two bytes through a UTF-16LE (4103) converter. A lone surrogate does not survive that decode, and `uccp` swallows `cx_sy_conversion_codepage` (`* todo, hmm`), which leaves the result empty.
 - Reproducer: `cl_abap_conv_in_ce=>uccp( 'D83D' ) && cl_abap_conv_in_ce=>uccp( 'DE0A' )`.
@@ -3835,5 +3835,49 @@ Not an anomaly, recorded for porting: on 7.58, `FIND ... REGEX` (POSIX) raises a
 - Related, milder: on SAP, `cl_abap_conv_codepage=>create_out( )->convert( )` of a lone surrogate raises `CX_SY_CONVERSION_CODEPAGE`, while OSG appears to produce `EF BF BD` silently. This is not measured in OSG yet.
 - Workaround: none in the tree. The same family as ANOMALY-2026-10-04-sxml-supplementary-ref and ANOMALY-2026-10-06-uccpi-high-byte.
 - Regression: none yet.
-- Upstream: needs an issue in open-abap-core (code-unit level `uccp`, without a decode round trip), after our critic pass; no upstream filing requested.
+- Upstream: [open-abap/open-abap-core#1298](https://github.com/open-abap/open-abap-core/pull/1298) (sent 2026-10-07 after our critic; branch oisee:fix/uccp-lone-surrogate-upstream).
+- Upstream version containing a fix: unknown.
+
+### ANOMALY-2026-10-07-daemon-api-types -- PIA measured typed START and INFO order
+
+- Status: fixed locally (round 1 of ZIP parity).
+- Measurement: PIA DD04L/DD03L on A4H 7.58, 2026-10-07.
+- Expected contract: IF_ABAP_DAEMON_TYPES instance ID uses ABAP_DAEMON_INSTANCE_ID
+  (SSTRING 255), name uses ABAP_DAEMON_NAME (CHAR60), priority uses
+  ABAP_DAEMON_PRIORITY (INT4). START priority is VALUE with normal default.
+- ABAP_DAEMON_INFO field order: NAME, INSTANCE_ID, CREATOR_CLIENT (CLNT3),
+  CREATOR_USER (CHAR12), USED_DEST (ABAP_DAEMON_DESTINATION, CHAR40),
+  CREATION_TIME (TIMESTAMP, DEC15), APPLICATION_SERVER (MSNAME2, CHAR40).
+  PIA did not name data elements for CREATOR_CLIENT/CREATOR_USER; those remain
+  direct types. No additional daemon API signatures were inferred.
+- Previously: generic START name/priority and INFO destination after creation
+  time, with missing element identities. The merged main had already corrected
+  the instance ID's builtin type to SSTRING; it still lacked the measured element.
+- Regression: test/daemon-api.mjs, measured DDIC/order/START parameter check;
+  test/unit/zcl_osd_daemon_api.clas.abap compiles calls using the interface types.
+
+### ANOMALY-2026-10-07-unit-method-case - a test method not written in lower case is "not a function"
+
+- Status: `fixed locally` (our runner); `open` upstream (the transpiler's own unit script)
+- Discovery: PIA's agent on OSG, F1 run of 2026-10-07: RUN_TESTS answered `test.FRIENDS_ACCESS_INSTANCE[declared.method] is not a function`. A repro matrix of 33 classes showed LOCAL FRIENDS has nothing to do with it; the trigger is the case of the declared name.
+- Affected path: the transpiler keys `FRIENDS_ACCESS_INSTANCE` in lower case (`traversal.ts` `buildFriendsAccess`) and exports a test include's local classes in lower case (`handlers/handle_abap.ts`), while abaplint's `listClassDefinitions()` keeps names as written. Before this fix `tools/osd-unit.mjs` (the runner behind RUN_TESTS and ADT) looked methods and local classes up by the written name, and `tools/osd-unit-all.mjs` (`npm run unit`), `tools/gogen/node-unit-results.mjs` and `tools/osgjs-unit-run.mjs` each had one such lookup. Upstream, the transpiler's own `unit_test.ts` keeps the method's written spelling (`methods.push(m.name)`, then `FRIENDS_ACCESS_INSTANCE[m.name]()`), though it already lower-cases the class.
+- Reproducer: a test class with `METHODS First_Test FOR TESTING.` (or `CLASS LTCL_Probe DEFINITION FOR TESTING`), implementation `METHOD first_test.`; run its tests.
+- Expected SAP behaviour: ABAP names are case-insensitive; the method runs.
+- Actual local behaviour: the method is a runtime failure ("is not a function"); a mixed-case local class is "not exported".
+- Workaround: the lookups lower-case the name (`tools/osd-unit.mjs`, `tools/osd-unit-all.mjs`, `tools/gogen/node-unit-results.mjs`, `tools/osgjs-unit-run.mjs`); the reported name stays upper case.
+- Regression: `test/osd-unit.mjs` "a test method or class written in mixed case is looked up the way the transpiler keys it".
+- Upstream: needs an issue/PR in abaplint/transpiler (`unit_test.ts` lower-cases the method name as it already does the class), after our critic pass.
+- Upstream version containing a fix: unknown.
+
+### ANOMALY-2026-10-07-sections-nonfinal - a non-final global class with only a PUBLIC SECTION is accepted
+
+- Status: `open`
+- Discovery: abapiti's translated abaplint lexer on A4H: none of its 113 generated classes activated, 105 of them reported this error (the rest only follow-up errors); osgo and OSG-JS ran the same classes green.
+- Affected path: osgo, the JS runtime (OSG-JS) and the abaplint syntax check (@abaplint/core 2.120.56, v750, check_syntax: no issue on the reproducer or the controls).
+- Reproducer: `CLASS zcl_x DEFINITION PUBLIC CREATE PUBLIC. PUBLIC SECTION. METHODS m RETURNING VALUE(rv) TYPE i. ENDCLASS.` with any implementation. Controls: the same class with `FINAL`, or with empty `PROTECTED SECTION.` and `PRIVATE SECTION.`, activates; a class with no section statement at all also activates.
+- Expected SAP behaviour (7.58, measured 2026-10-07 in a throwaway package): the class does not activate, "For technical reasons, the statement "PROTECTED SECTION" or "PRIVATE SECTION" must exist in non-final global classes."; subclasses and users then fail with follow-up errors (type unknown, superclass CREATE PRIVATE).
+- Actual local behaviour: osgo 3/3 and OSG-JS 3/3 pass the reproducer and both controls; abaplint reports nothing.
+- Workaround: generators always write all three sections (abapiti does since this finding).
+- Regression: none yet.
+- Upstream: https://github.com/abaplint/abaplint/issues/4393 (abaplint check_syntax accepts it; filed 2026-10-07).
 - Upstream version containing a fix: unknown.

@@ -126,6 +126,8 @@ export function serviceOf(xml, source) {
   const path = url.replace(/\/+$/, "");
   return {
     path,
+    // Keep the full TADIR/abapGit object name separate from the node label.
+    objectName: source ? basename(source).replace(/\.sicf\.xml$/i, "").toUpperCase() : undefined,
     name: tag(xml, "ICF_NAME") ?? path.split("/").pop(),
     description: tag(xml, "ICF_DOCU"),
     handler: row?.handler,

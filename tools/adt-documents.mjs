@@ -38,6 +38,9 @@ export const ADT_TYPE = {
   SRVD: "SRVD/SRV",
   SHLP: "SHLP/DH",
   MSAG: "MSAG/N",
+  SICF: "SICF",
+  SAPC: "SAPC",
+  SAMC: "SAMC",
   DEVC: "DEVC/K",
 };
 
@@ -255,21 +258,27 @@ function classParts(object, globalName, type) {
   return result;
 }
 
-export function structureOf(store, type, name) {
+export function structureOf(store, type, name, version = "inactive") {
+  if (version !== "active" && version !== "inactive") {
+    throw new Error(`invalid outline version ${version}`);
+  }
   const entry = store.find(type, name);
   if (entry === undefined) return undefined;
-  const object = store.registry().getObject(type === "INCL" ? "PROG" : type, entry.name);
-  const result = ["CLAS", "INTF"].includes(type) ? classParts(object, entry.name, type)
-    : {name: entry.name, type: ADT_TYPE[type] ?? type, uri: "source/main", children: []};
-  if (type === "CLAS") result.children.push({name: entry.name, type: "CLAS/OCX",
-    extra: {isExternalRef: "true", description: "Text Elements"},
-    links: [{rel: "definitionIdentifier", href: `/sap/bc/adt/textelements/classes/${entry.name.toLowerCase()}`}],
-  });
-  if (type === "PROG" || type === "INCL") {
-    result.children.push(...programParts(object), {name: entry.name, type: "PROG/PX", uri: "source/main"});
-  }
-  if (["INCL", "SRVD"].includes(type)) result.version = store.stateOf(entry).version;
-  return result;
+  const outlineOf = (registry) => {
+    const object = registry.getObject(type === "INCL" ? "PROG" : type, entry.name);
+    const result = ["CLAS", "INTF"].includes(type) ? classParts(object, entry.name, type)
+      : {name: entry.name, type: ADT_TYPE[type] ?? type, uri: "source/main", children: []};
+    if (type === "CLAS") result.children.push({name: entry.name, type: "CLAS/OCX",
+      extra: {isExternalRef: "true", description: "Text Elements"},
+      links: [{rel: "definitionIdentifier", href: `/sap/bc/adt/textelements/classes/${entry.name.toLowerCase()}`}],
+    });
+    if (type === "PROG" || type === "INCL") {
+      result.children.push(...programParts(object), {name: entry.name, type: "PROG/PX", uri: "source/main"});
+    }
+    if (["INCL", "SRVD"].includes(type)) result.version = version;
+    return result;
+  };
+  return version === "active" ? store.withOverlay(new Set(), () => outlineOf(store.registry())) : outlineOf(store.registry());
 }
 
 // The base resource of a class include. A client resolves a method body by
