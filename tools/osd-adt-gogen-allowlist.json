@@ -6,11 +6,6 @@
   },
   {
     "kind": "statement stub",
-    "entry": "ZCL_OSD_ADT_REQUEST_XML=>RESTORE (zcl_osd_adt_request_xml.clas.abap:505): DELETE form: DELETE TABLE mt_bindings FROM ls_binding.",
-    "reason": "gogen case: DELETE TABLE <hashed> FROM wa is NOT_COMPILED, reported to the gogen owner."
-  },
-  {
-    "kind": "statement stub",
     "entry": "ZCL_OSD_ADT_XREF=>EDGES (zcl_osd_adt_xref.clas.abap:40): SELECT form: SELECT DISTINCT include FROM wbcrossgt INTO TABLE lt_rows UP TO 5000 ROWS WHERE otype = 'TY' AND name = iv_name AND include <> iv_name ORDER BY include.",
     "reason": "Pre-existing gogen statement stub on the ADT build baseline; retain until the SELECT form is compiled."
   },
