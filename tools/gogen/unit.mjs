@@ -12,7 +12,7 @@ import {reconcile, killedGoTool, markBuildFailure} from "./unit-results.mjs";
 import {home} from "./home.mjs";
 import {cacheLocation, frontendInputs, readFrontendCache, writeFrontendCache} from "./frontend-cache.mjs";
 import {unitInputs} from "./unit-inputs.mjs";
-import {runUnit} from "./unit-process.mjs";
+import {processTimeout, runUnit} from "./unit-process.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const commandStarted = performance.now();
@@ -45,9 +45,11 @@ if (args.includes("--per-owner") && !selected.size && !fixture) {
   const rows = [];
   const cacheCounts = {hit: 0, miss: 0, bypass: 0};
   const timingMs = {frontendClosureRounds: [], emit: 0, goBuild: 0, run: 0};
+  // the child's test processes plus a minute for its frontend and Go build
+  const perOwnerTimeout = processTimeout() + 60000;
   for (const owner of owners) {
     const child = spawnSync("node", [join(here, "unit.mjs"), "--class", owner, "--unlayered", ...(args.includes("--no-cache") ? ["--no-cache"] : []), "--jobs", String(jobs), "--out", join(out, owner.toLowerCase()), ...extraInputs.flatMap((folder) => ["--input", folder])], {
-      cwd: home, encoding: "utf8", timeout: 180000, maxBuffer: 20e6, env: process.env,
+      cwd: home, encoding: "utf8", timeout: perOwnerTimeout, maxBuffer: 20e6, env: process.env,
     });
     if (!child.stdout) {
       rows.push({class: owner, source: "harness", status: "NOT_COMPILED", message: child.stderr || child.error?.message || `exit ${child.status}`});
