@@ -33,7 +33,7 @@ func TestStoreHistoryFollowsRenames(t *testing.T) {
 	if reason != "" || len(revs) != 2 {
 		t.Fatalf("history: %d versions, reason %q", len(revs), reason)
 	}
-	if revs[0].SUBJECT != "second" || revs[1].path != "src/zold.prog.abap" || revs[0].AUTHOR != "TESTAUTHOR" || len(revs[0].SHORT) != 12 || revs[0].DATE == "00000000" {
+	if revs[0].SUBJECT != "second" || revs[1].path != "src/zold.prog.abap" || revs[0].AUTHOR != "TESTAUTHOR" || revs[0].SHORT != revs[0].REVISION[:len(revs[0].SHORT)] || revs[0].DATE == "00000000" {
 		t.Fatalf("versions: %+v", revs)
 	}
 	src, path, err := storeRevisionAt(root, "src/znew.prog.abap", revs[1].REVISION)

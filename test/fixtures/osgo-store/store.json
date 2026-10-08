@@ -1,0 +1,1 @@
+{"roots":[{"path":"src","writable":true,"library":false},{"path":"local/tmp","writable":true,"library":false,"package":"$TMP"}],"libs":[{"path":"lib/src","writable":false,"library":true,"files":["lib/src/zlibrary.prog.abap"]}]}

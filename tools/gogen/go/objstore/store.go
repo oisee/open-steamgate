@@ -4,6 +4,8 @@
 package objstore
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -66,6 +68,8 @@ type storeEntry struct {
 	Imported               bool
 	Package                string
 	Packages               []string
+	ChangedBy              string
+	Synthetic              bool
 }
 
 var storeState struct {
@@ -144,8 +148,8 @@ type Answer struct {
 }
 
 func storeEmpty() Answer {
-	a := Answer{Scalars: map[string]string{}, Objects: []Row{}, Issues: []Issue{}, Types: []Tally{}}
-	for _, k := range []string{"EV_LIVE", "EV_NOTE", "EV_SOURCE", "EV_FILE", "EV_PACKAGE", "EV_VERSION", "EV_WRITABLE", "EV_ACTIVE", "EV_ERROR", "EV_JSON"} {
+	a := Answer{Scalars: map[string]string{}, Objects: []Row{}, Issues: []Issue{}, Types: []Tally{}, Revisions: []Revision{}}
+	for _, k := range []string{"EV_LIVE", "EV_NOTE", "EV_SOURCE", "EV_FILE", "EV_STATE", "EV_CHANGED", "EV_PACKAGE", "EV_VERSION", "EV_WRITABLE", "EV_ACTIVE", "EV_ERROR", "EV_JSON"} {
 		a.Scalars[k] = ""
 	}
 	a.Scalars["EV_COUNT"], a.Scalars["EV_MS"] = "0", "0"
@@ -169,11 +173,11 @@ func storeNotFound(typ, name string) error { return storeRefusal(typ + " " + nam
 
 // Capabilities is what CAPABILITIES names: the commands this host does,
 // as opposed to the ones it only refuses (CHECK, ACTIVATE: storeNoCompiler).
-var Capabilities = []string{"LIST", "READ", "WRITE", "HISTORY", "REVISION"}
+var Capabilities = []string{"LIST", "READ", "WRITE", "HISTORY", "REVISION", "OBJECT", "PACKAGE", "PACKAGES", "SEARCH"}
 
 // Commands lists the implemented protocol commands, including discovery.
 // CHECK, ACTIVATE and TOKENS answer a compiler refusal on this host.
-var Commands = []string{"LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "TOKENS", "CAPABILITIES", "HISTORY", "REVISION", "COMMANDS"}
+var Commands = []string{"LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "TOKENS", "CAPABILITIES", "HISTORY", "REVISION", "OBJECT", "PACKAGE", "PACKAGES", "SEARCH", "COMMANDS"}
 
 // Call answers one call of ZOSD_STORE. in holds the importing values
 // that were passed (IV_*), present or absent the way the caller passed them.
@@ -190,7 +194,7 @@ func Call(in map[string]*string) Answer {
 	command := strings.ToUpper(text("IV_COMMAND", "LIST"))
 
 	switch command {
-	case "LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "TOKENS", "HISTORY", "REVISION":
+	case "LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "TOKENS", "HISTORY", "REVISION", "OBJECT", "PACKAGE", "PACKAGES", "SEARCH":
 	case "COMMANDS":
 		value, _ := json.Marshal(map[string]any{"commands": Commands})
 		a.Scalars["EV_JSON"] = string(value)
@@ -231,7 +235,7 @@ func Call(in map[string]*string) Answer {
 		storeList(ix, &a, typ, strings.ToUpper(text("IV_FILTER", "")), text("IV_LIMIT", ""))
 		return a
 	case "READ":
-		err = storeRead(ix, &a, typ, name, include)
+		err = storeRead(ix, &a, typ, name, include, text("IV_REVISION", "inactive"))
 	case "WRITE":
 		src, ok := in["IV_SOURCE"]
 		if !ok || src == nil {
@@ -247,17 +251,36 @@ func Call(in map[string]*string) Answer {
 		// (docs/backlog/adt.md); outside git "no history" and why, with no
 		// count, as tools/osd-store-destination.mjs answers
 		e := ix.find(typ, name)
+		if e == nil && typ == "DDLS" {
+			e = ix.ddlsEntity(name)
+		}
 		if e == nil {
 			err = storeNotFound(typ, name)
 			break
 		}
+		file := e.File
+		if typ == "CLAS" && include != "main" {
+			suffix, ok := storeIncludeSuffix(include)
+			if !ok {
+				err = storeNotFound(typ, name+" include "+include)
+				break
+			}
+			file = strings.TrimSuffix(e.File, ".clas.abap") + suffix
+		}
 		if command == "HISTORY" {
+			if typ == "CLAS" && include != "main" {
+				if _, statErr := os.Stat(filepath.Join(storeState.root, file)); statErr != nil {
+					a.Scalars["EV_NOTE"], a.Scalars["EV_COUNT"] = "the include has no file", "0"
+					break
+				}
+			}
 			limit, perr := strconv.Atoi(text("IV_LIMIT", ""))
 			if perr != nil || limit <= 0 {
 				limit = 50
 			}
-			a.Scalars["EV_FILE"] = e.File
-			revs, reason := storeHistory(storeState.root, e.File, limit)
+			a.Scalars["EV_FILE"] = file
+			a.Scalars["EV_STATE"], a.Scalars["EV_CHANGED"] = storeHistoryState(storeState.root, file)
+			revs, reason := storeHistory(storeState.root, file, limit)
 			if reason != "" {
 				a.Scalars["EV_NOTE"], a.Scalars["EV_COUNT"] = "no history: "+reason, ""
 				break
@@ -266,7 +289,7 @@ func Call(in map[string]*string) Answer {
 			a.Scalars["EV_COUNT"] = strconv.Itoa(len(revs))
 		} else {
 			rev := text("IV_REVISION", "")
-			src, path, rerr := storeRevisionAt(storeState.root, e.File, rev)
+			src, path, rerr := storeRevisionAt(storeState.root, file, rev)
 			if rerr != nil {
 				err = rerr
 				break
@@ -281,9 +304,69 @@ func Call(in map[string]*string) Answer {
 		if err == nil {
 			a.Scalars["EV_MS"] = ms()
 		}
+	case "OBJECT":
+		var value string
+		value, err = storeObject(ix, typ, name)
+		if err == nil {
+			a.Scalars["EV_JSON"] = value
+		}
+	case "PACKAGE", "PACKAGES", "SEARCH":
+		var input struct {
+			Name   string `json:"name"`
+			Mode   string `json:"mode"`
+			User   string `json:"user"`
+			Format string `json:"format"`
+			Seed   string `json:"seed"`
+			Type   string `json:"type"`
+			Limit  *int   `json:"limit"`
+		}
+		if err = json.Unmarshal([]byte(text("IV_JSON", "")), &input); err != nil {
+			err = storeRefusal("Unexpected token in JSON: " + text("IV_JSON", ""))
+			break
+		}
+		if command == "PACKAGE" {
+			if input.Mode != "raw" && input.Mode != "local" {
+				a.Scalars["EV_ERROR"] = "PACKAGE mode must be raw or local"
+				a.Scalars["EV_JSON"] = storeJSONRefusal(a.Scalars["EV_ERROR"], "INVALID_NAME")
+				break
+			}
+			var value string
+			value, err = storePackageRows(ix, strings.ToUpper(input.Name), input.Mode, strings.ToUpper(input.User))
+			if err == nil {
+				a.Scalars["EV_JSON"] = value
+			}
+			break
+		}
+		if command == "PACKAGES" {
+			if input.Format == "lines" || input.Format == "vfs-lines" {
+				a.Scalars["EV_SOURCE"] = storePackagesLines(ix, input.Format)
+			} else {
+				a.Scalars["EV_JSON"] = storePackagesJSON(ix)
+			}
+			break
+		}
+		limit := -1
+		if input.Limit != nil {
+			limit = *input.Limit
+		}
+		rows := storeSearch(ix, input.Seed, input.Type, limit)
+		if input.Format == "lines" {
+			a.Scalars["EV_SOURCE"] = storeSearchLines(rows)
+		} else {
+			a.Scalars["EV_JSON"] = storeSearchJSON(rows)
+		}
 	}
 	if err != nil {
 		a.Scalars["EV_ERROR"] = err.Error()
+		if a.Scalars["EV_JSON"] == "" {
+			code := "INTERNAL"
+			if strings.HasSuffix(err.Error(), " does not exist") {
+				code = "NOT_FOUND"
+			} else if strings.Contains(err.Error(), "comes from a library and cannot be changed here") {
+				code = "READ_ONLY"
+			}
+			a.Scalars["EV_JSON"] = storeJSONRefusal(err.Error(), code)
+		}
 		a.Scalars["EV_MS"] = ms()
 	}
 	return a
@@ -341,7 +424,7 @@ func storeList(ix *storeIndex, a *Answer, typ, filter, limitText string) {
 	}
 }
 
-func storeRead(ix *storeIndex, a *Answer, typ, name, include string) error {
+func storeRead(ix *storeIndex, a *Answer, typ, name, include, version string) error {
 	e := ix.find(typ, name)
 	if e == nil && typ == "DDLS" {
 		e = ix.ddlsEntity(name)
@@ -356,8 +439,9 @@ func storeRead(ix *storeIndex, a *Answer, typ, name, include string) error {
 			return storeNotFound(typ, name+" include "+include)
 		}
 		f := strings.TrimSuffix(e.File, ".clas.abap") + suffix
+		file = f
 		if b, err := os.ReadFile(filepath.Join(storeState.root, f)); err == nil {
-			file, source = f, string(b)
+			source = string(b)
 		}
 	} else {
 		b, err := os.ReadFile(filepath.Join(storeState.root, e.File))
@@ -366,12 +450,38 @@ func storeRead(ix *storeIndex, a *Answer, typ, name, include string) error {
 		}
 		source = string(b)
 	}
+	if version == "active" {
+		if typ == "CLAS" && include != "main" {
+			digest, proven := storeState.cfg.Built[file]
+			if !proven || len(digest) != 64 || digest != storeDigest(file) {
+				source = ""
+			}
+		} else {
+			digest, proven := storeState.cfg.Built[file]
+			if !proven || len(digest) != 64 || digest != storeDigest(file) {
+				return storeNotFound(typ, name+" active version ("+include+")")
+			}
+		}
+	}
 	row := storeRowOf(e, file)
+	empty := typ == "CLAS" && include != "main" && source == ""
+	etag := sha256.Sum256([]byte(source))
+	if version == "active" {
+		active := sha256.Sum256([]byte("active\x00" + source))
+		etag = active
+	}
+	value, _ := json.Marshal(struct {
+		Name      string `json:"name"`
+		ChangedBy string `json:"changedBy,omitempty"`
+		Empty     bool   `json:"empty"`
+		ETag      string `json:"etag"`
+	}{e.Name, e.ChangedBy, empty, hex.EncodeToString(etag[:])[:32]})
 	a.Scalars["EV_SOURCE"] = source
 	a.Scalars["EV_FILE"] = file
 	a.Scalars["EV_PACKAGE"] = e.Package
 	a.Scalars["EV_WRITABLE"] = row.WRITABLE
 	a.Scalars["EV_VERSION"] = row.VERSION
+	a.Scalars["EV_JSON"] = string(value)
 	a.Objects = append(a.Objects, row)
 	return nil
 }

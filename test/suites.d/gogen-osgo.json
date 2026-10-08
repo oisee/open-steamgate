@@ -63,6 +63,7 @@
       "test/osg-support.mjs",
       "test/osgjs-unit.mjs",
       "test/osgjs-int8.mjs",
+      "test/osgo-store-goldens.mjs",
       "test/xstring-buffer.mjs"
     ]
   }

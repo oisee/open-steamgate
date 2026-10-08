@@ -3,7 +3,9 @@ package objstore
 import (
 	"bytes"
 	"fmt"
+	"os"
 	osexec "os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -65,7 +67,7 @@ func storeHistory(root, file string, limit int) ([]Revision, string) {
 	}
 	out, err := storeGit(root, "--literal-pathspecs", "-c", "core.quotePath=false", "log", "--follow",
 		"--first-parent", "--diff-merges=first-parent", "--name-status", "-n", strconv.Itoa(limit),
-		"--format=%x1e%H%x00%aN%x00%aI%x00%s", "HEAD", "--", file)
+		"--format=%x1e%H%x00%h%x00%aN%x00%aI%x00%s", "HEAD", "--", file)
 	if err != nil {
 		return nil, "git history is unavailable for this object store"
 	}
@@ -76,8 +78,8 @@ func storeHistory(root, file string, limit int) ([]Revision, string) {
 			continue
 		}
 		lines := strings.Split(rec, "\n")
-		f := strings.SplitN(lines[0], "\x00", 4)
-		if len(f) < 4 {
+		f := strings.SplitN(lines[0], "\x00", 5)
+		if len(f) < 5 {
 			continue
 		}
 		last := ""
@@ -95,15 +97,11 @@ func storeHistory(root, file string, limit int) ([]Revision, string) {
 		if len(change) > 1 {
 			path = change[len(change)-1]
 		}
-		r := Revision{REVISION: f[0], AUTHOR: storeSapUser(f[1]), SUBJECT: f[3], DATE: "00000000", TIME: "000000", path: path}
-		r.SHORT = r.REVISION
-		if len(r.SHORT) > 12 {
-			r.SHORT = r.SHORT[:12]
-		}
+		r := Revision{REVISION: f[0], SHORT: f[1], AUTHOR: storeSapUser(f[2]), SUBJECT: f[4], DATE: "00000000", TIME: "000000", path: path}
 		if len([]rune(r.SUBJECT)) > 80 {
 			r.SUBJECT = string([]rune(r.SUBJECT)[:80])
 		}
-		if t, err := time.Parse(time.RFC3339, f[2]); err == nil {
+		if t, err := time.Parse(time.RFC3339, f[3]); err == nil {
 			u := t.UTC()
 			r.DATE, r.TIME = u.Format("20060102"), u.Format("150405")
 		}
@@ -144,4 +142,17 @@ func storeRevisionAt(root, file, revision string) (source, path string, err erro
 		}
 	}
 	return "", "", storeRefusal(fmt.Sprintf("Revision %s is not a version of %s.", wanted[:12], file))
+}
+
+func storeHistoryState(root, file string) (state, changed string) {
+	state = "modified"
+	if out, err := storeGit(root, "status", "--porcelain", "--", file); err == nil && strings.TrimSpace(out) == "" {
+		state = "clean"
+	}
+	if st, err := os.Stat(filepath.Join(root, file)); err == nil {
+		changed = st.ModTime().UTC().Format("2006-01-02T15:04:05Z")
+	} else {
+		changed = "1970-01-01T00:00:00.000Z"
+	}
+	return state, changed
 }

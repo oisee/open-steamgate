@@ -3,6 +3,7 @@ package objstore
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -215,7 +216,29 @@ func storeBuild() *storeIndex {
 			}
 		}
 	}
+	storeIndexTmp(ix)
 	return ix
+}
+
+func storeIndexTmp(ix *storeIndex) {
+	if ix.by["DEVC $TMP"] == nil {
+		ix.set("DEVC $TMP", &storeEntry{Type: "DEVC", Name: "$TMP", File: "local/tmp/package.devc.xml",
+			Root: "local/tmp", Writable: true, Package: "$TMP", Packages: []string{"$TMP"}, Synthetic: true})
+	}
+	var authors map[string]struct {
+		Author string `json:"author"`
+	}
+	if b, err := os.ReadFile(filepath.Join(storeState.root, "local", "tmp", "tadir.json")); err == nil {
+		_ = json.Unmarshal(b, &authors)
+	}
+	for _, key := range ix.keys {
+		e := ix.by[key]
+		if e.Root == "local/tmp" {
+			if a := authors[e.Type+" "+e.Name]; a.Author != "" {
+				e.ChangedBy = strings.ToUpper(a.Author)
+			}
+		}
+	}
 }
 
 func (ix *storeIndex) find(typ, name string) *storeEntry {
@@ -339,6 +362,10 @@ func storeDigest(file string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+var storeSourceTypes = map[string]bool{
+	"CLAS": true, "INTF": true, "PROG": true, "DDLS": true, "SRVD": true, "INCL": true,
+}
+
 // active or inactive, and the file's time (osd-store.mjs stateOf)
 func storeStateOf(e *storeEntry, file string) (version, changedAt string) {
 	if st, err := os.Stat(filepath.Join(storeState.root, file)); err == nil {
@@ -347,7 +374,14 @@ func storeStateOf(e *storeEntry, file string) (version, changedAt string) {
 	version = "active"
 	if storeState.written[e.Type+" "+e.Name] {
 		version = "inactive"
-	} else if e.Writable && !e.Library && storeState.cfg.Built != nil {
+	} else if storeSourceTypes[e.Type] {
+		if storeState.cfg.Built == nil {
+			version = "inactive"
+		} else {
+			version = "active"
+		}
+	}
+	if storeSourceTypes[e.Type] && version == "active" && storeState.cfg.Built != nil {
 		for _, f := range storeFilesOf(e) {
 			if storeDigest(f) != storeState.cfg.Built[f] {
 				version = "inactive"
