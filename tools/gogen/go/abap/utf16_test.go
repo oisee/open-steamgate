@@ -68,6 +68,13 @@ func TestUTF16SurrogateHalves(t *testing.T) {
 	}
 }
 
+func TestUTF16CondenseNoGaps(t *testing.T) {
+	hi, lo := "\xed\xa0\xbd", "\xed\xb8\x80"
+	if got := Condense(hi+" "+lo, true); got != "😀" {
+		t.Fatalf("CONDENSE NO-GAPS: %x", got)
+	}
+}
+
 func TestUTF16FindAndReplace(t *testing.T) {
 	for _, rx := range []bool{false, true} {
 		ok, off, n, _ := FindStmt("😀Ж😀A", "😀A", rx, false, 0)

@@ -24,6 +24,7 @@ METHODS half_operators FOR TESTING.
 METHODS half_ignore_case FOR TESTING.
 METHODS json_half_parse FOR TESTING.
 METHODS egress_apc FOR TESTING.
+METHODS condense_no_gaps FOR TESTING.
 ENDCLASS.
 CLASS ltcl_test IMPLEMENTATION.
 METHOD len.
@@ -278,5 +279,17 @@ CREATE OBJECT msg TYPE zcl_apc_message.
 msg->set_text( hi && lo ).
 cl_abap_unit_assert=>assert_equals( act = msg->get_text( ) exp = emoji ).
 cl_abap_unit_assert=>assert_equals( act = msg->get_binary( ) exp = CONV xstring( 'F09F9880' ) ).
+ENDMETHOD.
+METHOD condense_no_gaps.
+DATA(s) = zcl_osgt_strlen16=>emoji( ).
+DATA(hi) = s+0(1).
+DATA(lo) = s+1(1).
+DATA r TYPE string.
+r = |{ hi } { lo }|.
+CONDENSE r NO-GAPS.
+DATA(emoji) = s+0(2).
+IF r <> emoji.
+  cl_abap_unit_assert=>fail( ).
+ENDIF.
 ENDMETHOD.
 ENDCLASS.
