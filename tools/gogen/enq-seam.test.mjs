@@ -54,6 +54,16 @@ func TestKernelLockSeam(t *testing.T) {
  req = requests[len(requests)-1]
  if req.Mode != "E" || req.Scope != 2 || !req.Fields[1].Generic || req.Fields[1].Value != "" { t.Fatalf("defaults: %#v", req) }
 
+ // the step is the caller's own Session, before and after a yield sleep
+ var before, after any
+ h.Enqueue = func(step any, r enq.Request, sleep func(time.Duration)) (enq.Result, error) {
+  before = step
+  if sleep != nil { sleep(time.Millisecond) }
+  after = step
+  return enq.Result{}, nil
+ }
+ ZCL_GOGEN_ENQ_SEAM_ALL_KEYS(s)
+ if before != any(s) || after != any(s) { t.Fatal("the lock hook did not get the calling step's Session") }
  h.Enqueue = func(any, enq.Request, func(time.Duration)) (enq.Result, error) { return enq.Result{Subrc: 1, Msgno: "601", Holder: "OTHER"}, nil }
  ZCL_GOGEN_ENQ_SEAM_FOREIGN_LOCK(s)
  if s.Sy.Subrc != 1 || s.Sy.Msgid != "MC" || s.Sy.Msgty != "E" || s.Sy.Msgno != "601" || s.Sy.Msgv1 != "OTHER" { t.Fatalf("foreign: %#v", s.Sy) }
