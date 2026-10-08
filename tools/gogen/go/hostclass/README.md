@@ -27,3 +27,19 @@ ABAP class. Its callbacks use `osg/gogen/enq` values and the current dialog
 step as `any`; the generated call wrapper builds requests and maps classic
 exceptions. A nil callback preserves the generated caller's `NotCompiled`
 refusal, as before this seam existed.
+
+`LUW` supplies the host's `Commit(step, updated)` and `Rollback(step)`
+callbacks for generated COMMIT WORK (including AND WAIT) and ROLLBACK WORK.
+The database finishes first; the per-session update-module flag is then cleared
+and the hook runs with the calling `*abap.Session` as `any`. A plain call of a
+compiled module marked `<UPDATE_TASK>` sets that flag on entry, after the
+caller's arguments, even if it raises. Nil hooks preserve database behavior; hook errors panic. Yield sleeps
+and dialog-step completion use the database functions directly and call no LUW
+hook, so they do not release the host's scope-2 locks.
+
+`updated` lives on the step's `*abap.Session`, so it ends with the request.
+Node keys it by the enq session, which a stateful ADT session keeps across
+requests: the two differ when stateful code calls an update module in one
+request and commits in another. Nothing in the tree marks a module
+`<UPDATE_TASK>` today (2026-10-08); when user code runs in a stateful ADT
+session, a third hook on module entry lets the host keep the flag per session.

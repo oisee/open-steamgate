@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<abapGit version="v1.0.0" serializer="LCL_OBJECT_FUGR" serializer_version="v1.0.0">
+<asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0"><asx:values>
+<AREAT>LUW seam fixture</AREAT><INCLUDES><SOBJ_NAME>LZGOGEN_LUWTOP</SOBJ_NAME><SOBJ_NAME>SAPLZGOGEN_LUW</SOBJ_NAME></INCLUDES>
+<FUNCTIONS>
+<item><FUNCNAME>ZGOGEN_LUW_UPDATE</FUNCNAME><SHORT_TEXT>Update module</SHORT_TEXT><UPDATE_TASK>X</UPDATE_TASK>
+<IMPORT><RSIMP><PARAMETER>IV_BOOM</PARAMETER><OPTIONAL>X</OPTIONAL><TYP>I</TYP></RSIMP></IMPORT>
+<EXCEPTION><RSEXC><EXCEPTION>BOOM</EXCEPTION></RSEXC></EXCEPTION></item>
+<item><FUNCNAME>ZGOGEN_LUW_ORDINARY</FUNCNAME><SHORT_TEXT>Ordinary module</SHORT_TEXT></item>
+</FUNCTIONS></asx:values></asx:abap></abapGit>

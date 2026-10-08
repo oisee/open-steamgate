@@ -2068,8 +2068,9 @@ ${t}	}`));
         `${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`];
     }
     case "nop": return [];
-    case "commit_work": return [`${t}abap.CommitWork(s)`];
-    case "rollback_work": return [`${t}abap.RollbackWork(s)`];
+    case "note_update_task": return [`${t}s.UpdateTask = true`];
+    case "commit_work": return [`${t}abap.GeneratedCommitWork(s)`];
+    case "rollback_work": return [`${t}abap.GeneratedRollbackWork(s)`];
     case "exit": return [`${t}${leave(ctx, 2)}`];
     case "continue": return [`${t}${leave(ctx, 3)}`];
     // CHECK continues the innermost loop, or leaves the processing block

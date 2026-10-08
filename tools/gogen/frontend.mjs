@@ -580,6 +580,8 @@ function functionGroupSignatures(ctx0, g) {
   try { spaghetti = new abaplint.SyntaxLogic(reg, g).run().spaghetti; } catch { spaghetti = undefined; }
   const top = spaghetti?.getTop();
   const globalData = g.getABAPFiles().some((f) => /top\.abap$/i.test(f.getFilename()) && f.getStatements().some((st) => st.get() instanceof Statements.Data || st.get() instanceof Statements.DataBegin || st.get() instanceof Statements.Tables));
+  const updateModules = new Set([...(g.getXMLFile()?.getRaw() ?? "").matchAll(/<item>([\s\S]*?)<\/item>/g)]
+    .filter((m) => /<UPDATE_TASK>/.test(m[1])).map((m) => upper(/<FUNCNAME>([^<]*)<\/FUNCNAME>/.exec(m[1])?.[1] ?? "")));
   for (const m of g.getModules()) {
     const name = upper(m.getName());
     const where = `${owner}=>${name}`;
@@ -611,7 +613,7 @@ function functionGroupSignatures(ctx0, g) {
       if (!(e instanceof Unsupported)) throw e;
       sig = {name, unsupported: e.message};
     }
-    program.functionModules.set(name, {owner, group: g, module: m, sig, top, spaghetti});
+    program.functionModules.set(name, {owner, group: g, module: m, sig, top, spaghetti, updateTask: updateModules.has(name)});
   }
 }
 
@@ -657,6 +659,9 @@ function functionGroupIr(ctx0, g) {
       ctx.inits = [];
       const compiled = body === undefined ? [] : block(body, ctx);
       compiled.unshift(...ctx.inits);
+      // an update-task module marks the LUW on entry, after its caller's
+      // arguments are evaluated, like Node's wrapper (osd-enq-host.mjs)
+      if (x.updateTask) compiled.unshift({s: "note_update_task"});
       cls.methods.push({...sig, fieldSymbols: [...ctx.fieldSymbols].map(([n, t]) => ({name: n, type: t})), locals: [...ctx.locals].map(([n, t]) => ({name: n, type: t})).sort((a, b) => a.name.localeCompare(b.name)),
         body: compiled, calls: ctx.calls ?? [], pos: {file: file.getFilename().split("/").pop(), row: node.getFirstToken().getStart().getRow()}});
     } catch (e) {
