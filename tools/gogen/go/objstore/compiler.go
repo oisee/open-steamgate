@@ -1,42 +1,28 @@
 package objstore
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
-	"time"
+
+	"osg/gogen/storecheck"
 )
 
-// Compiler owns validation, not its process. The host supplies an adapter.
-type Compiler interface {
-	Available(context.Context) error
-	Check(context.Context, CompilerInput) ([]Issue, error)
-	Outline(context.Context, CompilerInput) (json.RawMessage, error)
-}
-type CompilerInput struct {
-	Root, Generation, Type, Name, Version string
-	Files                                 []string
-	Expected                              map[string]string
-	Logical                               []string
-	Source                                *string
-}
+// Keep the host API stable; orchestration and neutral contracts live in storecheck.
+type Compiler = storecheck.Compiler
+type CompilerInput = storecheck.Input
 
-var ErrCompilerAbsent = errors.New("compiler absent")
-
+var ErrCompilerAbsent = storecheck.ErrCompilerAbsent
 var compilerState struct {
 	provider   Compiler
 	generation string
 }
 
-// SetCompiler injects a lazy provider; nil preserves the standalone refusals.
 func SetCompiler(provider Compiler, generation string) {
 	storeState.mu.Lock()
 	defer storeState.mu.Unlock()
+	storeState.revision++
 	compilerState.provider, compilerState.generation = provider, generation
 }
 
@@ -54,8 +40,9 @@ func compilerInput(ix *storeIndex, typ, name, version string) (CompilerInput, er
 				in.Expected[storeState.cfg.Active[file]] = storeState.cfg.Built[file]
 				in.Logical = append(in.Logical, file)
 			}
-		} else if _, err := os.Stat(filepath.Join(storeState.root, file)); err == nil {
+		} else if bytes, err := os.ReadFile(filepath.Join(storeState.root, file)); err == nil {
 			in.Files = append(in.Files, file)
+			in.Expected[file] = storeDigestBytes(bytes)
 			in.Logical = append(in.Logical, file)
 		} else if !os.IsNotExist(err) {
 			return in, err
@@ -64,92 +51,82 @@ func compilerInput(ix *storeIndex, typ, name, version string) (CompilerInput, er
 	return in, nil
 }
 
-func compilerRefusal(a *Answer, err error) error {
-	a.Scalars["EV_JSON"] = storeJSONRefusal(err.Error(), "NOT_SUPPORTED")
-	return err
+// captureCompiler is called only under the store mutex. No callback runs here.
+func captureCompiler(ix *storeIndex, command, typ, name, include string, source *string, filter, raw string) storecheck.Request {
+	req := storecheck.Request{Command: command, Type: typ, Name: name, Filter: filter}
+	version := "inactive"
+	if command == "PARSE" {
+		var parsed struct{ Kind, Type, Name, Version string }
+		req.InputError = json.Unmarshal([]byte(raw), &parsed)
+		req.ParseKind = parsed.Kind
+		typ, name = strings.ToUpper(parsed.Type), strings.ToUpper(parsed.Name)
+		if parsed.Version != "" {
+			version = parsed.Version
+		}
+	}
+	req.SourceType, req.Known = storeTypeSource(typ)
+	entry := ix.find(typ, name)
+	req.Exists = entry != nil
+	if entry != nil && !req.SourceType {
+		_, req.ReadError = os.ReadFile(filepath.Join(storeState.root, entry.File))
+	}
+	if req.InputError == nil && (req.Exists || command != "PARSE") {
+		req.Input, req.InputError = compilerInput(ix, typ, name, version)
+	} else {
+		req.Input.Version = version
+	}
+	req.Input.Include = include
+	if source != nil && command != "PARSE" {
+		value := *source
+		req.Input.Source = &value
+	}
+	if command == "CHECK" {
+		fallback := storeEmpty()
+		req.FallbackError = storeNoCompiler(ix, &fallback, command, typ, name)
+		req.Fallback = storecheck.Result{Scalars: fallback.Scalars, Issues: fallback.Issues}
+	}
+	return req
 }
 
-func storeCheck(ix *storeIndex, a *Answer, typ, name string, source *string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	if compilerState.provider == nil {
-		return storeNoCompiler(ix, a, "CHECK", typ, name)
+// runCompiler releases the mutex during all compiler calls, then rejects results
+// if the store tree, provider/generation or saved files changed concurrently.
+func runCompiler(ix *storeIndex, a *Answer, command, typ, name, include string, source *string, filter, raw string) error {
+	req := captureCompiler(ix, command, typ, name, include, source, filter, raw)
+	provider, generation, revision := compilerState.provider, compilerState.generation, storeState.revision
+	// The publisher changes build/live outside our mutex. Retain the link
+	// identity too, so switching away and back cannot reuse an old verdict.
+	live := filepath.Join(storeState.root, "build", "live")
+	liveInfo, liveErr := os.Lstat(live)
+	liveTarget, _ := os.Readlink(live)
+	storeState.mu.Unlock()
+	result, err := storecheck.Run(provider, req)
+	storeState.mu.Lock()
+	stale := revision != storeState.revision
+	currentInfo, currentErr := os.Lstat(live)
+	currentTarget, _ := os.Readlink(live)
+	if liveErr == nil {
+		stale = stale || currentErr != nil || !os.SameFile(liveInfo, currentInfo) || liveTarget != currentTarget || (req.SourceType && provider != nil && filepath.Base(liveTarget) != generation)
+	} else if !os.IsNotExist(liveErr) || !os.IsNotExist(currentErr) {
+		stale = true
 	}
-	if err := compilerState.provider.Available(ctx); err != nil {
-		if errors.Is(err, ErrCompilerAbsent) {
-			return storeNoCompiler(ix, a, "CHECK", typ, name)
+	for file, hash := range req.Input.Expected {
+		bytes, readErr := os.ReadFile(filepath.Join(req.Input.Root, file))
+		if readErr != nil || storeDigestBytes(bytes) != hash {
+			stale = true
 		}
-		return compilerRefusal(a, err)
 	}
-	version := "inactive" // Node CHECK always reads the saved registry.
-	in, err := compilerInput(ix, typ, name, version)
-	if err != nil {
-		return err
+	if stale {
+		reason := "STALE_RESULT: store state or active generation changed during compiler request; retry"
+		if command == "CHECKRUN" {
+			result, err = storecheck.NotProcessed(reason), nil
+		} else {
+			result = storecheck.Result{Scalars: map[string]string{"EV_JSON": storeJSONRefusal(reason, "STALE_RESULT")}}
+			err = storeRefusal(reason)
+		}
 	}
-	in.Source = source
-	issues, err := compilerState.provider.Check(ctx, in)
-	if errors.Is(err, ErrCompilerAbsent) {
-		return storeNoCompiler(ix, a, "CHECK", typ, name)
+	for key, value := range result.Scalars {
+		a.Scalars[key] = value
 	}
-	if err != nil {
-		return compilerRefusal(a, err)
-	}
-	a.Issues = append(a.Issues, issues...)
-	a.Scalars["EV_COUNT"] = strconv.Itoa(len(a.Issues))
-	if len(a.Issues) == 0 {
-		a.Scalars["EV_ACTIVE"] = "X"
-	}
-	value := struct {
-		Active bool    `json:"active"`
-		Live   bool    `json:"live"`
-		Note   string  `json:"note"`
-		Issues []Issue `json:"issues"`
-	}{len(a.Issues) == 0, false, "", a.Issues}
-	a.Scalars["EV_JSON"], err = storeJSON(value)
+	a.Issues = append(a.Issues, result.Issues...)
 	return err
-}
-
-func storeParse(ix *storeIndex, a *Answer, raw string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	if compilerState.provider == nil {
-		return compilerRefusal(a, fmt.Errorf("unknown store command PARSE"))
-	}
-	if err := compilerState.provider.Available(ctx); err != nil {
-		if errors.Is(err, ErrCompilerAbsent) {
-			err = fmt.Errorf("unknown store command PARSE")
-		}
-		return compilerRefusal(a, err)
-	}
-	var input struct{ Kind, Type, Name, Version string }
-	if err := json.Unmarshal([]byte(raw), &input); err != nil {
-		return err
-	}
-	if input.Kind != "OUTLINE" {
-		return compilerRefusal(a, fmt.Errorf("parse kind %s is not supported", input.Kind))
-	}
-	if input.Version == "" {
-		input.Version = "inactive"
-	}
-	if input.Version != "active" && input.Version != "inactive" {
-		return compilerRefusal(a, fmt.Errorf("outline version %s is not supported", input.Version))
-	}
-	typ, name := strings.ToUpper(input.Type), strings.ToUpper(input.Name)
-	if ix.find(typ, name) == nil {
-		a.Scalars["EV_JSON"] = `{"found":false}`
-		return nil
-	}
-	in, err := compilerInput(ix, typ, name, input.Version)
-	if err != nil {
-		return err
-	}
-	value, err := compilerState.provider.Outline(ctx, in)
-	if errors.Is(err, ErrCompilerAbsent) {
-		err = fmt.Errorf("unknown store command PARSE")
-	}
-	if err != nil {
-		return compilerRefusal(a, err)
-	}
-	a.Scalars["EV_JSON"] = string(value)
-	return nil
 }

@@ -7,11 +7,16 @@ supplies CHECK and PARSE kind OUTLINE snapshots; ACTIVATE and TOKENS are still r
 `SetStore`, `StoreCall`, the `Store*` type aliases and the
 session-first `ZOSD_STORE` adapter (Data in, tables filled).
 
-The compiler boundary is the small `Compiler` interface in `compiler.go`: objstore chooses saved CHECK files or the OUTLINE version and builds answer
-JSON/scalars, but owns no process lifecycle or diagnostic conversion. Provider availability is resolved before object shortcuts; nil or absent providers preserve standalone
-CHECK and unknown-PARSE behavior. Indexed objects without active proof still receive an OUTLINE skeleton. `storecompiler.Adapter` supplies the concrete snapshot/client
-adapter. CHECK with `IV_SOURCE` is deliberately unsupported in round 2 because contract-v1 snapshots can
-pin only on-disk files, not Node's in-memory unsaved buffer; the gap is ratcheted in `tools/gogen/storecmp.mjs`.
+The compiler boundary uses neutral contracts in `storecheck`; objstore keeps API
+aliases, resolution and answer assignment. It captures provider, generation,
+file hashes and a store revision under the mutex, then runs CHECK, CHECKRUN and
+OUTLINE outside it. A concurrent WRITE, SetStore or SetCompiler rejects the
+answer as STALE_RESULT; saved target bytes are rechecked after the call too.
+`storecompiler.Adapter` supplies snapshots to the lifecycle-owning client.
+CHECKRUN uses Node's shared report builder, including AMDP portability warnings,
+and ignores optional includes for saved-source syntax checks. Standalone CHECK
+and PARSE refusals remain unchanged. IV_SOURCE still requires a saved draft on
+the Go snapshot path; `tools/gogen/storecmp.mjs` ratchets that contract-v1 gap.
 
 SYSTEM is tree-independent. `CallWithSystem(in, provider)` uses the explicitly
 passed request's `SystemProvider`, whose `System(kind, name, input)` method

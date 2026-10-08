@@ -1,6 +1,7 @@
 package objstore
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	osexec "os/exec"
@@ -100,6 +101,16 @@ var goldenCases = []struct {
 	{"history-rename", map[string]string{"IV_COMMAND": "HISTORY", "IV_TYPE": "PROG", "IV_NAME": "Z_NEW"}},
 	{"history-ignored", map[string]string{"IV_COMMAND": "HISTORY", "IV_TYPE": "PROG", "IV_NAME": "ZIGNORED"}},
 	{"history-include", map[string]string{"IV_COMMAND": "HISTORY", "IV_TYPE": "CLAS", "IV_NAME": "ZCLASS", "IV_INCLUDE": "macros"}},
+	{"checkrun-clean", map[string]string{"IV_COMMAND": "CHECKRUN", "IV_TYPE": "CLAS", "IV_NAME": "ZCL_VALID"}},
+	{"checkrun-existing-include", map[string]string{"IV_COMMAND": "CHECKRUN", "IV_TYPE": "CLAS", "IV_NAME": "ZCLASS", "IV_INCLUDE": "definitions"}},
+	{"checkrun-absent-include", map[string]string{"IV_COMMAND": "CHECKRUN", "IV_TYPE": "CLAS", "IV_NAME": "ZCL_VALID", "IV_INCLUDE": "macros"}},
+	{"checkrun-amdp", map[string]string{"IV_COMMAND": "CHECKRUN", "IV_TYPE": "CLAS", "IV_NAME": "ZCL_PORTABLE"}},
+	{"checkrun-amdp-include", map[string]string{"IV_COMMAND": "CHECKRUN", "IV_TYPE": "CLAS", "IV_NAME": "ZCL_PORTABLE", "IV_INCLUDE": "macros"}},
+	{"checkrun-syntax", map[string]string{"IV_COMMAND": "CHECKRUN", "IV_TYPE": "CLAS", "IV_NAME": "ZCL_BAD"}},
+	{"checkrun-non-source", map[string]string{"IV_COMMAND": "CHECKRUN", "IV_TYPE": "TABL", "IV_NAME": "ZTABLE"}},
+	{"checkrun-structure", map[string]string{"IV_COMMAND": "CHECKRUN", "IV_TYPE": "STRU", "IV_NAME": "ZSTRUCT"}},
+	{"checkrun-missing-structure", map[string]string{"IV_COMMAND": "CHECKRUN", "IV_TYPE": "STRU", "IV_NAME": "ZMISSING"}},
+	{"checkrun-missing", map[string]string{"IV_COMMAND": "CHECKRUN", "IV_TYPE": "CLAS", "IV_NAME": "ZMISSING"}},
 }
 
 func TestStoreDestinationGoldens(t *testing.T) {
@@ -118,7 +129,10 @@ func TestStoreDestinationGoldens(t *testing.T) {
 		t.Fatal(err)
 	}
 	SetSystemIdentity(Identity{SystemID: "OSD", Client: "001", UserName: "OSD"})
-	defer SetStore("", nil, "")
+	defer func() {
+		SetCompiler(nil, "")
+		SetStore("", nil, "")
+	}()
 	goldenBytes, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "test", "fixtures", "osgo-store", "destination-golden.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -128,6 +142,18 @@ func TestStoreDestinationGoldens(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, test := range goldenCases {
+		if test.name == "checkrun-clean" {
+			prepare := osexec.Command("node", "--input-type=module", "-e", `import {prepareCompilerFixture} from "./tools/osgo-store-goldens.mjs"; await prepareCompilerFixture(process.argv.at(-1));`, root)
+			prepare.Dir = filepath.Join(filepath.Dir(script), "..")
+			prepare.Stderr = os.Stderr
+			if err := prepare.Run(); err != nil {
+				t.Fatal(err)
+			}
+			if err := SetStore(root, config, ""); err != nil {
+				t.Fatal(err)
+			}
+			SetCompiler(goldenCompiler{}, "test")
+		}
 		t.Run(test.name, func(t *testing.T) {
 			input := map[string]*string{}
 			for key, value := range test.parameters {
@@ -149,6 +175,24 @@ func TestStoreDestinationGoldens(t *testing.T) {
 			}
 		})
 	}
+}
+
+type goldenCompiler struct{}
+
+func (goldenCompiler) Available(context.Context) error { return nil }
+func (goldenCompiler) Check(_ context.Context, in CompilerInput) ([]Issue, error) {
+	if in.Type == "CLAS" && in.Name == "ZCL_BAD" {
+		return []Issue{{OBJ_TYPE: "CLAS", OBJ_NAME: "ZCL_BAD", Severity: "E", LINE: 3, COL: 10,
+			MESSAGE: `Method name "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" is too long, maximum length is 30 characters`}}, nil
+	}
+	if in.Name == "ZCL_PORTABLE" && in.Include == "main" {
+		return []Issue{{Severity: "W", LINE: 7, COL: 1, MESSAGE: "Portable AMDP: not supported on sqlite: CAST to INTEGER cannot raise in SQLite: it returns 0 where HANA and DuckDB raise"}}, nil
+	}
+
+	return nil, nil
+}
+func (goldenCompiler) Outline(context.Context, CompilerInput) (json.RawMessage, error) {
+	return json.RawMessage(`{}`), nil
 }
 
 func TestStoreHistoryStateUsesGitStatus(t *testing.T) {

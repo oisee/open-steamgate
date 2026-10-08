@@ -538,6 +538,10 @@
       "lines": 935,
       "reason": "Fix1: optional logicalPath per snapshot file and optional saved CHECK mode preserve contract v1; per-occurrence mappings permit multiple logical includes backed by one shared digest file."
     },
+    "go:storecheck": {
+      "lines": 204,
+      "reason": "recorded by --update"
+    },
     "go:storecompiler": {
       "lines": 77,
       "reason": "Fix1: adapter owns availability, saved-registry CHECK mode, explicit per-file logical mappings, active hash proof and all diagnostic-to-Issue conversion outside objstore."

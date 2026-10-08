@@ -9,8 +9,7 @@ import (
 
 const Contract = 1
 
-// CodeHandshake is the local refusal for a hello reply that is present but
-// malformed or incomplete; it never leaves the Go client.
+// CodeHandshake refuses an incomplete hello locally; it never leaves the client.
 const CodeHandshake = "HANDSHAKE"
 
 type Refusal struct {
@@ -41,6 +40,7 @@ type ObjectFiles struct {
 	Logical             []string
 }
 type Snapshot struct {
+	Include    string   `json:"include,omitempty"`
 	CheckMode  string   `json:"checkMode,omitempty"`
 	Root       string   `json:"root"`
 	Generation string   `json:"generation"`
@@ -51,6 +51,7 @@ type ObjectID struct {
 	Name string `json:"name"`
 }
 type Diagnostic struct {
+	URI      string   `json:"uri,omitempty"`
 	Severity string   `json:"severity"`
 	Code     string   `json:"code"`
 	Rule     string   `json:"rule,omitempty"`
@@ -114,7 +115,6 @@ func (result *CheckResult) UnmarshalJSON(raw []byte) error {
 	return nil
 }
 
-// outlineResult validates before exchange releases ownership of the child.
 type outlineResult struct {
 	Outline json.RawMessage `json:"outline"`
 }
