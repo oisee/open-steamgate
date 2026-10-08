@@ -21,6 +21,7 @@ METHODS egress_pair FOR TESTING.
 METHODS binary_body FOR TESTING.
 METHODS half_operators FOR TESTING.
 METHODS half_ignore_case FOR TESTING.
+METHODS json_half_parse FOR TESTING.
 ENDCLASS.
 CLASS ltcl_test IMPLEMENTATION.
 METHOD len.
@@ -237,5 +238,25 @@ cl_abap_unit_assert=>assert_equals( act = result-offset exp = 1 ).
 REPLACE lo IN s WITH `X` IGNORING CASE.
 cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 0 ).
 cl_abap_unit_assert=>assert_equals( act = s exp = hi && `XA` ).
+ENDMETHOD.
+METHOD json_half_parse.
+DATA(s) = zcl_osgt_strlen16=>emoji( ).
+DATA(hi) = s+0(1).
+DATA(lo) = s+1(1).
+DATA(emoji) = s+0(2).
+DATA reader TYPE REF TO if_sxml_reader.
+DATA node TYPE REF TO if_sxml_node.
+DATA val TYPE REF TO if_sxml_value_node.
+DATA(json) = `"` && escape( val = hi format = cl_abap_format=>e_json_string ) && `"`.
+reader = cl_sxml_string_reader=>create( cl_abap_codepage=>convert_to( json ) ).
+node = reader->read_next_node( ).
+node = reader->read_next_node( ).
+val ?= node.
+cl_abap_unit_assert=>assert_equals( act = val->get_value( ) exp = hi ).
+reader = cl_sxml_string_reader=>create( cl_abap_codepage=>convert_to( `"\uD83D\uDE00"` ) ).
+node = reader->read_next_node( ).
+node = reader->read_next_node( ).
+val ?= node.
+cl_abap_unit_assert=>assert_equals( act = val->get_value( ) exp = emoji ).
 ENDMETHOD.
 ENDCLASS.
