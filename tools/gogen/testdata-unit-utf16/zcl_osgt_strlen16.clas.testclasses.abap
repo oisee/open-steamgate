@@ -26,6 +26,7 @@ METHODS json_half_parse FOR TESTING.
 METHODS egress_apc FOR TESTING.
 METHODS condense_no_gaps FOR TESTING.
 METHODS mixed_scalar FOR TESTING.
+METHODS condense_half FOR TESTING.
 ENDCLASS.
 CLASS ltcl_test IMPLEMENTATION.
 METHOD len.
@@ -301,5 +302,13 @@ cl_abap_unit_assert=>assert_equals( act = to_mixed( `a_` && lower ) exp = `a` &&
 DATA(s) = zcl_osgt_strlen16=>emoji( ).
 DATA(hi) = s+0(1).
 cl_abap_unit_assert=>assert_equals( act = to_mixed( hi && `_A` ) exp = hi && `A` ).
+ENDMETHOD.
+METHOD condense_half.
+DATA(s) = zcl_osgt_strlen16=>emoji( ).
+DATA(hi) = s+0(1).
+DATA(lo) = s+1(1).
+cl_abap_unit_assert=>assert_equals( act = condense( hi ) exp = hi ).
+DATA(emoji) = s+0(2).
+cl_abap_unit_assert=>assert_equals( act = condense( val = hi && ` ` && lo to = `` ) exp = emoji ).
 ENDMETHOD.
 ENDCLASS.

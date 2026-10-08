@@ -354,6 +354,37 @@ func Repeat(v string, occ int32) string {
 // the first character of to (none when to is empty); an empty del strips
 // nothing, an empty from joins nothing.
 func CondenseFn(v, del, from, to string) string {
+	if hasHalf(v) || hasHalf(del) || hasHalf(from) || hasHalf(to) {
+		u, d, f, t := UTF16Units(v), UTF16Units(del), UTF16Units(from), UTF16Units(to)
+		contains := func(set []uint16, c uint16) bool {
+			for _, x := range set {
+				if x == c {
+					return true
+				}
+			}
+			return false
+		}
+		for len(u) > 0 && contains(d, u[0]) {
+			u = u[1:]
+		}
+		for len(u) > 0 && contains(d, u[len(u)-1]) {
+			u = u[:len(u)-1]
+		}
+		out := make([]uint16, 0, len(u))
+		in := false
+		for _, c := range u {
+			if contains(f, c) {
+				if !in && len(t) > 0 {
+					out = append(out, t[0])
+				}
+				in = true
+			} else {
+				out = append(out, c)
+				in = false
+			}
+		}
+		return UTF16String(out)
+	}
 	v = strings.TrimFunc(v, func(r rune) bool { return strings.ContainsRune(del, r) })
 	if from == "" {
 		return v
