@@ -71,8 +71,8 @@
       "reason": "sy-sysid from the one system id (go/sysid, tools/osd-identity.mjs), 2026-10-02; rebased over #453"
     },
     "go:cmd/osgo": {
-      "lines": 1205,
-      "reason": "ADT on osgo slice 1a: /sap/bc/adt mount behind -adt / OSD_OSGO_ADT=1 through runShim + DialogStep, NotCompiled -> 501"
+      "lines": 1210,
+      "reason": "ADT on osgo slice 1a round 1: /sap/bc/adt mount behind -adt / OSD_OSGO_ADT=1 through the testable real route matcher, runShim + DialogStep, NotCompiled -> 501"
     },
     "go:cmd/storecmp": {
       "lines": 41,
@@ -123,8 +123,8 @@
       "reason": "recorded by --update"
     },
     "go:objstore": {
-      "lines": 1627,
-      "reason": "ADT on osgo slice 1a: ZOSD_STORE OBJECT/PACKAGE/PACKAGES/SEARCH, ADT READ metadata and HISTORY state, matched field for field with the Node destination (18 goldens); candidate to carve the package index into its own package later"
+      "lines": 1751,
+      "reason": "ADT on osgo slice 1a round 1: Node-parity layer metadata, retained active reads, package ordering/empty descriptions, and deterministic HISTORY semantics; package index extraction remains a later carve-out"
     },
     "go:reportargs": {
       "lines": 209,

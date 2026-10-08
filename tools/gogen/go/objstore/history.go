@@ -97,7 +97,7 @@ func storeHistory(root, file string, limit int) ([]Revision, string) {
 		if len(change) > 1 {
 			path = change[len(change)-1]
 		}
-		r := Revision{REVISION: f[0], SHORT: f[1], AUTHOR: storeSapUser(f[2]), SUBJECT: f[4], DATE: "00000000", TIME: "000000", path: path}
+		r := Revision{REVISION: f[0], SHORT: f[0][:12], AUTHOR: storeSapUser(f[2]), SUBJECT: f[4], DATE: "00000000", TIME: "000000", path: path}
 		if len([]rune(r.SUBJECT)) > 80 {
 			r.SUBJECT = string([]rune(r.SUBJECT)[:80])
 		}
@@ -146,11 +146,16 @@ func storeRevisionAt(root, file, revision string) (source, path string, err erro
 
 func storeHistoryState(root, file string) (state, changed string) {
 	state = "modified"
-	if out, err := storeGit(root, "status", "--porcelain", "--", file); err == nil && strings.TrimSpace(out) == "" {
-		state = "clean"
+	if _, tracked := storeGit(root, "ls-files", "--error-unmatch", "--", file); tracked == nil {
+		if out, err := storeGit(root, "status", "--porcelain", "--", file); err == nil && strings.TrimSpace(out) == "" {
+			state = "clean"
+		}
+	}
+	if _, err := storeGit(root, "rev-parse", "--verify", "HEAD"); err != nil {
+		state = "modified"
 	}
 	if st, err := os.Stat(filepath.Join(root, file)); err == nil {
-		changed = st.ModTime().UTC().Format("2006-01-02T15:04:05Z")
+		changed = st.ModTime().UTC().Format("2006-01-02T15:04:05.000Z")
 	} else {
 		changed = "1970-01-01T00:00:00.000Z"
 	}

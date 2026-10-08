@@ -46,12 +46,23 @@ import (
 // Root is one root of the index: a folder walked, or a library's file
 // list as the build reads it.
 type Root struct {
-	Path     string   `json:"path"`
-	Writable bool     `json:"writable"`
-	Library  bool     `json:"library"`
-	Imported bool     `json:"imported"`
-	Package  string   `json:"package"`
-	Files    []string `json:"files"`
+	Path      string   `json:"path"`
+	Writable  bool     `json:"writable"`
+	Library   bool     `json:"library"`
+	Imported  bool     `json:"imported"`
+	Package   string   `json:"package"`
+	Tmp       bool     `json:"tmp"`
+	Abapgit   *Abapgit `json:"abapgit"`
+	Overlay   string   `json:"overlay"`
+	OverlayOf string   `json:"overlayOf"`
+	Files     []string `json:"files"`
+}
+
+type Abapgit struct {
+	StartingFolder string `json:"startingFolder"`
+	FolderLogic    string `json:"folderLogic"`
+	MasterLanguage string `json:"masterLanguage"`
+	Declared       bool   `json:"declared"`
 }
 
 // Config is what the build says about the tree (tools/gogen/store.mjs).
@@ -60,6 +71,7 @@ type Config struct {
 	Libs     []Root            `json:"libs"`
 	Excluded []string          `json:"excluded"`
 	Built    map[string]string `json:"built"`
+	Active   map[string]string `json:"active"`
 }
 
 type storeEntry struct {
@@ -70,6 +82,7 @@ type storeEntry struct {
 	Packages               []string
 	ChangedBy              string
 	Synthetic              bool
+	Overlay                string
 }
 
 var storeState struct {
@@ -159,7 +172,7 @@ func storeEmpty() Answer {
 func storeRowOf(e *storeEntry, file string) Row {
 	version, changed := storeStateOf(e, file)
 	w := "X"
-	if !e.Writable {
+	if !e.Writable && e.Overlay == "" {
 		w = ""
 	}
 	return Row{TYPE: e.Type, NAME: e.Name, PACKAGE: e.Package, FILE: file, WRITABLE: w, VERSION: version, CHANGED_AT: changed}
@@ -433,6 +446,8 @@ func storeRead(ix *storeIndex, a *Answer, typ, name, include, version string) er
 		return storeNotFound(typ, name)
 	}
 	file, source := e.File, ""
+	classInclude := typ == "CLAS" && include != "main"
+	includePresent := true
 	if typ == "CLAS" && include != "main" {
 		suffix, ok := storeIncludeSuffix(include)
 		if !ok {
@@ -440,31 +455,43 @@ func storeRead(ix *storeIndex, a *Answer, typ, name, include, version string) er
 		}
 		f := strings.TrimSuffix(e.File, ".clas.abap") + suffix
 		file = f
-		if b, err := os.ReadFile(filepath.Join(storeState.root, f)); err == nil {
+		if _, statErr := os.Stat(filepath.Join(storeState.root, f)); statErr == nil {
+			b, err := os.ReadFile(filepath.Join(storeState.root, f))
+			if err != nil {
+				return storeRefusal(err.Error())
+			}
 			source = string(b)
+		} else {
+			includePresent = false
 		}
 	} else {
 		b, err := os.ReadFile(filepath.Join(storeState.root, e.File))
 		if err != nil {
+			if !os.IsNotExist(err) {
+				return storeRefusal(err.Error())
+			}
 			return storeRefusal(fmt.Sprintf("ENOENT: no such file or directory, open '%s'", filepath.Join(storeState.root, e.File)))
 		}
 		source = string(b)
 	}
 	if version == "active" {
-		if typ == "CLAS" && include != "main" {
-			digest, proven := storeState.cfg.Built[file]
-			if !proven || len(digest) != 64 || digest != storeDigest(file) {
+		b, proven := storeActiveBytes(file)
+		if proven {
+			source = string(b)
+		} else {
+			digest, built := storeState.cfg.Built[file]
+			proven = built && len(digest) == 64 && digest == storeDigest(file)
+			if !proven {
+				if !classInclude {
+					return storeNotFound(typ, name+" active version ("+include+")")
+				}
 				source = ""
 			}
-		} else {
-			digest, proven := storeState.cfg.Built[file]
-			if !proven || len(digest) != 64 || digest != storeDigest(file) {
-				return storeNotFound(typ, name+" active version ("+include+")")
-			}
 		}
+		includePresent = proven
 	}
 	row := storeRowOf(e, file)
-	empty := typ == "CLAS" && include != "main" && source == ""
+	empty := classInclude && !includePresent
 	etag := sha256.Sum256([]byte(source))
 	if version == "active" {
 		active := sha256.Sum256([]byte("active\x00" + source))
@@ -508,7 +535,7 @@ func storeWrite(ix *storeIndex, a *Answer, typ, name, include, source string) er
 		return storeRefusal("object type " + typ + " is not supported")
 	}
 	e := ix.find(typ, name)
-	if e != nil && !e.Writable {
+	if e != nil && !e.Writable && e.Overlay == "" {
 		return storeRefusal(e.Type + " " + e.Name + " comes from a library and cannot be changed here")
 	}
 	if e == nil {

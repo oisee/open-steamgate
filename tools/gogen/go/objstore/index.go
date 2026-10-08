@@ -70,6 +70,45 @@ func storeNameOf(file string) string {
 
 // the chain of packages a file sits in (osd-store.mjs #packagesOf)
 func storePackagesOf(file string, root Root) []string {
+	if root.Tmp {
+		chain := []string{root.Package}
+		inside := strings.Split(strings.TrimPrefix(file, root.Path+"/"), "/")
+		if len(inside) > 0 {
+			inside = inside[:len(inside)-1]
+		}
+		for _, folder := range inside {
+			upper := strings.ToUpper(folder)
+			if strings.HasPrefix(upper, "$") && storeTmpChildName.MatchString(upper) {
+				chain = append(chain, upper)
+			} else {
+				chain = append(chain, chain[len(chain)-1]+"_"+storeNotWord.ReplaceAllString(upper, "_"))
+			}
+		}
+		return chain
+	}
+	if root.Abapgit != nil {
+		inside := strings.Split(strings.TrimPrefix(file, root.Path+"/"), "/")
+		if len(inside) > 0 {
+			inside = inside[:len(inside)-1]
+		}
+		chain := []string{root.Package}
+		at := root.Path
+		for _, folder := range inside {
+			if folder == "" || folder == "." {
+				continue
+			}
+			at += "/" + folder
+			declared := storeDeclaredPackage(at)
+			if declared != "" {
+				chain = append(chain, declared)
+			} else if root.Abapgit.FolderLogic == "FULL" {
+				chain = append(chain, strings.ToUpper(folder))
+			} else {
+				chain = append(chain, chain[len(chain)-1]+"_"+strings.ToUpper(folder))
+			}
+		}
+		return chain
+	}
 	own := ""
 	for _, f := range storeFolderPackages {
 		if strings.HasPrefix(file, f.Folder+"/") {
@@ -118,6 +157,21 @@ func storePackagesOf(file string, root Root) []string {
 		chain = append(chain, chain[len(chain)-1]+"_"+storeNotWord.ReplaceAllString(strings.ToUpper(folder), "_"))
 	}
 	return chain
+}
+
+var storeTmpChildName = regexp.MustCompile(`^\$[A-Z0-9_]+$`)
+var storePackageTag = regexp.MustCompile(`(?i)<(?:DEVCLASS|PACKAGE)>([^<]*)</(?:DEVCLASS|PACKAGE)>`)
+
+func storeDeclaredPackage(dir string) string {
+	b, err := os.ReadFile(filepath.Join(storeState.root, dir, "package.devc.xml"))
+	if err != nil {
+		return ""
+	}
+	match := storePackageTag.FindStringSubmatch(string(b))
+	if match == nil {
+		return ""
+	}
+	return strings.ToUpper(match[1])
 }
 
 // the files under one root, sorted, the build's exclusions left out
@@ -209,7 +263,7 @@ func storeBuild() *storeIndex {
 						home = chain[:len(chain)-1]
 					}
 					ix.set(key, &storeEntry{Type: t.Type, Name: objectName, File: file, Root: root.Path,
-						Writable: root.Writable, Library: root.Library, Imported: root.Imported,
+						Writable: root.Writable, Library: root.Library, Imported: root.Imported, Overlay: root.Overlay,
 						Package: home[len(home)-1], Packages: home})
 				}
 				break
@@ -360,6 +414,33 @@ func storeDigest(file string) string {
 	}
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
+}
+
+func storeActiveBytes(file string) ([]byte, bool) {
+	if storeState.cfg == nil || storeState.cfg.Active == nil {
+		return nil, false
+	}
+	path, ok := storeState.cfg.Active[file]
+	if !ok {
+		return nil, false
+	}
+	b, err := os.ReadFile(filepath.Join(storeState.root, filepath.FromSlash(path)))
+	if err != nil {
+		return nil, false
+	}
+	if digest, ok := storeState.cfg.Built[file]; ok && len(digest) == 64 && storeDigestBytes(b) == digest {
+		return b, true
+	}
+	return nil, false
+}
+
+func storeDigestBytes(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
+
+func storeWritable(e *storeEntry) bool {
+	return e.Writable || e.Overlay != ""
 }
 
 var storeSourceTypes = map[string]bool{

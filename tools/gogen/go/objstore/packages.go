@@ -12,7 +12,7 @@ import (
 type storePackage struct {
 	Name        string
 	Parent      string
-	Description string
+	Description *string
 	Library     bool
 	Objects     int
 	Subpackages []string
@@ -23,7 +23,7 @@ type storePackage struct {
 type storePackageJSON struct {
 	Name        string   `json:"name"`
 	Parent      *string  `json:"parent,omitempty"`
-	Description string   `json:"description,omitempty"`
+	Description *string  `json:"description,omitempty"`
 	Library     bool     `json:"library"`
 	Subpackages []string `json:"subpackages"`
 }
@@ -44,7 +44,7 @@ type storePackageAnswerJSON struct {
 	Found       bool                  `json:"found"`
 	Name        string                `json:"name"`
 	Parent      *string               `json:"parent,omitempty"`
-	Description string                `json:"description,omitempty"`
+	Description *string               `json:"description,omitempty"`
 	Library     bool                  `json:"library"`
 	Subpackages []storeSubpackageJSON `json:"subpackages"`
 	Objects     []storeObjectJSON     `json:"objects"`
@@ -125,11 +125,12 @@ func storePackages(ix *storeIndex) []*storePackage {
 	}
 	out := make([]*storePackage, 0, len(by))
 	for _, p := range by {
-		sort.Slice(p.Subpackages, func(i, j int) bool { return collateLess(p.Subpackages[i], p.Subpackages[j]) })
-		if p.devc != nil {
+		sort.Slice(p.Subpackages, func(i, j int) bool { return p.Subpackages[i] < p.Subpackages[j] })
+		if p.devc != nil && !p.devc.Synthetic {
 			p.Description = storePackageText(p.devc)
 		} else if p.Name == "$TMP" {
-			p.Description = "Temporary Objects (never transported!)"
+			description := "Temporary Objects (never transported!)"
+			p.Description = &description
 		}
 		out = append(out, p)
 	}
@@ -137,22 +138,23 @@ func storePackages(ix *storeIndex) []*storePackage {
 	return out
 }
 
-func storePackageText(e *storeEntry) string {
+func storePackageText(e *storeEntry) *string {
 	b, err := os.ReadFile(filepath.Join(storeState.root, e.File))
 	if err != nil {
-		return ""
+		return nil
 	}
 	match := storeCText.FindStringSubmatch(string(b))
 	if match == nil {
-		return ""
+		return nil
 	}
-	return match[1]
+	return &match[1]
 }
 
 func storePackageRows(ix *storeIndex, name, mode, user string) (string, error) {
 	packages := storePackages(ix)
 	if name == "" {
-		p := &storePackage{Name: "", Description: "the packages of this system"}
+		description := "the packages of this system"
+		p := &storePackage{Name: "", Description: &description}
 		for _, child := range packages {
 			if child.Parent == "" {
 				p.Subpackages = append(p.Subpackages, child.Name)
@@ -198,14 +200,18 @@ func storePackageRows(ix *storeIndex, name, mode, user string) (string, error) {
 func storeSubanswers(packages []*storePackage, names []string) []storeSubpackageJSON {
 	out := make([]storeSubpackageJSON, 0, len(names))
 	for _, name := range names {
-		description := ""
+		var description *string
 		for _, p := range packages {
 			if p.Name == name {
 				description = p.Description
 				break
 			}
 		}
-		out = append(out, storeSubpackageJSON{Name: name, Description: description})
+		text := ""
+		if description != nil {
+			text = *description
+		}
+		out = append(out, storeSubpackageJSON{Name: name, Description: text})
 	}
 	return out
 }
@@ -247,10 +253,10 @@ func storeLocalView(ix *storeIndex, packages []*storePackage, p *storePackage, u
 				}
 			}
 		}
-		sort.Slice(out.Subpackages, func(i, j int) bool { return collateLess(out.Subpackages[i], out.Subpackages[j]) })
 	}
-	if out.Description == "" {
-		out.Description = "Local objects"
+	if out.Description == nil {
+		description := "Local objects"
+		out.Description = &description
 	}
 	return &out
 }
@@ -270,7 +276,8 @@ func storeObject(ix *storeIndex, typ, name string) (string, error) {
 		return storeJSON(storeObjectAnswerJSON{Found: false})
 	}
 	version, changed := storeStateOf(e, e.File)
-	value := storeObjectAnswerJSON{Found: true, Type: e.Type, Name: e.Name, Writable: &e.Writable,
+	writable := storeWritable(e)
+	value := storeObjectAnswerJSON{Found: true, Type: e.Type, Name: e.Name, Writable: &writable,
 		Package: e.Package, Packages: e.Packages, Version: version, ChangedAt: changed, ChangedBy: e.ChangedBy}
 	includes := []string{}
 	value.Includes = &includes
@@ -337,7 +344,7 @@ func contains(values []string, wanted string) bool {
 type storePackagesJSONRow struct {
 	Name        string   `json:"name"`
 	Parent      *string  `json:"parent,omitempty"`
-	Description string   `json:"description,omitempty"`
+	Description *string  `json:"description,omitempty"`
 	Library     bool     `json:"library"`
 	Subpackages []string `json:"subpackages"`
 }
@@ -381,7 +388,11 @@ func storePackagesLines(ix *storeIndex, format string) string {
 		if p.Library {
 			library = "X"
 		}
-		add("P", p.Name, p.Parent, p.Description, library, root)
+		description := ""
+		if p.Description != nil {
+			description = *p.Description
+		}
+		add("P", p.Name, p.Parent, description, library, root)
 		if format == "vfs-lines" {
 			for _, child := range p.Subpackages {
 				add("C", p.Name, child)

@@ -154,6 +154,12 @@ const statusODataPath = odataBase + "/ZOSD_STATUS_SRV"
 // odataBase is where test/start.mjs mounts the OData front.
 const odataBase = "/sap/opu/odata/sap"
 
+type route struct {
+	prefix string
+	exact  bool
+	h      http.HandlerFunc
+}
+
 // the ABAP frames of a dump, innermost first (as gateway.mjs prints them)
 func abapStack(r any) []string {
 	stack := string(debug.Stack())
@@ -527,14 +533,9 @@ func main() {
 	}
 
 	webapp := filepath.Join(*root, "webapp")
-	type route struct {
-		prefix string
-		exact  bool
-		h      http.HandlerFunc
-	}
 	var routes []route
 	if adtEnabled(*adtFlag, os.Getenv) {
-		routes = append(routes, route{"/sap/bc/adt/", false, icfHandler("ZCL_OSD_ADT_HANDLER", "/sap/bc/adt", adtDump)})
+		routes = append(routes, route{"/sap/bc/adt", false, icfHandler("ZCL_OSD_ADT_HANDLER", "/sap/bc/adt", adtDump)})
 	}
 	// the port's front door is the launchpad when there is one (test/start.mjs root)
 	routes = append(routes, route{"/", true, func(w http.ResponseWriter, r *http.Request) {
@@ -611,33 +612,7 @@ func main() {
 	sort.SliceStable(routes, func(i, j int) bool { return len(routes[i].prefix) > len(routes[j].prefix) })
 
 	upgrade := channelRoutes()
-	mux := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if upgrade(w, r) {
-			return
-		}
-		p := r.URL.EscapedPath()
-		for _, rt := range routes {
-			switch {
-			case rt.exact:
-				if strings.EqualFold(p, rt.prefix) || strings.EqualFold(p, rt.prefix+"/") {
-					rt.h(w, r)
-					return
-				}
-			case strings.HasSuffix(rt.prefix, "/"):
-				if hasPrefixFold(p, rt.prefix) {
-					rt.h(w, r)
-					return
-				}
-			default:
-				// a mount: the path itself or anything below it
-				if strings.EqualFold(p, rt.prefix) || hasPrefixFold(p, rt.prefix+"/") {
-					rt.h(w, r)
-					return
-				}
-			}
-		}
-		notFound(w, r)
-	})
+	mux := routeMatcher(routes, notFound, upgrade)
 
 	for _, svc := range icfServices {
 		log.Printf("ICF service  on http://localhost:%d%s  (%s)", *port, svc.Path, svc.Handler)
@@ -686,6 +661,36 @@ func main() {
 		log.Printf("Listening on https://localhost:%d/  (bound to %s)", *tlsPort, osdbind.Describe(tlns))
 	}
 	log.Fatal(server.Serve(ln))
+}
+
+func routeMatcher(routes []route, notFound http.HandlerFunc, upgrade func(http.ResponseWriter, *http.Request) bool) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if upgrade != nil && upgrade(w, r) {
+			return
+		}
+		p := r.URL.EscapedPath()
+		for _, rt := range routes {
+			switch {
+			case rt.exact:
+				if strings.EqualFold(p, rt.prefix) || strings.EqualFold(p, rt.prefix+"/") {
+					rt.h(w, r)
+					return
+				}
+			case strings.HasSuffix(rt.prefix, "/"):
+				if hasPrefixFold(p, rt.prefix) {
+					rt.h(w, r)
+					return
+				}
+			default:
+				// a mount: the path itself or anything below it
+				if strings.EqualFold(p, rt.prefix) || hasPrefixFold(p, rt.prefix+"/") {
+					rt.h(w, r)
+					return
+				}
+			}
+		}
+		notFound(w, r)
+	})
 }
 
 func fileExists(p string) bool {

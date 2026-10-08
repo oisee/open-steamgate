@@ -3,9 +3,9 @@ package objstore
 import (
 	"encoding/json"
 	"os"
+	osexec "os/exec"
 	"path/filepath"
 	"reflect"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -65,6 +65,9 @@ var goldenCases = []struct {
 }{
 	{"object-class", map[string]string{"IV_COMMAND": "OBJECT", "IV_TYPE": "CLAS", "IV_NAME": "ZCLASS"}},
 	{"object-tmp", map[string]string{"IV_COMMAND": "OBJECT", "IV_TYPE": "PROG", "IV_NAME": "ZTMP_PROG"}},
+	{"object-overlay", map[string]string{"IV_COMMAND": "OBJECT", "IV_TYPE": "PROG", "IV_NAME": "ZARCHIVE"}},
+	{"object-overlay-write", map[string]string{"IV_COMMAND": "OBJECT", "IV_TYPE": "PROG", "IV_NAME": "ZOVERLAY"}},
+	{"object-full", map[string]string{"IV_COMMAND": "OBJECT", "IV_TYPE": "PROG", "IV_NAME": "ZFULLSUB"}},
 	{"object-library", map[string]string{"IV_COMMAND": "OBJECT", "IV_TYPE": "PROG", "IV_NAME": "ZLIBRARY"}},
 	{"object-missing", map[string]string{"IV_COMMAND": "OBJECT", "IV_TYPE": "PROG", "IV_NAME": "ZMISSING"}},
 	{"package-raw", map[string]string{"IV_COMMAND": "PACKAGE", "IV_JSON": `{"mode":"raw","name":"$STG"}`}},
@@ -77,14 +80,25 @@ var goldenCases = []struct {
 	{"search-lines", map[string]string{"IV_COMMAND": "SEARCH", "IV_JSON": `{"seed":"Z","type":"PROG","format":"lines"}`}},
 	{"read-main", map[string]string{"IV_COMMAND": "READ", "IV_TYPE": "CLAS", "IV_NAME": "ZCLASS"}},
 	{"read-include", map[string]string{"IV_COMMAND": "READ", "IV_TYPE": "CLAS", "IV_NAME": "ZCLASS", "IV_INCLUDE": "definitions"}},
+	{"read-zero-include", map[string]string{"IV_COMMAND": "READ", "IV_TYPE": "CLAS", "IV_NAME": "ZEMPTY", "IV_INCLUDE": "definitions"}},
+	{"read-active-main", map[string]string{"IV_COMMAND": "READ", "IV_TYPE": "PROG", "IV_NAME": "ZPROGRAM", "IV_REVISION": "active"}},
+	{"read-active-include", map[string]string{"IV_COMMAND": "READ", "IV_TYPE": "CLAS", "IV_NAME": "ZCLASS", "IV_INCLUDE": "definitions", "IV_REVISION": "active"}},
 	{"read-missing-include", map[string]string{"IV_COMMAND": "READ", "IV_TYPE": "CLAS", "IV_NAME": "ZCLASS", "IV_INCLUDE": "macros"}},
 	{"read-library", map[string]string{"IV_COMMAND": "READ", "IV_TYPE": "PROG", "IV_NAME": "ZLIBRARY"}},
 	{"history-main", map[string]string{"IV_COMMAND": "HISTORY", "IV_TYPE": "PROG", "IV_NAME": "ZPROGRAM"}},
+	{"history-rename", map[string]string{"IV_COMMAND": "HISTORY", "IV_TYPE": "PROG", "IV_NAME": "Z_NEW"}},
+	{"history-ignored", map[string]string{"IV_COMMAND": "HISTORY", "IV_TYPE": "PROG", "IV_NAME": "ZIGNORED"}},
 	{"history-include", map[string]string{"IV_COMMAND": "HISTORY", "IV_TYPE": "CLAS", "IV_NAME": "ZCLASS", "IV_INCLUDE": "macros"}},
 }
 
 func TestStoreDestinationGoldens(t *testing.T) {
-	root := filepath.Join("..", "..", "..", "..", "test", "fixtures", "osgo-store")
+	t.Setenv("OSD_LOCAL_PACKAGES", "$STG_A,$STG__,$STG")
+	script := filepath.Join("..", "..", "..", "osgo-store-fixture.mjs")
+	output, err := osexec.Command("node", script).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := strings.TrimSpace(string(output))
 	config, err := os.ReadFile(filepath.Join(root, "store.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -93,7 +107,7 @@ func TestStoreDestinationGoldens(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer SetStore("", nil, "")
-	goldenBytes, err := os.ReadFile(filepath.Join(root, "destination-golden.json"))
+	goldenBytes, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "test", "fixtures", "osgo-store", "destination-golden.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +115,6 @@ func TestStoreDestinationGoldens(t *testing.T) {
 	if err := json.Unmarshal(goldenBytes, &raw); err != nil {
 		t.Fatal(err)
 	}
-	timeLike := regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$`)
 	for _, test := range goldenCases {
 		t.Run(test.name, func(t *testing.T) {
 			input := map[string]*string{}
@@ -111,15 +124,8 @@ func TestStoreDestinationGoldens(t *testing.T) {
 			}
 			answer := Call(input)
 			answer.Scalars["EV_MS"] = "0"
-			for key, value := range answer.Scalars {
-				if timeLike.MatchString(value) {
-					answer.Scalars[key] = "<time>"
-				}
-			}
-			for i, row := range answer.Objects {
-				if timeLike.MatchString(row.CHANGED_AT) {
-					answer.Objects[i].CHANGED_AT = "<time>"
-				}
+			for i := range answer.Revisions {
+				answer.Revisions[i].path = ""
 			}
 			want := goldenAnswer{raw[test.name].Scalars, raw[test.name].Objects,
 				raw[test.name].Issues, raw[test.name].Types, raw[test.name].Revisions}
@@ -146,6 +152,55 @@ func TestStoreHistoryStateUsesGitStatus(t *testing.T) {
 	}
 	if _, err := time.Parse(time.RFC3339, strings.Replace(changed, "Z", "+00:00", 1)); err != nil && changed != "1970-01-01T00:00:00.000Z" {
 		t.Fatalf("changed time: %q (%v)", changed, err)
+	}
+}
+
+func TestStoreHistoryStateUnbornAndIgnored(t *testing.T) {
+	root := t.TempDir()
+	os.WriteFile(filepath.Join(root, ".gitignore"), []byte("ignored.prog.abap\n"), 0o644)
+	os.MkdirAll(filepath.Join(root, "src"), 0o755)
+	tracked := filepath.Join(root, "src", "tracked.prog.abap")
+	ignored := filepath.Join(root, "src", "ignored.prog.abap")
+	os.WriteFile(tracked, []byte("tracked\n"), 0o644)
+	os.WriteFile(ignored, []byte("ignored\n"), 0o644)
+	fixed := time.Date(2026, 10, 1, 12, 34, 56, 789000000, time.UTC)
+	os.Chtimes(tracked, fixed, fixed)
+	os.Chtimes(ignored, fixed, fixed)
+	for _, args := range [][]string{{"init", "-q", "-b", "main"}, {"config", "user.name", "Test Author"},
+		{"config", "user.email", "test@example.invalid"}, {"add", "src/tracked.prog.abap"}} {
+		if _, err := storeGit(root, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	state, changed := storeHistoryState(root, "src/tracked.prog.abap")
+	if state != "modified" || changed != "2026-10-01T12:34:56.789Z" {
+		t.Fatalf("unborn repository: %q %q", state, changed)
+	}
+	state, changed = storeHistoryState(root, "src/ignored.prog.abap")
+	if state != "modified" || changed != "2026-10-01T12:34:56.789Z" {
+		t.Fatalf("ignored file: %q %q", state, changed)
+	}
+}
+
+func TestStoreReadExistingIncludeErrorPropagates(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads files regardless of mode")
+	}
+	root := t.TempDir()
+	os.MkdirAll(filepath.Join(root, "src"), 0o755)
+	os.WriteFile(filepath.Join(root, "abap_transpile.json"), []byte("{}\n"), 0o644)
+	os.WriteFile(filepath.Join(root, "src", "zclass.clas.abap"), []byte("CLASS zclass.\nENDCLASS.\n"), 0o644)
+	include := filepath.Join(root, "src", "zclass.clas.locals_def.abap")
+	os.WriteFile(include, []byte("definitions\n"), 0o644)
+	os.Chmod(include, 0o000)
+	defer SetStore("", nil, "")
+	if err := SetStore(root, []byte(`{"roots":[{"path":"src","writable":true,"library":false}]}`), ""); err != nil {
+		t.Fatal(err)
+	}
+	str := func(value string) *string { return &value }
+	answer := Call(map[string]*string{"IV_COMMAND": str("READ"), "IV_TYPE": str("CLAS"), "IV_NAME": str("ZCLASS"), "IV_INCLUDE": str("definitions")})
+	if answer.Scalars["EV_ERROR"] == "" || !strings.Contains(answer.Scalars["EV_ERROR"], "zclass.clas.locals_def.abap") {
+		t.Fatalf("existing include read error was swallowed: %v", answer.Scalars)
 	}
 }
 

@@ -11,12 +11,14 @@
 import {createHash} from "node:crypto";
 import {existsSync, readFileSync} from "node:fs";
 import {join} from "node:path";
+import {sourceSnapshotPath} from "../osd-source-snapshot.mjs";
 
 export async function storeConfig(root, options = {}) {
   const {ObjectStore, exclusionsOf, INCLUDES} = await import(options.storeModule ?? `${root}/tools/osd-store.mjs`);
   const store = options.store ?? new ObjectStore({root});
   const roots = store.roots.map((r) => ({path: r.path, writable: r.writable !== false, library: false,
-    imported: r.imported === true, package: r.package ?? ""}));
+    imported: r.imported === true, package: r.package ?? "", tmp: r.tmp === true, abapgit: r.abapgit,
+    overlay: r.overlay ?? "", overlayOf: r.overlayOf ?? ""}));
   const libs = store.libs.map((r) => ({path: r.path, writable: false, library: true, imported: false, package: "",
     files: r.files ?? []}));
   const excluded = (options.excluded ?? store.excluded ?? exclusionsOf(root)).map((re) => re.source);
@@ -33,5 +35,11 @@ export async function storeConfig(root, options = {}) {
       if (existsSync(join(root, file))) built[file] = createHash("sha256").update(readFileSync(join(root, file))).digest("hex");
     }
   }
-  return {roots, libs, excluded, built};
+  const active = {};
+  const {liveHash} = await import("../osd-build.mjs");
+  const generation = join(root, "build", "by-input", liveHash(root));
+  if (existsSync(join(generation, "source", ".complete"))) {
+    for (const file of Object.keys(built)) active[file] = join(generation, "source", sourceSnapshotPath(file));
+  }
+  return {roots, libs, excluded, built, active};
 }
