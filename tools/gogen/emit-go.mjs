@@ -2258,6 +2258,7 @@ function conv(e, ctx) {
     case "x2i": case "x2i8": return `${to === "i" ? "int32" : "int64"}(${helperFn("intbytes.FromX")}(${x}, ${to === "i" ? 4 : 8}))`;
     case "xs2x": return `abap.XFit(${x}, ${e.to.len})`;
     case "c2x": return e.to.k === "x" ? `abap.XFit(abap.CToX(${x}), ${e.to.len})` : `abap.CToX(${x})`;
+    case "t2i": return `abap.TToI(${x})`;
     case "d2i": return `abap.DToI(${x})`;
     case "c2n":
       if (to === "f") return `abap.ParseF(${x})`;

@@ -55,6 +55,22 @@ func DToI(v string) int32 {
 	return int32(jdn - 1721424)
 }
 
+// TToI is a time operand's seconds since midnight.
+func TToI(v string) int32 {
+	if len(v) != 6 {
+		return 0
+	}
+	n := int32(0)
+	for i, factor := range []int32{3600, 60, 1} {
+		a, b := v[2*i], v[2*i+1]
+		if a < '0' || a > '9' || b < '0' || b > '9' {
+			return 0
+		}
+		n += (int32(a-'0')*10 + int32(b-'0')) * factor
+	}
+	return n
+}
+
 // SplitN is SPLIT v AT sep INTO n fields, measured on A4H: the pieces at
 // each separator, the last field taking the rest after its separator, a
 // field without a piece empty.

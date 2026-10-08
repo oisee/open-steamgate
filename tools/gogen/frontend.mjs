@@ -3778,10 +3778,9 @@ function source(node, ctx, outer, hint = outer) {
   // 2026-09-24, ZCL_GOGEN_T_XARITH: 'EDB88320' DIV 2 is -153337456, x1 FF
   // + 1 is 256, x8 ...000000FF is 255, x1 0A + p 1.5 is 11.50 in p, 07 / 2
   // into i is 4); arith converts such a leaf to i first
-  const leaves = leafTypes(node, ctx).map((t) => (t.k === "x" || t.k === "xstring" ? I : t));
-  // a character target (c, string) does not take part: the calculation
-  // type of `s = i + 1` is not measured, so it is refused below unless the
-  // operands decide it (a p or character operand: p, an f: f)
+  const leaves = leafTypes(node, ctx).map((t) => (["x", "xstring", "d", "t"].includes(t.k) ? I : t));
+  // A character target does not take part: compute from the operands,
+  // then MOVE the result (JS oracle: adt-cases calculation probe).
   const charTarget = target !== undefined && charlike(target);
   const types = [...leaves, ...(target === undefined || charTarget ? [] : [target])];
   // ** computes in f when the operands are integers (measured on A4H:
@@ -3797,7 +3796,6 @@ function source(node, ctx, outer, hint = outer) {
     if (odd) throw new Unsupported(`calculation type p with a ${odd.k} operand: ${node.concatTokens()}`);
     return arith(node, ctx, P31);
   }
-  if (charTarget) throw new Unsupported(`calculation type of ${node.concatTokens()} into a character field: not measured`);
   if (types.some((t) => t.k === "int8")) return arith(node, ctx, INT8);
   // a d operand counts its days as an i (measured on A4H: ( d / 7 ) * 7
   // into i rounds in between, so the calculation type is i, not p); a d
@@ -3908,8 +3906,9 @@ function arith(node, ctx, calc, hint) {
     if (isExpr(item.node, Expressions.Source)) return arith(item.node, ctx, t);
     let v = sourceOperand(item.node, ctx, t === undefined ? item.hint : t);
     if (item.comps) v = componentsOf(v, item.comps, ctx);
-    // an x operand of arithmetic that is not a bit operation: through i
-    if (t !== undefined && (v.type.k === "x" || v.type.k === "xstring") && t.k !== "x" && t.k !== "xstring" && t.k !== "i") v = convert(v, I);
+    // Byte, date and time operands enter arithmetic through their integer
+    // value (dates in days, times in seconds), before the calculation type.
+    if (t !== undefined && ["x", "xstring", "d", "t"].includes(v.type.k) && !["x", "xstring", "i"].includes(t.k)) v = convert(v, I);
     return t === undefined ? v : convert(v, t);
   };
   let expr;
@@ -6367,6 +6366,9 @@ export function convert(expr, to) {
   // before 15821015 (15821004 is 577736, 15821015 is 577737), an invalid
   // date is 0 (abap.DToI)
   if (to.k === "i" && from.k === "d") return ok("d2i");
+  if (to.k === "i" && from.k === "t") return ok("t2i");
+  // Reuse the existing signed, right-aligned packed MOVE formatting.
+  if (to.k === "c" && from.k === "i") return convert(convert(expr, {k: "p", len: 8, dec: 0}), to);
   // d / t into characters: the eight / six digits as they are (both are
   // held as their digits already); into a c they are cut or padded as any
   // characters are
