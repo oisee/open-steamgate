@@ -44,9 +44,20 @@ func storeInputs(args map[string]Data) map[string]*string {
 	return in
 }
 
+// StoreHook lets a host answer a call for the calling step first (step is
+// the caller's *Session); handled=false, or no hook, is the store's answer.
+var StoreHook func(step any, in map[string]*string) (StoreAnswer, bool)
+
 // ZOSD_STORE adapts DESTINATION 'STORE': inputs in, scalars and tables out.
 func ZOSD_STORE(s *Session, args map[string]Data) {
-	a := StoreCall(storeInputs(args))
+	in := storeInputs(args)
+	a, handled := StoreAnswer{}, false
+	if StoreHook != nil {
+		a, handled = StoreHook(s, in)
+	}
+	if !handled {
+		a = StoreCall(in)
+	}
 	// The backend supplies EV_JSON and EV_STATE; the adapter passes them through.
 	for k, v := range a.Scalars {
 		if d, ok := fmArg(args, k); ok {
