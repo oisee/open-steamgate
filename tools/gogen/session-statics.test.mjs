@@ -43,6 +43,9 @@ for (const layered of bench ? [false] : [false, true]) test(`generated class sta
     if (bench) process.stdout.write(run.stdout);
     assert.equal(run.error, undefined);
     assert.equal(run.status, 0, run.stderr + run.stdout);
-    assert.equal(run.stderr, "");
+    // a clean runner downloads the module's dependencies first ("go:
+    // downloading ..."); anything else on stderr is a finding (a data race
+    // report goes there)
+    assert.equal(run.stderr.split("\n").filter((l) => l && !/^go: downloading /.test(l)).join("\n"), "");
   } finally { rmSync(dir, {recursive: true, force: true}); }
 });
