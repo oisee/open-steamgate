@@ -143,7 +143,11 @@ export function compileProgram({folders, objects, tolerant = false, skip = () =>
   }
   REG = reg;
   prepareSession(session, reg);
-  const diagnostics = syntaxDiagnostics(reg, (fn) => wanted.includes(objName(fn)), objName, session);
+  // abaplint's RAISE syntax checker only accepts ObjectReferenceType, not
+  // its generic REF TO object sibling. The dynamic raise path below checks
+  // the actual registered object; retain every other syntax diagnostic.
+  const diagnostics = syntaxDiagnostics(reg, (fn) => wanted.includes(objName(fn)), objName, session)
+    .filter((d) => !d.message.endsWith("RAISE EXCEPTION, must be object reference, got GenericObjectReferenceType"));
   // Tolerant surveys leave broken objects out, retaining their diagnostics.
   if (diagnostics.length && !tolerant) throw new Error(diagnostics.map((d) => d.message).join("\n"));
   const broken = new Set(diagnostics.map((d) => d.object.toLowerCase()));
@@ -5515,7 +5519,7 @@ function raiseException(node, ctx, text) {
   const src = node.findDirectExpression(Expressions.Source) ?? node.findDirectExpression(Expressions.SimpleSource2);
   if (!src) throw new Unsupported(`RAISE EXCEPTION form: ${text.slice(0, 80)}`);
   const value = source(src, ctx);
-  if (value.type.k !== "ref" || value.type.name === "OBJECT") throw new Unsupported(`RAISE EXCEPTION of a ${value.type.k === "ref" ? "REF TO object" : value.type.k}`);
+  if (!["ref", "exc"].includes(value.type.k)) throw new Unsupported(`RAISE EXCEPTION of a ${value.type.k}`);
   return {s: "raise", value, cls: null};
 }
 
@@ -6609,7 +6613,7 @@ function compare(node, ctx) {
       const r = {c: "data_bound", x: v};
       return /\bIS\s+NOT\s+BOUND\b/.test(text) !== not ? {c: "not", x: r} : r;
     }
-    if (v.type.k !== "ref") throw new Unsupported(`IS BOUND of a ${v.type.k}`);
+    if (!["ref", "exc"].includes(v.type.k)) throw new Unsupported(`IS BOUND of a ${v.type.k}`);
     const r = {c: "initial", x: v};
     return /\bIS\s+NOT\s+BOUND\b/.test(text) !== not ? r : {c: "not", x: r};
   }
@@ -6823,7 +6827,7 @@ function compareValues(op, l, r, ctx) {
   // are not measured
   if (l.type.k === "n" && r.type.k === "n" && l.type.len === r.type.len) return {c: "cmp", op, l: convert(l, S), r: convert(r, S), type: S};
   // two object references, = and <>: the same object or not (ultra/json)
-  if (l.type.k === "ref" && r.type.k === "ref" && (op === "=" || op === "<>")) return {c: "refeq", op, l, r};
+  if (["ref", "exc"].includes(l.type.k) && ["ref", "exc"].includes(r.type.k) && (op === "=" || op === "<>")) return {c: "refeq", op, l, r};
   // parity-wave1: a generic operand against a c, a string or another
   // generic operand (A4H ZCL_GOGEN_T_GENCMP): holding a c or a string at
   // run time, the typed rule above, both read as strings and a c without

@@ -92,6 +92,12 @@ func Raise(obj any, class string) *Raised {
 	if obj == nil || (reflect.ValueOf(obj).Kind() == reflect.Pointer && reflect.ValueOf(obj).IsNil()) {
 		panic(ArithmeticError{Class: "OBJECTS_OBJREF_NOT_ASSIGNED", Op: "RAISE EXCEPTION of an initial reference"})
 	}
+	if e, ok := obj.(*Exception); ok {
+		if e.Obj == nil {
+			panic(ArithmeticError{Class: e.Class, Op: e.Op})
+		}
+		return &Raised{Obj: e.Obj, Class: e.Class}
+	}
 	if class == "" {
 		class = ClassOf(obj)
 		if class == "" {
