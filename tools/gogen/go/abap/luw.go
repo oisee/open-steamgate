@@ -230,14 +230,21 @@ func (s *Session) YieldSleep(d time.Duration) {
 		time.Sleep(d)
 		return
 	}
-	CommitWork(s)
 	if !s.HoldsWorkProcess {
+		CommitWork(s)
 		time.Sleep(d)
 		return
 	}
+	// End the database step before handing the work process to another
+	// session. COMMIT WORK alone immediately opens another transaction.
+	end(true)
+	s.Sy.Subrc = 0
+	s.HoldsWorkProcess = false
 	WorkProcess.Unlock()
 	time.Sleep(d)
 	WorkProcess.Lock()
+	s.HoldsWorkProcess = true
+	begin()
 }
 
 // BeginUnitLUW opens the LUW a unit run works in, which is how the Node
