@@ -473,15 +473,30 @@ function aliasTarget(reg, owner, name) {
  * filled in at each call. Keyed by the class that declares the method, so a
  * redefinition and the class interface keep one signature.
  */
+// per parsed file, the methods that ask IS SUPPLIED: a closure build calls
+// suppliedParams once a round over the same registry (abapiti's Registry
+// set, 2110 classes: 10 s of a 104 s build before this)
+const suppliedOfFile = new WeakMap();
+function suppliedMethods(file) {
+  let methods = suppliedOfFile.get(file);
+  if (methods) return methods;
+  methods = [];
+  // the parsed structure, not the raw text: a macro of another include can
+  // bring the IS SUPPLIED in (#694 critic)
+  for (const m of file.getStructure()?.findAllStructures(Structures.Method) ?? []) {
+    const found = [...m.concatTokens().matchAll(/(\w+)\s+IS\s+(?:NOT\s+)?SUPPLIED/gi)].map((x) => upper(x[1]));
+    if (found.length) methods.push({name: upper(m.findFirstExpression(Expressions.MethodName).concatTokens()), found});
+  }
+  suppliedOfFile.set(file, methods);
+  return methods;
+}
+
 function suppliedParams(reg, wanted) {
   const out = new Map();
   for (const obj of reg.getObjects()) {
     if (!(obj instanceof abaplint.Objects.Class) || !wanted.has(upper(obj.getName()))) continue;
-    const st = obj.getMainABAPFile()?.getStructure();
-    for (const m of st?.findAllStructures(Structures.Method) ?? []) {
-      const found = [...m.concatTokens().matchAll(/(\w+)\s+IS\s+(?:NOT\s+)?SUPPLIED/gi)].map((x) => upper(x[1]));
-      if (found.length === 0) continue;
-      const name = upper(m.findFirstExpression(Expressions.MethodName).concatTokens());
+    const file = obj.getMainABAPFile();
+    for (const {name, found} of file ? suppliedMethods(file) : []) {
       const key = name.includes("~") ? `${name.split("~")[0]}=>${name.split("~")[1]}`
         : `${declaringClass(reg, upper(obj.getName()), name, "method") ?? upper(obj.getName())}=>${name}`;
       out.set(key, new Set([...(out.get(key) ?? []), ...found]));
