@@ -2217,26 +2217,29 @@ function structure(node, ctx) {
  * "Created" is the primary index as long as rows are only added at the end,
  * so the statements that would put a row elsewhere or free a slot (INSERT
  * ... INDEX, SORT, DELETE) are refused on a table with a non-unique sorted
- * key (keyGuard). A hashed secondary key is not in the subset. The order is
+ * key (keyGuard). A hashed secondary key (always unique) is read and
+ * deleted by its value only (hashedOk: READ ... WITH KEY k COMPONENTS,
+ * DELETE TABLE ... WITH TABLE KEY k COMPONENTS); a LOOP USING it is not in
+ * the subset, since its order is not measured. The order is
  * computed where it is used (abap.KeyOrder), never cached, so a key changed
  * in place is always seen.
  *
  * Node's runtime sorts a copy stably, so its duplicates come oldest first:
  * ANORMALIES secondary-key-duplicates. The Go and JS emitters follow A4H.
  */
-function secondaryKey(tableType, keyName, ctx, text) {
+function secondaryKey(tableType, keyName, ctx, text, hashedOk = false) {
   const name = upper(keyName);
   if (name === "PRIMARY_KEY") return null;
   const k = (tableType.secondary ?? []).find((x) => x.name === name);
   if (k === undefined) throw new Unsupported(`key ${name}: not a secondary key of the table (${text})`);
-  if (!k.sorted) throw new Unsupported(`key ${name}: a hashed secondary key (${text})`);
+  if (!k.sorted && !hashedOk) throw new Unsupported(`key ${name}: a hashed secondary key (${text})`);
   if (tableType.row.k !== "struct") throw new Unsupported(`key ${name} over rows that are not structures`);
   const comps = k.comps.map((c) => {
     const f = fieldOf(ctx, tableType.row, c, text);
     if (!["string", "c", "n", "d", "t", "i", "int8", "f"].includes(f.type.k)) throw new Unsupported(`key ${name}: component ${c} of type ${f.type.k}`);
     return {name: f.name, type: f.type, num: numeric(f.type)};
   });
-  return {name, unique: k.unique, comps};
+  return {name, unique: k.unique, comps, ...(k.sorted ? {} : {hashed: true})};
 }
 
 /** statements that add a row anywhere but the end, or remove one, on a table with a non-unique sorted secondary key */
@@ -2680,8 +2683,10 @@ function statement(node, ctx) {
     // primary-order search until ultra/json, silently
     const named = /\bWITH\s+(?:TABLE\s+)?KEY\s+([\w~]+)\s+COMPONENTS\b/i.exec(text);
     if (named !== null) {
-      const key = secondaryKey(table.type, named[1], ctx, text);
+      const key = secondaryKey(table.type, named[1], ctx, text, true);
       if (key === null) throw new Unsupported(`READ TABLE WITH KEY primary_key COMPONENTS: ${text}`);
+      // read_key refuses the same in emit-go; the hashed path does not convert the row
+      if (key.hashed && into?.conv) throw new Unsupported(`READ TABLE WITH KEY ${key.name} INTO a work area of another type (${text})`);
       const given = keys.map((x) => x.name);
       if (keys.some((x) => x.line) || given.length !== key.comps.length || new Set(given).size !== given.length || !key.comps.every((c) => given.includes(c.name))) {
         throw new Unsupported(`READ TABLE WITH KEY ${key.name}: not every component of the key once (${text})`);
@@ -2814,6 +2819,30 @@ function statement(node, ctx) {
     if (!cc) throw new Unsupported(`DELETE form: ${text}`);
     keyGuard(table.type, "DELETE", ctx);
     return {s: "delete_where", table, where: whereOf(cc, table.type.row, ctx, text)};
+  }
+  // DELETE TABLE itab WITH TABLE KEY k COMPONENTS c = v ...: the row a unique
+  // secondary key holds the values in, every component of the key given once
+  // (abapiti's maps, a hashed key; secondaryKey)
+  const namedDelete = /^DELETE\s+TABLE\s+\S+\s+WITH\s+TABLE\s+KEY\s+([\w~]+)\s+COMPONENTS\b/i.exec(text);
+  if (isStmt(node, Statements.DeleteInternal) && namedDelete) {
+    const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    if (table.type.k !== "table") throw new Unsupported("DELETE from a non-table");
+    const key = secondaryKey(table.type, namedDelete[1], ctx, text, true);
+    if (key === null || !key.unique) throw new Unsupported(`DELETE TABLE WITH TABLE KEY ${upper(namedDelete[1])}: not a unique secondary key (${text})`);
+    const given = node.findDirectExpressions(Expressions.ComponentCompare).map((cc) => {
+      const kids = cc.getChildren();
+      if (kids.length !== 3 || kids[1].concatTokens() !== "=") throw new Unsupported(`DELETE TABLE key form: ${cc.concatTokens()}`);
+      const f = fieldOf(ctx, table.type.row, kids[0].concatTokens(), text);
+      return {name: f.name, value: convert(source(kids[2], ctx, f.type), f.type)};
+    });
+    const names = given.map((x) => x.name);
+    if (names.length !== key.comps.length || new Set(names).size !== names.length || !key.comps.every((c) => names.includes(c.name))) {
+      throw new Unsupported(`DELETE TABLE WITH TABLE KEY ${key.name}: not every component of the key once (${text})`);
+    }
+    keyGuard(table.type, "DELETE TABLE");
+    const bare = (x) => JSON.stringify(x, (k, v) => (k === "type" ? undefined : v));
+    if (ctx.loopStack?.some((l) => bare(l.table) === bare(table))) throw new Unsupported(`${text.replace(/\s*\.$/, "")} inside a LOOP over the same table: the loop index and its field symbol were not adjusted`);
+    return {s: "delete_seckey", table, key, values: key.comps.map((c) => given.find((x) => x.name === c.name).value)};
   }
   if (isStmt(node, Statements.DeleteInternal) && /^DELETE\s+TABLE\s+\S+\s+WITH\s+TABLE\s+KEY\s+/i.test(text)) {
     const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);

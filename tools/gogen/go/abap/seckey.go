@@ -70,6 +70,23 @@ func KeyRead(n int, c func(i int) int, unique string) (int, int32, int32) {
 	return -1, int32(less + 1), 4
 }
 
+// KeyFind is READ TABLE ... WITH KEY k COMPONENTS over a hashed secondary
+// key, and DELETE TABLE ... WITH TABLE KEY k COMPONENTS over a unique one:
+// eq(i) reports whether row i holds the values. The row, or -1. It scans,
+// as KeyRead does; a value held twice (a key changed in place) is refused.
+func KeyFind(n int, eq func(i int) bool, key string) int {
+	pick := -1
+	for i := 0; i < n; i++ {
+		if eq(i) {
+			if pick >= 0 {
+				panic(NotCompiled("secondary key "+key, "a unique key holds a value twice"))
+			}
+			pick = i
+		}
+	}
+	return pick
+}
+
 // UniqueKeyCheck refuses an APPEND that would repeat a unique secondary
 // key's value: dup reports whether row i has the new row's value.
 func UniqueKeyCheck(n int, dup func(i int) bool, key string) {
