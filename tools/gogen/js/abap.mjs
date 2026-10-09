@@ -162,6 +162,23 @@ export function ParseI(v) {
   if (n > 2147483647 || n < -2147483648) throw new AbapError("CX_SY_CONVERSION_OVERFLOW", "c->i");
   return n;
 }
+// ParseI8: ParseI for an int8 target, as go/abap conv.go (a BigInt)
+export function ParseI8(v) {
+  const t = v.replace(/^ +| +$/g, "");
+  if (t === "") return 0n;
+  const {neg, body: raw, ok} = numSign(t);
+  const body = raw.replace(/^ +| +$/g, "");
+  if (!ok || !decimalDigits(body)) throw new AbapError("CX_SY_CONVERSION_NO_NUMBER", "c->int8");
+  const dot = body.indexOf(".");
+  const whole = (dot < 0 ? body : body.slice(0, dot)).replace(/^0+/, "");
+  const frac = dot < 0 ? "" : body.slice(dot + 1);
+  if (whole.length > 19) throw new AbapError("CX_SY_CONVERSION_OVERFLOW", "c->int8");
+  let n = whole === "" ? 0n : BigInt(whole);
+  if (frac !== "" && frac[0] >= "5") n++;
+  if (neg) n = -n;
+  if (n > 9223372036854775807n || n < -9223372036854775808n) throw new AbapError("CX_SY_CONVERSION_OVERFLOW", "c->int8");
+  return n;
+}
 export const ToUpper = (v) => v.toUpperCase();
 export const ToLower = (v) => v.toLowerCase();
 // A string without surrogates has one UTF-16 unit per character, so its

@@ -1148,6 +1148,7 @@ function conv(e, ctx) {
     case "c2n":
       if (to === "f") return `abap.ParseF(${x})`;
       if (to === "i") return `abap.ParseI(${x})`;
+      if (to === "int8") return `abap.ParseI8(${x})`;
       break;
     default: break;
   }
