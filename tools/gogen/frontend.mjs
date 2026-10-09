@@ -481,11 +481,11 @@ function suppliedMethods(file) {
   let methods = suppliedOfFile.get(file);
   if (methods) return methods;
   methods = [];
-  if (/SUPPLIED/i.test(file.getRaw())) {
-    for (const m of file.getStructure()?.findAllStructures(Structures.Method) ?? []) {
-      const found = [...m.concatTokens().matchAll(/(\w+)\s+IS\s+(?:NOT\s+)?SUPPLIED/gi)].map((x) => upper(x[1]));
-      if (found.length) methods.push({name: upper(m.findFirstExpression(Expressions.MethodName).concatTokens()), found});
-    }
+  // the parsed structure, not the raw text: a macro of another include can
+  // bring the IS SUPPLIED in (#694 critic)
+  for (const m of file.getStructure()?.findAllStructures(Structures.Method) ?? []) {
+    const found = [...m.concatTokens().matchAll(/(\w+)\s+IS\s+(?:NOT\s+)?SUPPLIED/gi)].map((x) => upper(x[1]));
+    if (found.length) methods.push({name: upper(m.findFirstExpression(Expressions.MethodName).concatTokens()), found});
   }
   suppliedOfFile.set(file, methods);
   return methods;
