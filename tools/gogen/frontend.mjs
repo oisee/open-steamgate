@@ -2183,6 +2183,8 @@ function structure(node, ctx) {
     const cc = st.findDirectExpression(Expressions.ComponentCond);
     const where = cc ? whereOf(cc, table.type.row, ctx, text) : null;
     const key = using === null ? null : secondaryKey(table.type, using[1], ctx, text);
+    // keyLoop compares w.name with w.value directly: a converted or nested component is not there
+    if ((using !== null || dynamicUsing !== null) && where?.some((w) => w.fx)) throw new Unsupported(`LOOP ... USING KEY with a WHERE on a component of another type or a nested one: ${text}`);
     const dynamicKeys = dynamicUsing === null ? null : {
       value: convert(variable(dynamicUsing[1], ctx), S),
       options: (table.type.secondary ?? []).filter((x) => x.sorted).map((x) => secondaryKey(table.type, x.name, ctx, text)),
@@ -2271,6 +2273,9 @@ function stringComparison(op, l, r) {
   return ["NP", "NA", "NS", "CN"].includes(op) ? {c: "not", x: c} : c;
 }
 
+/** the type two numbers of a WHERE compare in: f, else int8 when both are i/int8 and either is int8 (abapiti 043), else i as before (a packed side keeps its old lowering) */
+const whereCalc = (a, b) => (a.k === "f" || b.k === "f" ? F : numeric(a) && numeric(b) && (a.k === "int8" || b.k === "int8") ? {k: "int8"} : I);
+
 /** WHERE comp op value [AND ...] over the rows of a table of structures */
 function whereOf(cc, rowType, ctx, text) {
   const where = [];
@@ -2296,9 +2301,9 @@ function whereOf(cc, rowType, ctx, text) {
       if (sc) { where.push({fx: {e: "bool", cond: sc, blank: "", type: C(1)}, op: "=", value: {e: "chars", value: "X", type: C(1)}, calc: S}); continue; }
       if (!["=", "<>", "<", "<=", ">", ">="].includes(op)) throw new Unsupported(`WHERE table_line operator ${op}`);
       const v = source(kids[2], ctx, rowType);
-      const calc = numeric(rowType) || numeric(v.type) ? (rowType.k === "f" || v.type.k === "f" ? F : I) : S;
+      const calc = numeric(rowType) || numeric(v.type) ? whereCalc(rowType, v.type) : S;
       if (calc !== S && (charlike(rowType) || charlike(v.type))) throw new Unsupported("WHERE comparing characters with a number");
-      where.push({fx, op, value: convert(v, calc), calc});
+      where.push({fx: calc !== S && numeric(rowType) && calc.k !== rowType.k ? convert(fx, calc) : fx, op, value: convert(v, calc), calc});
       continue;
     }
     let fx = null;
@@ -2322,9 +2327,11 @@ function whereOf(cc, rowType, ctx, text) {
     if (sc) { where.push({fx: {e: "bool", cond: sc, blank: "", type: C(1)}, op: "=", value: {e: "chars", value: "X", type: C(1)}, calc: S}); continue; }
     if (!["=", "<>", "<", "<=", ">", ">="].includes(op)) throw new Unsupported(`WHERE operator ${op}`);
     const v = source(src, ctx, f.type);
-    const calc = numeric(f.type) || numeric(v.type) ? (f.type.k === "f" || v.type.k === "f" ? F : I) : S;
+    const calc = numeric(f.type) || numeric(v.type) ? whereCalc(f.type, v.type) : S;
     if (calc !== S && (charlike(f.type) || charlike(v.type))) throw new Unsupported("WHERE comparing characters with a number");
-    where.push({name: f.name, ftype: f.type, op, value: convert(v, calc), calc, ...(fx !== null ? {fx} : {})});
+    // a component of another numeric type is compared in the calculation type
+    const fxc = calc !== S && numeric(f.type) && calc.k !== f.type.k ? convert(fx ?? {e: "field", base: {e: "lrow", type: rowType}, name: f.name, type: f.type}, calc) : fx;
+    where.push({name: f.name, ftype: f.type, op, value: convert(v, calc), calc, ...(fxc !== null ? {fx: fxc} : {})});
   }
   return where;
 }
