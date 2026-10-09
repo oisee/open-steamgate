@@ -396,10 +396,10 @@ ready = rows.filter((x) => x.status === "READY");
 groups = [...Map.groupBy(ready, (r) => `${r.class}:${r.testclass}`)].map(([key, methods]) => ({key, methods}));
 // A4H: an assertion in TEARDOWN stops this local test class unless the
 // assertion that actually failed was called with QUIT = NO.
-const generated = ["package main", "", "import (_ \"embed\"; \"encoding/json\"; \"flag\"; \"fmt\"; \"os\"; \"path/filepath\"; \"regexp\"; \"runtime/debug\"; \"strconv\"; \"strings\"; \"time\"; \"osg/gogen/abap\"; \"osg/gogen/session\")", "",
+const generated = ["package main", "", "import (_ \"embed\"; \"encoding/json\"; \"flag\"; \"fmt\"; \"os\"; \"path/filepath\"; \"regexp\"; \"runtime/debug\"; \"strconv\"; \"strings\"; \"time\"; \"osg/gogen/abap\"; \"osg/gogen/abapsite\"; \"osg/gogen/session\")", "",
   "//go:embed zz_db.json", "var dbScript []byte", "",
-  "type result struct { Class string `json:\"class\"`; Testclass string `json:\"testclass\"`; Method string `json:\"method\"`; Status string `json:\"status\"`; Message string `json:\"message\"` }",
-  "var assertSite = regexp.MustCompile(`(?m)([A-Za-z0-9_]+\\.clas\\.testclasses\\.abap):([0-9]+)`)\nfunc failureMessage(x any) string { msg := fmt.Sprint(x); if msg != \"Expected abap_true\" && msg != \"Expected abap_false\" { return msg }; sites := assertSite.FindAllStringSubmatch(string(debug.Stack()), -1); if len(sites) == 0 { return msg }; site := sites[len(sites)-1]; return msg + \" at \" + site[1] + \":\" + site[2] }",
+  "type result struct { Class string `json:\"class\"`; Testclass string `json:\"testclass\"`; Method string `json:\"method\"`; Status string `json:\"status\"`; Message string `json:\"message\"`; Where string `json:\"where,omitempty\"` }",
+  "var assertSite = regexp.MustCompile(`(?m)([A-Za-z0-9_]+\\.clas\\.testclasses\\.abap):([0-9]+)`)\n// lastSite: where the last caught error began in ABAP source (abapiti 10-09), not for assertions\nvar lastSite string\nfunc failureMessage(x any) string { msg := fmt.Sprint(x); lastSite = \"\"; if r, ok := abap.AsRaised(x); !ok || r.Class != \"KERNEL_CX_ASSERT\" { st := string(debug.Stack()); if w, ok := x.(*abap.Rethrown); ok { st = w.Stack }; lastSite = abapsite.Site(st) }; if msg != \"Expected abap_true\" && msg != \"Expected abap_false\" { return msg }; sites := assertSite.FindAllStringSubmatch(string(debug.Stack()), -1); if len(sites) == 0 { return msg }; site := sites[len(sites)-1]; return msg + \" at \" + site[1] + \":\" + site[2] }",
   "func caught(f func()) (msg string) { defer func() { if x := recover(); x != nil { msg = failureMessage(x) } }(); f(); return }",
   "func caughtTeardown(f func()) (msg string, assertion, quitNo bool) { defer func() { if x := recover(); x != nil { msg = failureMessage(x); if r, ok := abap.AsRaised(x); ok && r.Class == \"KERNEL_CX_ASSERT\" { assertion, quitNo = true, r.AssertionQuitNo } } }(); f(); return }",
   "func isNotCompiled(msg string) bool { return strings.Contains(msg, \"NOT_COMPILED in \") }",
@@ -428,24 +428,25 @@ for (const {key, methods} of groups) {
     ? `${receiver}.${goName(name)}(s)` : "";
   // Generated class statics are process globals. Keep each whole test class
   // exclusive until U4 step 2 moves them into abap.Session.
-  generated.push(`if *classesFile == "" || selected[${JSON.stringify(key)}] {`, `checkpoint(${JSON.stringify(key)})`, "classStarted := time.Now()", "session.BeginTestClass()", "s = &abap.Session{}", ...(c.methods.some((m) => m.name === "CLASS_TEARDOWN") ? ["groupStart := len(results)"] : []), "classError := \"\"", "stopClass := false");
+  generated.push(`if *classesFile == "" || selected[${JSON.stringify(key)}] {`, `checkpoint(${JSON.stringify(key)})`, "classStarted := time.Now()", "session.BeginTestClass()", "s = &abap.Session{}", ...(c.methods.some((m) => m.name === "CLASS_TEARDOWN") ? ["groupStart := len(results)"] : []), "classError := \"\"; classSite := \"\"", "stopClass := false");
   // one LUW chain as the Node unit run has (abap.BeginUnitLUW): COMMIT and
   // ROLLBACK WORK end it, nothing between the methods does
-  if (methods.some((m) => m.db)) generated.push("classError = caught(func(){ if err := abap.OpenDBImage(dbImage); err != nil { panic(err) }; abap.BeginUnitLUW() })");
-  if (c.methods.some((m) => m.name === "CLASS_SETUP")) generated.push(`if classError == "" { classError = caught(func(){ ${T}_CLASS_SETUP(s) }) }`);
+  if (methods.some((m) => m.db)) generated.push("classError = caught(func(){ if err := abap.OpenDBImage(dbImage); err != nil { panic(err) }; abap.BeginUnitLUW() }); classSite = lastSite");
+  if (c.methods.some((m) => m.name === "CLASS_SETUP")) generated.push(`if classError == "" { classError = caught(func(){ ${T}_CLASS_SETUP(s) }); classSite = lastSite }`);
   for (const row of methods) {
     generated.push(`{ r := result{Class:${JSON.stringify(owner)}, Testclass:${JSON.stringify(local)}, Method:${JSON.stringify(row.method)}, Status:"SUCCESS"}`,
-      "if stopClass { r.Status = \"SKIPPED\"; r.Message = \"stopped after teardown failure\" } else if classError != \"\" { r.Status = \"FAILED\"; if isNotCompiled(classError) { r.Status = \"NOT_COMPILED\" }; r.Message = \"class_setup: \" + classError } else {",
+      "if stopClass { r.Status = \"SKIPPED\"; r.Message = \"stopped after teardown failure\" } else if classError != \"\" { r.Status = \"FAILED\"; if isNotCompiled(classError) { r.Status = \"NOT_COMPILED\" }; r.Message = \"class_setup: \" + classError; r.Where = classSite } else {",
       `test := New_${T}(s)`,
       `err := caught(func(){ ${special("SETUP", "test")} })`,
       "if err == \"\" { err = caught(func(){ test." + goName(row.method) + "(s) }) }",
+      "site := lastSite",
       `tear, assertion, quitNo := caughtTeardown(func(){ ${special("TEARDOWN", "test")} })`,
       "if assertion && !quitNo { stopClass = true }",
-      "if err == \"\" && tear != \"\" { err = \"teardown: \" + tear }",
-      "if err != \"\" { r.Status = \"FAILED\"; if isNotCompiled(err) { r.Status = \"NOT_COMPILED\" }; r.Message = err }", "}", "results = append(results, r)", "}");
+      "if err == \"\" && tear != \"\" { err = \"teardown: \" + tear; site = lastSite }",
+      "if err != \"\" { r.Status = \"FAILED\"; if isNotCompiled(err) { r.Status = \"NOT_COMPILED\" }; r.Message = err; r.Where = site }", "}", "results = append(results, r)", "}");
   }
   if (c.methods.some((m) => m.name === "CLASS_TEARDOWN")) generated.push(
-    `if err := caught(func(){ ${T}_CLASS_TEARDOWN(s) }); err != "" { for i := groupStart; i < len(results); i++ { results[i].Status = "FAILED"; if isNotCompiled(err) { results[i].Status = "NOT_COMPILED" }; results[i].Message += " class_teardown: " + err } }`);
+    `if err := caught(func(){ ${T}_CLASS_TEARDOWN(s) }); err != "" { for i := groupStart; i < len(results); i++ { results[i].Status = "FAILED"; if isNotCompiled(err) { results[i].Status = "NOT_COMPILED" }; results[i].Message += " class_teardown: " + err; if lastSite != "" { if results[i].Where == "" { results[i].Where = lastSite } else { results[i].Where += " class_teardown: " + lastSite } } } }`);
   generated.push("abap.EndTestClass(s)", `durations[${JSON.stringify(key)}] = float64(time.Since(classStarted).Microseconds()) / 1000`,
     'checkpoint("")', "}");
 }
@@ -543,7 +544,7 @@ timingMs.run = Math.round(performance.now() - runStarted);
 timingMs.runDetail = runDetail;
 timingMs.total = Math.round(performance.now() - commandStarted);
 const reconciled = reconcile(ready, actual);
-for (let i = 0; i < ready.length; i++) { ready[i].status = reconciled[i].status; ready[i].message = reconciled[i].message; if (reconciled[i].source) ready[i].source = reconciled[i].source; }
+for (let i = 0; i < ready.length; i++) { ready[i].status = reconciled[i].status; ready[i].message = reconciled[i].message; if (reconciled[i].where) ready[i].where = reconciled[i].where; if (reconciled[i].source) ready[i].source = reconciled[i].source; }
 updateCompiledCount();
 console.log(JSON.stringify({...summary, rows}));
 if (ready.some((x) => x.status === "FAILED")) process.exit(1);

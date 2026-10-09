@@ -554,6 +554,10 @@
       "lines": 47,
       "reason": "abapiti 037: Node's UTF-8 decode (WHATWG maximal subparts) for @KERNEL Buffer.toString(); no go/abap import"
     },
+    "go:abapsite": {
+      "lines": 20,
+      "reason": "abapiti 10-09: the ABAP file:line of a panic's stack for the unit runner's where field; does not import go/abap."
+    },
     "go:yieldsleep": {
       "lines": 18,
       "reason": "#39 dispatches yield sleep through a narrow Session interface so the package does not import go/abap."
