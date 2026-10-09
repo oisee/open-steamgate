@@ -1670,7 +1670,11 @@ ${t}	}`));
       ctx.lrow = `r${n}`;
       const v = st.value.e === "lrow" ? copied(rowValue(st.src.type, `r${n}`), st.value.type) : expr(st.value, ctx);
       ctx.lrow = saved;
-      out.push(`${t}	for i${n} := lo${n}; i${n} <= hi${n}; i${n}++ {`, `${t}		r${n} := src${n}[i${n}-1]`, `${t}		${tb} = append(${tb}, ${rowStored(st.table.type, v)})`, `${t}	}`,
+      // the rows as they are: one append of the section, one growth (abapiti
+      // Registry run, Z_RUNTIME_ARRA splice: per-row growth was most of it)
+      if (rowStored(st.table.type, v) === `r${n}`) out.push(`${t}	if lo${n} <= hi${n} {`, `${t}		${tb} = append(${tb}, src${n}[lo${n}-1:hi${n}]...)`, `${t}	}`,
+        `${t}	if lo${n} <= hi${n} { abap.BumpTable(&${tb}) }`, `${t}	s.Sy.Tabix = int32(len(${tb}))`, `${t}}`);
+      else out.push(`${t}	for i${n} := lo${n}; i${n} <= hi${n}; i${n}++ {`, `${t}		r${n} := src${n}[i${n}-1]`, `${t}		${tb} = append(${tb}, ${rowStored(st.table.type, v)})`, `${t}	}`,
         `${t}	if lo${n} <= hi${n} { abap.BumpTable(&${tb}) }`, `${t}	s.Sy.Tabix = int32(len(${tb}))`, `${t}}`);
       return out;
     }
@@ -2028,14 +2032,14 @@ ${t}	}`));
       const keep = st.where.map((w) => whereItem(w, `r${n}`, ctx)).join(" && ");
       return [`${t}{`, `${t}\tkept${n} := ${tb}[:0]`, `${t}\tfor _, r${n} := range ${tb} {`, `${t}\t\tif !(${keep}) {`,
         `${t}\t\t\tkept${n} = append(kept${n}, r${n})`, `${t}\t\t}`, `${t}\t}`,
-        `${t}\ts.Sy.Subrc = 4`, `${t}\tif len(kept${n}) < len(${tb}) {`, `${t}\t\ts.Sy.Subrc = 0`, `${t}\t\tabap.BumpTable(&${tb})`, `${t}\t}`, `${t}\t${tb} = kept${n}`, `${t}}`];
+        `${t}\ts.Sy.Subrc = 4`, `${t}\tif len(kept${n}) < len(${tb}) {`, `${t}\t\ts.Sy.Subrc = 0`, `${t}\t\tclear(${tb}[len(kept${n}):])`, `${t}\t\tabap.BumpTable(&${tb})`, `${t}\t}`, `${t}\t${tb} = kept${n}`, `${t}}`];
     }
     case "delete_key": {
       const n = ctx.loop++;
       const tb = place(st.table, ctx);
       return [`${t}{`, `${t}\tkey${n} := ${expr(st.value, ctx)}`, `${t}\ts.Sy.Subrc = 4`,
         `${t}\tfor i${n}, r${n} := range ${tb} {`, `${t}\t\tif r${n}.${ident(st.key)} == key${n} {`,
-        `${t}\t\t\t${tb} = append(${tb}[:i${n}], ${tb}[i${n}+1:]...)`, `${t}\t\t\tabap.BumpTable(&${tb})`,
+        `${t}\t\t\t${tb} = append(${tb}[:i${n}], ${tb}[i${n}+1:]...)`, `${t}\t\t\tclear(${tb}[len(${tb}):len(${tb})+1])`, `${t}\t\t\tabap.BumpTable(&${tb})`,
         `${t}\t\t\ts.Sy.Subrc = 0`, `${t}\t\t\tbreak`, `${t}\t\t}`, `${t}\t}`, `${t}}`];
     }
     case "delete_from": {
@@ -2043,7 +2047,7 @@ ${t}	}`));
       const tb = place(st.table, ctx);
       return [`${t}{`, `${t}\twa${n} := ${expr(st.value, ctx)}`, `${t}\ts.Sy.Subrc = 4`,
         `${t}\tfor i${n}, r${n} := range ${tb} {`, `${t}\t\tif ${st.keys.map((k) => `r${n}.${ident(k)} == wa${n}.${ident(k)}`).join(" && ")} {`,
-        `${t}\t\t\t${tb} = append(${tb}[:i${n}], ${tb}[i${n}+1:]...)`, `${t}\t\t\tabap.BumpTable(&${tb})`,
+        `${t}\t\t\t${tb} = append(${tb}[:i${n}], ${tb}[i${n}+1:]...)`, `${t}\t\t\tclear(${tb}[len(${tb}):len(${tb})+1])`, `${t}\t\t\tabap.BumpTable(&${tb})`,
         `${t}\t\t\ts.Sy.Subrc = 0`, `${t}\t\t\tbreak`, `${t}\t\t}`, `${t}\t}`, `${t}}`];
     }
     // ultra/itab: DELETE itab inside LOOP AT itab: the current row goes and
@@ -2051,13 +2055,13 @@ ${t}	}`));
     case "delete_current": {
       const tb = place(st.table, ctx);
       const i = st.token.idxVar;
-      return [`${t}${tb} = append(${tb}[:${i}], ${tb}[${i}+1:]...)`, `${t}abap.BumpTable(&${tb})`, `${t}${i}--`, `${t}s.Sy.Subrc = 0`];
+      return [`${t}${tb} = append(${tb}[:${i}], ${tb}[${i}+1:]...)`, `${t}clear(${tb}[len(${tb}):len(${tb})+1])`, `${t}abap.BumpTable(&${tb})`, `${t}${i}--`, `${t}s.Sy.Subrc = 0`];
     }
     case "delete_index": {
       const n = `idx${ctx.loop++}`;
       const tb = place(st.table, ctx);
       return [`${t}if ${n} := ${expr(st.index, ctx)}; ${n} >= 1 && int(${n}) <= len(${tb}) {`,
-        `${t}\t${tb} = append(${tb}[:${n}-1], ${tb}[${n}:]...)`, `${t}\tabap.BumpTable(&${tb})`, `${t}\ts.Sy.Subrc = 0`, `${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`];
+        `${t}\t${tb} = append(${tb}[:${n}-1], ${tb}[${n}:]...)`, `${t}\tclear(${tb}[len(${tb}):len(${tb})+1])`, `${t}\tabap.BumpTable(&${tb})`, `${t}\ts.Sy.Subrc = 0`, `${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`];
     }
     case "delete_range": {
       const n = ctx.loop++;
@@ -2066,7 +2070,7 @@ ${t}	}`));
         `${t}\tif from${n} < 1 || to${n} < 1 { panic(abap.NotCompiled("DELETE range", "index below 1 was not measured")) }`,
         `${t}\tif to${n} > int32(len(${tb})) { to${n} = int32(len(${tb})) }`,
         `${t}\ts.Sy.Subrc = 4`, `${t}\tif from${n} <= to${n} {`,
-        `${t}\t\t${tb} = append(${tb}[:from${n}-1], ${tb}[to${n}:]...)`, `${t}\t\tabap.BumpTable(&${tb})`, `${t}\t\ts.Sy.Subrc = 0`, `${t}\t}`, `${t}}`];
+        `${t}\t\t${tb} = append(${tb}[:from${n}-1], ${tb}[to${n}:]...)`, `${t}\t\tclear(${tb}[len(${tb}):len(${tb})+int(to${n}-from${n}+1)])`, `${t}\t\tabap.BumpTable(&${tb})`, `${t}\t\ts.Sy.Subrc = 0`, `${t}\t}`, `${t}}`];
     }
     case "insert_index": {
       const n = `idx${ctx.loop++}`;
