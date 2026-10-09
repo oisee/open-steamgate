@@ -88,11 +88,11 @@ Runs ABAP-FS's own ADT client (${PIN.name} ${PIN.version}) against an OSG ADT fa
   --url URL           a running OSG (default http://localhost:3030)
   --start             start one from this checkout (test/run.mjs, STG_PORT) and stop it after
   --port N            port for --start (default 3393)
-  --only g1,g2        run only these groups
+  --only g1,g2        run only these groups (overrides expected file defaults)
   --out DIR           report folder (default .local/conformance/abapfs)
   --expected FILE     expectations to compare against (default test/fixtures/abapfs-conformance/expected.json)
   --update-expected   write this run's statuses into the expectations file
-Exit 1 on a regression (a PASS lost, or a MISSING now FAIL), 2 if a restore failed or anything was left behind.`;
+Exit 1 on a regression (or any drift with expected.ratchet), 2 if a restore failed or anything was left behind.`;
 
 class Check extends Error {}
 const check = (cond, message) => { if (!cond) throw new Check(message); };
@@ -416,12 +416,39 @@ function ensureClient() {
   return createRequire(join(deps, "package.json"))(PIN.name);
 }
 
-async function waitServing(url, ms) {
+const SERVICE_DOCUMENT_ROOT =
+  /^(?:\uFEFF)?\s*(?:<\?xml[^>]*\?>\s*)?(?:<!--[\s\S]*?-->\s*)*<(?:[A-Za-z_][\w.-]*:)?service(?:\s|\/?>)/i;
+
+function atomServiceContentType(value) {
+  const [media, ...parameters] = String(value ?? "").split(";").map(part => part.trim());
+  const lower = media.toLowerCase();
+  const type = parameters.find(part => part.toLowerCase().startsWith("type="))?.slice(5).replace(/^["']|["']$/g, "").toLowerCase();
+  return lower === "application/atomsvc+xml" || (lower === "application/atom+xml" && type === "service");
+}
+
+async function adtServiceDocument(response) {
+  if (response.status === 401) return true;
+  if (response.status !== 200 || !atomServiceContentType(response.headers.get("content-type"))) return false;
+  return SERVICE_DOCUMENT_ROOT.test(await response.text());
+}
+
+export async function waitServing(url, ms, pollMs = 1000, requestTimeoutMs = 2_000) {
   const deadline = Date.now() + ms;
   while (Date.now() < deadline) {
-    const s = await fetch(`${url}/osd/serving`).then(r => r.json()).catch(() => undefined);
-    if (s?.ready) return s;
-    await new Promise(r => setTimeout(r, 1000));
+    try {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) break;
+      const response = await fetch(`${url}/osd/serving`, {signal: AbortSignal.timeout(Math.max(1, Math.min(requestTimeoutMs, remaining)))});
+      const s = await response.json().catch(() => undefined);
+      if (s?.ready) return s;
+      if (response.status === 404 || s === undefined) {
+        const discoveryRemaining = deadline - Date.now();
+        if (discoveryRemaining <= 0) break;
+        const discovery = await fetch(`${url}/sap/bc/adt/discovery`, {signal: AbortSignal.timeout(Math.max(1, Math.min(requestTimeoutMs, discoveryRemaining)))});
+        if (await adtServiceDocument(discovery)) return {ready: true, discovery: true};
+      }
+    } catch { /* not listening yet */ }
+    await new Promise(r => setTimeout(r, pollMs));
   }
   throw new Error(`${url} did not become ready in ${ms / 1000}s`);
 }
@@ -493,14 +520,26 @@ export function snapshotDiff(before, after) {
  *  problem; a scenario that did not run keeps its previous expectation. */
 export function nextExpectations(results, expected, leftBehind = []) {
   if (leftBehind.length) throw new Error(`the run was not clean (${leftBehind[0]})`);
-  return {client: {name: PIN.name, version: PIN.version, integrity: PIN.integrity},
+  return {...expected, client: {name: PIN.name, version: PIN.version, integrity: PIN.integrity},
     scenarios: Object.fromEntries(SCENARIOS.map(s => {
       const r = results.find(x => x.id === s.id);
       const ran = r && !String(r.error ?? "").startsWith("not run");
       const status = ran ? r.status : expected?.scenarios?.[s.id]?.status;
       if (!status) throw new Error(`${s.id} did not run and has no previous expectation`);
-      return [s.id, {status, feature: s.feature}];
+      return [s.id, {...expected?.scenarios?.[s.id], status, feature: s.feature}];
     }))};
+}
+
+/** Target defaults live with its expectations; an explicit --only overrides them. */
+export function selectedScenarios(opts, expected) {
+  const only = opts.only.length ? opts.only : (expected?.only ?? []);
+  if (!Array.isArray(only) || only.some(g => !SCENARIOS.some(s => s.group === g)))
+    throw new Error("expected.only must contain known scenario groups");
+  return SCENARIOS.filter(s => !only.length || only.includes(s.group) || s.group === "connect");
+}
+
+export function verdict(diff, expected) {
+  return diff.regressions.length || (expected?.ratchet && (diff.improvements.length || diff.changed.length || diff.unknown.length)) ? 1 : 0;
 }
 
 export function compare(results, expected) {
@@ -542,6 +581,8 @@ function markdown(report) {
 export async function main(argv = process.argv.slice(2)) {
   const opts = parseArgs(argv);
   if (opts.help) { console.log(HELP); return 0; }
+  const expected = existsSync(opts.expected) ? JSON.parse(readFileSync(opts.expected, "utf8")) : undefined;
+  const selected = selectedScenarios(opts, expected);
   const {ADTClient, session_types} = ensureClient();
   mkdirSync(opts.out, {recursive: true});
   const t0 = Date.now();
@@ -564,7 +605,6 @@ export async function main(argv = process.argv.slice(2)) {
     const r = c.statelessClone;
     const scratch = `ZOSD_AFS_${Date.now().toString(36).toUpperCase()}`;
     const ctx = {c, r, ADTClient, scratch};
-    const selected = SCENARIOS.filter(s => !opts.only.length || opts.only.includes(s.group) || s.group === "connect");
     let aborted;
     try {
       for (const s of selected) {
@@ -605,7 +645,6 @@ export async function main(argv = process.argv.slice(2)) {
   if (opts.start) leftBehind.push(...snapshotDiff(before, treeSnapshot()).map(l => `repo: ${l}`));
   const repoCheck = opts.start ? "compared file hashes before and after" : "skipped (--url: the system's files are not this checkout's to judge)";
   const counts = Object.fromEntries(STATUSES.map(k => [k, results.filter(r => r.status === k).length]));
-  const expected = existsSync(opts.expected) ? JSON.parse(readFileSync(opts.expected, "utf8")) : undefined;
   const report = {client: PIN, url: opts.url, startedAt: new Date(t0).toISOString(), ms: Date.now() - t0,
     counts, leftBehind, repoCheck, diff: compare(results, expected), results};
   writeFileSync(join(opts.out, "report.json"), JSON.stringify(report, null, 2) + "\n");
@@ -625,7 +664,7 @@ export async function main(argv = process.argv.slice(2)) {
   console.log(`  report: ${join(opts.out, "report.md")}`);
   console.log(`  repo check: ${repoCheck}; system-side cleanup verified${leftBehind.length ? " WITH PROBLEMS" : ""}`);
   if (leftBehind.length) { console.log(`  LEFT BEHIND:\n    ${leftBehind.join("\n    ")}`); return 2; }
-  return d.regressions.length ? 1 : 0;
+  return verdict(d, expected);
 }
 
 

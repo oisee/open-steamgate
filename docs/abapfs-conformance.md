@@ -29,9 +29,9 @@ scenario that did not run keeps its previous expectation.
 
 `--start` runs `test/run.mjs` from this checkout with `STG_PORT` and a
 database under `.local/conformance/abapfs/db/`. It waits for `/osd/serving`
-and stops the process group at the end. Run it under
-`flock /tmp/open-steamgate-heavy.lock` when other sessions are building. It
-needs a built generation (`npm run transpile`).
+and stops the process group at the end. It needs a built generation
+(`npm run transpile`); use `tools/osd-heavy.sh` for contended heavyweight
+builds so the host assigns the instance and ports.
 
 Output:
 
@@ -56,6 +56,52 @@ was left behind:
   dirty. With `--url` the checkout is not this tool's to judge, so the repo
   check is skipped and the report says so. The system-side cleanup is still
   verified.
+
+## Against osgo
+
+The `osgo-host` CI job runs this harness after the shared ADT conformance
+runner, against the same binary and server started with `-adt`. It uses
+`test/fixtures/abapfs-conformance/expected-osgo.json`: `only` selects the
+groups in one place, and `ratchet: true` fails every status change, including
+FAIL→MISSING and a PASS improvement, until the baseline is recorded. Every gap
+has a reason. The client
+is installed by the harness with its pinned `npm ci`; no separate client
+installation or unpinned dependency cache is needed.
+
+Build and run from the repository root with dependencies installed (`npm ci`,
+Node 22 and Go 1.26, plus the project's fetched libraries/toolchain). Use one
+heavy allocation so the server uses its assigned `STG_PORT`:
+
+```sh
+OSD_HEAVY_RANGE=90-99 GOCACHE=/tmp/osg-go-cache tools/osd-heavy.sh sh tools/abapfs-osgo.sh
+```
+
+[`tools/abapfs-osgo.sh`](../tools/abapfs-osgo.sh) uses `set -eu` to stop
+immediately on a staging, transpile or build failure. CI calls the same script
+with `--setup-only`: it stages the synthetic outline fixture in `src/` and the
+live source snapshot, transpiles, stages the fixture again in the new live
+generation, writes and verifies the executable compiler launcher
+`tools/gogen/.out/osd` (Node → `bin/osd.mjs`), then builds osgo. The tracked
+ABAP-FS fixture/write package in `src/zosd_test/` (`$ZOSD_TEST`) enters the
+generation with `src/` as a writable store root; Go also supplies the `$TMP`
+package. The full recipe checks the ADT
+compiler gate, starts the server, runs the pinned client, propagates its exit
+code and stops the server. Reports go to `.local/conformance/abapfs-osgo/`.
+
+Readiness keeps `/osd/serving` authoritative for Node. A 404 or non-JSON
+response falls back to `/sap/bc/adt/discovery`: a 401 proves the ADT path is
+there, while a 200 must have an Atom service-document content type and root
+element. Each request has its own deadline, so a stalled response cannot hang
+the wait.
+The osgo default omits `write`: source save is absent, and a failed restore
+aborts the harness for safety. All other groups still run. The omitted write
+expectation is documented as unexercised; re-enable it when save is available.
+An explicit `--only write` overrides the target defaults for diagnosis.
+Measured at `bc2ab5b5`, after PR #691 (CHECKRUN on osgo) merged: **22 PASS,
+1 FAIL, 23 MISSING** of 46 exercised scenarios; one write scenario omitted.
+The exercised FAIL is `debugger.coreDiscovery` (the client cannot parse core
+discovery; it fails on the Node host too). The omitted write scenario retains
+its FAIL expectation until it is exercised.
 
 ## The client, and why it is pinned this way
 
