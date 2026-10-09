@@ -266,7 +266,12 @@ export function databaseFacts({client = globalThis.abap?.context?.databaseConnec
       ? "memory"
       : "file";
   const connected = databaseDescriptor(liveClient).connected;
-  return databaseRows(engine, storage, connected);
+  return [...databaseRows(engine, storage, connected), ...migrationFacts(databaseDescriptor(liveClient).schemaDrift)];
+}
+
+function migrationFacts(rows = []) {
+  return rows.filter(row => /^[a-z0-9_]+$/i.test(row.table) && /^[a-z0-9_]+$/i.test(row.backup))
+    .map(row => ({section: "Database migration", name: row.table, value: row.backup, note: safeLabel(row.reason)}));
 }
 
 function databaseRows(engine, storage, connected) {
@@ -332,7 +337,7 @@ export async function childDatabaseFacts(runtime, {fetcher = fetch, timeoutMs = 
     if (body.ready !== true || body.generation !== runtime.generation || d?.connected !== true ||
         !["sqlite", "duckdb", "HDB", "postgres"].includes(d.engine) ||
         !(["HDB", "postgres"].includes(d.engine) ? d.storage === "server" : ["file", "memory"].includes(d.storage))) return undefined;
-    return databaseRows(d.engine, d.storage, true);
+    return [...databaseRows(d.engine, d.storage, true), ...migrationFacts(d.schemaDrift)];
   } catch {
     return undefined;
   }

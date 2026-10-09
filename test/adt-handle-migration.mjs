@@ -104,7 +104,7 @@ describe("ADT handle DDIC upgrade preserves persistent business data", function 
       const db = new DatabaseSync(path);
       try {
         expect(db.prepare("PRAGMA table_info(zosd_adt_shdl)").all().find(c => c.name === "handle").type).to.equal("NCHAR(40)");
-        expect(db.prepare("SELECT COUNT(*) AS n FROM zosd_adt_shdl WHERE objname = 'ZOLD'").get().n).to.equal(0);
+        expect(db.prepare("SELECT COUNT(*) AS n FROM zosd_adt_shdl WHERE objname = 'ZOLD'").get().n).to.equal(1);
       } finally { db.close(); }
     });
   }
@@ -128,13 +128,12 @@ describe("ADT handle DDIC upgrade preserves persistent business data", function 
     expect(readdirSync(dir).filter(name => name.includes(".drift"))).to.deep.equal([]);
   });
 
-  it("sql.js: failed restamp rolls back the handle table and does not export over the original file", async () => {
+  it("persistent SQLite: failed restamp rolls back the handle table and keeps the original rows", async () => {
     const path = join(dir, "heap-rollback.sqlite"), old = oldHandle(ddl.sqlite);
     sqliteFixture(path, old);
     const native = new DatabaseSync(path);
     native.exec("CREATE TRIGGER reject_stamp BEFORE UPDATE ON osd_schema BEGIN SELECT RAISE(ABORT, 'stamp failure'); END");
     native.close();
-    const original = readFileSync(path);
     const result = await start(path, "heap", true, `
       let error;
       try { await import('./output/init.mjs'); } catch (e) { error = e.message; }
@@ -149,7 +148,12 @@ describe("ADT handle DDIC upgrade preserves persistent business data", function 
     expect(result.stamp).to.equal(fingerprintOf(old));
     expect(result.handle).to.have.length(36);
     expect(result.columns.find(column => column.name === "handle").type).to.equal("NCHAR(36)");
-    expect(readFileSync(path).equals(original)).to.equal(true);
+    const original = new DatabaseSync(path);
+    try {
+      expect(original.prepare("SELECT fingerprint FROM osd_schema").get().fingerprint).to.equal(fingerprintOf(old));
+      expect(original.prepare("PRAGMA table_info(zosd_adt_shdl)").all().find(c => c.name === "handle").type).to.equal("NCHAR(36)");
+      expect(original.prepare("SELECT handle FROM zosd_adt_shdl").get().handle).to.have.length(36);
+    } finally { original.close(); }
   });
 
   for (const olderJobs of [false, true]) {
@@ -164,9 +168,10 @@ describe("ADT handle DDIC upgrade preserves persistent business data", function 
         import {FileSqliteClient} from './tools/sqlite-file-client.mjs';
         const gate = process.env.MIGRATION_GATE;
         if (gate) {
-          const original = FileSqliteClient.prototype.stampedSchema;
-          FileSqliteClient.prototype.stampedSchema = async function () {
-            const found = await original.call(this);
+          const original = FileSqliteClient.prototype.connect;
+          FileSqliteClient.prototype.connect = async function () {
+            await original.call(this);
+            const found = await this.stampedSchema();
             writeFileSync(gate + '.ready', found);
             const deadline = Date.now() + 30000;
             while (!existsSync(gate + '.release')) {
@@ -213,9 +218,10 @@ describe("ADT handle DDIC upgrade preserves persistent business data", function 
     const first = start(path, "file", false, `
       import {existsSync, writeFileSync} from 'node:fs';
       import {FileSqliteClient} from './tools/sqlite-file-client.mjs';
-      const original = FileSqliteClient.prototype.stampedSchema;
-      FileSqliteClient.prototype.stampedSchema = async function () {
-        const found = await original.call(this);
+      const original = FileSqliteClient.prototype.connect;
+      FileSqliteClient.prototype.connect = async function () {
+        await original.call(this);
+        const found = await this.stampedSchema();
         const gate = process.env.MIGRATION_GATE;
         writeFileSync(gate + '.ready', found);
         const deadline = Date.now() + 30000;

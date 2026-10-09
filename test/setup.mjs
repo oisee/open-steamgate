@@ -1,14 +1,12 @@
 import {phase} from "../tools/osgjs-trace.mjs";
 import {installXStringBuffer} from "../tools/osd-xstring-buffer.mjs";
 import {SQLiteDatabaseClient} from "../tools/sqlite-heap-client.mjs";
-import {randomBytes} from "node:crypto";
 import {bootIdentity} from "../tools/osd-identity.mjs";
 import {installTrim} from "../tools/sql-literals.mjs";
 import {installSqlTrace, fileSink} from "../tools/osd-sql-trace.mjs";
 import {batchInserts} from "../tools/osd-batch-inserts.mjs";
 import {TraceRing, TraceDestination} from "../tools/osd-sql-trace-buffer.mjs";
 import {StoreDestination} from "../tools/osd-store-destination.mjs";
-import {beforeAdtHandleDDL, adtHandleMigration} from "../tools/osd-adt-handle-migrate.mjs";
 export {beforeAdtHandleDDL} from "../tools/osd-adt-handle-migrate.mjs";
 
 /** The trace a running system holds, for the ST05-shaped screen to read
@@ -21,244 +19,10 @@ export function schemaTables(ddl) {
     [...String(statement).matchAll(/\bCREATE\s+TABLE\s+"?([A-Za-z_][A-Za-z_0-9]*)"?/gi)].map((match) => match[1].toUpperCase()));
 }
 
-// Standalone migrations take the write lock; startup holds it across the
-// whole chain and the drift decision. Savepoints keep each migration's
-// rollback local without releasing the startup transaction.
-function withSchemaMigrationLock(native, migrate) {
-  const nested = native.isTransaction;
-  native.exec(nested ? "SAVEPOINT osd_schema_migration" : "BEGIN IMMEDIATE");
-  try {
-    const result = migrate();
-    native.exec(nested ? "RELEASE osd_schema_migration" : "COMMIT");
-    return result;
-  } catch (error) {
-    if (nested) {
-      native.exec("ROLLBACK TO osd_schema_migration");
-      native.exec("RELEASE osd_schema_migration");
-    } else {
-      native.exec("ROLLBACK");
-    }
-    throw error;
-  }
-}
-
-export function migrateAdtHandleFile(native, found, wanted, ddl, fingerprintOf) {
-  const table = adtHandleMigration(found, wanted, ddl, fingerprintOf);
-  if (!table) return false;
-  return withSchemaMigrationLock(native, () => {
-    const current = native.prepare("SELECT fingerprint FROM osd_schema LIMIT 1").get()?.fingerprint;
-    if (current === wanted) return true;
-    if (current !== found) return false;
-    // These rows are transient session handles, so discarding them on an
-    // upgrade is acceptable. No business table or session row is dropped.
-    native.exec("DROP TABLE zosd_adt_shdl");
-    native.exec(table);
-    native.prepare("UPDATE osd_schema SET fingerprint = ?, at = ?")
-      .run(wanted, new Date().toISOString());
-    return true;
-  });
-}
-
-// Add the permanent job key to the previous business schema without moving
-// useful rows aside. Backfill unacknowledged intents before a new OPEN can
-// allocate their count. The operations ledger covers already acknowledged
-// pre-upgrade intents at candidate selection time.
-export function migrateJobIdentityFile(native, found, wanted, ddl, fingerprintOf) {
-  const identity = ddl.find((statement) => /^CREATE TABLE ['"]zosd_job_identity['"] /i.test(statement));
-  const step = ddl.find((statement) => /^CREATE TABLE ['"]zosd_job_step['"] /i.test(statement));
-  const parent = ddl.find((statement) => /^CREATE TABLE ['"]zosd_job_outbox['"] /i.test(statement));
-  if (!identity || !step || !parent || fingerprintOf(ddl) !== wanted) return false;
-  const oldParent = parent.replace(/,\s*['"]step_count['"]\s+NCHAR\(2\)/i, "");
-  const previous = ddl.filter((statement) => statement !== identity);
-  const oneStep = previous.filter((statement) => statement !== step)
-    .map((statement) => statement === parent ? oldParent : statement);
-  const prior = fingerprintOf(previous) === found ? "multistep" :
-    fingerprintOf(oneStep) === found && oldParent !== parent ? "one-step" : undefined;
-  if (!prior) return false;
-  return withSchemaMigrationLock(native, () => {
-    const current = native.prepare("SELECT fingerprint FROM osd_schema LIMIT 1").get()?.fingerprint;
-    if (current === wanted) return true;
-    if (current !== found) return false;
-    if (native.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'zosd_job_identity'").get()) {
-      return false;
-    }
-    if (prior === "one-step") {
-      native.exec("ALTER TABLE zosd_job_outbox ADD COLUMN step_count NCHAR(2)");
-      native.exec(step);
-    }
-    native.exec(identity);
-    const insertIdentity = native.prepare(`INSERT INTO zosd_job_identity
-      (mandt, jobname, jobcount, owner, intent_id) VALUES (?, ?, ?, ?, ?)`);
-    for (const row of native.prepare(`SELECT mandt, jobname, jobcount, owner, intent_id
-      FROM zosd_job_outbox`).all()) {
-      insertIdentity.run(row.mandt, String(row.jobname ?? "").trim().toUpperCase(),
-        row.jobcount, row.owner, row.intent_id);
-    }
-    native.prepare("UPDATE osd_schema SET fingerprint = ?, at = ?")
-      .run(wanted, new Date().toISOString());
-    return true;
-  });
-}
-
-// The predecessor columns are additive. Existing committed outbox rows have
-// no dependency and keep their original import digest.
-export function beforeJobPredecessorDDL(ddl) {
-  const parent = ddl.find((statement) => /^CREATE TABLE ['"]zosd_job_outbox['"] /i.test(statement));
-  if (!parent) return ddl;
-  const previousParent = parent
-    .replace(/,\s*['"]pred_jobname['"]\s+NCHAR\(32\)\s+COLLATE RTRIM/i, "")
-    .replace(/,\s*['"]pred_jobcount['"]\s+NCHAR\(8\)\s+COLLATE RTRIM/i, "")
-    .replace(/,\s*['"]pred_intent_id['"]\s+NCHAR\(32\)\s+COLLATE RTRIM/i, "");
-  return ddl.map((statement) => statement === parent ? previousParent : statement);
-}
-
-export function migrateJobPredecessorFile(native, found, wanted, ddl, fingerprintOf) {
-  if (fingerprintOf(ddl) !== wanted) return false;
-  const previous = beforeJobPredecessorDDL(ddl);
-  if (fingerprintOf(previous) === wanted) return false;
-  if (fingerprintOf(previous) !== found) return false;
-  return withSchemaMigrationLock(native, () => {
-    const current = native.prepare("SELECT fingerprint FROM osd_schema LIMIT 1").get()?.fingerprint;
-    if (current === wanted) return true;
-    if (current !== found) return false;
-    native.exec(`ALTER TABLE zosd_job_outbox ADD COLUMN pred_jobname NCHAR(32) COLLATE RTRIM`);
-    native.exec(`ALTER TABLE zosd_job_outbox ADD COLUMN pred_jobcount NCHAR(8) COLLATE RTRIM`);
-    native.exec(`ALTER TABLE zosd_job_outbox ADD COLUMN pred_intent_id NCHAR(32) COLLATE RTRIM`);
-    native.exec("UPDATE zosd_job_outbox SET pred_jobname = '', pred_jobcount = '', pred_intent_id = ''");
-    native.prepare("UPDATE osd_schema SET fingerprint = ?, at = ?")
-      .run(wanted, new Date().toISOString());
-    return true;
-  });
-}
-
-export function beforeJobEventDDL(ddl) {
-  const parent = ddl.find((statement) => /^CREATE TABLE ['"]zosd_job_outbox['"] /i.test(statement));
-  if (!parent) return ddl;
-  const previousParent = parent
-    .replace(/,\s*['"]source_instance['"]\s+NCHAR\(32\)\s+COLLATE RTRIM/i, "")
-    .replace(/,\s*['"]wait_seq['"]\s+NCHAR\(16\)/i, "")
-    .replace(/,\s*['"]event_id['"]\s+NCHAR\(32\)\s+COLLATE RTRIM/i, "")
-    .replace(/,\s*['"]event_param['"]\s+NCHAR\(64\)\s+COLLATE RTRIM/i, "");
-  return ddl.map((statement) => statement === parent ? previousParent : statement);
-}
-
-export function migrateJobEventFile(native, found, wanted, ddl, fingerprintOf) {
-  if (fingerprintOf(ddl) !== wanted) return false;
-  const previous = beforeJobEventDDL(ddl);
-  if (fingerprintOf(previous) === wanted || fingerprintOf(previous) !== found) return false;
-  return withSchemaMigrationLock(native, () => {
-    const current = native.prepare("SELECT fingerprint FROM osd_schema LIMIT 1").get()?.fingerprint;
-    if (current === wanted) return true;
-    if (current !== found) return false;
-    native.exec("ALTER TABLE zosd_job_outbox ADD COLUMN source_instance NCHAR(32) COLLATE RTRIM");
-    native.exec("ALTER TABLE zosd_job_outbox ADD COLUMN wait_seq NCHAR(16)");
-    native.exec("ALTER TABLE zosd_job_outbox ADD COLUMN event_id NCHAR(32) COLLATE RTRIM");
-    native.exec("ALTER TABLE zosd_job_outbox ADD COLUMN event_param NCHAR(64) COLLATE RTRIM");
-    native.exec("UPDATE zosd_job_outbox SET source_instance = '', wait_seq = '', event_id = '', event_param = ''");
-    native.prepare("UPDATE osd_schema SET fingerprint = ?, at = ?")
-      .run(wanted, new Date().toISOString());
-    return true;
-  });
-}
-
-export function beforeJobStepInputDDL(ddl) {
-  return ddl.map((statement) => /^CREATE TABLE ['"]zosd_job_step['"] /i.test(statement) ?
-    statement.replace(/,\s*['"]input_json['"]\s+TEXT(?:\s+COLLATE\s+RTRIM)?/i, "") : statement);
-}
-
-export function migrateJobStepInputFile(native, found, wanted, ddl, fingerprintOf) {
-  if (fingerprintOf(ddl) !== wanted) return false;
-  const previous = beforeJobStepInputDDL(ddl);
-  if (fingerprintOf(previous) === wanted || fingerprintOf(previous) !== found) return false;
-  return withSchemaMigrationLock(native, () => {
-    const current = native.prepare("SELECT fingerprint FROM osd_schema LIMIT 1").get()?.fingerprint;
-    if (current === wanted) return true;
-    if (current !== found) return false;
-    native.exec("ALTER TABLE zosd_job_step ADD COLUMN input_json TEXT COLLATE RTRIM");
-    native.exec("UPDATE zosd_job_step SET input_json = '[]'");
-    native.prepare("UPDATE osd_schema SET fingerprint = ?, at = ?")
-      .run(wanted, new Date().toISOString());
-    return true;
-  });
-}
-
-// Start by date and time and periodic starts (2026-10-01): eight additive
-// outbox columns. A committed intent written before has none of them and
-// keeps its import digest: an empty column is a job that is not timed.
-const JOB_SCHEDULE_COLUMNS = [["sdlstrtdt", 8], ["sdlstrttm", 6], ["laststrtdt", 8], ["laststrttm", 6],
-  ["prdmins", 2], ["prdhours", 2], ["prddays", 3], ["prdweeks", 2]];
-
-export function beforeJobScheduleDDL(ddl) {
-  const parent = ddl.find((statement) => /^CREATE TABLE ['"]zosd_job_outbox['"] /i.test(statement));
-  if (!parent) return ddl;
-  let previousParent = parent;
-  for (const [column, width] of JOB_SCHEDULE_COLUMNS) {
-    previousParent = previousParent.replace(new RegExp(`,\\s*['"]${column}['"]\\s+NCHAR\\(${width}\\)\\s+COLLATE RTRIM`, "i"), "");
-  }
-  return ddl.map((statement) => statement === parent ? previousParent : statement);
-}
-
-export function migrateJobScheduleFile(native, found, wanted, ddl, fingerprintOf) {
-  if (fingerprintOf(ddl) !== wanted) return false;
-  const previous = beforeJobScheduleDDL(ddl);
-  if (fingerprintOf(previous) === wanted || fingerprintOf(previous) !== found) return false;
-  return withSchemaMigrationLock(native, () => {
-    const current = native.prepare("SELECT fingerprint FROM osd_schema LIMIT 1").get()?.fingerprint;
-    if (current === wanted) return true;
-    if (current !== found) return false;
-    for (const [column, width] of JOB_SCHEDULE_COLUMNS) {
-      native.exec(`ALTER TABLE zosd_job_outbox ADD COLUMN ${column} NCHAR(${width}) COLLATE RTRIM`);
-    }
-    native.exec(`UPDATE zosd_job_outbox SET ${JOB_SCHEDULE_COLUMNS.map(([column]) => `${column} = ''`).join(", ")}`);
-    native.prepare("UPDATE osd_schema SET fingerprint = ?, at = ?")
-      .run(wanted, new Date().toISOString());
-    return true;
-  });
-}
-
-// The release order of the outbox (DSL L3 slice 5d, 2026-10-02): RELEASE_SEQ,
-// which JOB_CLOSE writes and the drain sorts by, and in the same change the
-// gate table's RUN_BIND, the binding a DSL L3 run started with. Both are
-// additive; a pending intent written before has an empty RELEASE_SEQ and
-// drains first, in the order it drained before.
-export function beforeJobReleaseDDL(ddl) {
-  return ddl.map((statement) => /^CREATE TABLE ['"]zosd_job_outbox['"] /i.test(statement)
-    ? statement.replace(/,\s*['"]release_seq['"]\s+NCHAR\(16\)/i, "")
-    : /^CREATE TABLE ['"]zosd_l3_stage['"] /i.test(statement)
-      ? statement.replace(/,\s*['"]run_bind['"]\s+NCHAR\(255\)\s+COLLATE RTRIM/i, "") : statement);
-}
-
-export function migrateJobReleaseFile(native, found, wanted, ddl, fingerprintOf) {
-  if (fingerprintOf(ddl) !== wanted) return false;
-  const previous = beforeJobReleaseDDL(ddl);
-  if (fingerprintOf(previous) === wanted || fingerprintOf(previous) !== found) return false;
-  return withSchemaMigrationLock(native, () => {
-    const current = native.prepare("SELECT fingerprint FROM osd_schema LIMIT 1").get()?.fingerprint;
-    if (current === wanted) return true;
-    if (current !== found) return false;
-    native.exec("ALTER TABLE zosd_job_outbox ADD COLUMN release_seq NCHAR(16)");
-    native.exec("UPDATE zosd_job_outbox SET release_seq = ''");
-    if (native.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'zosd_l3_stage'").get()) {
-      native.exec("ALTER TABLE zosd_l3_stage ADD COLUMN run_bind NCHAR(255) COLLATE RTRIM");
-      native.exec("UPDATE zosd_l3_stage SET run_bind = ''");
-    }
-    native.prepare("UPDATE osd_schema SET fingerprint = ?, at = ?")
-      .run(wanted, new Date().toISOString());
-    return true;
-  });
-}
-
-export function ensureJobEventMetadata(native) {
-  native.exec("BEGIN IMMEDIATE");
-  try {
-    native.exec(`CREATE TABLE IF NOT EXISTS zosd_job_source_instance (id TEXT PRIMARY KEY)`);
-    if (!native.prepare("SELECT id FROM zosd_job_source_instance LIMIT 1").get()) {
-      native.prepare("INSERT INTO zosd_job_source_instance (id) VALUES (?)")
-        .run(randomBytes(16).toString("hex"));
-    }
-    native.exec("COMMIT");
-  } catch (error) { native.exec("ROLLBACK"); throw error; }
-}
+export {migrateAdtHandleFile, migrateJobIdentityFile, beforeJobPredecessorDDL, migrateJobPredecessorFile,
+  beforeJobEventDDL, migrateJobEventFile, beforeJobStepInputDDL, migrateJobStepInputFile,
+  beforeJobScheduleDDL, migrateJobScheduleFile, beforeJobReleaseDDL, migrateJobReleaseFile,
+  ensureJobEventMetadata} from "../tools/osd-db-legacy.mjs";
 
 // HANA's execute opens a transaction even for the DELETE in a reseed.
 export async function reseedExistingHana(db) {
@@ -530,22 +294,11 @@ async function setupDatabase(abap, schemas, insert) {
     await db.connect();
     abap.context.databaseConnections["DEFAULT"] = traced(db);
     abap.builtin.sy.get().dbsys?.set(db.name);
-    if (await db.hasSchema(schemas.pg)) {
-      await reseedPackRows(db);
-      return;
-    }
-    await db.beginTransaction();
-    try {
-      await db.execute(schemas.pg);
-      await db.execute(postgresInserts(insert));
-      await db.execute(seedStatements());
-      await loadScaledData(db, "postgres");
-      await db.stamp(schemas.pg);
-      await db.commit();
-    } catch (error) {
-      await db.rollback();
-      throw error;
-    }
+    const {startupDatabase} = await import(/* webpackIgnore: true */ "../tools/osd-db-migrate.mjs");
+    await startupDatabase(db, schemas.pg, postgresInserts(insert), {
+      seed: seedStatements(), reseed: reseedPackRows,
+      scale: (held) => loadScaledData(held, "postgres"), strict: process.env.STG_DB_STRICT === "1",
+    });
     return;
   }
   // STG_DB=hana: a real HANA, which is the mode the AMDP work runs in -- the
@@ -603,145 +356,45 @@ async function setupDatabase(abap, schemas, insert) {
     db = new DuckDBDatabaseClient({trace: process.env.STG_DB_TRACE === "1", path: process.env.STG_DB_PATH ?? ":memory:"});
     abap.context.databaseConnections["DEFAULT"] = traced(db);
     await db.connect();
-    if (process.env.STG_DB_PATH && await db.hasSchema()) {
-      await requireCurrentSchema(db, duckdbSchema(schemas), "DuckDB",
-        "Use a new STG_DB_PATH after preserving the old file");
-      // a file made by an earlier build: the column renames since then are
-      // applied before anything reads it, and its views are the running
-      // generation's, in one transaction (tools/osd-db-migrate.mjs)
-      const {migrateDuckdbFile} = await import("../tools/osd-db-migrate.mjs");
-      const migrated = await migrateDuckdbFile({query: (sql) => db.query(sql), execute: (sql) => db.execute(sql)}, duckdbSchema(schemas));
-      for (const done of migrated.renamed) {
-        console.log(`${process.env.STG_DB_PATH}: renamed ${done}`);
-      }
-      if (migrated.foreign.length > 0) {
-        console.log(`${process.env.STG_DB_PATH}: views this build does not have, left as they are: ${migrated.foreign.join(", ")}`);
-      }
-      // A persistent database keeps its business rows, but the generated
-      // repository catalog must follow the running generation. Otherwise a
-      // new BSP page is in the registry while its WWWPARAMS object is absent.
-      await upsertGeneratedMetadata(db, insert);
-      await reseedPackRows(db);
-      return;
+    if (process.env.STG_DB_PATH && process.env.STG_DB_PATH !== ":memory:") {
+      const {startupDatabase} = await import(/* webpackIgnore: true */ "../tools/osd-db-migrate.mjs");
+      await startupDatabase(db, duckdbSchema(schemas), duckdbInserts(insert), {
+        seed: seedStatements(), reseed: reseedPackRows,
+        scale: (held) => loadScaledData(held, "duckdb"), strict: process.env.STG_DB_STRICT === "1",
+      });
+    } else {
+      await db.execute(duckdbSchema(schemas));
+      await db.execute(duckdbInserts(insert));
+      await db.execute(seedStatements());
+      await loadScaledData(db, "duckdb");
+      await db.commit();
     }
-    await db.execute(duckdbSchema(schemas));
-    await db.execute(duckdbInserts(insert));
-    await db.execute(seedStatements());
-    await loadScaledData(db, "duckdb");
-    await db.commit();
     return;
   }
   // STG_DB=file: a real SQLite file, written while the process runs, WAL
   // (tools/sqlite-file-client.mjs). The rows survive a crash and a recycle,
   // and a second connection can read them. The default path keeps them
   // beside the tree, out of git.
-  if (process.env.STG_DB === "file") {
-    const {FileSqliteClient, DEFAULT_DATABASE, BASE_DIR, setAsideDatabase} = await import("../tools/sqlite-file-client.mjs");
-    const {fingerprintOf, SchemaDrift} = await import("../tools/osd-persist.mjs");
-    const {existsSync, renameSync, copyFileSync, mkdirSync} = await import("node:fs");
-    const {join, dirname} = await import("node:path");
+  if (process.env.STG_DB === "file" || ((process.env.STG_DB === undefined || process.env.STG_DB === "sqlite") && process.env.STG_DB_PATH)) {
+    const {FileSqliteClient, DEFAULT_DATABASE} = await import("../tools/sqlite-file-client.mjs");
+    const {startupDatabase} = await import(/* webpackIgnore: true */ "../tools/osd-db-migrate.mjs");
+    const {baseImage, copyBase, publishBase} = await import(/* webpackIgnore: true */ "../tools/osd-db-base.mjs");
     const path = process.env.STG_DB_PATH ?? DEFAULT_DATABASE;
-    const wanted = fingerprintOf(schemas.sqlite);
-    // A base image: this DDIC's schema and mandatory rows, seeded once and
-    // kept under .local/db/base/<hash>.sqlite. A database that does not exist
-    // yet is a copy of it — milliseconds, and the same bytes every time —
-    // and the first instance of a new DDIC seeds and leaves the image behind
-    // for the next. This is what makes twenty runtimes over twenty files
-    // cheap: each is a copy, and nobody seeds twice.
-    //
-    // The image is named by the schema *and* the rows that went into it: the
-    // generation's mandatory rows (the wwwparams of every SMW0 object) and
-    // the seed. Named by the schema alone, an image made before a pack
-    // brought a new media object was copied for every later database, and
-    // the object was in the generation and not in the table (B.13,
-    // 2026-09-17). The stamp inside the file stays the schema's, which is
-    // what drift means.
-    const seeded = seedStatements();
-    const imageOf = fingerprintOf([schemas.sqlite, ...insert, ...seeded]);
-    const base = join(BASE_DIR, `${imageOf}.sqlite`);
-    if (!existsSync(path) && existsSync(base)) {
-      mkdirSync(dirname(path), {recursive: true});
-      copyFileSync(base, path);
-    }
+    const seed = seedStatements();
+    const base = baseImage(schemas.sqlite, insert, seed);
+    copyBase(base, path);
     db = new FileSqliteClient({trace: process.env.STG_DB_TRACE === "1", path});
+    await abap.context.databaseConnections["DEFAULT"]?.disconnect();
     abap.context.databaseConnections["DEFAULT"] = traced(db);
     await db.connect();
-    let found = await db.stampedSchema();
-    const drift = withSchemaMigrationLock(db.db, () => {
-      found = db.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'osd_schema'").get()
-        ? db.db.prepare("SELECT fingerprint FROM osd_schema LIMIT 1").get()?.fingerprint : undefined;
-      if (found === wanted) return false;
-      const beforeHandle = beforeAdtHandleDDL(schemas.sqlite);
-      const handlePriorWanted = fingerprintOf(beforeHandle);
-      const beforeRelease = beforeJobReleaseDDL(beforeHandle);
-      const releasePriorWanted = fingerprintOf(beforeRelease);
-      const beforeSchedule = beforeJobScheduleDDL(beforeRelease);
-      const schedulePriorWanted = fingerprintOf(beforeSchedule);
-      const beforeInput = beforeJobStepInputDDL(beforeSchedule);
-      const inputPriorWanted = fingerprintOf(beforeInput);
-      const beforeEvent = beforeJobEventDDL(beforeInput);
-      const eventPriorWanted = fingerprintOf(beforeEvent);
-      const beforePredecessor = beforeJobPredecessorDDL(beforeEvent);
-      const priorWanted = fingerprintOf(beforePredecessor);
-      if (migrateJobIdentityFile(db.db, found, priorWanted, beforePredecessor, fingerprintOf)) found = priorWanted;
-      if (migrateJobPredecessorFile(db.db, found, eventPriorWanted, beforeEvent, fingerprintOf)) found = eventPriorWanted;
-      if (migrateJobEventFile(db.db, found, inputPriorWanted, beforeInput, fingerprintOf)) found = inputPriorWanted;
-      if (migrateJobStepInputFile(db.db, found, schedulePriorWanted, beforeSchedule, fingerprintOf)) found = schedulePriorWanted;
-      if (migrateJobScheduleFile(db.db, found, releasePriorWanted, beforeRelease, fingerprintOf)) found = releasePriorWanted;
-      if (migrateJobReleaseFile(db.db, found, handlePriorWanted, beforeHandle, fingerprintOf)) found = handlePriorWanted;
-      if (migrateAdtHandleFile(db.db, found, wanted, schemas.sqlite, fingerprintOf)) found = wanted;
-      // Decide while holding the same lock as the migrations, even when an
-      // unstamped database has tables. A pre-lock stamp is only a snapshot.
-      return found !== wanted && (found !== undefined ||
-        db.db.prepare("SELECT COUNT(*) AS n FROM sqlite_master").get().n > 0);
+    const migrated = await startupDatabase(db, schemas.sqlite, insert, {
+      seed, reseed: reseedPackRows,
+      scale: (held) => loadScaledData(held, "sqlite"), strict: process.env.STG_DB_STRICT === "1",
     });
-    if (found === wanted) {
-      // the rows are already there, made for this DDIC. The tables the
-      // generation writes at start (wwwparams: which SMW0 objects exist and
-      // what they are called) are the generation's, not the user's, so they
-      // follow it: an object a pack added since this file was made is put
-      // in, one the pack dropped is taken out.
-      await refreshGenerated(db, insert);
-      await reseedPackRows(db);
-      ensureJobEventMetadata(db.db);
-      return;
-    }
-    if (drift) {
-      // a file made for another DDIC, or one nobody stamped: not this
-      // instance's data. Moved aside with the schema it was made for in
-      // its name, never dropped — the rows may be somebody's
-      const said = `${path} was made for schema ${found ?? "nobody recorded which"} and this runtime generates ${wanted}`;
-      if (process.env.STG_DB_STRICT === "1") {
-        throw new SchemaDrift(`${said}: refusing to touch it (STG_DB_STRICT=1)`);
-      }
-      await db.disconnect();
-      const aside = `${path}.${found ?? "unstamped"}.drift`;
-      // the -wal and the -shm go with it: a shared-memory index left behind
-      // under the old name is what a later runtime maps and dies on
-      setAsideDatabase(path, aside);
-      console.log(`${said}: moved to ${aside}, starting with an empty database`);
-      db = new FileSqliteClient({trace: process.env.STG_DB_TRACE === "1", path});
-      abap.context.databaseConnections["DEFAULT"] = traced(db);
-      await db.connect();
-    }
-    await db.execute(schemas.sqlite);
-    await db.execute(insert);
-    await db.execute(seeded);
-    await loadScaledData(db, "sqlite");
-    await db.stamp(schemas.sqlite);
-    await db.commit();
-    // the image for the next instance, unless scaled data made this one a
-    // special case rather than the mandatory rows
-    if (!existsSync(base) && !(Number(process.env.STG_DATA_SCALE ?? 0) > 0)) {
-      try {
-        db.fork(base);
-      } catch (error) {
-        console.error(`the base image could not be written: ${error?.message ?? error}`);
-      }
-    }
-    ensureJobEventMetadata(db.db);
+    publishBase(db, base, migrated, schemaTables(schemas.sqlite).length);
     return;
   }
+
   db = installTrim(new SQLiteDatabaseClient());
   abap.context.databaseConnections["DEFAULT"] = traced(db);
   // STG_DB_PATH keeps the rows between runs for SQLite too, which is what
@@ -749,8 +402,8 @@ async function setupDatabase(abap, schemas, insert) {
   // this process is asked to go away (tools/osd-persist.mjs). Without it
   // the database is in memory and the seed runs every time, as before.
   const {loadInto, saveWhenAsked, stamp} = await import("../tools/osd-persist.mjs");
-  // a file made for a different DDIC is not this instance's data, so it is
-  // said out loud and built again rather than served as if it fitted
+  // Legacy sql.js snapshot callers receive the same per-table planner;
+  // normal Node file persistence uses the native branch above.
   const restored = await loadInto(db, schemas.sqlite);
   saveWhenAsked(db);
   if (restored === true) {
@@ -772,29 +425,6 @@ async function loadScaledData(db, kind) {
     const {loadFlightFacts} = await import("../tools/gen-data.mjs");
     await loadFlightFacts(db, scale, kind);
   }
-}
-
-// The tables the generation's own INSERTs fill are rewritten from the
-// generation on every boot over an existing file: delete what is there for
-// each of those tables, insert what the generation says. Nothing else in the
-// file is touched.
-async function refreshGenerated(db, insert) {
-  const statements = Array.isArray(insert) ? insert : String(insert ?? "").split("\n").filter((s) => s.trim() !== "");
-  const tables = new Set();
-  for (const s of statements) {
-    const m = /^INSERT INTO "([^"]+)"/i.exec(s.trim());
-    if (m) {
-      tables.add(m[1]);
-    }
-  }
-  if (tables.size === 0) {
-    return;
-  }
-  for (const table of tables) {
-    await db.execute(`DELETE FROM "${table}";`);
-  }
-  await db.execute(statements.filter((s) => /^INSERT INTO "/i.test(s.trim())));
-  await db.commit();
 }
 
 /** Refresh generation-owned repository rows without clearing user tables.

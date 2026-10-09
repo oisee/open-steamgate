@@ -5,6 +5,7 @@
     "test/conformance.mjs",
     "test/database-identity.mjs",
     "test/db-migrate.mjs",
+    "test/db-migration-startup.mjs",
     "test/database-identity-host.mjs",
     "test/gateway-regression-contract.mjs",
     "test/http-case.mjs",

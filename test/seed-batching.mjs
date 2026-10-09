@@ -95,7 +95,7 @@ describe("pack table ownership on fresh and existing databases", () => {
     expect(visible).to.deep.equal(['DELETE FROM "zshared";', ...seedStatements()]);
   });
 
-  it("reseeds pack tables when setup restores a SQLite database", async () => {
+  it("keeps existing pack data when setup restores SQLite after captures change", async () => {
     process.env.STG_DB_PATH = join(root, "saved.sqlite");
     const schema = {sqlite: ['CREATE TABLE zshared (id TEXT PRIMARY KEY, value TEXT);']};
     const start = async () => {
@@ -110,7 +110,8 @@ describe("pack table ownership on fresh and existing databases", () => {
     writeFileSync(join(root, "packs", "later", "data", "zshared.tabu.json"),
       JSON.stringify([{id: "1", value: "edited"}]));
     const restored = await start();
-    expect((await restored.select({select: 'SELECT value FROM zshared'})).rows).to.deep.equal([{value: "edited"}]);
+    expect((await restored.select({select: 'SELECT value FROM zshared'})).rows).to.deep.equal([{value: "later"}]);
+    await restored.disconnect();
   });
 });
 
