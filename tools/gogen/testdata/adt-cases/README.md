@@ -41,7 +41,8 @@ Final checks: frontend/emission trio 49/49; semantics 369/369; full fixture
 32/32 classes compiled, 112/112 SUCCESS; unit harness 23/23; Go runtime 118
 listed top-level tests, normal and race runs passed. Disposable harness builds
 needed GOFLAGS=-buildvcs=false after Git VCS stamping failed with exit 128;
-no test was disabled. GOCACHE stays in tools/gogen/.out/go-cache.
+no test was disabled. GOCACHE then stayed in tools/gogen/.out/go-cache (since
+2026-10-09 unit.mjs uses the caller's GOCACHE or Go's own cache).
 
 ## Round 2 host contracts
 

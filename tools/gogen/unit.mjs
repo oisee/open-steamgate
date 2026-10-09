@@ -514,11 +514,14 @@ function stubGoErrors(diagnostics) {
   }
   return pending.size;
 }
+// GOCACHE is the caller's, else Go's own per-user cache. A cache inside the
+// checkout started cold in every fresh one (osgjs-unit stages a checkout per
+// run) and wrote ~10 GB a run (2026-10-09).
 let build;
 for (let attempt = 0; attempt < 100; attempt++) {
   const buildStarted = performance.now();
   build = spawnSync("go", ["build", ...(process.env.GOGEN_GO_BUILD_X ? ["-x"] : []), "-trimpath", "-o", bin, "./cmd/unit"], {
-    cwd: goDir, encoding: "utf8", env: {...process.env, GOCACHE: process.env.GOCACHE ?? join(here, ".out", "go-cache")}, maxBuffer: 5e6,
+    cwd: goDir, encoding: "utf8", env: process.env, maxBuffer: 5e6,
   });
   if (process.env.GOGEN_GO_BUILD_X) appendFileSync(join(runDir, "go-build-x.log"), build.stderr ?? "");
   timingMs.goBuild += Math.round(performance.now() - buildStarted);

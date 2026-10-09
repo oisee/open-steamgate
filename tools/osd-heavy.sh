@@ -30,8 +30,10 @@
 # then the status is timeout(1)'s, 124 (or 137 after the KILL) whatever the command
 # did with the TERM. It signals the command itself, not its children.
 #
-# Each run gets its own TMPDIR, removed after the command has exited. Stop a run by
-# signalling its process group (kill -- -PGID); Ctrl-C does that already.
+# Each run gets its own TMPDIR, removed after the command has exited. It is made
+# under OSD_HEAVY_TMP (default /tmp): a machine whose /tmp sits on a slow disk
+# points it at a faster one or a tmpfs. Stop a run by signalling its process group
+# (kill -- -PGID); Ctrl-C does that already.
 set -euo pipefail
 range=${OSD_HEAVY_RANGE:-40-49}
 slots=${OSD_HEAVY_SLOTS:-2}
@@ -90,7 +92,7 @@ done
 unset OSD_SERVE_PORT STG_PREVIEW_PORT PROBE_HTTP_PORT PROBE_HTTPS_PORT
 export OSD_HEAVY_SLOT=$got INSTANCE=$inst STG_PORT=80$inst STG_TLS_PORT=443$inst
 export STG_DIAG_PORT=32$inst DIAG_PORT=32$inst STG_RFC_PORT=33$inst
-TMPDIR=$(mktemp -d "/tmp/osd-heavy-$inst.XXXXXX"); export TMPDIR
+TMPDIR=$(mktemp -d "${OSD_HEAVY_TMP:-/tmp}/osd-heavy-$inst.XXXXXX"); export TMPDIR
 echo "osd-heavy: range $range, slot $got/$slots, INSTANCE=$INSTANCE, STG_PORT=$STG_PORT, STG_TLS_PORT=$STG_TLS_PORT, DIAG=$STG_DIAG_PORT, RFC=$STG_RFC_PORT, waited $(( $(date +%s) - t0 ))s: $*" >&2
 # The command runs in the foreground. A Ctrl-C reaches the whole process group. A
 # signal sent to this wrapper alone is caught and does nothing: bash runs a trap
