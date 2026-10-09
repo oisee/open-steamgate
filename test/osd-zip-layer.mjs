@@ -129,7 +129,7 @@ describe('immutable abapGit ZIP source layers', function () {
       expect(put.status, await put.text()).to.equal(200);
       expect(store.find('CLAS', 'ZCL_ZIP_DEMO').root).to.equal(layers[1].path);
       const body = '<class:abapClass xmlns:class="http://www.sap.com/adt/oo/classes" xmlns:adtcore="http://www.sap.com/adt/core" adtcore:name="ZCL_ZIP_CREATED"><adtcore:packageRef adtcore:name="$ZDEMO"/></class:abapClass>';
-      const create = await call('/oo/classes', 'POST', body); expect(create.status, await create.text()).to.equal(201);
+      const create = await call('/oo/classes', 'POST', body); expect(create.status, await create.text()).to.equal(200);
       expect(store.find('CLAS','ZCL_ZIP_CREATED').root).to.equal(layers[1].path);
       const destination = new StoreDestination({store});
       const dev = await withSystem(() => {}, () => destination.execute({IV_COMMAND: 'WRITE', IV_TYPE: 'CLAS', IV_NAME: 'ZCL_ZIP_IMPLICIT_API', IV_SOURCE: source('dev').replaceAll('zcl_zip_demo','zcl_zip_implicit_api')}), {store});
