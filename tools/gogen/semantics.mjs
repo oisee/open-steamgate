@@ -588,6 +588,10 @@ const EXPECT = {
   // 8 past the end (ANORMALIES secondary-key-duplicates: the transpiler
   // runtime answers otherwise)
   ZCL_GOGEN_T_SECKEY: "w:5/3,3/4,1/5, after:2 app:0/3,5/4,3/5,1/6, mod:4/1,3/2,2/3, all:0/1,5/2,4/3,3/4,2/5,1/6, ru:0/3/4 rp:0/0/4 rmiss:8/0/7 rlow:4/0/1 rfs:0/4/3",
+  // WHERE over int8 (abapiti inbox 043): the comparison is in int8 when
+  // either side is i or int8 and one is int8, also for values past the
+  // range of i. Unmeasured: ABAP documentation of comparison types
+  ZCL_GOGEN_T_WHEREI8: "d:0/2 l:7 n:7 g:0/1",
   // a unique hashed secondary key (abapiti inbox 042, its maps): READ ...
   // WITH KEY k COMPONENTS finds by value, a miss is sy-subrc 4 with the
   // target left alone; DELETE TABLE ... WITH TABLE KEY k COMPONENTS removes
@@ -963,6 +967,11 @@ for (const line of new Set([...Object.keys(HKEY_REFUSED).map(Number), ...hgot.ke
   if (!ok) bad += 1;
   console.log(`${ok ? "ok  " : "FAIL"} refused seckeyh :${line}: ${hgot.get(line) ?? "(compiled)"}${ok ? "" : `\n     want: ${HKEY_REFUSED[line] ?? "(compiled)"}`}`);
 }
+// LOOP ... USING KEY with a WHERE in int8 over an i component (abapiti 043)
+const ri8 = compileProgram({folders: [join(here, "testdata-refused"), core], objects: ["zcl_gogen_t_rf_wherei8"], tolerant: true});
+const ri8ok = ri8.partial.some((x) => x.includes("zcl_gogen_t_rf_wherei8.clas.abap:16): LOOP ... USING KEY with a WHERE on a component of another type"));
+if (!ri8ok) bad += 1;
+console.log(`${ri8ok ? "ok  " : "FAIL"} refused wherei8 :16: ${ri8.partial.join(" | ") || "(compiled)"}`);
 const resumable = compileProgram({folders: [join(here, "testdata-refused"), core], objects: ["zcl_gogen_t_rf_resume", "CX_SY_ZERODIVIDE"], tolerant: true});
 const resumeRefused = resumable.partial.some((x) => x.includes("RAISE RESUMABLE:"));
 if (!resumeRefused) bad += 1;
