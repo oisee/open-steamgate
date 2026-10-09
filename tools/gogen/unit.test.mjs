@@ -459,6 +459,9 @@ test("ABAP fixture runs pass, fail, exception, and teardown after failures", {ti
   assert.deepEqual(rows.map((r) => r.status), ["SUCCESS", "FAILED", "FAILED", "SUCCESS", "SUCCESS", "FAILED", "FAILED", "SKIPPED", "FAILED", "SKIPPED", "FAILED", "SUCCESS"]);
   assert.equal(rows[1].message, "intentional failure");
   assert.match(rows[2].message, /CX_SY_ZERODIVIDE/);
+  // abapiti 10-09: an error that is not an assertion names its ABAP source line
+  assert.equal(rows[2].where, "zcl_gogen_unit_fixture.clas.testclasses.abap:81");
+  assert.equal(rows[1].where, undefined);
   assert.equal(rows[6].message, "teardown: stop second");
   assert.match(rows[7].message, /stopped after teardown failure/);
   assert.match(rows[9].message, /stopped after teardown failure/);
