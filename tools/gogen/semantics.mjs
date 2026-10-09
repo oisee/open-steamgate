@@ -74,6 +74,9 @@ const EXPECT = {
   ZCL_GOGEN_T_COPYINSERT: "1",
   ZCL_GOGEN_T_COPYDATA: "1",
   ZCL_GOGEN_T_COPYHASH: "1",
+  // abapiti 017: string -> int8; the first three A4H-measured (2026-10-03),
+  // the bounds unmeasured
+  ZCL_GOGEN_T_C2I8: "42/8000000000/-17/9223372036854775807/-9223372036854775808/ovf",
   // Unmeasured (ABAP keyword documentation: DELETE TABLE itab FROM wa matches
   // the primary table key only): hashed one-field key, hashed two-field key,
   // sorted unique key; the ADT front needs the hashed form (adt-i5, 10-08).
