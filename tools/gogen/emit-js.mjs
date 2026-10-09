@@ -380,10 +380,23 @@ function keyLoop(st, ctx, t, d) {
   ];
 }
 
+// a hashed secondary key, as emit-go keyEq (temporaries kV/kI/kR: no ABAP
+// name is spelled with an upper case letter after the first)
+function keyEq(key, n) {
+  return `(kR) => ${key.comps.map((c, j) => `abap.cmpKey(kR.${ident(c.name)}, kV${n}[${j}]) === 0`).join(" && ")}`;
+}
+
 function readSecKey(st, ctx, t) {
   const n = ctx.loop++;
   const tb = expr(st.table, ctx);
   const vals = `[${st.values.map((v) => expr(v, ctx)).join(", ")}]`;
+  if (st.key.hashed) {
+    const at = `kI${n}`;
+    const bindH = st.fs ? `${ident(st.fs)} = ${boundRow(st.table.type, tb, at)};` : st.refInto ? `${place(st.into, ctx)} = ${rowRef(st.table.type, tb, at)};` : st.into ? `${place(st.into, ctx)} = ${composite(st.into.type) ? `abap.copy(${tb}[${at}])` : `${tb}[${at}]`};` : "";
+    return [`${t}{`, `${t}  const kV${n} = ${vals};`,
+      `${t}  const ${at} = abap.keyFind(${tb}, ${keyEq(st.key, n)}, ${JSON.stringify(st.key.name)});`,
+      `${t}  s.sy.subrc = 4; s.sy.tabix = 0;`, `${t}  if (${at} >= 0) { ${bindH} s.sy.subrc = 0; }`, `${t}}`];
+  }
   const cmp = st.key.comps.map((c, j) => `abap.cmpKey(r.${ident(c.name)}, v${n}[${j}])`).join(" || ") + " || 0";
   const bind = st.fs ? `${ident(st.fs)} = ${boundRow(st.table.type, tb, `i${n}`)};` : st.refInto ? `${place(st.into, ctx)} = ${rowRef(st.table.type, tb, `i${n}`)};` : st.into ? `${place(st.into, ctx)} = ${composite(st.into.type) ? `abap.copy(${tb}[i${n}])` : `${tb}[i${n}]`};` : "";
   return [`${t}{`, `${t}  const v${n} = ${vals};`,
@@ -845,6 +858,13 @@ function stmt(st, ctx, d) {
       return [`${t}{`, `${t}  const key${n} = ${expr(st.value, ctx)};`, `${t}  s.sy.subrc = 4;`,
         `${t}  const i${n} = ${tb}.findIndex((r${n}) => r${n}.${ident(st.key)} === key${n});`,
         `${t}  if (i${n} >= 0) { ${tb}.splice(i${n}, 1); abap.bumpTable(${tb}); s.sy.subrc = 0; }`, `${t}}`];
+    }
+    case "delete_seckey": {
+      const tb = place(st.table, ctx);
+      const n = ctx.loop++;
+      return [`${t}{`, `${t}  const kV${n} = [${st.values.map((v) => expr(v, ctx)).join(", ")}];`, `${t}  s.sy.subrc = 4;`,
+        `${t}  const kI${n} = abap.keyFind(${tb}, ${keyEq(st.key, n)}, ${JSON.stringify(st.key.name)});`,
+        `${t}  if (kI${n} >= 0) { ${tb}.splice(kI${n}, 1); abap.bumpTable(${tb}); s.sy.subrc = 0; }`, `${t}}`];
     }
     case "delete_from": {
       const tb = place(st.table, ctx);

@@ -588,6 +588,12 @@ const EXPECT = {
   // 8 past the end (ANORMALIES secondary-key-duplicates: the transpiler
   // runtime answers otherwise)
   ZCL_GOGEN_T_SECKEY: "w:5/3,3/4,1/5, after:2 app:0/3,5/4,3/5,1/6, mod:4/1,3/2,2/3, all:0/1,5/2,4/3,3/4,2/5,1/6, ru:0/3/4 rp:0/0/4 rmiss:8/0/7 rlow:4/0/1 rfs:0/4/3",
+  // a unique hashed secondary key (abapiti inbox 042, its maps): READ ...
+  // WITH KEY k COMPONENTS finds by value, a miss is sy-subrc 4 with the
+  // target left alone; DELETE TABLE ... WITH TABLE KEY k COMPONENTS removes
+  // the row, 4 when there is none. Unmeasured past abapiti's own A4H run of
+  // the first READ and DELETE (a10): ABAP documentation
+  ZCL_GOGEN_T_SECKEYH: "r:0 i:0/3 miss:4/99 t:0 d:0 i:1/0 d2:4 a10c3",
   // the generic statements of /UI2/CL_JSON's deserializer (ultra/json), A4H
   // 2026-09-24 (the same code in ZCL_GOGEN_T_SECKEY's probe include): INSERT
   // INTO TABLE of a generic standard table appends and leaves sy-tabix alone,
@@ -947,6 +953,15 @@ for (const line of new Set([...Object.keys(DEL_REFUSED).map(Number), ...dgot.key
   const ok = dgot.get(line) === DEL_REFUSED[line];
   if (!ok) bad += 1;
   console.log(`${ok ? "ok  " : "FAIL"} refused delfrom :${line}: ${dgot.get(line) ?? "(compiled)"}${ok ? "" : `\n     want: ${DEL_REFUSED[line] ?? "(compiled)"}`}`);
+}
+// a hashed secondary key (abapiti 042): what stays refused
+const HKEY_REFUSED = {21: "READ TABLE WITH KEY BY_K INTO a work area of another type (READ TABLE shorts WITH KEY by_k COMPONENTS k = 'a' INTO wa.)", 23: "DELETE TABLE entries WITH TABLE KEY by_k COMPONENTS k = row-k inside a LOOP over the same table: the loop index and its field symbol were not adjusted", 25: "key BY_K: a hashed secondary key (LOOP AT entries INTO row USING KEY by_k.)"};
+const rhkey = compileProgram({folders: [join(here, "testdata-refused"), core], objects: ["zcl_gogen_t_rf_seckeyh"], tolerant: true});
+const hgot = new Map(rhkey.partial.map((x) => [Number(/zcl_gogen_t_rf_seckeyh\.clas\.abap:(\d+)\)/.exec(x)?.[1]), x.slice(x.indexOf("): ") + 3)]));
+for (const line of new Set([...Object.keys(HKEY_REFUSED).map(Number), ...hgot.keys()])) {
+  const ok = hgot.get(line) === HKEY_REFUSED[line];
+  if (!ok) bad += 1;
+  console.log(`${ok ? "ok  " : "FAIL"} refused seckeyh :${line}: ${hgot.get(line) ?? "(compiled)"}${ok ? "" : `\n     want: ${HKEY_REFUSED[line] ?? "(compiled)"}`}`);
 }
 const resumable = compileProgram({folders: [join(here, "testdata-refused"), core], objects: ["zcl_gogen_t_rf_resume", "CX_SY_ZERODIVIDE"], tolerant: true});
 const resumeRefused = resumable.partial.some((x) => x.includes("RAISE RESUMABLE:"));

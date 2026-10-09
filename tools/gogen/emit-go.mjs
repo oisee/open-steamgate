@@ -1194,6 +1194,23 @@ function keyLoop(st, ctx, t, d) {
 }
 
 /*
+ * A hashed secondary key (unique): the row holding the values (abap.KeyFind,
+ * a scan, not a hash: the table is a plain slice and its rows can change in
+ * place). sy-tabix is 0: the ABAP documentation of READ TABLE says so for a
+ * hit by a hashed key and leaves a miss undefined; not measured on A4H.
+ * The temporaries are spelled kV/kI/kR, an upper case letter after the
+ * first, which ident never produces, so no ABAP name can shadow them.
+ */
+function keyValues(st, ctx, t, n) {
+  return st.values.map((v, j) => `${t}\tkV${n}_${j} := ${expr(v, ctx)}`);
+}
+
+function keyEq(key, tb, n) {
+  const eq = key.comps.map((c, j) => `abap.${c.num ? "CmpNum" : "CmpS"}(${tb}[kR].${ident(c.name)}, kV${n}_${j}) == 0`);
+  return `func(kR int) bool { return ${eq.join(" && ")} }`;
+}
+
+/*
  * READ TABLE ... WITH KEY k COMPONENTS over a sorted secondary key: the
  * first row of the key's order with that value (abap.KeyRead), sy-tabix its
  * position; not found, sy-tabix is where it would go and sy-subrc 4, or 8
@@ -1203,6 +1220,14 @@ function readSecKey(st, ctx, t) {
   const n = ctx.loop++;
   const tb = expr(st.table, ctx);
   const vals = st.values.map((v, j) => `${t}\tv${n}_${j} := ${expr(v, ctx)}`);
+  if (st.key.hashed) {
+    const at = `kI${n}`;
+    const bindH = st.fs ? `${ident(st.fs)} = ${boundRow(st.table.type, tb, at)}` : st.refInto ? `${place(st.into, ctx)} = ${rowRef(st.table.type, tb, `${tb}[${at}]`)}` : st.into ? `${place(st.into, ctx)} = ${copied(rowValue(st.table.type, `${tb}[${at}]`), st.into.type)}` : null;
+    return [`${t}{`, ...keyValues(st, ctx, t, n),
+      `${t}\t${at} := abap.KeyFind(len(${tb}), ${keyEq(st.key, tb, n)}, ${JSON.stringify(st.key.name)})`,
+      `${t}\ts.Sy.Subrc, s.Sy.Tabix = 4, 0`,
+      `${t}\tif ${at} >= 0 {`, ...(bindH ? [`${t}\t\t${bindH}`] : []), `${t}\t\ts.Sy.Subrc = 0`, `${t}\t}`, `${t}}`];
+  }
   const cmp = st.key.comps.map((c, j) => `if c := abap.${c.num ? "CmpNum" : "CmpS"}(${tb}[i].${ident(c.name)}, v${n}_${j}); c != 0 {\n${t}\t\treturn c\n${t}\t}`);
   const bind = st.fs ? `${ident(st.fs)} = ${boundRow(st.table.type, tb, `i${n}`)}` : st.refInto ? `${place(st.into, ctx)} = ${rowRef(st.table.type, tb, `${tb}[i${n}]`)}` : st.into ? `${place(st.into, ctx)} = ${copied(rowValue(st.table.type, `${tb}[i${n}]`), st.into.type)}` : null;
   return [`${t}{`, ...vals,
@@ -2041,6 +2066,16 @@ ${t}	}`));
         `${t}\tfor i${n}, r${n} := range ${tb} {`, `${t}\t\tif r${n}.${ident(st.key)} == key${n} {`,
         `${t}\t\t\t${tb} = append(${tb}[:i${n}], ${tb}[i${n}+1:]...)`, `${t}\t\t\tclear(${tb}[len(${tb}):len(${tb})+1])`, `${t}\t\t\tabap.BumpTable(&${tb})`,
         `${t}\t\t\ts.Sy.Subrc = 0`, `${t}\t\t\tbreak`, `${t}\t\t}`, `${t}\t}`, `${t}}`];
+    }
+    // DELETE TABLE ... WITH TABLE KEY k COMPONENTS: the row a unique key
+    // (sorted or hashed) holds the values in; sy-tabix is left alone
+    case "delete_seckey": {
+      const n = ctx.loop++;
+      const tb = place(st.table, ctx);
+      const at = `kI${n}`;
+      return [`${t}{`, ...keyValues(st, ctx, t, n), `${t}\t${at} := abap.KeyFind(len(${tb}), ${keyEq(st.key, tb, n)}, ${JSON.stringify(st.key.name)})`, `${t}\ts.Sy.Subrc = 4`,
+        `${t}\tif ${at} >= 0 {`, `${t}\t\t${tb} = append(${tb}[:${at}], ${tb}[${at}+1:]...)`, `${t}\t\tclear(${tb}[len(${tb}):len(${tb})+1])`, `${t}\t\tabap.BumpTable(&${tb})`,
+        `${t}\t\ts.Sy.Subrc = 0`, `${t}\t}`, `${t}}`];
     }
     case "delete_from": {
       const n = ctx.loop++;

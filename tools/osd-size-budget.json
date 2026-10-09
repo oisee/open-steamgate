@@ -15,8 +15,8 @@
   ],
   "budgets": {
     "go:abap": {
-      "lines": 11968,
-      "reason": "osgo 026/029 (#658, #659): UTF-16 units and class statics per Session (carve-out queued, stoker QUEUE #33). ADT batch 1 (adt-i5 cases 1-7): Session message fields (sy-msgno as NUMC 3), MESSAGE RAISING binding with scoped restoration, classic exceptions keyed by the resolved interface method, date/time and signed MOVE adapters, object-wrapper identity, STORE answer projection and conservative ADT host answers; timestamp conversion lives in go/timestamp. abapiti 037: cl_http_utility=>decode_base64 beside its encode_base64 sibling (the @KERNEL text decode). StoreHook: a host answers ZOSD_STORE for the calling step first (adt-i5's per-session SYSTEM facts), replacing a text substitution of emitter output. #39 records WorkProcess ownership and exposes only the narrow Session methods needed by the abap-free lock/yield packages; round 2: end and reopen the database transaction across yield, and mark APC step Session ownership. #43: per-Session update-module flag and two small explicit-statement LUW bindings; database primitives retain yield and dialog-step behavior. abapiti 017: ParseI8, string to int8 with ParseI's rules."
+      "lines": 11985,
+      "reason": "osgo 026/029 (#658, #659): UTF-16 units and class statics per Session (carve-out queued, stoker QUEUE #33). ADT batch 1 (adt-i5 cases 1-7): Session message fields (sy-msgno as NUMC 3), MESSAGE RAISING binding with scoped restoration, classic exceptions keyed by the resolved interface method, date/time and signed MOVE adapters, object-wrapper identity, STORE answer projection and conservative ADT host answers; timestamp conversion lives in go/timestamp. abapiti 037: cl_http_utility=>decode_base64 beside its encode_base64 sibling (the @KERNEL text decode). StoreHook: a host answers ZOSD_STORE for the calling step first (adt-i5's per-session SYSTEM facts), replacing a text substitution of emitter output. #39 records WorkProcess ownership and exposes only the narrow Session methods needed by the abap-free lock/yield packages; round 2: end and reopen the database transaction across yield, and mark APC step Session ownership. #43: per-Session update-module flag and two small explicit-statement LUW bindings; database primitives retain yield and dialog-step behavior. abapiti 017: ParseI8, string to int8 with ParseI's rules. abapiti 042: READ and DELETE TABLE by a hashed secondary key."
     },
     "go:abaperr": {
       "lines": 13,
@@ -207,16 +207,16 @@
       "reason": "lowered 2026-10-02: the YAML line index went to tools/dsl-yaml-lines.mjs; holds the range: of L3 slice 3a"
     },
     "tools/gogen/emit-go.mjs": {
-      "lines": 2423,
-      "reason": "#36: generated host-class hook dispatch and ABAP Raise/error bridging on top of the merged emitter baseline. #38/#39 add lock-call emission and trim the arithmetic string result only for arithmetic sources. Rebased on #675 (step-first host hooks). #43: emit update-task marking and explicit-statement LUW bindings. ADT 10-08: DELETE TABLE itab FROM wa on a keyed table (ADT request XML namespace bindings). abapiti 017: c2n into int8. abapiti Registry run 10-09: APPEND LINES of plain rows in one append, DELETE clears the vacated tail."
+      "lines": 2458,
+      "reason": "#36: generated host-class hook dispatch and ABAP Raise/error bridging on top of the merged emitter baseline. #38/#39 add lock-call emission and trim the arithmetic string result only for arithmetic sources. Rebased on #675 (step-first host hooks). #43: emit update-task marking and explicit-statement LUW bindings. ADT 10-08: DELETE TABLE itab FROM wa on a keyed table (ADT request XML namespace bindings). abapiti 017: c2n into int8. abapiti Registry run 10-09: APPEND LINES of plain rows in one append, DELETE clears the vacated tail. abapiti 042: READ and DELETE TABLE by a hashed secondary key."
     },
     "tools/gogen/emit-js.mjs": {
-      "lines": 1206,
-      "reason": "baseline 2026-10-01"
+      "lines": 1224,
+      "reason": "baseline 2026-10-01 abapiti 042: READ and DELETE TABLE by a hashed secondary key."
     },
     "tools/gogen/frontend.mjs": {
-      "lines": 7031,
-      "reason": "#34/#36: packed DEC comparisons and the host-replaced class signature registry on top of the merged frontend baseline. #36 round 2: shared omitted-argument lowering for host exception factories, including OPTIONAL, DEFAULT and IS SUPPLIED; no second emitter call path. #36 critic r2: a host-replaced method whose signature does not compile, or is untyped, is refused instead of dropped. abapiti 037: cl_http_utility=>decode_base64 beside its encode_base64 sibling (the @KERNEL text decode). #38/#39 add numeric-text/string calculation targets and the ENQUEUE/DEQUEUE lock-object registry; round 2: size all supported lock key kinds as Node request() does and refuse unsized keys by table and field. #43: read UPDATE_TASK presence per module from function group XML and mark compiled calls before execution. #43: update-task modules from the function group XML mark the LUW on module entry. ADT 10-08: DELETE TABLE itab FROM wa on a HASHED or SORTED table by its primary key fields, refused inside a LOOP over the same table (#688 critic). abapiti scale 10-09: the IS SUPPLIED scan cached per parsed file across closure rounds."
+      "lines": 7060,
+      "reason": "#34/#36: packed DEC comparisons and the host-replaced class signature registry on top of the merged frontend baseline. #36 round 2: shared omitted-argument lowering for host exception factories, including OPTIONAL, DEFAULT and IS SUPPLIED; no second emitter call path. #36 critic r2: a host-replaced method whose signature does not compile, or is untyped, is refused instead of dropped. abapiti 037: cl_http_utility=>decode_base64 beside its encode_base64 sibling (the @KERNEL text decode). #38/#39 add numeric-text/string calculation targets and the ENQUEUE/DEQUEUE lock-object registry; round 2: size all supported lock key kinds as Node request() does and refuse unsized keys by table and field. #43: read UPDATE_TASK presence per module from function group XML and mark compiled calls before execution. #43: update-task modules from the function group XML mark the LUW on module entry. ADT 10-08: DELETE TABLE itab FROM wa on a HASHED or SORTED table by its primary key fields, refused inside a LOOP over the same table (#688 critic). abapiti scale 10-09: the IS SUPPLIED scan cached per parsed file across closure rounds. abapiti 042: READ and DELETE TABLE by a hashed secondary key."
     },
     "tools/gogen/go/abap/abap.go": {
       "lines": 278,
@@ -399,8 +399,8 @@
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/go/abap/seckey.go": {
-      "lines": 114,
-      "reason": "ADT batch 1 (adt-i5 cases 1-7): Unwrap caught exception objects for ABAP reference identity comparison."
+      "lines": 131,
+      "reason": "ADT batch 1 (adt-i5 cases 1-7): Unwrap caught exception objects for ABAP reference identity comparison. abapiti 042: READ and DELETE TABLE by a hashed secondary key."
     },
     "tools/gogen/go/abap/select.go": {
       "lines": 55,
@@ -459,8 +459,8 @@
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/js/abap.mjs": {
-      "lines": 1688,
-      "reason": "baseline 2026-10-01; critic round 1: JS time conversion and exception identity. ADT batch 1 (round 5 finding 1): preserve initial c subject CS semantics. abapiti 017: ParseI8 beside ParseI (BigInt)."
+      "lines": 1699,
+      "reason": "baseline 2026-10-01; critic round 1: JS time conversion and exception identity. ADT batch 1 (round 5 finding 1): preserve initial c subject CS semantics. abapiti 017: ParseI8 beside ParseI (BigInt). abapiti 042: READ and DELETE TABLE by a hashed secondary key."
     },
     "tools/lift.mjs": {
       "lines": 1225,

@@ -1407,6 +1407,17 @@ export function keyRead(tb, c, unique) {
   return [-1, less + 1, less === tb.length ? 8 : 4];
 }
 
+// keyFind: go/abap/seckey.go KeyFind
+export function keyFind(tb, eq, key) {
+  let pick = -1;
+  tb.forEach((r, i) => {
+    if (!eq(r)) return;
+    if (pick >= 0) notCompiled(`secondary key ${key}: a unique key holds a value twice`);
+    pick = i;
+  });
+  return pick;
+}
+
 export function uniqueKeyCheck(tb, dup, key) {
   if (tb.some(dup)) notCompiled(`APPEND: a row repeating the value of the unique secondary key ${key}: A4H raises the catchable CX_SY_ITAB_DUPLICATE_KEY (2026-09-24), which this runtime does not`);
 }
