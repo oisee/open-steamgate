@@ -468,6 +468,18 @@ test("ABAP fixture runs pass, fail, exception, and teardown after failures", {ti
   assert.equal(rows[10].message, "teardown: teardown continue");
 });
 
+test("class setup and class teardown errors name their ABAP site in where", {timeout: 120000}, () => {
+  const run = spawnSync("node", [join(here, "unit.mjs"), "--fixture", join(here, "testdata-unit-where"), "--no-cache"], {
+    cwd: join(here, "..", ".."), encoding: "utf8", timeout: 110000, maxBuffer: 5e6,
+  });
+  assert.equal(run.status, 1, run.stderr || run.error?.message);
+  const rows = Object.fromEntries(JSON.parse(run.stdout).rows.map((r) => [`${r.testclass}/${r.method}`, r]));
+  const divide = "zcl_gogen_unit_where.clas.abap:8";
+  assert.equal(rows["LTCL_SETUP/FIRST"].where, divide);
+  assert.equal(rows["LTCL_TEARDOWN/PASSES"].where, divide);
+  assert.equal(rows["LTCL_TEARDOWN/FAILS"].where, `zcl_gogen_unit_where.clas.testclasses.abap:30 class_teardown: ${divide}`);
+});
+
 test("byte section replacement, bounded FIND and memory spans run through ABAP Unit", async () => {
   const run = await unitRun([join(here, "unit.mjs"), "--fixture", "tools/gogen/testdata",
     "--class", "ZCL_GOGEN_T_BYTESECTION", "--class", "ZCL_GOGEN_T_BYTEMEM",
