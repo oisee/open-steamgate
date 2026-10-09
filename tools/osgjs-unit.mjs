@@ -1,6 +1,6 @@
 // A checkout CI runner: build and run in a disposable system, never build/live.
 import {cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
-import {join, resolve} from "node:path";
+import {basename, join, resolve} from "node:path";
 import {phase, timingMs} from "./osgjs-trace.mjs";
 import {runsAs} from "./osd-main.mjs";
 import {libraryPath} from "./osd-lib-path.mjs";
@@ -34,7 +34,9 @@ function isolatedSystem(staging, input) {
   for (const dir of new Set(["src", "test", "tools", "scripts", "webapp", "web", "data", "deploy", ...folders])) {
     if (!existsSync(resolve(root, dir))) continue;
     // External input folders are copied into a numbered private layer below.
-    if (resolve(root, dir).startsWith(root + "/")) cpSync(resolve(root, dir), resolve(home, dir), {recursive: true, dereference: true});
+    // never a build output (tools/gogen/.out held a 9 GB Go cache that every
+    // run copied, 2026-10-09); the run makes its own
+    if (resolve(root, dir).startsWith(root + "/")) cpSync(resolve(root, dir), resolve(home, dir), {recursive: true, dereference: true, filter: (src) => basename(src) !== ".out"});
   }
   symlinkSync(join(root, "node_modules"), join(home, "node_modules"), "dir");
   mkdirSync(join(home, ".local", "lars"), {recursive: true});

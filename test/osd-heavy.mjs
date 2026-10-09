@@ -3,6 +3,9 @@
 // command that overruns OSD_HEAVY_TIMEOUT gives it up.
 import {expect} from "chai";
 import {spawn} from "node:child_process";
+import {existsSync, mkdtempSync, readdirSync, rmSync} from "node:fs";
+import {tmpdir} from "node:os";
+import {join} from "node:path";
 import {fileURLToPath} from "node:url";
 
 const script = fileURLToPath(new URL("../tools/osd-heavy.sh", import.meta.url));
@@ -92,4 +95,35 @@ describe("osd-heavy slot lease", function () {
       expect(r.stderr).to.match(/OSD_HEAVY_TIMEOUT must be/);
     });
   }
+});
+
+describe("osd-heavy TMPDIR", function () {
+  this.timeout(30000);
+
+  it("makes the run's TMPDIR under OSD_HEAVY_TMP and removes it, also after a failure", async () => {
+    const parent = mkdtempSync(join(tmpdir(), "heavy-parent-"));
+    try {
+      const ok = await heavy(["bash", "-c", "echo $TMPDIR"], {OSD_HEAVY_TMP: parent + "/"});
+      expect(ok.status).to.equal(0);
+      expect(ok.stdout.trim().startsWith(parent + "/")).to.equal(true);
+      const failed = await heavy(["bash", "-c", "echo $TMPDIR; exit 3"], {OSD_HEAVY_TMP: parent});
+      expect(failed.status).to.equal(3);
+      expect(readdirSync(parent)).to.deep.equal([]);
+    } finally { rmSync(parent, {recursive: true, force: true}); }
+  });
+
+  it("falls back to /tmp when OSD_HEAVY_TMP is empty", async () => {
+    const run = await heavy(["bash", "-c", "echo $TMPDIR"], {OSD_HEAVY_TMP: ""});
+    expect(run.status).to.equal(0);
+    expect(run.stdout.trim()).to.match(/^\/tmp\/osd-heavy-/);
+    expect(existsSync(run.stdout.trim())).to.equal(false);
+  });
+
+  it("refuses a parent that does not exist and gives the slot back", async () => {
+    const run = await heavy(["true"], {OSD_HEAVY_TMP: "/nonexistent-osd-heavy-parent"});
+    expect(run.status).to.not.equal(0);
+    const next = await heavy(["true"], {}, 8000);
+    expect(next.timedOut).to.equal(false);
+    expect(next.status).to.equal(0);
+  });
 });
