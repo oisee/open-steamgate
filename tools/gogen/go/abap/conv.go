@@ -195,6 +195,47 @@ func ParseI(v string) int32 {
 	return int32(n)
 }
 
+// ParseI8 is ParseI for an int8 target: the same text rules, nineteen
+// digits, the range of int64 (abapiti 017, A4H 3/3 2026-10-03)
+func ParseI8(v string) int64 {
+	t := strings.Trim(v, " ")
+	if t == "" {
+		return 0
+	}
+	neg, body, ok := numSign(t)
+	body = strings.Trim(body, " ")
+	if !ok || !decimalDigits(body) {
+		panic(ArithmeticError{Class: "CX_SY_CONVERSION_NO_NUMBER", Op: "c->int8"})
+	}
+	whole, frac := body, ""
+	if i := strings.IndexByte(body, '.'); i >= 0 {
+		whole, frac = body[:i], body[i+1:]
+	}
+	whole = strings.TrimLeft(whole, "0")
+	overflow := ArithmeticError{Class: "CX_SY_CONVERSION_OVERFLOW", Op: "c->int8"}
+	if len(whole) > 19 {
+		panic(overflow)
+	}
+	// the magnitude in uint64: 19 digits fit, the bound is checked below
+	var n uint64
+	for i := 0; i < len(whole); i++ {
+		n = n*10 + uint64(whole[i]-'0')
+	}
+	if frac != "" && frac[0] >= '5' {
+		n++
+	}
+	if neg {
+		if n > 1<<63 {
+			panic(overflow)
+		}
+		return int64(-n)
+	}
+	if n > math.MaxInt64 {
+		panic(overflow)
+	}
+	return int64(n)
+}
+
 // I8ToI and F2I8: int8 into i with an overflow check, f into int8 rounded.
 func I8ToI(v int64) int32 { return check(v, "int8->i") }
 

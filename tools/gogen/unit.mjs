@@ -134,6 +134,7 @@ while (sourceQueue.length) {
 }
 let registry;
 const session = {};
+const calledBy = new WeakMap();
 timingMs.frontendClosureCounts = [];
 for (let round = 0; round < 12; round++) {
   const started = performance.now();
@@ -145,8 +146,14 @@ for (let round = 0; round < 12; round++) {
     if (sup) refs.add(sup.toUpperCase());
   }
   for (const c of program.classes) {
-    if (c.super) refs.add(c.super);
-    for (const m of c.methods) callsIn(m.body, refs);
+    // a class the session reused is the same IR object as last round
+    let found = calledBy.get(c);
+    if (!found) {
+      found = new Set(c.super ? [c.super] : []);
+      for (const m of c.methods) callsIn(m.body, found);
+      calledBy.set(c, found);
+    }
+    for (const x of found) refs.add(x);
   }
   const more = [...refs].filter((x) => available.has(x) && !wanted.has(x) && !x.includes(":"));
   timingMs.frontendClosureRounds.push(Math.round(performance.now() - started));
