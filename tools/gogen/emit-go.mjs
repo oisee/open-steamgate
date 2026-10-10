@@ -1,3 +1,4 @@
+import {analyzeTableMoves} from "./emit-table-move.mjs";
 import {omittedFactoryCall} from "./frontend.mjs";
 import {analyzeOwnership} from "./frontend-owned.mjs";
 import {ownedExpression, ownedStatement, emitByteConcat} from "./emit-owned.mjs";
@@ -53,6 +54,7 @@ function chainCctor(cls) {
 }
 
 let STABLE_ROWS = new Set();
+let movePair;
 const stable = (t) => t?.stable || (t?.k === "table" && STABLE_ROWS.has(t.row.go ?? `${t.row.k}:${t.row.len ?? ""}`));
 export function goType(t) {
   switch (t.k) {
@@ -320,6 +322,7 @@ export function emitGo(program, pkg = "main", layers = null, unitBuild = false) 
   STRUCTDEFS = Array.isArray(program) ? structs : program.structs;
   CLASSES = new Map((Array.isArray(program) ? classes : program.classes).map((c) => [c.name, c]));
   POLY = new Set([...CLASSES.values()].map((c) => c.super).filter(Boolean));
+  movePair = analyzeTableMoves(program, stable, goType);
   HELPER_IMPORTS.add("hostclass");
   EVENTS = Array.isArray(program) ? new Map() : (program.events ?? new Map());
   const consts = layers?.consts ?? (Array.isArray(program) ? new Map() : program.consts);
@@ -983,10 +986,10 @@ function method(cls, m) {
     lines.push("\tfunc() {");
     for (const p of valueOutputs) lines.push(`\t\tvar ${ident(p.name)} ${goType(p.type)} = ${p.dir === "changing" ? copied(`*${ident(p.name)}`, p.type) : zero(p.type)}`, `\t\t_ = ${ident(p.name)}`,
       `\t\tdefer func() { ${ident(p.name)}_value = ${ident(p.name)} }()`);
-    lines.push(...m.body.flatMap((st) => stmt(st, ctx, 2)));
+    lines.push(...stmtList(m.body, ctx, 2));
     lines.push("\t}()");
     for (const p of valueOutputs) lines.push(`\t*${ident(p.name)} = ${copied(`${ident(p.name)}_value`, p.type)}`);
-  } else lines.push(...m.body.flatMap((st) => stmt(st, ctx, 1)));
+  } else lines.push(...stmtList(m.body, ctx, 1));
   lines.push("\treturn", "}");
   if (LINES && m.pos) lines.push(RESET);
   return lines;
@@ -1188,7 +1191,7 @@ function keyLoop(st, ctx, t, d) {
     ...(skip ? [skip] : []),
     `${t}\t\ts.Sy.Tabix = int32(k${n} + 1)`, `${t}\t\ts.Sy.Subrc = 0`,
     `${t}\t\t${bind}`,
-    ...st.body.flatMap((x) => stmt(x, ctx, d + 2)),
+    ...stmtList(st.body, ctx, d + 2),
     `${t}\t}`, `${t}\ts.Sy.Tabix = save${n}`, `${t}}`,
   ];
 }
@@ -1297,8 +1300,26 @@ function hostPreds(preds, ctx) {
 const RESET = "\u0000reset-position";
 // GOGEN_NOLINE=1 leaves the directives out, for debugging the emitter itself
 const LINES = !process.env.GOGEN_NOLINE;
+
+function stmtList(body, ctx, d) {
+  const lines = [];
+  for (let i = 0; i < body.length; i++) {
+    const st = body[i], next = body[i + 1];
+    if (movePair(st, next, ctx, body[i - 1])) {
+      // BumpTable keys on the address of the slice HEADER, not its backing
+      // array. Preserve both bumps; clearing the source cannot invalidate a.
+      lines.push(...stmt({...st, moveTable: true}, ctx, d), ...stmt(next, ctx, d));
+      i++;
+    } else lines.push(...stmt(st, ctx, d));
+  }
+  return lines;
+}
+
 function stmt(st, ctx, d) {
-  const lines = stmtLines(st, ctx, d);
+  const loop = st.s === "loop" || st.s === "loop_data";
+  if (loop) (ctx.loopStack ??= []).push(st);
+  let lines;
+  try { lines = stmtLines(st, ctx, d); } finally { if (loop) ctx.loopStack.pop(); }
   if (LINES && st.pos && lines.length > 0) lines[0] = lines[0].replace(/^(\t*)/, `$1/*line ${st.pos.file}:${st.pos.row}*/ `);
   return lines;
 }
@@ -1323,7 +1344,7 @@ function stmtLines(st, ctx, d) {
         for (let e = st.value; e.e === "concat"; e = e.l) parts.unshift(e.r);
         return parts.map((x) => `${t}${ctx.builders.get(st.target.name)}.WriteString(${expr(x, ctx)})`);
       }
-      return [...(st.target.type.k === "table" ? [`${t}abap.BumpTable(&${place(st.target, ctx)})`] : []), `${t}${place(st.target, ctx)} = ${copied(expr(st.value, ctx), st.value.type, st.value)}`];
+      return [...(st.target.type.k === "table" ? [`${t}abap.BumpTable(&${place(st.target, ctx)})`] : []), `${t}${place(st.target, ctx)} = ${st.moveTable ? expr(st.value, ctx) : copied(expr(st.value, ctx), st.value.type, st.value)}`];
     case "clear":
       return [...(st.target.type.k === "table" ? [`${t}abap.BumpTable(&${place(st.target, ctx)})`] : []), `${t}${place(st.target, ctx)} = ${zero(st.target.type)}`];
     case "append": {
@@ -1525,7 +1546,7 @@ function stmtLines(st, ctx, d) {
     case "kernel_loop":
       return [`${t}for _, kv := range ${helperFn(st.fn)}(${["s", ...st.args.map((a) => (a.ref ? `&${place(a.value, ctx)}` : expr(a.value, ctx)))].join(", ")}) {`,
         ...st.binds.map((b, i) => `${t}\t${place(b, ctx)} = kv[${i}]`),
-        ...st.body.flatMap((x) => stmt(x, ctx, d + 1)), `${t}}`];
+        ...stmtList(st.body, ctx, d + 1), `${t}}`];
     case "raise":
       return [`${t}panic(abap.Raise(${expr(st.value, ctx)}, ${JSON.stringify(st.cls ?? "")}))`];
     case "raise_classic":
@@ -1534,11 +1555,11 @@ function stmtLines(st, ctx, d) {
       const lines = [];
       st.branches.forEach((b, i) => {
         lines.push(`${t}${i === 0 ? "if" : "} else if"} ${cond(b.cond, ctx)} {`);
-        lines.push(...b.body.flatMap((x) => stmt(x, ctx, d + 1)));
+        lines.push(...stmtList(b.body, ctx, d + 1));
       });
       if (st.else !== null) {
         lines.push(`${t}} else {`);
-        lines.push(...st.else.flatMap((x) => stmt(x, ctx, d + 1)));
+        lines.push(...stmtList(st.else, ctx, d + 1));
       }
       lines.push(`${t}}`);
       return lines;
@@ -1546,15 +1567,15 @@ function stmtLines(st, ctx, d) {
     case "case": {
       const lines = [`${t}{`, `${t}\t${st.temp} := ${expr(st.subject, ctx)}`, `${t}\t_ = ${st.temp}`];
       if (st.branches.length === 0 && st.else !== null) {
-        lines.push(...st.else.flatMap((x) => stmt(x, ctx, d + 1)));
+        lines.push(...stmtList(st.else, ctx, d + 1));
       } else {
         st.branches.forEach((b, i) => {
           lines.push(`${t}\t${i === 0 ? "if" : "} else if"} ${cond(b.cond, ctx)} {`);
-          lines.push(...b.body.flatMap((x) => stmt(x, ctx, d + 2)));
+          lines.push(...stmtList(b.body, ctx, d + 2));
         });
         if (st.else !== null) {
           lines.push(`${t}\t} else {`);
-          lines.push(...st.else.flatMap((x) => stmt(x, ctx, d + 2)));
+          lines.push(...stmtList(st.else, ctx, d + 2));
         }
         if (st.branches.length > 0) lines.push(`${t}\t}`);
       }
@@ -1568,7 +1589,7 @@ function stmtLines(st, ctx, d) {
       const lines = [`${t}{`, `${t}\tsave${n} := s.Sy.Index`];
       if (st.times === null) lines.push(`${t}\tfor i${n} := int32(1); ; i${n}++ {`);
       else lines.push(`${t}\tn${n} := ${expr(st.times, ctx)}`, `${t}\tfor i${n} := int32(1); i${n} <= n${n}; i${n}++ {`);
-      lines.push(`${t}\t\ts.Sy.Index = i${n}`, ...st.body.flatMap((x) => stmt(x, ctx, d + 2)), `${t}\t}`, `${t}\ts.Sy.Index = save${n}`, `${t}}`);
+      lines.push(`${t}\t\ts.Sy.Index = i${n}`, ...stmtList(st.body, ctx, d + 2), `${t}\t}`, `${t}\ts.Sy.Index = save${n}`, `${t}}`);
       return lines;
     });
     case "while": return withBuilders(st.body, ctx, t, () => {
@@ -1577,7 +1598,7 @@ function stmtLines(st, ctx, d) {
         `${t}{`, `${t}\tsave${n} := s.Sy.Index`,
         `${t}\tfor i${n} := int32(1); ${cond(st.cond, ctx)}; i${n}++ {`,
         `${t}\t\ts.Sy.Index = i${n}`,
-        ...st.body.flatMap((x) => stmt(x, ctx, d + 2)),
+        ...stmtList(st.body, ctx, d + 2),
         `${t}\t}`, `${t}\ts.Sy.Index = save${n}`, `${t}}`,
       ];
     }, [st.cond]);
@@ -1604,7 +1625,7 @@ function stmtLines(st, ctx, d) {
         ...(skip ? [skip] : []),
         `${t}\t\ts.Sy.Tabix = int32(i${n} + 1)`, `${t}\t\ts.Sy.Subrc = 0`,
         `${t}\t\t${bind}`,
-        ...st.body.flatMap((x) => stmt(x, ctx, d + 2)),
+        ...stmtList(st.body, ctx, d + 2),
         `${t}\t}`, `${t}\ts.Sy.Tabix = save${n}`, `${t}}`,
       ];
     }, [st.where, st.from, st.to]);
@@ -1625,7 +1646,7 @@ function stmtLines(st, ctx, d) {
       return [`${t}${p}, s.Sy.Subrc = abap.ReplaceStmt(${p}, ${expr(st.pattern, ctx)}, ${expr(st.with, ctx)}, ${st.regex}, ${st.all}, ${st.icase}, ${st.off ? expr(st.off, ctx) : "0"}, ${st.len ? expr(st.len, ctx) : "abap.NoLength"}, ${st.cLen})`];
     }
     case "stub": return [`${t}panic(abap.NotCompiled(${JSON.stringify(st.where)}, ${JSON.stringify(st.reason)}))`];
-    case "seq": return st.body.flatMap((x) => stmt(x, ctx, d));
+    case "seq": return stmtList(st.body, ctx, d);
     case "try": {
       // a panic of the runtime is an ABAP exception; a CATCH takes the
       // classes the front end found it covers, anything else goes on. The
@@ -1636,17 +1657,17 @@ function stmtLines(st, ctx, d) {
       (ctx.tries ??= []).push(frame);
       const priorTryBuilderBlocked = ctx.tryBuilderBlocked;
       ctx.tryBuilderBlocked = priorTryBuilderBlocked || st.catches.length > 0 || !!st.cleanup;
-      const body = st.body.flatMap((x) => stmt(x, ctx, d + 1));
+      const body = stmtList(st.body, ctx, d + 1);
       ctx.tryBuilderBlocked = priorTryBuilderBlocked;
       frame.mode = "catch";
       const cases = st.catches.map((c) => [`${t}\t\t\tcase ${catchCond(c)}:`,
         ...catchInto(c, t, ctx),
-        ...c.body.flatMap((x) => stmt(x, ctx, d + 4))]).flat();
+        ...stmtList(c.body, ctx, d + 4)]).flat();
       // a CLEANUP runs only when a TRY further out takes the exception (A4H:
       // the handler is looked for before unwinding; none, and the dump is at
       // the RAISE with no CLEANUP run), so each TRY with CATCHes registers
       // them in the session while its body runs
-      const cleanup = st.cleanup ? [`${t}\t\t\t\tif abap.ClassBased(xR) && s.Handled(xR) {`, ...st.cleanup.flatMap((x) => stmt(x, ctx, d + 5)), `${t}\t\t\t\t}`] : [];
+      const cleanup = st.cleanup ? [`${t}\t\t\t\tif abap.ClassBased(xR) && s.Handled(xR) {`, ...stmtList(st.cleanup, ctx, d + 5), `${t}\t\t\t\t}`] : [];
       ctx.tries.pop();
       const guard = st.catches.length ? `${t}\t\t\t\tif !abap.Catchable(xR) { return false }\n${t}\t\t\t\txE, xOK := abap.AsError(xR)\n${t}\t\t\t\txRX, xROK := abap.AsRaised(xR)\n${t}\t\t\t\t_, _, _, _ = xE, xOK, xRX, xROK\n${t}\t\t\t\treturn ${st.catches.map(catchCond).join(" || ")}` : null;
       const push = guard ? [`${t}\txH := len(s.Handlers)`, `${t}\ts.Handlers = append(s.Handlers, func(xR any) bool {`, guard, `${t}\t})`] : [];
@@ -1818,7 +1839,7 @@ ${t}	}`));
         `${t}\t\ts.Sy.Tabix = int32(i${n} + 1)`, `${t}\t\ts.Sy.Subrc = 0`,
         // a typed field symbol (ultra/json): the row must be that structure
         st.fsType ? `${t}\t\t${ident(st.fs)} = abap.DerefAs[${goType(st.fsType)}](abap.Row(${tb}, i${n}), ${JSON.stringify(st.text)})` : `${t}\t\t${ident(st.fs)} = abap.Row(${tb}, i${n})`,
-        ...st.body.flatMap((x) => stmt(x, ctx, d + 2)), `${t}\t}`, `${t}\ts.Sy.Tabix = save${n}`, `${t}}`];
+        ...stmtList(st.body, ctx, d + 2), `${t}\t}`, `${t}\ts.Sy.Tabix = save${n}`, `${t}}`];
     });
     case "call_dyn_static":
       return [`${t}abap.CallStatic(s, ${expr(st.cls, ctx)}, ${JSON.stringify(st.method)}, map[string]abap.Data{${st.args.map((a) => `${JSON.stringify(a.name)}: ${expr(a.value, ctx)}`).join(", ")}})`];
@@ -1933,7 +1954,7 @@ ${t}	}`));
         `${t}\tfor _, q${n} := range rows${n} {`,
         `${t}\t\t_ = q${n}`, `${t}\t\tread${n}++`, `${t}\t\ts.Sy.Subrc, s.Sy.Dbcnt = 0, read${n}`,
         ...moves.map((m) => `${t}\t\t${m}`),
-        ...st.body.flatMap((x) => stmt(x, ctx, d + 2)),
+        ...stmtList(st.body, ctx, d + 2),
         `${t}\t}`,
         `${t}\tif read${n} > 0 {`, `${t}\t\ts.Sy.Subrc, s.Sy.Dbcnt = 0, read${n}`, `${t}\t} else {`, `${t}\t\ts.Sy.Subrc, s.Sy.Dbcnt = 4, 0`, `${t}\t}`,
         `${t}}`];

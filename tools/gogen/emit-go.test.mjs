@@ -527,3 +527,300 @@ ENDCLASS.`);
     assert.equal(cls.FIELDS(s), "00/001/E/one/two/three/four");
   } finally { rmSync(dir, {recursive: true, force: true}); }
 });
+
+
+test("move then CLEAR/FREE avoids clones but an enclosing LOOP keeps its copy", () => {
+  const program = compileProgram({folders: [join(here, "testdata")], objects: ["ZCL_GOGEN_T_MOVCLR"]});
+  const go = emitGo(program);
+  assert.doesNotMatch(go, /NOT_COMPILED in ZCL_GOGEN_T_MOVCLR/);
+  assert.match(go, /a = b\b/);
+  assert.match(go, /freed = free_src\b/);
+  assert.match(go, /deep_a = deep_b\b/);
+  assert.match(go, /component_dst.items = component_src.items\b/);
+  assert.match(go, /result.items = me.items\b/);
+  assert.match(go, /loop_copy = clone_\d+\(loop_src\)/);
+  assert.doesNotMatch(go, /(?:a|freed|deep_a) = clone_\d+\((?:b|free_src|deep_b)\)/);
+});
+
+
+test("table moves refuse bindings, aliases, conversions and keyed types", () => {
+  const program = compileProgram({folders: [join(here, "testdata")], objects: ["ZCL_GOGEN_T_MOVCLR"]});
+  const method = program.classes[0].methods.find((m) => m.name === "RUN");
+  const pair = method.body.find((st) => st.s === "assign" && st.target.name === "A");
+  const original = structuredClone(pair);
+  const check = (change, extra = []) => {
+    const st = structuredClone(original);
+    change(st);
+    method.body = [st, {s: "clear", target: st.value}, ...extra];
+    return emitGo(program);
+  };
+  assert.match(check(() => {}, [{s: "get_ref", target: {e: "var", name: "r", type: {k: "dref"}}, value: {e: "wrap", x: original.value, type: {k: "data"}}}]), /a = clone_\d+\(b\)/);
+  assert.match(check(() => {}, [{s: "read_index", table: original.value, index: {e: "int", value: 1, type: {k: "i"}}, fs: "fs"}]), /a = clone_\d+\(b\)/);
+  assert.match(check((st) => { st.target = st.value; }), /b = clone_\d+\(b\)/);
+  assert.match(check((st) => { st.value.ref = true; }), /a = clone_\d+\(\(\*b\)\)/);
+  for (const key of ["sorted", "hashed", "secondary"]) {
+    assert.match(check((st) => { st.target.type[key] = st.value.type[key] = key === "secondary" ? [{name: "SK", comps: [], unique: false}] : []; }), /a = clone_\d+\(b\)/);
+  }
+  assert.match(check((st) => { st.target.type.row = {k: "int8"}; }), /a = clone_\d+\(b\)/);
+  assert.match(check((st) => { st.target = {...st.target, e: "attr"}; st.value = {...st.value, e: "attr"}; }), /me.a = clone_\d+\(me.b\)/);
+});
+
+test("a binding through a CHANGING parameter alias keeps the clone", () => {
+  const program = compileProgram({folders: [join(here, "testdata")], objects: ["ZCL_GOGEN_T_MOVCLR"]});
+  const method = program.classes[0].methods.find((m) => m.name === "RUN");
+  const pair = method.body.find((st) => st.s === "assign" && st.target.name === "A");
+  method.params.push({name: "ALIAS", type: pair.value.type, dir: "changing"});
+  method.fieldSymbols.push({name: "<R>", type: pair.value.type.row});
+  // The caller may pass B as ALIAS. Its binding path is unknown even though
+  // the assignment's source is ordinary, non-reference local storage.
+  method.body = [{s: "read_index", table: {e: "var", name: "ALIAS", ref: true, type: pair.value.type},
+    index: {e: "int", value: 1, type: {k: "i"}}, fs: "<R>"}, pair, {s: "clear", target: pair.value}];
+  assert.match(emitGo(program), /a = clone_\d+\(b\)/);
+});
+
+test("a caller binding an attribute keeps the moving method's clone", () => {
+  const program = compileProgram({folders: [join(here, "testdata")], objects: ["ZCL_GOGEN_T_MOVCLR"]});
+  const cls = program.classes[0], caller = cls.methods.find((m) => m.name === "RUN");
+  const take = cls.methods.find((m) => m.name === "TAKE"), pair = take.body[1];
+  assert.match(emitGo(program), /result.items = me.items\b/);
+  const call = caller.body.findIndex((st) => st.s === "assign" && st.target.name === "RESULT");
+  caller.fieldSymbols.push({name: "<R>", type: pair.value.type.row});
+  // A separate type object mirrors frontend typeOf's per-access types.
+  caller.body.splice(call, 0, {s: "read_index", table: {e: "refattr",
+    base: {e: "var", name: "OBJ", type: take.returning.type}, name: "ITEMS", type: structuredClone(pair.value.type)},
+    index: {e: "int", value: 1, type: {k: "i"}}, fs: "<R>"});
+  assert.equal(pair.value.type.stable, undefined);
+  assert.match(emitGo(program), /result.items = clone_\d+\(me.items\)/);
+  caller.body.splice(call, 1);
+  for (const expr of [pair.target, pair.value]) expr.type.stable = true;
+  assert.match(emitGo(program), /result.items = clone_\d+\(me.items\)/);
+});
+
+test("a callee binding into a local table passed by reference keeps the caller's clone", () => {
+  const program = compileProgram({folders: [join(here, "testdata")], objects: ["ZCL_GOGEN_T_MOVCLR"]});
+  const cls = program.classes[0], method = cls.methods.find((m) => m.name === "RUN");
+  const pair = method.body.find((st) => st.s === "assign" && st.target.name === "A");
+  assert.match(emitGo(program), /a = b\b/);
+  // A helper given B by reference can hand its row binding back.
+  const helper = cls.methods.find((m) => m !== method);
+  helper.fieldSymbols.push({name: "<ROW>", type: pair.value.type.row});
+  method.body.unshift({s: "call", call: {e: "call", owner: cls.name, method: helper.name, static: true,
+    args: [{dir: "importing", byValue: false, value: pair.value}], type: {k: "void"}}});
+  helper.body.unshift({s: "read_index", table: {e: "var", name: "TAB", type: structuredClone(pair.value.type)},
+    index: {e: "int", value: 1, type: {k: "i"}}, fs: "<ROW>"});
+  assert.match(emitGo(program), /a = clone_\d+\(b\)/);
+});
+
+test("a binding into a table nested in a moved table's row keeps the clone", () => {
+  const program = compileProgram({folders: [join(here, "testdata-move")], objects: ["ZCL_GOGEN_T_MOVNEST"]});
+  const go = emitGo(program);
+  assert.doesNotMatch(go, /NOT_COMPILED in ZCL_GOGEN_T_MOVNEST/);
+  assert.match(go, /result.items = clone_\d+\(me.items\)/);
+});
+
+
+function compileMoveReach({direction = "IMPORTING", actual = "other", dynamic = false, byValue = false} = {}) {
+  const dir = mkdtempSync(join(tmpdir(), "gogen-move-reach-"));
+  try {
+    writeFileSync(join(dir, "zcl_move_reach.clas.abap"), `
+CLASS zcl_move_reach DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    TYPES: BEGIN OF row, n TYPE i, END OF row.
+    TYPES rows TYPE STANDARD TABLE OF row WITH EMPTY KEY.
+    DATA items TYPE rows.
+    METHODS take RETURNING VALUE(result) TYPE REF TO zcl_move_reach.
+    CLASS-METHODS bind ${direction} ${byValue ? "VALUE(tab)" : "tab"} TYPE ANY TABLE.
+    CLASS-METHODS run.
+    CLASS-METHODS dynamic.
+ENDCLASS.
+CLASS zcl_move_reach IMPLEMENTATION.
+  METHOD take.
+    CREATE OBJECT result.
+    result->items = items.
+    CLEAR items.
+  ENDMETHOD.
+  METHOD bind.
+    FIELD-SYMBOLS <fs> TYPE any.
+    LOOP AT tab ASSIGNING <fs>.
+    ENDLOOP.
+  ENDMETHOD.
+  METHOD run.
+    DATA a TYPE rows.
+    DATA b TYPE rows.
+    DATA other TYPE STANDARD TABLE OF string WITH EMPTY KEY.
+    ${direction === "CHANGING" ? `bind( CHANGING tab = ${actual} ).` : `bind( ${actual} ).`}
+    a = b.
+    FREE b.
+  ENDMETHOD.
+  METHOD dynamic.
+    ${dynamic ? `DATA name TYPE string.
+    FIELD-SYMBOLS <fs> TYPE any.
+    name = 'ITEMS'.
+    ${typeof dynamic === "string" ? dynamic : "ASSIGN (name) TO <fs>."}` : ""}
+  ENDMETHOD.
+ENDCLASS.
+`);
+    return compileProgram({folders: [dir], objects: ["ZCL_MOVE_REACH"]});
+  } finally { rmSync(dir, {recursive: true, force: true}); }
+}
+
+test("an unrelated generic table binding permits the move", () => {
+  const go = emitGo(compileMoveReach());
+  assert.doesNotMatch(go, /NOT_COMPILED/);
+  assert.match(go, /a = b\b/);
+  assert.match(go, /result.items = me.items\b/);
+});
+
+test("generic by-reference IMPORTING and CHANGING escape the source storage", () => {
+  for (const direction of ["IMPORTING", "CHANGING"]) {
+    const program = compileMoveReach({direction, actual: "b"});
+    const lines = [], oldError = console.error, oldTrace = process.env.GOGEN_MOVE_TRACE;
+    let go;
+    try {
+      process.env.GOGEN_MOVE_TRACE = "1";
+      console.error = (line) => lines.push(line);
+      go = emitGo(program);
+    } finally {
+      console.error = oldError;
+      if (oldTrace === undefined) delete process.env.GOGEN_MOVE_TRACE;
+      else process.env.GOGEN_MOVE_TRACE = oldTrace;
+    }
+    assert.doesNotMatch(go, /NOT_COMPILED/);
+    assert.match(go, /a = clone_\d+\(b\)/);
+    assert.ok(lines.some((line) => /ZCL_MOVE_REACH=>RUN.*escapedStorage local:ZCL_MOVE_REACH=>RUN:B by ZCL_MOVE_REACH=>RUN call/.test(line)), lines.join("\n"));
+  }
+  assert.match(emitGo(compileMoveReach({actual: "b", byValue: true})), /a = b\b/);
+});
+
+test("dynamic ASSIGN by name escapes attributes but not unrelated locals", () => {
+  const go = emitGo(compileMoveReach({dynamic: true}));
+  // This ASSIGN form is a runtime stub today; its conservative escape must
+  // still protect attributes when another method performs the move.
+  assert.match(go, /ASSIGN form/);
+  assert.match(go, /result.items = clone_\d+\(me.items\)/);
+  assert.match(go, /a = b\b/);
+});
+
+
+test("inline FIELD-SYMBOL parentheses do not imply dynamic name access", () => {
+  const program = compileMoveReach();
+  program.classes[0].methods.find((m) => m.name === "DYNAMIC").body = [
+    {s: "stub", where: "probe", reason: "ASSIGN form: ASSIGN COMPONENT 'VALUE' OF STRUCTURE <row> TO FIELD-SYMBOL(<value>)."},
+  ];
+  const go = emitGo(program);
+  assert.match(go, /a = b\b/);
+  assert.match(go, /result.items = me.items\b/);
+});
+
+test("binding a whole typed structure protects its contained table rows", () => {
+  const program = compileProgram({folders: [join(here, "testdata")], objects: ["ZCL_GOGEN_T_MOVCLR"]});
+  const cls = program.classes[0], method = cls.methods.find((m) => m.name === "RUN");
+  const source = method.locals.find((l) => l.name === "COMPONENT_SRC");
+  method.body.unshift({s: "get_ref", target: {e: "var", name: "r", type: {k: "dref"}},
+    value: {e: "var", name: source.name, type: source.type}});
+  assert.match(emitGo(program), /component_dst.items = clone_\d+\(component_src.items\)/);
+});
+
+
+test("binding a structure scalar field does not bind independent table rows of that type", () => {
+  const program = compileProgram({folders: [join(here, "testdata")], objects: ["ZCL_GOGEN_T_MOVCLR"]});
+  const helper = program.classes[0].methods.find((m) => m.name === "TAKE");
+  const row = {k: "struct", go: "SCALAR_MAPPING"}, table = {k: "table", row};
+  program.structs.set(row.go, {...row, fields: [{name: "VALUE", type: {k: "i"}}]});
+  helper.locals.push({name: "MAPPING", type: table});
+  helper.fieldSymbols.push({name: "<MAP>", type: row});
+  helper.body.unshift({s: "read_index", table: {e: "var", name: "MAPPING", type: table},
+    index: {e: "int", value: 1, type: {k: "i"}}, fs: "<MAP>"});
+  assert.match(emitGo(program), /a = b\b/);
+});
+
+
+test("a typed helper binding a nested-table actual protects the containing rows", () => {
+  const dir = mkdtempSync(join(tmpdir(), "gogen-move-nested-actual-"));
+  try {
+    writeFileSync(join(dir, "zcl_move_nested_actual.clas.abap"), `
+CLASS zcl_move_nested_actual DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    TYPES ints TYPE STANDARD TABLE OF i WITH EMPTY KEY.
+    TYPES: BEGIN OF row, items TYPE ints, END OF row.
+    TYPES rows TYPE STANDARD TABLE OF row WITH EMPTY KEY.
+    CLASS-METHODS bind IMPORTING tab TYPE ints.
+    CLASS-METHODS run.
+ENDCLASS.
+CLASS zcl_move_nested_actual IMPLEMENTATION.
+  METHOD bind.
+    FIELD-SYMBOLS <n> TYPE i.
+    LOOP AT tab ASSIGNING <n>.
+    ENDLOOP.
+  ENDMETHOD.
+  METHOD run.
+    DATA a TYPE rows.
+    DATA b TYPE rows.
+    bind( b[ 1 ]-items ).
+    a = b.
+    CLEAR b.
+  ENDMETHOD.
+ENDCLASS.
+`);
+    const go = emitGo(compileProgram({folders: [dir], objects: ["ZCL_MOVE_NESTED_ACTUAL"]}));
+    assert.doesNotMatch(go, /NOT_COMPILED/);
+    assert.match(go, /a = clone_\d+\(b\)/);
+  } finally { rmSync(dir, {recursive: true, force: true}); }
+});
+
+
+test("typed-to-generic forwarding with an exported row reference keeps the clone", () => {
+  const program = compileProgram({folders: [join(here, "testdata")], objects: ["ZCL_GOGEN_T_MOVFWD"]});
+  const go = emitGo(program);
+  assert.doesNotMatch(go, /NOT_COMPILED/);
+  assert.match(go, /a = clone_\d+\(b\)/);
+  assert.match(go, /ZCL_GOGEN_T_MOVFWD_BIND\(s, abap.Data/);
+  assert.match(go, /ZCL_GOGEN_T_MOVFWD_WRITE\(s, r\)/);
+});
+
+test("a by-reference scalar actual outside table storage does not escape table rows", () => {
+  const program = compileMoveReach();
+  const run = program.classes[0].methods.find((m) => m.name === "RUN");
+  const pair = run.body.find((st) => st.s === "assign" && st.target.name === "A");
+  pair.target.type.row = pair.value.type.row = {k: "i"};
+  const scalar = {e: "var", name: "N", type: {k: "i"}};
+  run.locals.push({name: "N", type: scalar.type});
+  run.body.unshift({s: "call", call: {e: "call", owner: "ZCL_MOVE_REACH", method: "SCALAR", static: true,
+    args: [{dir: "importing", byValue: false, type: scalar.type, value: scalar}], type: {k: "void"}}});
+  const go = emitGo(program);
+  assert.match(go, /a = b\b/);
+  assert.match(go, /result.items = me.items\b/);
+});
+
+
+test("an unrelated generic loop_data binding does not taint string attributes", () => {
+  const program = compileMoveReach();
+  const cls = program.classes[0], take = cls.methods.find((m) => m.name === "TAKE");
+  for (const expr of [take.body[1].target, take.body[1].value]) expr.type.row = {k: "string"};
+  cls.attributes.find((a) => a.name === "ITEMS").type.row = {k: "string"};
+  assert.match(emitGo(program), /result.items = me.items\b/);
+});
+
+test("dynamic object attribute names escape all attributes; literals escape only that name", () => {
+  for (const [operand, refused] of [["name", true], ["'ITEMS'", true], ["'OTHER'", false]]) {
+    const program = compileMoveReach({dynamic:
+      `DATA obj TYPE REF TO zcl_move_reach. ASSIGN obj->(${operand}) TO <fs>.`});
+    const body = program.classes[0].methods.find((m) => m.name === "DYNAMIC").body;
+    assert.ok(body.some((st) => st.s === "stub" && st.reason.includes(`obj->(${operand})`)), JSON.stringify(body));
+    const go = emitGo(program);
+    if (refused) assert.match(go, /result.items = clone_\d+\(me.items\)/);
+    else assert.match(go, /result.items = me.items\b/);
+    assert.match(go, /a = b\b/);
+  }
+});
+
+test("a binding made in the constructor keeps the clone (044 critic round 5)", () => {
+  const program = compileProgram({folders: [join(here, "testdata")], objects: ["ZCL_GOGEN_T_MOVCLR"]});
+  const cls = program.classes[0];
+  assert.match(emitGo(program), /result.items = me.items\b/);
+  const take = cls.methods.find((m) => m.name === "TAKE"), pair = take.body.find((st) => st.s === "assign" && st.target.e === "refattr");
+  cls.constructor ??= {name: "CONSTRUCTOR", params: [], body: [], fieldSymbols: [], locals: []};
+  cls.constructor.fieldSymbols = [...(cls.constructor.fieldSymbols ?? []), {name: "<ROW>", type: pair.value.type.row}];
+  cls.constructor.body = [{s: "read_index", table: pair.value, index: {e: "int", value: 1, type: {k: "i"}}, fs: "<ROW>"}, ...(cls.constructor.body ?? [])];
+  assert.match(emitGo(program), /result.items = clone_\d+\(me.items\)/);
+});
