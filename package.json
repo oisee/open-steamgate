@@ -83,6 +83,7 @@
     "osd:unit": "node tools/osd-unit.mjs",
     "osg:support": "node tools/osg-support.mjs",
     "osgo:unit": "node tools/osgo-unit.mjs",
+    "osgb": "node tools/gogen/osabap.mjs",
     "osgjs:unit": "node tools/osgjs-unit.mjs",
     "bench:cube": "node tools/bench-cube.mjs",
     "stg:compile": "node tools/stg-compile.mjs",

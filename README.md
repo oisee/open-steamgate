@@ -117,7 +117,9 @@ runtime differs from SAP, written down before any workaround.
 
 **A report becomes a native command.** `osabap` takes a classic executable
 report and builds one self-contained binary with no server, no database and no
-SAP system. The selection screen is the command-line contract:
+SAP system (`npm run osgb -- <report>` is the same command: osabap is the
+compiler, OSGB the binary it makes). The compiler itself runs on Node; the
+binary does not. The selection screen is the command-line contract:
 
 ```sh
 node tools/gogen/osabap.mjs tools/gogen/apps/hello/zhello.prog.abap   # -> tools/gogen/.out/osabap
