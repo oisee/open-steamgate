@@ -40,6 +40,7 @@ type HostFlag struct {
 var HostFlags = []HostFlag{
 	{Name: "db", Value: Required},
 	{Name: "allow-read", Value: Required},
+	{Name: "no-default-reads", Value: NoValue},
 	{Name: "allow-write", Value: Required},
 	{Name: "dataset-home", Value: Required},
 	{Name: "dataset-audit", Value: Required},

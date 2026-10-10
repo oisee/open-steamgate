@@ -134,7 +134,13 @@ GOOS=windows GOARCH=arm64 node tools/gogen/osabap.mjs report.prog.abap   # cross
 The usual lifecycle runs: `INITIALIZATION`, the selection-screen events,
 `START-OF-SELECTION`, `WRITE` to stdout. `CL_GUI_FRONTEND_SERVICES` maps to the
 local file system. `OPEN DATASET` works inside the roots you allow
-(`-allow-read ./in -allow-write ./out`). A report with tables of its own
+(`-allow-read ./in -allow-write ./out`). Build with `--read-params P_FILE,P_CONFIG`
+to grant reads to the files or directories the user supplies, or `--read-lists P_DEPS`
+to also grant the paths listed in that file (relative to its directory).
+Supplying a list means the user vouches for every path in it, including absolute
+and `../` entries; a list the report wrote earlier is still the user's choice to pass.
+The host grants these reads before ABAP runs; `-no-default-reads` disables them,
+and writes still require explicit permission. A report with tables of its own
 (their `.tabl.xml` beside the report) keeps its rows in the SQLite file
 `-db notes.db` names, created with those tables when missing; 12 of the 18
 Open SQL forms of `tools/gogen/apps/sql-corpus` compile so far. The samples are in

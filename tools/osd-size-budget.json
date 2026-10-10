@@ -14,6 +14,10 @@
     "tools/gogen/js/abap.mjs"
   ],
   "budgets": {
+    "go:readgrant": {
+      "lines": 128,
+      "reason": "Critic round 1: parse lists through the retained file descriptor, bound total bytes and entries before installing authority, support BOM/CRLF, and report failed pins without changing DATASET home."
+    },
     "go:abap": {
       "lines": 11990,
       "reason": "osgo 026/029 (#658, #659): UTF-16 units and class statics per Session (carve-out queued, stoker QUEUE #33). ADT batch 1 (adt-i5 cases 1-7): Session message fields (sy-msgno as NUMC 3), MESSAGE RAISING binding with scoped restoration, classic exceptions keyed by the resolved interface method, date/time and signed MOVE adapters, object-wrapper identity, STORE answer projection and conservative ADT host answers; timestamp conversion lives in go/timestamp. abapiti 037: cl_http_utility=>decode_base64 beside its encode_base64 sibling (the @KERNEL text decode). StoreHook: a host answers ZOSD_STORE for the calling step first (adt-i5's per-session SYSTEM facts), replacing a text substitution of emitter output. #39 records WorkProcess ownership and exposes only the narrow Session methods needed by the abap-free lock/yield packages; round 2: end and reopen the database transaction across yield, and mark APC step Session ownership. #43: per-Session update-module flag and two small explicit-statement LUW bindings; database primitives retain yield and dialog-step behavior. abapiti 017: ParseI8, string to int8 with ParseI's rules. abapiti 042: READ and DELETE TABLE by a hashed secondary key. Call-scope allocation: five lines for an inactive zero value, the value return and deferred Restore method, preserving immediate-caller masking without heap records or restore closures."
@@ -71,8 +75,8 @@
       "reason": "baseline 2026-10-01; 95 as measured on main 2026-10-08 (grown there before this record); the APC step adapter now passes the channel session"
     },
     "go:cmd/osabap": {
-      "lines": 1120,
-      "reason": "sy-sysid from the one system id (go/sysid, tools/osd-identity.mjs), 2026-10-02; rebased over #453"
+      "lines": 1136,
+      "reason": "Compute explicit user read grants and pin sandbox handles before constructing any ABAP report; expose granting parameters and the opt-out in help."
     },
     "go:cmd/osgo": {
       "lines": 1366,
@@ -143,16 +147,16 @@
       "reason": "Per-request SYSTEM provider, passed explicitly and called outside the store mutex; nil preserves the existing protocol byte for byte."
     },
     "go:reportargs": {
-      "lines": 209,
-      "reason": "baseline 2026-10-01"
+      "lines": 210,
+      "reason": "Register the value-free -no-default-reads host flag without reserving a report option."
     },
     "go:runtimeclock": {
       "lines": 25,
       "reason": "GET RUN TIME FIELD monotonic clock in its own package; no abap growth."
     },
     "go:sandbox": {
-      "lines": 533,
-      "reason": "carved out of go/abap/dataset.go (wave 2, docs/gogen-go-packages.md)"
+      "lines": 829,
+      "reason": "Critic round 2: retain checked handles and DATASET base; identity-check case-variant file opens with parent identity and unambiguous entry names to refuse sibling hard links, and inspect single-file grants for GUI_UPLOAD without directory browsing."
     },
     "go:session": {
       "lines": 54,

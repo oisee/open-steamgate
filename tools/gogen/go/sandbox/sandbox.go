@@ -1,6 +1,7 @@
 // Package sandbox is the disk behind DATASET and the file dialogs:
-// nothing is reachable unless OSD_DATASET_READ / OSD_DATASET_WRITE name a
-// root, every name is resolved to its real path and compared with the
+// nothing is reachable unless explicit roots or single-file reads grant it.
+// Directory roots come from OSD_DATASET_READ / OSD_DATASET_WRITE; names
+// are resolved to their real paths and compared with the
 // roots' real paths as directories, every open and unlink goes through an
 // os.Root of the root that holds the path (no symlink escape between the
 // checks and the open), a refusal is the MESSAGE text, and
@@ -12,6 +13,7 @@ package sandbox
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -50,9 +52,18 @@ type Host interface {
 // read root). Audit, when set, gets every OPEN and DELETE.
 type Sandbox struct {
 	Read, Write []string
-	Home        string
-	Audit       func(entry map[string]any)
-	CreatePerm  os.FileMode
+	// ReadFiles grants only resolved regular files, never their parent directories.
+	ReadFiles []string
+	files     map[string]fileGrant
+	base      string // implicit DATASET home, captured from explicit roots only
+	// BeforeGrantInstall runs after classification (and list parsing), before
+	// ownership of the checked handles is transferred. Tests only.
+	BeforeGrantInstall func()
+	// BeforeGrantOpen runs between startup Stat and pinning. Tests only.
+	BeforeGrantOpen func()
+	Home            string
+	Audit           func(entry map[string]any)
+	CreatePerm      os.FileMode
 	// BeforeOpen runs between the path checks and the open or unlink; only
 	// tests set it, to stand in for another process at that moment
 	BeforeOpen              func()
@@ -72,6 +83,14 @@ type Sandbox struct {
 func (sb *Sandbox) Close() error {
 	sb.roots()
 	var first error
+	for _, grant := range sb.files {
+		if err := grant.pin.Close(); err != nil && first == nil {
+			first = err
+		}
+		if err := grant.root.Close(); err != nil && first == nil {
+			first = err
+		}
+	}
 	for _, root := range sb.handles {
 		if err := root.Close(); err != nil && first == nil {
 			first = err
@@ -152,6 +171,25 @@ func (sb *Sandbox) roots() ([]string, []string) {
 				sb.handles[p] = h
 			}
 		}
+		if len(sb.write) > 0 {
+			sb.base = sb.write[0]
+		} else if len(sb.read) > 0 {
+			sb.base = sb.read[0]
+		}
+		sb.files = map[string]fileGrant{}
+		for _, name := range sb.ReadFiles {
+			grant, err := PinRead(name)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "read: warning: %s: %v\n", name, err)
+				continue
+			}
+			if grant.IsDir() {
+				grant.Close()
+				fmt.Fprintf(os.Stderr, "read: warning: %s: not a regular file\n", name)
+				continue
+			}
+			sb.installRead(grant)
+		}
 	})
 	return sb.read, sb.write
 }
@@ -191,10 +229,21 @@ func (sb *Sandbox) BrowsePath(name string, save bool) (string, *os.File, error) 
 	return real, f, err
 }
 
-// BrowseEntry inspects a directory entry without opening it. In particular,
-// opening a FIFO here would wait for a writer while the terminal is raw.
+// BrowseEntry inspects directory entries without opening them. Exact file
+// grants use a nonblocking, identity-checked open; FIFOs never wait for a writer.
 func (sb *Sandbox) BrowseEntry(name string, save bool) (string, os.FileInfo, error) {
 	_, write := sb.roots()
+	if !save {
+		if h, _, matched := sb.openFileGrant(name); matched && h != nil {
+			defer h.Close()
+			info, err := h.(*osDataset).f.Stat()
+			real, resolveErr := sb.datasetName(name)
+			if err == nil {
+				err = resolveErr
+			}
+			return real, info, err
+		}
+	}
 	roots, given := sb.browseRead, sb.Read
 	if save {
 		roots, given = write, sb.Write
@@ -305,20 +354,7 @@ func (sb *Sandbox) place(name string, roots, given []string) (real, named, refus
 	if strings.ContainsRune(name, 0) {
 		return "", "", "a NUL in the name", false
 	}
-	read, write := sb.roots()
-	base := sb.Home
-	if base == "" {
-		if len(write) > 0 {
-			base = write[0]
-		} else if len(read) > 0 {
-			base = read[0]
-		}
-	}
-	wanted := name
-	if !filepath.IsAbs(wanted) {
-		wanted = filepath.Join(base, wanted)
-	}
-	wanted, _ = filepath.Abs(wanted)
+	wanted, _ := sb.datasetName(name)
 	lexical := make([]string, 0, len(given))
 	for _, g := range given {
 		if a, err := filepath.Abs(g); err == nil {
@@ -383,6 +419,15 @@ func escaped(err error) bool {
 // Open opens name for mode inside the roots.
 func (sb *Sandbox) Open(name string, mode Mode) (Handle, string) {
 	read, write := sb.roots()
+	if mode == Input {
+		if h, message, matched := sb.openFileGrant(name); matched {
+			if h != nil || len(read) == 0 {
+				return h, message
+			}
+			// Authority is additive: an independently granted directory may
+			// still permit a replacement refused by an exact-file grant.
+		}
+	}
 	roots, given := read, append(append([]string{}, sb.Read...), sb.Write...)
 	if mode != Input {
 		roots, given = write, sb.Write
