@@ -1,3 +1,5 @@
+import {typeName, funcName} from "./symbols.mjs";
+export {funcName} from "./symbols.mjs";
 import {analyzeTableMoves} from "./emit-table-move.mjs";
 import {omittedFactoryCall} from "./frontend.mjs";
 import {analyzeOwnership} from "./frontend-owned.mjs";
@@ -24,7 +26,7 @@ const GO_RESERVED = new Set(("break default func interface select case defer go 
   + "panic print println real recover bool byte error float32 float64 int int8 int16 int32 int64 rune string uint uint8 uint16 "
   + "uint32 uint64 uintptr true false nil iota me s math abap").split(" "));
 
-let exportedFields = false, OWNERSHIP;
+let exportedFields = false, OWNERSHIP, SYMBOLS;
 const ownedType = (v) => OWNERSHIP.declarations.has(v) ? (HELPER_IMPORTS.add("xbuf"), (v.type.k === "x" ? `[${v.type.len}]byte` : "hXbuf.Buffer")) : goType(v.type);
 export const ident = (name) => {
   // INTF~ATTR, an interface's attribute in the object, keeps the ~ apart
@@ -36,11 +38,6 @@ export const ident = (name) => {
   return exportedFields ? safe[0].toUpperCase() + safe.slice(1) : safe;
 };
 const selfField = (name) => `${exportedFields ? "Self" : "self"}_${typeName(name)}`;
-const typeName = (s) => {
-  const name = String(s).toUpperCase().replace(/=>|~|-/g, "__").replace(/[^A-Z0-9_]/g, "_");
-  return name.startsWith("_") ? `N${name}` : name;
-};
-export const funcName = (cls, method) => `${typeName(cls)}_${typeName(method)}`;
 const evType = (key) => `EV_${typeName(key)}`;
 /*
  * ultra/events: CLASS_CONSTRUCTOR runs once, at the first use of the class:
@@ -307,7 +304,8 @@ function cloneFuncs() {
   return out;
 }
 
-export function emitGo(program, pkg = "main", layers = null, unitBuild = false) {
+export function emitGo(program, pkg = "main", layers = null, unitBuild = false, symbols = null) {
+  SYMBOLS = symbols;
   STABLE_ROWS = new Set();
   const collectStable = (v) => {
     if (Array.isArray(v)) { for (const x of v) collectStable(x); return; }
@@ -409,6 +407,7 @@ export function emitGo(program, pkg = "main", layers = null, unitBuild = false) 
     // a method that did not compile still exists, and says why when called
     for (const m of cls.stubs ?? []) {
       if (m.name === "CONSTRUCTOR" || !definable(program, m)) continue;
+      SYMBOLS?.(cls, m, m.static ? funcName(cls.name, m.name) : typeName(m.name), m.static ? null : typeName(cls.name));
       out.push(`${signature(cls, m)} {`, `\tpanic(abap.NotCompiled(${JSON.stringify(`${cls.name}=>${m.name}`)}, ${JSON.stringify(m.reason)}))`, "}", "");
     }
     if (cls.constructor) out.push(...method(cls, {...cls.constructor, name: "CONSTRUCTOR", static: false}), "");
@@ -951,6 +950,7 @@ function amcGlue(program) {
 }
 
 function method(cls, m) {
+  SYMBOLS?.(cls, m, m.static ? funcName(cls.name, m.name) : typeName(m.name), m.static ? null : typeName(cls.name));
   const lines = [...(LINES && m.pos ? [`//line ${m.pos.file}:${m.pos.row}`] : []), `${signature(cls, m)} {`, "\t_ = s"];
   if (m.static && m.name !== "CLASS_CONSTRUCTOR" && chainCctor(cls)) lines.push(`\tEnsure_${typeName(cls.name)}(s)`);
   if (!m.static) lines.push("\t_ = me");
