@@ -1,7 +1,6 @@
 FUNCTION zgogen_t_binary.
 * Expectations: unmeasured; ABAP documentation.
-* Compile regression for generic TABLES ([]Data); the ANY TABLE method
-* in ZCL_GOGEN_T_BINARY executes this body on both Go and JS.
+* Executed via CALL FUNCTION in ZCL_GOGEN_T_BINARY on both Go and JS.
   FIELD-SYMBOLS <ls_row> TYPE any.
   FIELD-SYMBOLS <lv_line> TYPE any.
   DATA lv_kind TYPE c LENGTH 1.

@@ -59,14 +59,16 @@ CLASS zcl_gogen_t_binary IMPLEMENTATION.
     lx = '0102'. APPEND lx TO lt_x.
     lx = 'A0B0'. APPEND lx TO lt_x.
     ls-bytes = '1122'. ls-label = 'Q'. APPEND ls TO lt_s.
-    probe( IMPORTING ev_text = text CHANGING binary_tab = lt_x ).
+    CALL FUNCTION 'ZGOGEN_T_BINARY' IMPORTING ev_text = text TABLES binary_tab = lt_x.
     rv = |x:{ text }|.
     LOOP AT lt_x INTO lx.
       rv = |{ rv }/{ lx }|.
     ENDLOOP.
-    probe( IMPORTING ev_text = text CHANGING binary_tab = lt_s ).
+    CALL FUNCTION 'ZGOGEN_T_BINARY' IMPORTING ev_text = text TABLES binary_tab = lt_s.
     rv = |{ rv } s:{ text }|.
     READ TABLE lt_s INDEX 1 INTO ls.
     rv = |{ rv }/{ ls-bytes }/{ ls-label }|.
+    probe( IMPORTING ev_text = text CHANGING binary_tab = lt_x ).
+    rv = |{ rv } any:{ text }|.
   ENDMETHOD.
 ENDCLASS.

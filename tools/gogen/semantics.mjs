@@ -15,8 +15,11 @@ import {home} from "./home.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const EXPECT = {
+  // Unmeasured: documented TABLES aliasing, positional components, nested rows,
+  // and DELETE INDEX at / before / after the loop cursor (or a missing index).
+  ZCL_GOGEN_T_GENLOOP: "std:0/before/1/written/nested sorted:0/before/1/written/nested hashed:0/before/1/written/nested fm1:abc/0 any1:abc/0 typed1:abc/0 fm2:abc/1 any2:abc/1 typed2:abc/1 fm3:abc/3 any3:abc/3 typed3:abc/3 fm4:ac/1 any4:ac/1 typed4:ac/1 fm5:abc/0 any5:abc/0 typed5:abc/0",
   // unmeasured; ABAP documentation: generic binary rows, writable components, and failed assignment.
-  ZCL_GOGEN_T_BINARY: "x:0102A0B0 miss:4/free miss:4/free/CCDD/CCDD s:1122 second:0/Q miss:4/free/CCDD/Q",
+  ZCL_GOGEN_T_BINARY: "x:0102A0B0 miss:4/free miss:4/free/CCDD/CCDD s:1122 second:0/Q miss:4/free/CCDD/Q any:CCDDCCDD miss:4/free miss:4/free",
   // Unmeasured regression: nested classic mappings; OTHERS cannot take a class exception.
   ZCL_GOGEN_T_CLASSICNEST: "0/3/7/9/class",
   // Unmeasured regression: recursive MESSAGE masking and nested classic mappings.

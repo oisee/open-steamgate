@@ -826,15 +826,16 @@ test("a binding made in the constructor keeps the clone (044 critic round 5)", (
 });
 
 
-test("generic TABLES rows bind their Data directly in both emitters", async () => {
+test("generic TABLES retain the caller descriptor in both emitters", async () => {
   const program = compileProgram({folders: [join(here, "testdata")], objects: ["ZGOGEN_T_FG", "ZCL_GOGEN_T_BINARY"]});
   const go = emitGo(program);
-  assert.match(go, /_ls_row_ = \(\*binary_tab\)\[i\d+\]/);
+  assert.match(go, /ZGOGEN_T_BINARY\(s \*abap.Session, ev_text \*string, binary_tab \*abap.Data\)/);
+  assert.match(go, /_ls_row_ = abap.Row\(tab\d+, i\d+\)/);
   assert.doesNotMatch(go, /BindRow\(&\(\*binary_tab\)/);
   assert.doesNotMatch(go, /ASSIGN COMPONENT by a i/);
   const {emitJs} = await import("./emit-js.mjs");
   const js = emitJs(program);
-  assert.match(js, /_ls_row_ = binary_tab\.v\[i\d+\]/);
+  assert.match(js, /_ls_row_ = abap.Row\(tab\d+, i\d+\)/);
 });
 
 test("JS positional components retain writable storage and reject invalid positions", () => {

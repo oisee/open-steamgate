@@ -1830,8 +1830,12 @@ ${t}	}`));
       return [`${t}${p} = abap.Condense(${p}, ${st.noGaps})`];
     }
     // DELETE / READ TABLE ... INDEX on a generic table (ultra/sadl, the SADL DPC's paging)
-    case "delete_index_data":
-      return [`${t}if abap.DeleteIndex(${expr(st.table, ctx)}, ${expr(st.index, ctx)}) {`, `${t}\ts.Sy.Subrc = 0`, `${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`];
+    case "delete_index_data": {
+      const n = `idx${ctx.loop++}`;
+      return [`${t}if ${n} := ${expr(st.index, ctx)}; abap.DeleteIndex(${expr(st.table, ctx)}, ${n}) {`,
+        ...(st.tokens ?? []).map((token) => `${t}\tif int(${n}) <= ${token.idxVar}+1 { ${token.idxVar}-- }`),
+        `${t}\ts.Sy.Subrc = 0`, `${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`];
+    }
     case "read_index_data": {
       const n = `idx${ctx.loop++}`;
       return [`${t}if ${n}, tb${n} := ${expr(st.index, ctx)}, ${expr(st.table, ctx)}; ${n} >= 1 && int(${n}) <= abap.Lines(tb${n}) {`,
@@ -1840,6 +1844,7 @@ ${t}	}`));
     case "loop_data": return withBuilders(st.body, ctx, t, () => {
       const n = ctx.loop++;
       const tb = `tab${n}`;
+      st.token.idxVar = `i${n}`;
       return [`${t}{`, `${t}\t${tb} := ${expr(st.table, ctx)}`, `${t}\tsave${n} := s.Sy.Tabix`, `${t}\ts.Sy.Subrc = 4`,
         `${t}\tfor i${n} := 0; i${n} < abap.Lines(${tb}); i${n}++ {`,
         `${t}\t\ts.Sy.Tabix = int32(i${n} + 1)`, `${t}\t\ts.Sy.Subrc = 0`,
@@ -2123,7 +2128,9 @@ ${t}	}`));
       const n = `idx${ctx.loop++}`;
       const tb = place(st.table, ctx);
       return [`${t}if ${n} := ${expr(st.index, ctx)}; ${n} >= 1 && int(${n}) <= len(${tb}) {`,
-        `${t}\t${tb} = append(${tb}[:${n}-1], ${tb}[${n}:]...)`, `${t}\tclear(${tb}[len(${tb}):len(${tb})+1])`, `${t}\tabap.BumpTable(&${tb})`, `${t}\ts.Sy.Subrc = 0`, `${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`];
+        `${t}\t${tb} = append(${tb}[:${n}-1], ${tb}[${n}:]...)`, `${t}\tclear(${tb}[len(${tb}):len(${tb})+1])`, `${t}\tabap.BumpTable(&${tb})`,
+        ...(st.tokens ?? []).map((token) => `${t}\tif int(${n}) <= ${token.idxVar}+1 { ${token.idxVar}-- }`),
+        `${t}\ts.Sy.Subrc = 0`, `${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`];
     }
     case "delete_range": {
       const n = ctx.loop++;

@@ -615,9 +615,11 @@ function functionGroupSignatures(ctx0, g) {
         // types it as a table with a header line and no access kind); the
         // header line itself is not in the subset, a use of it is refused
         const it = id.getType();
-        const type = p.direction === "tables" && it instanceof BasicTypes.TableType
+        let type = p.direction === "tables" && it instanceof BasicTypes.TableType
           ? {k: "table", row: typeOf(it.getRowType(), `${where} ${pn}`, program), skey: "default"} : typeOf(it, `${where} ${pn}`, program);
         if (p.direction === "tables" && type.k !== "table") throw new Unsupported(`${name}: TABLES ${pn} is a ${type.k}`);
+        // Untyped TABLES must retain the caller's row descriptor and storage.
+        if (p.direction === "tables" && type.row.k === "data") type = {k: "data", table: true};
         const dir = p.direction === "tables" ? "changing" : p.direction;
         return {name: pn, dir, byValue: p.direction === "tables" ? false : p.passByValue, type,
           default: p.defaultValue, optional: p.optional || p.defaultValue !== undefined || p.direction === "exporting" || p.direction === "tables",
@@ -1210,6 +1212,9 @@ function compiledFunctionCall(node, ctx, text, name) {
       return {dir: p.dir, byValue: p.byValue, place: null, type: p.type};
     }
     const t = got.target;
+    if (p.tables && p.type.k === "data" && t.type.k === "table") {
+      return {dir: p.dir, byValue: false, place: null, wrap: {e: "wrap", x: t, type: p.type}, type: p.type};
+    }
     const direct = sameType(t.type, p.type);
     if (!direct && !(charlike(t.type) && charlike(p.type))) {
       throw new Unsupported(`CALL FUNCTION '${name}': ${want} ${p.name} into a ${t.type.k}, the parameter is ${p.type.k}`);
@@ -2148,7 +2153,10 @@ function structure(node, ctx) {
       if (!nm || !["data", "struct"].includes(fsType?.k) || /\b(WHERE|FROM|TO|INTO|USING)\b/i.test(text.replace(/ASSIGNING.*/i, ""))) throw new Unsupported(`LOOP form over a generic table: ${text}`);
       // a typed field symbol (ultra/json): each row must be a value of that
       // structure, checked at run time as ASSIGN ref->* TO <typed> is
-      return {s: "loop_data", table, fs: upper(nm), ...(fsType.k === "struct" ? {fsType, text} : {}), body: bodyOf(node, ctx)};
+      const loop = {s: "loop_data", table, fs: upper(nm), ...(fsType.k === "struct" ? {fsType, text} : {}), token: {}};
+      (ctx.loopStack ??= []).push(loop);
+      try { loop.body = bodyOf(node, ctx); } finally { ctx.loopStack.pop(); }
+      return loop;
     }
     if (table.type.k !== "table") throw new Unsupported("LOOP over a non-table");
     const lt = st.findFirstExpression(Expressions.LoopTarget);
@@ -2912,12 +2920,17 @@ function statement(node, ctx) {
   if (isStmt(node, Statements.DeleteInternal)) {
     if (!/^DELETE\s+\S+\s+INDEX\s+/i.test(text)) throw new Unsupported(`DELETE form: ${text}`);
     const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    // Like DELETE current, INDEX at or before the cursor steps it back.
+    const same = (a, b) => JSON.stringify(a, (k, v) => k === "type" ? undefined : v) === JSON.stringify(b, (k, v) => k === "type" ? undefined : v);
+    const loops = (ctx.loopStack ?? []).filter((loop) => same(loop.table, table));
+    if (loops.some((loop) => loop.to || loop.key || loop.dynamicKeys)) throw new Unsupported(`DELETE INDEX inside LOOP with TO / USING KEY: not measured: ${text}`);
+    const tokens = loops.map((loop) => loop.token);
     // a generic table (ultra/sadl): the same rule through its descriptor
-    if (table.type.k === "data" && table.type.table) return {s: "delete_index_data", table, index: convert(source(node.findDirectExpressions(Expressions.Source).slice(-1)[0], ctx, I), I)};
+    if (table.type.k === "data" && table.type.table) return {s: "delete_index_data", table, tokens, index: convert(source(node.findDirectExpressions(Expressions.Source).slice(-1)[0], ctx, I), I)};
     if (table.type.k !== "table") throw new Unsupported("DELETE from a non-table");
     const idx = node.findDirectExpressions(Expressions.Source).slice(-1)[0];
     keyGuard(table.type, "DELETE", ctx);
-    return {s: "delete_index", table, index: convert(source(idx, ctx, I), I)};
+    return {s: "delete_index", table, tokens, index: convert(source(idx, ctx, I), I)};
   }
   if (isStmt(node, Statements.InsertInternal) && /\bINTO\s+TABLE\b/i.test(text)) {
     if (/^INSERT\s+LINES\s+OF\b/i.test(text)) {
