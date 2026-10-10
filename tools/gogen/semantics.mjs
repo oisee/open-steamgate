@@ -15,6 +15,8 @@ import {home} from "./home.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const EXPECT = {
+  // Unmeasured regression: literal local CONSTANTS share ordinary VALUE conversion.
+  ZCL_GOGEN_T_LOCALCONST: "-9223372036854775808/9223372036854775807/-42/00012/[2024]/[12]/[xy   ]/hello/[ab   ]/21/-9223372036854775808/9223372036854775807/-42/00012/[2024]/[12]/[xy   ]/hello/[ab   ]/21",
   // Unmeasured regression: nested classic mappings; OTHERS cannot take a class exception.
   ZCL_GOGEN_T_CLASSICNEST: "0/3/7/9/class",
   // Unmeasured regression: recursive MESSAGE masking and nested classic mappings.
