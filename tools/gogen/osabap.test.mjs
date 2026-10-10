@@ -555,3 +555,164 @@ test("select-option LOW and HIGH F4 handlers build and run in the terminal", () 
     cwd: join(here, "go"), stdio: "inherit",
   });
 });
+
+test("build-selected read parameters and lists grant only user paths before ABAP", () => {
+  const dir = mkdtempSync(join(tmpdir(), "osabap-read-grants-"));
+  try {
+    const report = join(dir, "zread.prog.abap");
+    writeFileSync(report, `REPORT zread.
+TYPES ty_path TYPE string.
+PARAMETERS p_file TYPE ty_path DEFAULT '${join(dir, "sibling.txt")}'.
+PARAMETERS p_config TYPE c LENGTH 255.
+PARAMETERS p_swap AS CHECKBOX.
+PARAMETERS p_select AS CHECKBOX.
+PARAMETERS p_rewrite AS CHECKBOX.
+PARAMETERS p_upload AS CHECKBOX.
+DATA upload_lines TYPE STANDARD TABLE OF string WITH DEFAULT KEY.
+PARAMETERS p_other LIKE p_file.
+PARAMETERS p_deps TYPE string.
+PARAMETERS p_number TYPE i.
+PARAMETERS p_check AS CHECKBOX.
+SELECT-OPTIONS s_paths FOR p_config.
+DATA line TYPE string.
+DATA reason TYPE string.
+INITIALIZATION.
+  p_file = '${join(dir, "init-secret.txt")}'.
+  OPEN DATASET p_file FOR INPUT IN TEXT MODE ENCODING UTF-8 MESSAGE reason.
+  IF sy-subrc = 0.
+    WRITE: / 'initialization widened'.
+    CLOSE DATASET p_file.
+  ENDIF.
+AT SELECTION-SCREEN.
+  IF p_select = abap_true.
+    p_file = p_other.
+  ENDIF.
+START-OF-SELECTION.
+  IF p_rewrite = abap_true.
+    OPEN DATASET p_deps FOR OUTPUT IN TEXT MODE ENCODING UTF-8.
+    IF sy-subrc = 0.
+      TRANSFER p_other TO p_deps.
+      CLOSE DATASET p_deps.
+    ENDIF.
+  ENDIF.
+  IF p_swap = abap_true.
+    p_file = p_other.
+  ENDIF.
+  IF p_upload = abap_true.
+    cl_gui_frontend_services=>gui_upload(
+      EXPORTING filename = p_file filetype = 'ASC'
+      CHANGING data_tab = upload_lines ).
+    LOOP AT upload_lines INTO line.
+      WRITE: / line.
+    ENDLOOP.
+    RETURN.
+  ENDIF.
+  OPEN DATASET p_file FOR INPUT IN TEXT MODE ENCODING UTF-8 MESSAGE reason.
+  IF sy-subrc = 0.
+    READ DATASET p_file INTO line.
+    WRITE: / line.
+    CLOSE DATASET p_file.
+  ELSE.
+    WRITE: / 'file refused', reason.
+  ENDIF.
+  OPEN DATASET p_other FOR INPUT IN TEXT MODE ENCODING UTF-8 MESSAGE reason.
+  IF sy-subrc = 0.
+    READ DATASET p_other INTO line.
+    WRITE: / line.
+    CLOSE DATASET p_other.
+  ELSE.
+    WRITE: / 'other refused', reason.
+  ENDIF.
+`);
+    execFileSync(process.execPath, [builder, report, "--read-params", "p_file,p_config", "--read-lists", "p_deps"], {stdio: "inherit"});
+    execFileSync("go", ["test", "-tags", "nodatabase,osabap_readgrants", "./cmd/osabap"], {
+      cwd: join(here, "go"), stdio: "inherit",
+    });
+    const work = join(dir, "work");
+    mkdirSync(work);
+    const input = join(dir, "input.txt");
+    const sibling = join(dir, "sibling.txt");
+    const list = join(dir, "deps.txt");
+    writeFileSync(input, "allowed content\n");
+    writeFileSync(sibling, "sibling content\n");
+    writeFileSync(join(dir, "init-secret.txt"), "initial secret\n");
+    writeFileSync(list, "\ufeff# dependencies\r\n\r\nsibling.txt\r\n");
+    const invoke = (args) => spawnSync(binary, args, {encoding: "utf8", cwd: work});
+    const args = ["--file", "../input.txt", "--other", "../sibling.txt"];
+    const allowed = invoke(args);
+    assert.equal(allowed.status, 0, allowed.stderr);
+    assert.match(allowed.stdout, /^allowed content\nother refused Permission denied/);
+    assert.equal(allowed.stderr, `read: ${input} (P_FILE)\n`);
+    const uploaded = invoke([...args, "--upload"]);
+    assert.equal(uploaded.status, 0, uploaded.stderr);
+    assert.equal(uploaded.stdout, "allowed content\n");
+    assert.equal(uploaded.stderr, allowed.stderr);
+    const uploadSibling = invoke([...args, "--upload", "--swap"]);
+    assert.notEqual(uploadSibling.status, 0);
+    assert.doesNotMatch(uploadSibling.stdout, /sibling content/);
+    assert.match(uploadSibling.stderr, /permission denied/i);
+    const changedByReport = invoke([...args, "--swap"]);
+    assert.match(changedByReport.stdout, /^file refused Permission denied[\s\S]*other refused Permission denied/);
+    assert.equal(changedByReport.stderr, `read: ${input} (P_FILE)\n`);
+    const defaultOnly = invoke(["--other", sibling]);
+    assert.match(defaultOnly.stdout, /^file refused Permission denied/);
+    assert.equal(defaultOnly.stderr, "");
+    const listed = invoke([...args, "--deps", "../deps.txt"]);
+    assert.equal(listed.status, 0, listed.stderr);
+    assert.equal(listed.stdout, "allowed content\nsibling content\n");
+    assert.equal(listed.stderr, `read: ${input} (P_FILE), ${list} (P_DEPS) + 1 from deps.txt\n`);
+    const disabled = invoke([...args, "--deps", "../deps.txt", "-no-default-reads"]);
+    assert.equal(disabled.status, 0, disabled.stderr);
+    assert.match(disabled.stdout, /^file refused Permission denied[\s\S]*other refused Permission denied/);
+    assert.equal(disabled.stderr, "");
+    const explicit = invoke([...args, "-no-default-reads", "-allow-read", dir, "-dataset-home", work]);
+    assert.equal(explicit.status, 0, explicit.stderr);
+    assert.equal(explicit.stdout, "initialization widened\nallowed content\nsibling content\n");
+    // Critic reproducer: adding a grant must not change the implicit home.
+    const beforeGrant = invoke(["--other", "sibling.txt", "-allow-read", dir]);
+    const afterGrant = invoke(["--file", "../input.txt", "--other", "sibling.txt", "-allow-read", dir]);
+    assert.match(beforeGrant.stdout, /sibling content/);
+    assert.match(afterGrant.stdout, /sibling content/);
+    // DATASET uses the selected home, while parameter VALUES still use cwd.
+    const withHome = invoke(["--file", "../input.txt", "--other", "input.txt", "-dataset-home", dir]);
+    assert.match(withHome.stdout, /^file refused Permission denied[^\n]*\nallowed content\n$/);
+    assert.equal(withHome.stderr, `read: ${input} (P_FILE)\n`);
+    assert.doesNotMatch(allowed.stdout, /initialization widened/);
+    const selected = invoke([...args, "--select"]);
+    assert.equal(selected.status, 0, selected.stderr);
+    assert.match(selected.stdout, /^file refused Permission denied[\s\S]*other refused Permission denied/);
+    assert.equal(selected.stderr, `read: ${input} (P_FILE)\n`);
+    const json = join(work, "params.json");
+    writeFileSync(json, JSON.stringify({P_FILE: "../input.txt", P_OTHER: "../sibling.txt"}));
+    for (const params of ["@params.json", JSON.stringify({file: "../input.txt", other: "../sibling.txt"})]) {
+      const fromJSON = invoke(["-params", params]);
+      assert.equal(fromJSON.status, 0, fromJSON.stderr);
+      assert.equal(fromJSON.stdout, allowed.stdout);
+      assert.equal(fromJSON.stderr, allowed.stderr);
+    }
+    // Rewriting a previously parsed list inside a separate write root never
+    // recomputes grants. Its new external path remains refused this run.
+    const mutable = join(work, "mutable.txt");
+    writeFileSync(mutable, "../input.txt\n");
+    const rewritten = invoke([...args, "--deps", "mutable.txt", "--rewrite", "-allow-write", work]);
+    assert.equal(rewritten.status, 0, rewritten.stderr);
+    assert.match(rewritten.stdout, /^allowed content\nother refused Permission denied/);
+    assert.equal(readFileSync(mutable, "utf8"), "../sibling.txt\n");
+    const help = invoke(["-help"]);
+    assert.match(help.stdout, /default read parameters: P_FILE, P_CONFIG; list parameters: P_DEPS/);
+    assert.match(help.stdout, /-no-default-reads/);
+    const empty = invoke(["--file", "", "--other", sibling]);
+    assert.equal(empty.stderr, "");
+    assert.match(empty.stdout, /other refused Permission denied/);
+    const unreadable = invoke([...args, "--deps", "../missing-list"]);
+    assert.equal((unreadable.stderr.match(/warning:/g) ?? []).length, 1);
+    assert.match(unreadable.stdout, /other refused Permission denied/);
+    for (const [option, name] of [["--read-params", "P_UNKNOWN"], ["--read-lists", "P_NUMBER"], ["--read-params", "P_CHECK"], ["--read-params", "S_PATHS"], ["--read-lists", "S_PATHS"]]) {
+      const bad = spawnSync(process.execPath, [builder, report, option, name], {encoding: "utf8"});
+      assert.notEqual(bad.status, 0, name);
+      assert.match(bad.stderr, new RegExp(`read grant: .*${name}`));
+    }
+  } finally {
+    rmSync(dir, {recursive: true, force: true});
+  }
+});

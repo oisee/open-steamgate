@@ -17,6 +17,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"osg/gogen/abap"
 	"osg/gogen/filepick"
+	"osg/gogen/readgrant"
 	"osg/gogen/reportargs"
 	"osg/gogen/sysid"
 	"osg/gogen/termgui"
@@ -61,12 +62,12 @@ func main() {
 			}
 		}()
 		s := &abap.Session{Statics: abap.ProcessStatics}
-		report := newReport(s)
 		cli := commandLine(os.Args[1:])
 		sapGUI, launchSAPGUI, listen := sapGUIOption(cli.Host)
-		datasetOptions(cli.Host)
 		dbOption(cli.Host)
 		input, headless := commandInput(cli)
+		datasetOptions(cli.Host, input)
+		report := newReport(s)
 		if sapGUI {
 			var screen ZCL_GG_HOST__TY_RESULT
 			abap.DialogStep(func() { screen = hostRun(s, report, input, "", "X") })
@@ -152,7 +153,7 @@ func commandLine(args []string) reportargs.Result {
 
 // datasetOptions installs a fresh sandbox from the dataset flags, even when
 // the parent process carries dataset env vars.
-func datasetOptions(host []reportargs.Arg) {
+func datasetOptions(host []reportargs.Arg, input []ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE) {
 	var read, write []string
 	var home, audit string
 	for _, flag := range host {
@@ -186,6 +187,19 @@ func datasetOptions(host []reportargs.Arg) {
 		}
 	}
 	dialogSandbox = abap.SandboxFromEnv()
+	values := map[string]string{}
+	for _, v := range input {
+		values[strings.TrimSpace(v.name)] = strings.TrimRight(v.value, " ")
+	}
+	disabled := false
+	for _, flag := range host {
+		if flag.Name == "no-default-reads" {
+			disabled = true
+		}
+	}
+	readgrant.Apply(dialogSandbox, values, appReadParams, appReadLists, disabled, os.Stderr)
+	// Pin root and file identities before report construction or INITIALIZATION.
+	_ = dialogSandbox.BrowseRoots(false)
 	abap.SetDatasetHost(dialogSandbox)
 }
 
@@ -500,6 +514,8 @@ func usage() {
 		fmt.Printf("  -db FILE           keep the rows of %s in the SQLite FILE (created when missing)\n", strings.Join(appTables, ", "))
 	}
 	fmt.Println("  -params JSON|@file  the selection screen as JSON")
+	fmt.Printf("default read parameters: %s; list parameters: %s\n", strings.Join(appReadParams, ", "), strings.Join(appReadLists, ", "))
+	fmt.Println("  -no-default-reads   disable reads granted from user parameter values")
 	fmt.Println("  -allow-read DIR     allow DATASET reads within DIR (repeatable)")
 	fmt.Println("  -allow-write DIR    allow DATASET writes within DIR (repeatable; also readable)")
 	fmt.Println("  -dataset-home DIR   base for relative DATASET names")

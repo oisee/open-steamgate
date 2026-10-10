@@ -166,7 +166,16 @@ sample.
 ## DATASET file access
 
 `OPEN`, `READ`, `TRANSFER`, `CLOSE`, `DELETE`, `GET` and `SET DATASET` use the
-native dataset sandbox. With no access flags, every open is refused with
+native dataset sandbox. Builds selecting `--read-params P_FILE,P_CONFIG` or
+`--read-lists P_DEPS` grant startup reads from explicit user values (CLI,
+positionals or JSON), before report construction. A file grants only its resolved
+path and pinned identity; a directory grants reads below it. List entries use the
+list's directory, accept an initial UTF-8 BOM and CRLF, and are limited to 10,000
+entries and 4 MiB total; an unreadable or over-limit list warns once and grants
+nothing from it. Supplying a list vouches for every path, including absolute and
+`../` entries, even when the report wrote that list in a previous run. Later ABAP
+mutations and list/JSON rewrites cannot add grants. `-no-default-reads` disables
+these grants. With no explicit roots or enabled startup grants, every open is refused with
 `sy-subrc = 8` and a `MESSAGE` reason, even if the parent process has dataset
 environment variables set. Grant only the directories a report needs:
 
@@ -178,10 +187,12 @@ osabap -allow-read ./input -allow-write ./output --input ./input/source.txt --ou
 per flag. A write root
 also permits reads. `-dataset-home DIR` resolves relative DATASET names from
 that directory; otherwise the first write root, then the first read root, is
-the base. `-dataset-audit FILE` appends JSON lines for OPEN and DELETE decisions
+the base (cwd when neither exists). Parameter VALUES resolve against cwd at
+startup separately; default grants do not change the DATASET base or set an unset
+home. `-dataset-audit FILE` appends JSON lines for OPEN and DELETE decisions
 only when FILE is inside a write root; an outside path creates no audit file.
 Relative audit names use the same base as relative DATASET names.
-Each option accepts either `--option value` or `--option=value`. Paths outside
+Each host option accepts either `-option value` or `-option=value`. Paths outside
 the granted roots, including `..` escapes, are refused. These flags govern
 DATASET statements; frontend service file methods have their own host API.
 

@@ -17,13 +17,26 @@ const here = import.meta.dirname;
 // --lib adds a folder of ABAP classes and interfaces the report may use; the
 // classes, interfaces and dictionary beside the report are always part of it.
 const cli = process.argv.slice(2);
-const libs = cli.flatMap((arg, i) => {
-  if (arg !== "--lib") return [];
-  // a --lib without its folder would be the working directory, node_modules and all
-  if (!cli[i + 1] || cli[i + 1].startsWith("-")) throw new Error("osabap: --lib needs a folder");
-  return [resolve(cli[i + 1])];
-});
-const positional = cli.filter((arg, i) => arg !== "--lib" && cli[i - 1] !== "--lib");
+const libs = [];
+const positional = [];
+const readOptions = {"--read-params": [], "--read-lists": []};
+for (let i = 0; i < cli.length; i++) {
+  const arg = cli[i];
+  if (arg === "--lib" || arg in readOptions) {
+    const value = cli[++i];
+    if (!value || value.startsWith("-")) throw new Error(`osabap: ${arg} needs ${arg === "--lib" ? "a folder" : "parameter names"}`);
+    if (arg === "--lib") libs.push(resolve(value));
+    else {
+      const names = value.split(",").map((name) => name.trim().toUpperCase());
+      if (names.some((name) => !/^[A-Z_][A-Z0-9_]*$/.test(name))) throw new Error(`osabap: ${arg}: invalid parameter name in ${value}`);
+      readOptions[arg].push(...names);
+    }
+  } else if (arg.startsWith("-")) throw new Error(`osabap: unknown build option ${arg}`);
+  else positional.push(arg);
+}
+if (positional.length > 1) throw new Error("osabap: expected one report");
+const readParams = [...new Set(readOptions["--read-params"])];
+const readLists = [...new Set(readOptions["--read-lists"])];
 const report = resolve(positional[0] ?? join(here, "apps", "hello", "zhello.prog.abap"));
 const name = basename(report).replace(/\.prog\.abap$/i, "").toUpperCase();
 const className = `ZCL_OSABAP_${name.replace(/^Z/, "")}`;
@@ -228,6 +241,20 @@ const program = compileProgram({
     "cl_gui_control", "cl_gui_container", "cl_gui_cfw", "cl_gui_frontend_services", "zcl_osabap_runtime"],
   skip: (path) => /\.testclasses\.abap$/i.test(path),
 });
+// (kept after rttiObjects: test/dsl-report.mjs evaluates the selections block alone)
+for (const parameter of [...readParams, ...readLists]) {
+  const element = selections.find((element) => element.name.toUpperCase() === parameter);
+  if (!element) throw new Error(`osabap: read grant: unknown parameter ${parameter}`);
+  if (element.kind !== "parameter" || isCheckbox(element)) throw new Error(`osabap: read grant: ${parameter} must be a character PARAMETERS field`);
+}
+
+// Validate the resolved ABAP type, including LIKE, aliases and DDIC elements;
+// syntax spelling alone cannot tell whether a selection value is a path.
+for (const parameter of [...readParams, ...readLists]) {
+  const member = converted.reportIR?.statePlan?.selectionState?.[parameter]?.member?.toUpperCase();
+  const attribute = program.classes.find((cls) => cls.name === className)?.attributes.find((attr) => attr.name === member);
+  if (!["c", "string"].includes(attribute?.type?.k)) throw new Error(`osabap: read grant: ${parameter} must be a character PARAMETERS field`);
+}
 writeFileSync(join(dir, "zz_generated.go"), emitGo(program));
 
 // the report's own tables: their CREATE TABLEs, as the transpiler writes them
@@ -261,6 +288,8 @@ var appSelectionNames = []string{${selectionNames.map(JSON.stringify).join(", ")
 var appPositionals = []string{${positionals.map(JSON.stringify).join(", ")}}
 var appCheckboxes = map[string]bool{${checkboxes.map((name) => `${JSON.stringify(name)}: true`).join(", ")}}
 var appRanges = map[string]bool{${ranges.map((name) => `${JSON.stringify(name)}: true`).join(", ")}}
+var appReadParams = []string{${readParams.map(JSON.stringify).join(", ")}}
+var appReadLists = []string{${readLists.map(JSON.stringify).join(", ")}}
 var appLabels = map[string]string{${Object.entries(textPool).filter(([key]) => selectionNames.includes(key)).map(([key, text]) => `${JSON.stringify(key)}: ${JSON.stringify(text)}`).join(", ")}}
 var appF4 = map[string]bool{${f4Fields.map((name) => `${JSON.stringify(name)}: true`).join(", ")}}
 
