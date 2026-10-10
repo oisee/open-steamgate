@@ -16,6 +16,7 @@ import {home} from "./home.mjs";
 const here = dirname(fileURLToPath(import.meta.url));
 const EXPECT = {
   // Unmeasured regression: literal local CONSTANTS share ordinary VALUE conversion.
+  ZCL_GOGEN_T_CONSTUNICODE: {Go: "😀/😀z/😀/😀z", JS: "😀z/😀z/😀z/😀z"},
   ZCL_GOGEN_T_CONSTLOAD: "1",
   ZCL_GOGEN_T_CONSTENTRY: "1/2/12/2/0",
   ZCL_GOGEN_T_LOCALCONST: "-9223372036854775808/9223372036854775807/-42/00012/[2024]/[12]/[xy   ]/hello/[ab   ]/21/-9223372036854775808/9223372036854775807/-42/00012/[2024]/[12]/[xy   ]/hello/[ab   ]/21",
