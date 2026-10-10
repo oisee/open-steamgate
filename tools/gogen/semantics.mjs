@@ -15,6 +15,11 @@ import {home} from "./home.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const EXPECT = {
+  // Unmeasured regression: nested classic mappings; OTHERS cannot take a class exception.
+  ZCL_GOGEN_T_CLASSICNEST: "0/3/7/9/class",
+  // Unmeasured regression: recursive MESSAGE masking and nested classic mappings.
+  ZCL_GOGEN_T_CALLSCOPE: {Go: "continue/outer/7/ZZ/S/007/nested/9/continue/outer3/0//5/11/continue/outer3/0/continue/",
+    JS: "ERROR NOT_COMPILED in abap.MessageRaise: a host function of the Go runtime"},
   // Unmeasured: ABAP value semantics
   ZCL_GOGEN_T_MOVCLR: "clear:3,0 append:1,9 delete:2,2 free:4,2,8 deep:6,10 component:14,16 object:18,19 loop:11,2,13",
   // Unmeasured: ABAP value semantics; a forwarded row reference must not alias the copy.

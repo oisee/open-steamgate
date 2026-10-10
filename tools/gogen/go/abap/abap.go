@@ -91,7 +91,7 @@ type Session struct {
 	// inflate: the decoders of ZCL_OSD_INFLATE=>HOST_* by handle (inflate.go)
 	inflate           *inflate.Registry
 	localDestinations map[string]bool
-	messageCall       *messageCall
+	messageCall       MessageCall
 }
 
 // ArithmeticError retains the identity of errors from pure packages.

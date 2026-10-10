@@ -13,6 +13,12 @@ import {emitByteStatement} from "./emit-bytes.mjs";
 // same generated code runs on any goroutine. An instance method has the
 // object as its receiver; a static one is a plain function.
 
+// An absent or OTHERS-only clause carries no named exception codes.
+const exceptionCodes = (exceptions) => {
+  const codes = Object.entries(exceptions?.map ?? {}).map(([k, v]) => `${JSON.stringify(k)}: ${v}`).join(", ");
+  return codes ? `map[string]int32{${codes}}` : "nil";
+};
+
 const GO_RESERVED = new Set(("break default func interface select case defer go map struct chan else goto package switch const "
   + "fallthrough if range type continue for import return var append cap clear close complex copy delete imag len make max min new "
   + "panic print println real recover bool byte error float32 float64 int int8 int16 int32 int64 rune string uint uint8 uint16 "
@@ -1416,13 +1422,13 @@ function stmtLines(st, ctx, d) {
       const fits = c.args.filter((a) => a.fitc).map((a) => `${t}${place(a.place, ctx)} = abap.CFit(${place(a.place, ctx)}, ${a.fitc})`);
       if (fits.length) {
         if (!c.exceptions) return [`${t}${marked}`, ...fits];
-        const m = Object.entries(c.exceptions.map).map(([k, v]) => `${JSON.stringify(k)}: ${v}`).join(", ");
-        return [`${t}func() {`, `${t}\tdefer abap.Classic(s, ${JSON.stringify(c.callee)}, map[string]int32{${m}}, ${c.exceptions.others})`,
+        const m = exceptionCodes(c.exceptions);
+        return [`${t}func() {`, `${t}\tdefer abap.Classic(s, ${JSON.stringify(c.callee)}, ${m}, ${c.exceptions.others})`,
           `${t}\t${marked}`, `${t}\ts.Sy.Subrc = 0`, `${t}}()`, ...fits];
       }
       if (!c.exceptions) return [`${t}${marked}`];
-      const m = Object.entries(c.exceptions.map).map(([k, v]) => `${JSON.stringify(k)}: ${v}`).join(", ");
-      return [`${t}func() {`, `${t}\tdefer abap.Classic(s, ${JSON.stringify(c.callee)}, map[string]int32{${m}}, ${c.exceptions.others})`,
+      const m = exceptionCodes(c.exceptions);
+      return [`${t}func() {`, `${t}\tdefer abap.Classic(s, ${JSON.stringify(c.callee)}, ${m}, ${c.exceptions.others})`,
         `${t}\t${marked}`, `${t}\ts.Sy.Subrc = 0`, `${t}}()`];
     }
     // ultra/events: SET HANDLER, one registration per handler (the names
@@ -1507,10 +1513,10 @@ function stmtLines(st, ctx, d) {
       // CALL FUNCTION of a module the host implements (frontend NATIVE_FM):
       // every actual as generic data, the module's classic exceptions by name
       const call = `${helperFn(st.fn)}(s, map[string]abap.Data{${st.args.map((x) => `${JSON.stringify(x.name)}: ${expr(x.value, ctx)}`).join(", ")}})`;
-      if (!st.exceptions) return [`${t}func() { defer abap.MessageCallScope(s, ${JSON.stringify(st.name)}, nil, -1)(); ${call} }()`];
-      const m = Object.entries(st.exceptions.map).map(([k, v]) => `${JSON.stringify(k)}: ${v}`).join(", ");
-      return [`${t}func() {`, `${t}\tdefer abap.Classic(s, ${JSON.stringify(st.name)}, map[string]int32{${m}}, ${st.exceptions.others})`,
-        `${t}\tdefer abap.MessageCallScope(s, ${JSON.stringify(st.name)}, map[string]int32{${m}}, ${st.exceptions.others})()`, `${t}\t${call}`, `${t}\ts.Sy.Subrc = 0`, `${t}}()`];
+      if (!st.exceptions) return [`${t}func() { defer abap.MessageCallScope(s, ${JSON.stringify(st.name)}, nil, -1).Restore(s); ${call} }()`];
+      const m = exceptionCodes(st.exceptions);
+      return [`${t}func() {`, `${t}\tdefer abap.Classic(s, ${JSON.stringify(st.name)}, ${m}, ${st.exceptions.others})`,
+        `${t}\tdefer abap.MessageCallScope(s, ${JSON.stringify(st.name)}, ${m}, ${st.exceptions.others}).Restore(s)`, `${t}\t${call}`, `${t}\ts.Sy.Subrc = 0`, `${t}}()`];
     }
     case "call_enq": {
       HELPER_IMPORTS.add("enqseam");
@@ -1523,10 +1529,10 @@ function stmtLines(st, ctx, d) {
         : st.kind === "dequeue"
           ? `hEnqseam.${fn}(s, ${table}, ${JSON.stringify(st.object)}, ${map}, hHostclass.KERNEL_LOCK.Dequeue)`
           : `hEnqseam.${fn}(s, hHostclass.KERNEL_LOCK.DequeueAll)`;
-      if (!st.exceptions) return [`${t}func() { defer abap.MessageCallScope(s, ${JSON.stringify(st.name)}, nil, -1)(); ${call} }()`];
-      const exceptionMap = Object.entries(st.exceptions.map).map(([key, value]) => `${JSON.stringify(key)}: ${value}`).join(", ");
-      return [`${t}func() {`, `${t}\tdefer abap.Classic(s, ${JSON.stringify(st.name)}, map[string]int32{${exceptionMap}}, ${st.exceptions.others})`,
-        `${t}\tdefer abap.MessageCallScope(s, ${JSON.stringify(st.name)}, map[string]int32{${exceptionMap}}, ${st.exceptions.others})()`, `${t}\t${call}`, `${t}}()`];
+      if (!st.exceptions) return [`${t}func() { defer abap.MessageCallScope(s, ${JSON.stringify(st.name)}, nil, -1).Restore(s); ${call} }()`];
+      const exceptionMap = exceptionCodes(st.exceptions);
+      return [`${t}func() {`, `${t}\tdefer abap.Classic(s, ${JSON.stringify(st.name)}, ${exceptionMap}, ${st.exceptions.others})`,
+        `${t}\tdefer abap.MessageCallScope(s, ${JSON.stringify(st.name)}, ${exceptionMap}, ${st.exceptions.others}).Restore(s)`, `${t}\t${call}`, `${t}}()`];
     }
     case "native": {
       const m = ctx.method;
@@ -2248,9 +2254,9 @@ function expr(e, ctx) {
       else if (e.static) call = `${funcName(ctx.cls.name, e.method)}(${args.join(", ")})`;
       else if (e.sup) call = `me.${typeName(e.sup)}.${typeName(e.method)}(${args.join(", ")})`;
       else call = `${self(ctx, e.method)}.${typeName(e.method)}(${args.join(", ")})`;
-      const codes = Object.entries(e.exceptions?.map ?? {}).map(([k, v]) => `${JSON.stringify(k)}: ${v}`).join(", ");
+      const exceptionMap = exceptionCodes(e.exceptions);
       const result = e.type.k === "void" ? "" : goType(e.type);
-      return `func() ${result} { defer abap.MessageCallScope(s, ${JSON.stringify(e.callee)}, map[string]int32{${codes}}, ${e.exceptions?.others ?? -1})(); ${result ? "return " : ""}${call} }()`;
+      return `func() ${result} { defer abap.MessageCallScope(s, ${JSON.stringify(e.callee)}, ${exceptionMap}, ${e.exceptions?.others ?? -1}).Restore(s); ${result ? "return " : ""}${call} }()`;
     }
     case "nop_call": return "";
     case "xbytes": return constLiteral({type: e.type, value: e.value});

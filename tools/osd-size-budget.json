@@ -15,8 +15,8 @@
   ],
   "budgets": {
     "go:abap": {
-      "lines": 11985,
-      "reason": "osgo 026/029 (#658, #659): UTF-16 units and class statics per Session (carve-out queued, stoker QUEUE #33). ADT batch 1 (adt-i5 cases 1-7): Session message fields (sy-msgno as NUMC 3), MESSAGE RAISING binding with scoped restoration, classic exceptions keyed by the resolved interface method, date/time and signed MOVE adapters, object-wrapper identity, STORE answer projection and conservative ADT host answers; timestamp conversion lives in go/timestamp. abapiti 037: cl_http_utility=>decode_base64 beside its encode_base64 sibling (the @KERNEL text decode). StoreHook: a host answers ZOSD_STORE for the calling step first (adt-i5's per-session SYSTEM facts), replacing a text substitution of emitter output. #39 records WorkProcess ownership and exposes only the narrow Session methods needed by the abap-free lock/yield packages; round 2: end and reopen the database transaction across yield, and mark APC step Session ownership. #43: per-Session update-module flag and two small explicit-statement LUW bindings; database primitives retain yield and dialog-step behavior. abapiti 017: ParseI8, string to int8 with ParseI's rules. abapiti 042: READ and DELETE TABLE by a hashed secondary key."
+      "lines": 11990,
+      "reason": "osgo 026/029 (#658, #659): UTF-16 units and class statics per Session (carve-out queued, stoker QUEUE #33). ADT batch 1 (adt-i5 cases 1-7): Session message fields (sy-msgno as NUMC 3), MESSAGE RAISING binding with scoped restoration, classic exceptions keyed by the resolved interface method, date/time and signed MOVE adapters, object-wrapper identity, STORE answer projection and conservative ADT host answers; timestamp conversion lives in go/timestamp. abapiti 037: cl_http_utility=>decode_base64 beside its encode_base64 sibling (the @KERNEL text decode). StoreHook: a host answers ZOSD_STORE for the calling step first (adt-i5's per-session SYSTEM facts), replacing a text substitution of emitter output. #39 records WorkProcess ownership and exposes only the narrow Session methods needed by the abap-free lock/yield packages; round 2: end and reopen the database transaction across yield, and mark APC step Session ownership. #43: per-Session update-module flag and two small explicit-statement LUW bindings; database primitives retain yield and dialog-step behavior. abapiti 017: ParseI8, string to int8 with ParseI's rules. abapiti 042: READ and DELETE TABLE by a hashed secondary key. Call-scope allocation: five lines for an inactive zero value, the value return and deferred Restore method, preserving immediate-caller masking without heap records or restore closures."
     },
     "go:abaperr": {
       "lines": 13,
@@ -391,8 +391,8 @@
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/go/abap/registry.go": {
-      "lines": 191,
-      "reason": "ADT batch 1 (adt-i5 cases 1-7): Keep MESSAGE RAISING next to ClassicException: assign session message fields and raise the existing classic exception type. Critic round 1: immediate caller MESSAGE RAISING assignments and scoped restoration, including calls without EXCEPTIONS."
+      "lines": 196,
+      "reason": "ADT batch 1 (adt-i5 cases 1-7): Keep MESSAGE RAISING next to ClassicException: assign session message fields and raise the existing classic exception type. Critic round 1: immediate caller MESSAGE RAISING assignments and scoped restoration, including calls without EXCEPTIONS. Call-scope allocation: five lines for an inactive zero value, the value return and deferred Restore method, preserving immediate-caller masking without heap records or restore closures."
     },
     "tools/gogen/go/abap/row_binding.go": {
       "lines": 175,
