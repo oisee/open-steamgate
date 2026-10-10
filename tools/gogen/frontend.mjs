@@ -1190,8 +1190,7 @@ function compiledFunctionCall(node, ctx, text, name) {
   }
   const known = new Set(sig.params.map((p) => p.name));
   for (const pn of [...given.keys(), ...targets.keys()]) if (!known.has(pn)) throw new Unsupported(`CALL FUNCTION '${name}': ${pn} is not a parameter of the module`);
-  const before = [];
-  const after = [];
+  const before = [], after = [];
   const args = sig.params.map((p) => {
     if (p.dir === "importing") {
       if (targets.has(p.name)) throw new Unsupported(`CALL FUNCTION '${name}': importing ${p.name} passed as ${targets.get(p.name).kw}`);
@@ -1209,7 +1208,8 @@ function compiledFunctionCall(node, ctx, text, name) {
     if (got !== undefined && got.kw !== want) throw new Unsupported(`CALL FUNCTION '${name}': ${p.name} passed as ${got.kw}, it is ${want}`);
     if (got === undefined) {
       if (!p.optional) throw new Unsupported(`CALL FUNCTION '${name}': parameter ${p.name} not supplied`);
-      return {dir: p.dir, byValue: p.byValue, place: null, type: p.type};
+      return {dir: p.dir, byValue: p.byValue, place: null, type: p.type,
+        wrap: p.tables && p.type.k === "data" ? {e: "wrap", x: {e: "zero", type: {k: "table", row: S, skey: "default"}}, type: p.type} : undefined};
     }
     const t = got.target;
     if (p.tables && p.type.k === "data" && t.type.k === "table") {

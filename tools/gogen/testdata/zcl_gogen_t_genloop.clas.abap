@@ -43,6 +43,7 @@ CLASS zcl_gogen_t_genloop IMPLEMENTATION.
     DATA line TYPE string.
     DATA tab TYPE ty_lines.
     DATA mode TYPE i.
+    DATA sorted_lines TYPE SORTED TABLE OF string WITH UNIQUE KEY table_line.
     row-id = 1. row-payload = 'before'.
     APPEND 'child' TO row-children.
     APPEND row TO standard.
@@ -69,6 +70,12 @@ CLASS zcl_gogen_t_genloop IMPLEMENTATION.
       READ TABLE row-children INDEX 1 INTO child.
       rv = |{ rv }/{ row-id }/{ row-payload }/{ child }|.
     ENDLOOP.
+    INSERT `c` INTO TABLE sorted_lines.
+    INSERT `a` INTO TABLE sorted_lines.
+    INSERT `b` INTO TABLE sorted_lines.
+    CALL FUNCTION 'ZGOGEN_T_GENLOOP' EXPORTING iv_mode = 1
+      IMPORTING ev_text = text TABLES ct_row = sorted_lines.
+    rv = |{ rv } sorted-delete:{ text }/{ lines( sorted_lines ) }|.
     DO 5 TIMES.
       mode = sy-index.
       CLEAR tab. APPEND 'a' TO tab. APPEND 'b' TO tab. APPEND 'c' TO tab.

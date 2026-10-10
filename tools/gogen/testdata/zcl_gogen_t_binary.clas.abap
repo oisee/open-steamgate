@@ -70,5 +70,8 @@ CLASS zcl_gogen_t_binary IMPLEMENTATION.
     rv = |{ rv }/{ ls-bytes }/{ ls-label }|.
     probe( IMPORTING ev_text = text CHANGING binary_tab = lt_x ).
     rv = |{ rv } any:{ text }|.
+    text = 'not empty'.
+    CALL FUNCTION 'ZGOGEN_T_BINARY' IMPORTING ev_text = text.
+    rv = |{ rv } omitted:[{ text }]|.
   ENDMETHOD.
 ENDCLASS.
