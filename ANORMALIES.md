@@ -30,6 +30,23 @@ Format adapted from `larshp/hithub` (MIT).
 
 ## Open anomalies
 
+### ANOMALY-2026-10-10-get-run-time-wrap -- GET RUN TIME does not wrap at 2^31
+
+- Status: `open` (fix committed locally in the transpiler branch).
+- Discovery date: `2026-10-10`.
+- Affected versions: `@abaplint/runtime 2.14.2` on transpiler `origin/main`; the unwrapped implementation also affected the observed 55-minute run.
+- Affected ABAP statement, runtime API or adapter: `GET RUN TIME FIELD`; `packages/runtime/src/statements/get_run_time.ts` in `abaplint/transpiler`.
+- Minimal ABAP reproducer: `DATA elapsed TYPE i. GET RUN TIME FIELD elapsed.`; repeat in the same internal session more than `2147483648` microseconds after the first call. A controllable-clock reproducer is `packages/runtime/test/statements/get_run_time.ts` in the transpiler clone.
+- Exact command used to run it: `cd packages/runtime && npm test -- --grep 'Statement GET RUN TIME'` in the transpiler clone. Kernel measurement: background job calling the statement into `TYPE i` every 60 seconds for 41 minutes.
+- Expected SAP behaviour: measured on an ABAP 7.5x system on `2026-10-10`, the first call returns 0 and elapsed microseconds wrap modulo `2^31`, staying non-negative without an exception. Minute 35: `2100029253`; minute 36: `12546088` (a drop of about `2^31`, then growing again); subsequent minutes: `72546692`, `132547544`.
+- Actual open-abap behaviour: assigns `floor((now - start) * 1000)` without wrapping. `Integer.set` does not range-check (its check is commented out), so after about 35.8 minutes a `TYPE i` target silently holds a value above `2147483647`. In a 55-minute run the caller's own arithmetic on that value then ended in `CX_SY_ARITHMETIC_OVERFLOW`.
+- Impact on open-steamgate: long-running sessions and background jobs that read the runtime counter get out-of-range `TYPE i` values; arithmetic on them can overflow.
+- Smallest safe workaround: apply the local runtime fix pending an upstream release; no application workaround recorded.
+- Upstream issue: abaplint/transpiler#1990 (branch `get-run-time-wrap`).
+- Regression-test location: transpiler `packages/runtime/test/statements/get_run_time.ts`; fake `performance.now` and fallback `Date.now`, first call, boundary, wrap, unwrapped monotonic clamp, continued progress, second wrap.
+- Target type: the measurement and the fix cover `TYPE i`, the type SAP documents for the field ([ABAP 7.50 documentation](https://help.sap.com/doc/abapdocu_750_index_htm/7.50/en-US/abapget_run_time.htm)).
+- Upstream version containing a fix: `unknown`.
+
 ### ANOMALY-2026-10-08-dec-sqlite-real -- DEC precision collapses in SQLite
 
 - Status: `open`

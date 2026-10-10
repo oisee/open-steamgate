@@ -95,6 +95,18 @@ branch. What is left:
    fails without it. When the fix is in the pinned shim, the roll-out's
    shim half goes and the test stays.
 
+9. **`get-run-time-wrap`: GET RUN TIME does not wrap at 2^31** --
+   `ANOMALY-2026-10-10-get-run-time-wrap`. Measured on an ABAP 7.5x system:
+   the kernel returns non-negative elapsed microseconds that wrap at `2^31`
+   (minute 35 `2100029253`, minute 36 `12546088`, then `72546692`). The
+   runtime assigns the unwrapped count, and `Integer.set` does not
+   range-check, so a `TYPE i` field holds an out-of-range value after about
+   35.8 minutes. The fix keeps `context.runTime.last` unwrapped for the
+   backward-clock clamp and wraps only at assignment
+   (`packages/runtime/src/statements/get_run_time.ts`); two fake-clock tests
+   (`performance.now` and `Date.now`) fail without it. Sent as
+   abaplint/transpiler#1990; next: record the containing release.
+
 ## What we carry, and what we wait for
 
 *Decided 2026-09-17, after the performance work made the question real.*
