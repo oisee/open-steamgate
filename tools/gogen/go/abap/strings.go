@@ -241,19 +241,20 @@ func splice(s string, ms [][]int, with func(m []int) string) string {
 	return Canon(b.String())
 }
 
-// ReplaceStmt is REPLACE [FIRST OCCURRENCE | ALL OCCURRENCES] OF [REGEX] p
-// IN [SECTION [OFFSET off] [LENGTH ln] OF] v WITH with [IGNORING CASE], as
-// measured on A4H: sy-subrc 0 when something was replaced, 4 when not; an
-// empty plain pattern is inserted at the start by FIRST and raises
-// CX_SY_REPLACE_INFINITE_LOOP with ALL (a c pattern of blanks is empty); a
-// regex that matches empty replaces there (abc with x* is -a-b-c-); $n in
-// WITH is literal without REGEX; a SECTION outside v raises
-// CX_SY_RANGE_OUT_OF_BOUNDS. off is 0 and ln NoLength without a SECTION. cLen is
-// the length of a c target, -1 for a string: the c field is searched with
-// its trailing blanks (ab in a c(10), all blanks replaced, is ab--------),
-// cut back to its length after, and a cut of more than blanks is
-// sy-subrc 2.
+// ReplaceStmt implements literal/REGEX REPLACE FIRST/ALL, optionally in a SECTION.
+// off=0, ln=NoLength searches the whole subject; cLen=-1 denotes a string.
+// c fields search trailing blanks, then trim/fit: subrc 2 for nonblank cuts, 0 for matches, 4 for no match.
+// Empty literals insert with FIRST, raise with ALL; regex may match empty. Bad sections raise; $n needs REGEX.
 func ReplaceStmt(v, p, with string, regex, all, icase bool, off, ln int32, cLen int) (string, int32) {
+	return replaceStmt(v, p, with, regex, all, icase, off, ln, cLen, true)
+}
+
+func replaceStmt(v, p, with string, regex, all, icase bool, off, ln int32, cLen int, fast bool) (string, int32) {
+	// fast is a per-call test seam. Sections/c need bounds/padding; folding validates regex; halves match inside scalars.
+	if fast && len(v) <= math.MaxInt32 && cLen < 0 && off == 0 && ln == NoLength && !regex && !icase && p != "" &&
+		!hasHalf(p) && strings.Index(v, p) < 0 && !hasHalf(v) {
+		return v, 4
+	}
 	if cLen >= 0 {
 		v = PadC(v, cLen)
 	}
@@ -294,8 +295,7 @@ func ReplaceStmt(v, p, with string, regex, all, icase bool, off, ln int32, cLen 
 	if cLen >= 0 {
 		if int(Strlen(out)) > cLen {
 			cut := SubS(out, int32(cLen), -1)
-			// only blanks cut is no cut (measured: ab in a c(4), a -> xxx, is
-			// xxxb and sy-subrc 0)
+			// Only nonblank truncation sets subrc 2.
 			if strings.TrimRight(cut, " ") == "" {
 				return CFit(out, cLen), 0
 			}
