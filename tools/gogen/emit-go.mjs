@@ -81,7 +81,7 @@ const rowValue = (table, item) => stable(table) ? `(*(${item}))` : item;
 const rowAddress = (table, item) => stable(table) ? item : `&${item}`;
 const rowStored = (table, value) => stable(table) ? `abap.Ptr(${value})` : value;
 const rowRef = (table, tb, item) => stable(table) ? `abap.RowRef(&${tb}, ${item}, ${desc(table.row)})` : `abap.Data{P: &${item}, T: ${desc(table.row)}}`;
-const boundRow = (table, tb, index) => !stable(table) && table.row.k !== "struct" ? `abap.BindRow(&${tb}, int(${index}))` : rowAddress(table, `${tb}[${index}]`);
+const boundRow = (table, tb, index) => table.row.k === "data" ? rowValue(table, `${tb}[${index}]`) : !stable(table) && table.row.k !== "struct" ? `abap.BindRow(&${tb}, int(${index}))` : rowAddress(table, `${tb}[${index}]`);
 
 // a p field holds its decimals: initial is 0, 0.0, 0.00 ... (go/abap packed.go)
 const pZero = (t) => (t.calc || !t.dec ? "0" : `0.${"0".repeat(t.dec)}`);
@@ -1765,7 +1765,7 @@ ${t}	}`));
       return [`${t}if !(${cond(st.cond, ctx)}) {`, `${t}\tpanic(abap.ArithmeticError{Class: "ASSERTION_FAILED", Op: ${JSON.stringify(st.text)}})`, `${t}}`];
     case "assign_comp":
       return [`${t}if c, ok := abap.Component(${expr(st.from, ctx)}, ${expr(st.name, ctx)}); ok {`, `${t}\t${ident(st.fs.name)} = c`, `${t}\ts.Sy.Subrc = 0`,
-        `${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`];
+        `${t}} else {`, ...(st.name.type.k === "i" ? [`${t}\t${ident(st.fs.name)} = abap.Data{}`] : []), `${t}\ts.Sy.Subrc = 4`, `${t}}`];
     case "assign_deref":
       return [`${t}if r := ${expr(st.ref, ctx)}; r.P != nil {`, `${t}\t${ident(st.fs.name)} = r`, `${t}\ts.Sy.Subrc = 0`, `${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`];
     case "assign_deref_typed":

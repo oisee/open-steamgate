@@ -356,7 +356,7 @@ function whereItem(w, row, ctx) {
   }
 }
 const moved = (e, ctx) => (composite(e.type) && isPlace(e) ? `abap.copy(${expr(e, ctx)})` : expr(e, ctx));
-const boundRow = (table, tb, index) => table.row.k === "struct" ? `${tb}[${index}]` : `abap.bindRow(() => ${tb}, ${index})`;
+const boundRow = (table, tb, index) => ["data", "struct"].includes(table.row.k) ? `${tb}[${index}]` : `abap.bindRow(() => ${tb}, ${index})`;
 const rowRef = (table, tb, index) => table.row.k === "struct" ? `abap.cell(${tb}[${index}], ${desc(table.row)}, ${tb})` : `abap.rowCell(() => ${tb}, ${index}, ${desc(table.row)})`;
 
 /* sorted secondary keys (frontend secondaryKey, ultra/json): as emit-go keyLoop / readSecKey */
@@ -508,7 +508,7 @@ function stmt(st, ctx, d) {
     }
     case "assign_comp":
       return [`${t}{`, `${t}  const c = abap.Component(${expr(st.from, ctx)}, ${expr(st.name, ctx)});`,
-        `${t}  if (c !== null) { ${ident(st.fs.name)} = c; s.sy.subrc = 0; } else { s.sy.subrc = 4; }`, `${t}}`];
+        `${t}  if (c !== null) { ${ident(st.fs.name)} = c; s.sy.subrc = 0; } else { ${st.name.type.k === "i" ? `${ident(st.fs.name)} = null; ` : ""}s.sy.subrc = 4; }`, `${t}}`];
     case "assign_deref":
       return [`${t}{`, `${t}  const r = ${expr(st.ref, ctx)};`, `${t}  if (r !== null) { ${ident(st.fs.name)} = r; s.sy.subrc = 0; } else { s.sy.subrc = 4; }`, `${t}}`];
     case "assign_deref_typed":

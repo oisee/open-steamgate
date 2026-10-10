@@ -5556,8 +5556,8 @@ function assignStatement(node, ctx, text) {
   if (/^ASSIGN\s+COMPONENT\b/i.test(text)) {
     if (parts.length !== 2) throw new Unsupported(`ASSIGN COMPONENT form: ${text}`);
     const name = sourceOperand(parts[0].getFirstChild(), ctx);
-    if (!["string", "c"].includes(name.type.k)) throw new Unsupported(`ASSIGN COMPONENT by a ${name.type.k}`);
-    return {s: "assign_comp", fs, name: convert(name, S), from: convert(source(parts[1], ctx), {k: "data"})};
+    if (!["string", "c", "i"].includes(name.type.k)) throw new Unsupported(`ASSIGN COMPONENT by a ${name.type.k}`);
+    return {s: "assign_comp", fs, name: convert(name, name.type.k === "i" ? I : S), from: convert(source(parts[1], ctx), {k: "data"})};
   }
   if (parts.length !== 1 || !isExpr(parts[0], Expressions.Source)) throw new Unsupported(`ASSIGN form: ${text}`);
   const inner = parts[0];

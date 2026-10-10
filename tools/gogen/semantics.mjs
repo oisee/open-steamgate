@@ -15,6 +15,8 @@ import {home} from "./home.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const EXPECT = {
+  // unmeasured; ABAP documentation: generic binary rows, writable components, and failed assignment.
+  ZCL_GOGEN_T_BINARY: "x:0102A0B0 miss:4/free miss:4/free/CCDD/CCDD s:1122 second:0/Q miss:4/free/CCDD/Q",
   // Unmeasured regression: nested classic mappings; OTHERS cannot take a class exception.
   ZCL_GOGEN_T_CLASSICNEST: "0/3/7/9/class",
   // Unmeasured regression: recursive MESSAGE masking and nested classic mappings.
