@@ -151,19 +151,24 @@ func RegisterLocalDestination(s *Session, name string) {
 	s.localDestinations[strings.TrimRight(name, " ")] = true
 }
 
-// MessageCallScope carries only the immediate caller's EXCEPTIONS assignment.
+// MessageCall carries only the immediate caller's EXCEPTIONS assignment.
 // Every call, including one without EXCEPTIONS, masks its parent's assignment.
-type messageCall struct {
+type MessageCall struct {
 	method string
 	codes  map[string]int32
 	others int32
+	active bool
 }
 
-func MessageCallScope(s *Session, method string, codes map[string]int32, others int32) func() {
+// MessageCallScope saves the assignment for a deferred Restore call.
+// Neither push nor panic-safe pop needs a heap record or a restore closure.
+func MessageCallScope(s *Session, method string, codes map[string]int32, others int32) MessageCall {
 	previous := s.messageCall
-	s.messageCall = &messageCall{method, codes, others}
-	return func() { s.messageCall = previous }
+	s.messageCall = MessageCall{method: method, codes: codes, others: others, active: true}
+	return previous
 }
+
+func (previous MessageCall) Restore(s *Session) { s.messageCall = previous }
 
 // MESSAGE ... RAISING sets the session fields before raising. Classic's
 // deferred handler assigns sy-subrc using the caller's EXCEPTIONS mapping.
@@ -178,7 +183,7 @@ func MessageRaise(s *Session, id, ty, no, name, method string, values ...string)
 			*p = CFit(values[i], 50)
 		}
 	}
-	if c := s.messageCall; c != nil && c.method == method {
+	if c := s.messageCall; c.active && c.method == method {
 		if _, assigned := c.codes[name]; assigned || c.others >= 0 {
 			panic(ClassicException{Name: name, Method: method})
 		}
