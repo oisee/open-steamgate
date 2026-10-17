@@ -16,35 +16,17 @@
 // Without STG_DB_PATH nothing here changes: the database is in memory, the
 // seed runs every time, and a test suite is not slowed down by a file.
 import {createHash} from "node:crypto";
-import {existsSync, mkdirSync, readFileSync, renameSync, writeFileSync} from "node:fs";
+import {existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, statSync} from "node:fs";
 import {dirname} from "node:path";
-import {migrateAdtHandle} from "./osd-adt-handle-migrate.mjs";
 
-// The one table OSD owns in its own database: which schema the rows in this
-// file were made for. Source and data version on different axes, git for the
-// one and this file for the other, and a file made for one branch's DDIC
-// opened by another branch's code would otherwise come up silently with the
-// wrong tables and serve rows the running code does not describe.
-//
-// It is a compatibility check and nothing more. Nothing compares it between
-// instances, nothing promotes it, and the answer to a mismatch is to build
-// this instance's data again, never to fetch data from somewhere else.
+// The whole-schema stamp remains compatible with old snapshots. The general
+// planner also records per-table definitions and preserves incompatible
+// application tables individually (docs/db-migrations.md).
 const STAMP = "osd_schema";
 
 export function fingerprintOf(schema) {
   const text = Array.isArray(schema) ? schema.join("\n") : String(schema ?? "");
   return createHash("sha256").update(text).digest("hex").slice(0, 16);
-}
-
-async function stampOf(db) {
-  try {
-    const answer = await db.select({select: `SELECT fingerprint FROM ${STAMP} LIMIT 1`});
-    return answer?.rows?.[0]?.fingerprint;
-  } catch {
-    // no such table: a file from before this existed, which is a file whose
-    // schema nobody recorded and therefore nobody can trust
-    return undefined;
-  }
 }
 
 // set once the seed is complete: before that, a stop must not export a
@@ -112,9 +94,8 @@ export function databasePath(fallback) {
   return file ? fallback : undefined;
 }
 
-// true when the database came back from the file and the caller should not
-// seed over it; false when the caller has to build it, which is a file that
-// never existed, an empty one, or one made for a different schema
+// true when a snapshot was restored/migrated; false only for a missing or
+// empty file. Restored application rows are never seeded over.
 export async function loadInto(db, schema) {
   const file = databaseFile();
   if (file === undefined || existsSync(file) === false) {
@@ -132,36 +113,16 @@ export async function loadInto(db, schema) {
     seeded = true;
     return true;
   }
-  const wanted = fingerprintOf(schema);
-  let found = await stampOf(db);
-  if (await migrateAdtHandle({
-    begin: () => db.execute("BEGIN IMMEDIATE"),
+  const {startupDatabase} = await import(/* webpackIgnore: true */ "./osd-db-migrate.mjs");
+  const access = {
+    name: "sqlite", execute: (sql) => db.execute(sql),
     query: async (sql) => (await db.select({select: sql})).rows,
-    execute: (sql) => db.execute(sql),
-    commit: () => db.execute("COMMIT"),
-    rollback: () => db.execute("ROLLBACK"),
-  }, found, wanted, schema, fingerprintOf)) found = wanted;
-  if (found === wanted) {
-    seeded = true;
-    return true;
-  }
-  // the rows in this file were made for other tables. Saying so is the
-  // point: silently serving them is how a client reads data the running
-  // code does not describe.
-  //
-  // What to do about it is a knob, and the default is to rebuild, because
-  // rows that do not fit the running code cannot be served whatever we
-  // decide, so refusing only leaves an instance stuck. STG_DB_STRICT=1 is
-  // for data worth looking at before it is thrown away: then nothing is
-  // touched and the human chooses. Never silent either way.
-  const said = `${file} was made for schema ${found ?? "nobody recorded which"} and this runtime generates ${wanted}`;
-  if (process.env.STG_DB_STRICT === "1") {
-    throw new SchemaDrift(`${said}: refusing to touch it (STG_DB_STRICT=1). Move it aside, or unset STG_DB_STRICT to rebuild.`);
-  }
-  console.log(`${said}: starting with an empty database`);
-  await db.disconnect();
-  await db.connect();
-  return false;
+    commit: () => db.execute("COMMIT"), rollback: () => db.execute("ROLLBACK"),
+  };
+  await startupDatabase(access, schema, [], {strict: process.env.STG_DB_STRICT === "1"});
+  db.schemaDrift = access.schemaDrift;
+  seeded = true;
+  return true;
 }
 
 export class SchemaDrift extends Error {
@@ -178,6 +139,8 @@ export function save(db) {
   if (file === undefined) {
     return undefined;
   }
+  // Native file clients already persist committed rows, including their WAL.
+  if (db?.db && db.path === file) return {file, bytes: statSync(file).size};
   const bytes = db?.export?.();
   if (bytes === undefined) {
     return undefined;
