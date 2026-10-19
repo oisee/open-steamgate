@@ -94,8 +94,12 @@ function equal(left, right, label) {
   for (const name of ["zz_app.go", "zz_generated.go", "zz_db.json", "symbols.json"])
     assert.deepEqual(readFileSync(join(artifactFolders.get(right), name)), readFileSync(join(artifactFolders.get(left), name)), `${label}: ${name} bytes`);
   const a = capturedSelections.get(left), b = capturedSelections.get(right);
-  if (a || b) assert.deepEqual(b, a, `${label}: ordered selections differ`);
-  results.comparisons.push({label, equal: true, selectionEqual: a && b ? true : undefined, byteFiles: 4}); save();
+  // Every comparison must carry an ordered selection: the runner emits it only
+  // under OSABAP_TIMING=1, and without this assert that guarantee can be lost
+  // silently (GLM review note 2026-10-20).
+  assert.ok(a && b, `${label}: ordered selection missing (run the proof with OSABAP_TIMING=1)`);
+  assert.deepEqual(b, a, `${label}: ordered selections differ`);
+  results.comparisons.push({label, equal: true, selectionEqual: true, byteFiles: 4}); save();
 }
 const recorded = capture("cold-enabled", true);
 if (baseline) {

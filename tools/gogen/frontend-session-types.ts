@@ -136,6 +136,8 @@ export interface DiskFrontend {
 }
 export interface PreparedSelection {wanted: string[]; diagnostics: readonly import("./ir.ts").Diagnostic[]; broken: Set<string>}
 export interface CompileOptions {
+  // Internal seam for the cache host's discovery-equivalence checker: returns
+  // a deliberately partial program. Not a supported compilation mode.
   discoveryProbe?: {owners: Set<string>; selection?: PreparedSelection; cds?: import("./frontend-cache-types.ts").CdsSource[]; compile: (ctx: LoweringContext, obj: ClassObject, lower: ClassLowering) => ClassIR};
   closureContext?: {round: number};
   strictRoots?: Set<string>;
