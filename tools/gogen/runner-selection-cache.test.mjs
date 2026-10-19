@@ -123,6 +123,21 @@ for (const noline of [false, true]) {
     }));
   }
 }
+for (const noline of [false, true]) test(`reordered static calls restart discovery in first-discovery order; noline=${noline}`, () => fixture(({input, cache, put}) => {
+  put("zentry", source("zentry", "zleaf=>run( ). zother=>run( )."));
+  const prime = oracle(input, cache, {}, noline);
+  assert.deepEqual(prime.wanted, ["ZENTRY", "ZLEAF", "ZOTHER"]);
+  assert.equal(capture(input, cache, {}, noline).evidence, "exact-inputs");
+  put("zentry", source("zentry", "zother=>run( ). zleaf=>run( )."));
+  const edited = capture(input, cache, {}, noline), cold = capture(input, undefined, {}, noline);
+  assert.ok(!edited.error, edited.error); assert.ok(!cold.error, cold.error);
+  assert.equal(edited.evidence, "discovery-from-roots");
+  assert.ok(edited.rounds > 1, "reordered discovery references cannot reuse the one-round selection");
+  assert.deepEqual(cold.wanted, ["ZENTRY", "ZOTHER", "ZLEAF"]);
+  assert.deepEqual(edited.wanted, cold.wanted, "ordered selection matches independent discovery from roots");
+  assert.deepEqual(edited.artifacts, cold.artifacts);
+}));
+
 test("policy, roots, corruption and tool identity fail closed", () => fixture(({input, cache}) => {
   oracle(input, cache);
   assert.equal(oracle(input, cache, {policy: "different"}).evidence, "discovery-from-roots");
@@ -341,7 +356,7 @@ test("negative control: omitting static-call references really certifies a stale
     let text = readFileSync(new URL(name, import.meta.url), "utf8");
     text = text.replace("createRequire(import.meta.url)", `createRequire(${JSON.stringify(new URL(name, import.meta.url).href)})`);
     if (name === "runner-method-projection.mjs") text = text.replace("  const retained =", '  statements = statements.filter(s => !staticDiscoveryReferences(s, core).some(r => r.owner.toUpperCase() === "ZLEAF"));\n  const retained =');
-    if (name === "runner-method-discovery.mjs") text = text.replace("references: [...new Set(references)].sort()", 'references: [...new Set(references)].filter(r => !r.includes("ZLEAF")).sort()');
+    if (name === "runner-method-discovery.mjs") text = text.replace("return {references, phases:", 'return {references: references.filter(r => !r.includes("ZLEAF")), phases:');
     const ast = ts.createSourceFile(name, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS), edits = [];
     for (const node of ast.statements) if (ts.isImportDeclaration(node) && node.moduleSpecifier.text.startsWith(".")) {
       const spec = node.moduleSpecifier.text, leaf = spec.slice(2);
@@ -523,12 +538,13 @@ for (const noline of [false, true]) test(`general method edits preserve the actu
   assert.equal(oracle(input, cache, {}, noline).evidence, "discovery-from-roots");
 }));
 
-for (const noline of [false, true]) test(`duplicate static calls preserve the discovery reference set; noline=${noline}`, () => fixture(({input, cache, put}) => {
+for (const noline of [false, true]) test(`duplicate static-call insertion restarts roots and revert reuses exact inputs; noline=${noline}`, () => fixture(({input, cache, put}) => {
   const body = "DATA(text) = CONV string( |hello| ). zleaf=>run( ).";
   put("zentry", source("zentry", body)); oracle(input, cache, {}, noline);
   for (const after of [body + " zleaf=>run( ).", body]) {
     put("zentry", source("zentry", after));
     const result = oracle(input, cache, {}, noline);
-    assert.equal(result.rounds, 1); assert.equal(result.evidence, "method-discovery-references");
+    assert.equal(result.rounds, after === body ? 1 : 3);
+    assert.equal(result.evidence, after === body ? "exact-inputs" : "discovery-from-roots");
   }
 }));

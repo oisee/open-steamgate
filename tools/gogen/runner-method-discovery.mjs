@@ -151,7 +151,9 @@ function observe(input, before) {
       }
     }
   }
-  return {references: [...new Set(references)].sort(), phases: {parseMs: Math.round(parseMs), syntaxMs: Math.round(syntaxMs),
+  // Preserve first-discovery order and repeated positions: closure consumes
+  // missing dependencies in insertion order, so a reordered sequence must fail.
+  return {references, phases: {parseMs: Math.round(parseMs), syntaxMs: Math.round(syntaxMs),
     roundsMs: Math.round(performance.now() - roundsStarted), totalMs: Math.round(performance.now() - started)}};
 }
 if (process.argv[1] === fileURLToPath(import.meta.url) && process.argv[2] === "--probe") {

@@ -1043,11 +1043,13 @@ variants. This avoids repeating whole-registry selection scans twelve times.
 Per-variant parse, syntax and round-check timings are included in the optional
 `method-discovery` diagnostic row and the runner proof report.
 
-The existing `recordLowering` observer supplies the per-owner discovery set:
-sorted, deduplicated operations on `wanted`, `missing`, `caught`, `supplied`,
-`functionModules`, `dynStatics` and `interfaces`, including query arguments and
-read answers. Signature observations additionally bind the queried signature
-slot and its final availability (typed, unsupported or missing), rather than
+The existing `recordLowering` observer supplies the per-owner discovery reference
+sequence (the certified "reference set"): operations on `wanted`, `missing`,
+`caught`, `supplied`, `functionModules`, `dynStatics` and `interfaces`, including query arguments and
+read answers, in first-discovery order, with repeated positions preserved.
+Before and after must have identical ordered sequences; a reorder is not
+certified and falls back to full rediscovery from roots. Signature observations
+additionally bind the queried signature slot and its final availability (typed, unsupported or missing), rather than
 memoization hit booleans that vary when a call is duplicated. `wanted` membership checks are the actual closure guards, and
 `missing` additions include dependencies inferred by lowering rather than
 spelled in a statement. This catches, for example, adding `CREATE OBJECT o`
@@ -1141,9 +1143,11 @@ from importing the host checker. New regressions cover valid local include
 methods with shared names, mixed fast/general edits involving unchanged partial
 statements, and unchanged broken-owner diagnostics in historical contexts.
 
-The follow-up also covers duplicate static-call insertion/removal with an
-unchanged discovery set, loaded CDS mappings, raw CDS invalidation and actual
-acceptance by the deliberately reference-incomplete negative-control certifier.
+The follow-up also covers duplicate static-call insertion and revert: insertion
+now restarts roots when the ordered observations differ, while reverting can
+reuse the retained exact-input certificate. It also covers loaded CDS mappings,
+raw CDS invalidation and actual acceptance by the deliberately
+reference-incomplete negative-control certifier.
 
 A bounded copied-corpus probe of the optimized checker passed on the actual
 7,031-file loaded registry: 129.3 s total, with before/after parsing 57.1/60.7 s
