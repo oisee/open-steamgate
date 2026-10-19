@@ -134,7 +134,9 @@ export interface DiskFrontend {
   prepareDiskSession(session: SessionInput, registry: Registry): void;
   compileDiskClass(ctx: LoweringContext, obj: ClassObject, lower: ClassLowering, session: CacheSession | null | undefined): ClassIR;
 }
+export interface PreparedSelection {wanted: string[]; diagnostics: readonly import("./ir.ts").Diagnostic[]; broken: Set<string>}
 export interface CompileOptions {
+  discoveryProbe?: {owners: Set<string>; selection?: PreparedSelection; cds?: import("./frontend-cache-types.ts").CdsSource[]; compile: (ctx: LoweringContext, obj: ClassObject, lower: ClassLowering) => ClassIR};
   closureContext?: {round: number};
   strictRoots?: Set<string>;
   selectionCache?: {
