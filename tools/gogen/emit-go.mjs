@@ -66,7 +66,7 @@ const GO_RESERVED = new Set(("break default func interface select case defer go 
 /** @param {import("./emit-go-types.ts").Class} cls @returns {boolean} */ const ownCctor = (cls) => cls.name !== "CL_ABAP_CHAR_UTILITIES"
   && (cls.methods.some((m) => m.name === "CLASS_CONSTRUCTOR") || (cls.stubs ?? []).some((m) => m.name === "CLASS_CONSTRUCTOR"));
 /** @param {import("./emit-go-types.ts").Class} cls @returns {boolean} */ function chainCctor(cls) {
-  for (let c = cls; c; c = c.super ? CLASSES.get(c.super) : null) if (ownCctor(c)) return true;
+  for (let c = cls; c; c = (/** @type {import("./emit-go-types.ts").Class} */ (c.super ? CLASSES.get(c.super) : null))) if (ownCctor(c)) return true;
   return false;
 }
 
@@ -157,7 +157,7 @@ const GO_RESERVED = new Set(("break default func interface select case defer go 
 /** @param {import("./emit-go-types.ts").Type} t @returns {string} */ function cloneName(t) {
   const key = goType(t);
   if (!CLONES.has(key)) CLONES.set(key, {name: `clone_${CLONES.size}`, type: /** @type {import("./emit-go-types.ts").TableType | import("./emit-go-types.ts").StructType} */ (t)});
-  return CLONES.get(key).name;
+  return (/** @type {{readonly name: string}} */ (CLONES.get(key))).name;
 }
 const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key", "refattr", "dref_field"]);
 /** a value moved out of a place: a table (or a structure holding one) is copied */
@@ -189,7 +189,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
     const base = desc({...t, qname: undefined, ddic: undefined});
     const key = `${base}|${t.qname ?? ""}|${t.ddic ?? ""}`;
     if (!NAMED.has(key)) NAMED.set(key, {name: `tn_${NAMED.size}`, text: `abap.Named(${base}, ${JSON.stringify(t.qname ?? "")}, ${JSON.stringify(t.ddic ?? "")})`});
-    return NAMED.get(key).name;
+    return (/** @type {{readonly name: string}} */ (NAMED.get(key))).name;
   }
   switch (t.k) {
     case "i": return "abap.TI";
@@ -213,7 +213,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
       // has no Append
       const key = descKey(t);
       if (!DESCS.has(key)) DESCS.set(key, {name: `td_${DESCS.size}`, type: t});
-      return DESCS.get(key).name;
+      return (/** @type {{readonly name: string}} */ (DESCS.get(key))).name;
     }
     default: throw new Error(`no descriptor for ${t.k}`);
   }
@@ -312,7 +312,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
         const inner = stable(t) ? `for i := range v {\n\t\tr[i] = ${rowStored(t, needsCopy(t.row) ? `${cloneName(t.row)}(*v[i])` : `*v[i]`)}\n\t}` : needsCopy(t.row) ? `for i := range v {\n\t\tr[i] = ${cloneName(t.row)}(v[i])\n\t}` : "copy(r, v)";
         out.push(`func ${c.name}(v ${goType(t)}) ${goType(t)} {`, "\tif v == nil {", "\t\treturn nil", "\t}", `\tr := make(${goType(t)}, len(v))`, `\t${inner}`, "\treturn r", "}", "");
       } else {
-        const fs = STRUCTDEFS.get(t.go).fields.filter((f) => needsCopy(f.type));
+        const fs = (/** @type {import("./emit-go-types.ts").StructType & {readonly fields: readonly import("./ir.ts").Field[]}} */ (STRUCTDEFS.get(t.go))).fields.filter((f) => needsCopy(f.type));
         append(out, [`func ${c.name}(v ${goType(t)}) ${goType(t)} {`], fs.map((f) => `\tv.${ident(f.name)} = ${cloneName(f.type)}(v.${ident(f.name)})`), ["\treturn v", "}", ""]);
       }
     }
@@ -327,7 +327,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
   /** @param {unknown} v @returns {void} */ const collectStable = (v) => {
     if (Array.isArray(v)) { for (const x of v) collectStable(x); return; }
     if (!v || typeof v !== "object") return;
-    const table = (/** @type {import("./emit-go-types.ts").WalkNode} */ (v)).table?.type;
+    const table = (/** @type {{readonly type?: {readonly stable?: boolean; readonly row: {readonly go?: string}}}} */ (/** @type {unknown} */ ((/** @type {import("./emit-go-types.ts").WalkNode} */ (v)).table)))?.type;
     if (table?.stable && table.row.go) STABLE_ROWS.add(table.row.go);
     for (const key of ["body", "branches", "cases", "catches", "else", "then", "cleanup"]) collectStable((/** @type {import("./emit-go-types.ts").WalkNode} */ (v))[key]);
   };
@@ -420,7 +420,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
       out.push("\t}", "})", `func St_${name}(s *abap.Session) *statics_${name} {`, `\treturn s.Static(slot_${name}).(*statics_${name})`, "}", "");
     }
     if (chainCctor(cls)) {
-      const sup = cls.super && CLASSES.get(cls.super) && chainCctor(CLASSES.get(cls.super)) ? `\tEnsure_${typeName(cls.super)}(s)` : null;
+      const sup = cls.super && CLASSES.get(cls.super) && chainCctor((/** @type {import("./emit-go-types.ts").Class} */ (CLASSES.get(cls.super)))) ? `\tEnsure_${typeName(cls.super)}(s)` : null;
       append(out, [`func Ensure_${typeName(cls.name)}(s *abap.Session) {`, `\tst := St_${typeName(cls.name)}(s)`, "\tif st.cctor {", "\t\treturn", "\t}",
         // Set before running for reentrant access within this session.
         "\tst.cctor = true", `\tdefer abap.CctorGuard(${JSON.stringify(cls.name)}, &st.cctor)`], sup ? [sup] : [], ownCctor(cls) ? [`\t${funcName(cls.name, "CLASS_CONSTRUCTOR")}(s)`] : [], ["}", ""]);
@@ -437,7 +437,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
     // NEW: a new object, every level's attributes set, every level's self
     // pointing at it, then the nearest constructor of the chain
     const chain = [cls];
-    for (let c = cls; c.super && CLASSES.has(c.super);) { c = CLASSES.get(c.super); chain.push(c); }
+    for (let c = cls; c.super && CLASSES.has(c.super);) { c = (/** @type {import("./emit-go-types.ts").Class} */ (CLASSES.get(c.super))); chain.push(c); }
     const ctorAt = chain.find((c) => c.constructor || c.ctorParams);
     const cp = ctorAt ? (ctorAt.constructor?.params ?? ctorAt.ctorParams ?? []) : [];
     // Alloc_: the object without its constructor, for the host (RTTI builds
@@ -458,7 +458,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
     out.push(`func init() {`, `\tabap.RegisterClass(${JSON.stringify(cls.name)}, (*${typeName(cls.name)})(nil), func(s *abap.Session) any { ${make} })`, "}", "");
   }
   append(out, exceptionSupers(program));
-  if (classes.some(c => c.methods.some(m => (/** @type {readonly import("./emit-go-types.ts").WalkNode[] | undefined} */ (m.body))?.[0]?.fn === "Native_GET_SUPER_CLASS_TYPE"))) append(out, superClassGo(program, {goType, ident}));
+  if (classes.some(c => c.methods.some(m => (/** @type {readonly import("./emit-go-types.ts").WalkNode[] | undefined} */ (m.body))?.[0]?.fn === "Native_GET_SUPER_CLASS_TYPE"))) append(out, superClassGo((/** @type {import("./emit-go-types.ts").Program & {readonly rtti: import("./emit-go-types.ts").Rtti}} */ (program)), {goType, ident}));
   if (classes.some(c => c.methods.some(m => (/** @type {readonly import("./emit-go-types.ts").WalkNode[] | undefined} */ (m.body))?.[0]?.fn === "Native_DESCRIBE_BY_OBJECT_REF" || (/** @type {readonly import("./emit-go-types.ts").WalkNode[] | undefined} */ (m.body))?.[0]?.fn === "Native_GET_SUPER_CLASS_TYPE"))) append(out, (/** @type {import("./emit-go-types.ts").ObjectRttiGo} */ (objectRttiGo))(program, {goType, ident}));
   append(out, hostRaiseGlue(program, classes, layers));
   if (!layers) append(out, dispatcher(classes));
@@ -534,7 +534,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
   if (!c.into) return [];
   // a local, or an attribute of the class (a report's global data)
   const v = c.intoPlace ? place(c.intoPlace, ctx) : ident(c.into);
-  if (c.intoKind === "ref") return [`${t}\t\t\t\t${v} = abap.Cast[${goType(c.intoType)}](xRX.Obj)`];
+  if (c.intoKind === "ref") return [`${t}\t\t\t\t${v} = abap.Cast[${goType((/** @type {import("./emit-go-types.ts").Type} */ (c.intoType)))}](xRX.Obj)`];
   return [`${t}\t\t\t\t${v} = abap.CaughtException(xR)`];
 }
 
@@ -571,7 +571,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
     "\t\tif rttiKnown[name] {", `\t\t\tpanic(abap.NotCompiled("CL_ABAP_TYPEDESCR=>DESCRIBE_BY_NAME", "RTTI in the Go host describes structures only: "+name))`, "\t\t}",
     `\t\tpanic(abap.ClassicException{Name: "TYPE_NOT_FOUND", Method: "DESCRIBE_BY_NAME"})`, "\t}",
     "\td := Alloc_CL_ABAP_STRUCTDESCR()"], set(sd, "d", "KIND", `"S"`), set(sd, "d", "TYPE_KIND", `"u"`), set(sd, "d", "RELATIVE_NAME", "name"), set(sd, "d", "ABSOLUTE_NAME", "`\\TYPE=` + name"), set(sd, "d", "DDIC", `"X"`), ["\tfor _, f := range fields {", "\t\te := Alloc_CL_ABAP_ELEMDESCR()"], set(ed, "e", "KIND", `"E"`).map((l) => `\t${l}`), set(ed, "e", "TYPE_KIND", "f[1]").map((l) => `\t${l}`), set(ed, "e", "RELATIVE_NAME", "f[0]").map((l) => `\t${l}`), [`\t\tc := ${row}{}`, `\t\tc.${ident("name")} = f[0]`, `\t\tc.${ident("type")} = e`,
-    `\t\td.${ident("mt_refs_comp")} = append(d.${ident("mt_refs_comp")}, ${rowStored(comp.type, "c")})`], has(sd, "MT_REFS") ? [`\t\td.${ident("mt_refs")} = append(d.${ident("mt_refs")}, ${rowStored((/** @type {import("./emit-go-types.ts").TableType} */ (sd.attributes.find((a) => a.name === "MT_REFS").type)), "c")})`] : [], ["\t}", "\treturn d", "}", ""]);
+    `\t\td.${ident("mt_refs_comp")} = append(d.${ident("mt_refs_comp")}, ${rowStored(comp.type, "c")})`], has(sd, "MT_REFS") ? [`\t\td.${ident("mt_refs")} = append(d.${ident("mt_refs")}, ${rowStored((/** @type {import("./emit-go-types.ts").TableType} */ ((/** @type {import("./emit-go-types.ts").SupportedAttribute} */ (sd.attributes.find((a) => a.name === "MT_REFS"))).type)), "c")})`] : [], ["\t}", "\treturn d", "}", ""]);
   return out;
 }
 
@@ -640,9 +640,9 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
     `		base.${f("KIND")} = "S"`,
     "		rttiDescs[t] = d",
     "		for _, c := range t.Comps {",
-    `			sd.${f("MT_REFS")} = append(sd.${f("MT_REFS")}, ${rowStored(attr(/** @type {import("./emit-go-types.ts").Class} */ (sd), "MT_REFS").type, `${refRow}{${f("NAME")}: c.Name, ${f("TYPE")}: abap.Cast[${dataRef}](rttiOf(c.T))}`)})`,
+    `			sd.${f("MT_REFS")} = append(sd.${f("MT_REFS")}, ${rowStored((/** @type {import("./emit-go-types.ts").TableType} */ ((/** @type {import("./emit-go-types.ts").SupportedAttribute} */ (attr(/** @type {import("./emit-go-types.ts").Class} */ (sd), "MT_REFS"))).type)), `${refRow}{${f("NAME")}: c.Name, ${f("TYPE")}: abap.Cast[${dataRef}](rttiOf(c.T))}`)})`,
     "			ct := rttiOf(c.T).As_CL_ABAP_TYPEDESCR()",
-    `			sd.${f("COMPONENTS")} = append(sd.${f("COMPONENTS")}, ${rowStored(attr(/** @type {import("./emit-go-types.ts").Class} */ (sd), "COMPONENTS").type, `${compRow}{${f("NAME")}: c.Name, ${f("TYPE_KIND")}: ct.${f("TYPE_KIND")}, ${f("LENGTH")}: ct.${f("LENGTH")}, ${f("DECIMALS")}: ct.${f("DECIMALS")}}`)})`,
+    `			sd.${f("COMPONENTS")} = append(sd.${f("COMPONENTS")}, ${rowStored((/** @type {import("./emit-go-types.ts").TableType} */ ((/** @type {import("./emit-go-types.ts").SupportedAttribute} */ (attr(/** @type {import("./emit-go-types.ts").Class} */ (sd), "COMPONENTS"))).type)), `${compRow}{${f("NAME")}: c.Name, ${f("TYPE_KIND")}: ct.${f("TYPE_KIND")}, ${f("LENGTH")}: ct.${f("LENGTH")}, ${f("DECIMALS")}: ct.${f("DECIMALS")}}`)})`,
     "		}",
     `		sd.${f("MT_REFS_COMP")} = append(sd.${f("MT_REFS_COMP")}[:0:0], sd.${f("MT_REFS")}...)`,
     "	case 'h':",
@@ -765,7 +765,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
       if (p.suppliedOf) { lines.push(`\t\t${v} := ""`, `\t\tif _, ok := a[${JSON.stringify(p.suppliedOf)}]; ok {`, `\t\t\t${v} = "X"`, `\t\t}`); return v; }
       /** @param {string} d @returns {string} */ const read = (d) => (["i", "string", "c", "d", "t"].includes(p.type.k) ? unwrapTo(p.type, d)
         : p.type.k === "ref" ? `abap.DynamicRef[${goType(p.type)}](${d})` : p.type.k === "data" ? d : byRef(p) ? `${d}.P.(*${goType(p.type)})` : `*${d}.P.(*${goType(p.type)})`);
-      let absent = p.default !== undefined ? expr(defaults.find(d => d.name === p.name).value, {cls, method: m, loop: 0}) : p.optional ? zero(p.type)
+      let absent = p.default !== undefined ? expr((/** @type {{readonly name: string; readonly value: import("./emit-go-types.ts").Expr}} */ (defaults.find(d => d.name === p.name))).value, {cls, method: m, loop: 0}) : p.optional ? zero(p.type)
         : `func() ${byRef(p) ? "*" : ""}${goType(p.type)} { abap.DynCallError("CX_SY_DYN_CALL_PARAM_MISSING", ${JSON.stringify(`${cls.name}=>${m.name} ${p.name}`)}); return ${byRef(p) ? "nil" : zero(p.type)} }()`;
       if (byRef(p) && p.default !== undefined) absent = `func() *${goType(p.type)} { v := ${absent}; return &v }()`;
       lines.push(`\t\tvar ${v} ${byRef(p) ? "*" : ""}${goType(p.type)}`, `\t\tif d, ok := a[${JSON.stringify(p.name)}]; ok {`, `\t\t\t${v} = ${read("d")}`, `\t\t} else {`,
@@ -1162,8 +1162,8 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
  * strings.Builder for it and writes v back once after the loop.
  */
 /** @param {import("./emit-go-types.ts").Expr} e @returns {import("./emit-go-types.ts").Expr} */ const leftmost = (e) => { while (e?.e === "concat") e = e.l; return e; };
-/** @param {import("./emit-go-types.ts").WalkNode | null | undefined} st @param {string} [name] @returns {boolean} */ const isAppend = (st, name) => st?.s === "assign" && st.target.e === "var" && !st.target.ref && st.target.type.k === "string"
-  && (name === undefined || (/** @type {Extract<import("./emit-go-types.ts").Expr, {e: "var"}>} */ (st.target)).name === name) && st.value.e === "concat" && leftmost(st.value).e === "var" && (/** @type {Extract<import("./emit-go-types.ts").Expr, {e: "var"}>} */ (leftmost(st.value))).name === (/** @type {Extract<import("./emit-go-types.ts").Expr, {e: "var"}>} */ (st.target)).name;
+/** @param {import("./emit-go-types.ts").WalkNode | null | undefined} st @param {string} [name] @returns {boolean} */ const isAppend = (st, name) => st?.s === "assign" && (/** @type {Extract<import("./emit-go-types.ts").Expr, {e: "var"}>} */ (st.target)).e === "var" && !(/** @type {Extract<import("./emit-go-types.ts").Expr, {e: "var"}>} */ (st.target)).ref && (/** @type {Extract<import("./emit-go-types.ts").Expr, {e: "var"}>} */ (st.target)).type.k === "string"
+  && (name === undefined || (/** @type {Extract<import("./emit-go-types.ts").Expr, {e: "var"}>} */ (st.target)).name === name) && (/** @type {import("./emit-go-types.ts").Expr} */ (st.value)).e === "concat" && leftmost((/** @type {import("./emit-go-types.ts").Expr} */ (st.value))).e === "var" && (/** @type {Extract<import("./emit-go-types.ts").Expr, {e: "var"}>} */ (leftmost((/** @type {import("./emit-go-types.ts").Expr} */ (st.value))))).name === (/** @type {Extract<import("./emit-go-types.ts").Expr, {e: "var"}>} */ (st.target)).name;
 
 /** @param {readonly import("./emit-go-types.ts").Stmt[]} body @param {import("./emit-go-types.ts").Context} ctx @param {readonly unknown[]} [outside] @returns {string[]} */ function builders(body, ctx, outside = []) {
   /** @type {Set<string>} */ const names = new Set();
