@@ -1,3 +1,4 @@
+// @ts-check
 import {dynamicResultMoves, dynamicAdapters} from "./emit-dynamic-call.mjs";
 import {env} from "./host-io.ts";
 import {append} from "./append.ts";
