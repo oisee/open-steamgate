@@ -327,8 +327,8 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
   /** @param {unknown} v @returns {void} */ const collectStable = (v) => {
     if (Array.isArray(v)) { for (const x of v) collectStable(x); return; }
     if (!v || typeof v !== "object") return;
-    const table = (/** @type {{readonly type?: {readonly stable?: boolean; readonly row: {readonly go?: string}}}} */ (/** @type {unknown} */ ((/** @type {import("./emit-go-types.ts").WalkNode} */ (v)).table)))?.type;
-    if (table?.stable && table.row.go) STABLE_ROWS.add(table.row.go);
+    const table = (/** @type {{readonly table?: {readonly type?: {readonly stable?: unknown; readonly row?: {readonly go?: unknown}}}}} */ (v)).table?.type;
+    if (table?.stable && (/** @type {string} */ ((/** @type {{readonly go?: unknown}} */ (table.row)).go))) STABLE_ROWS.add((/** @type {string} */ ((/** @type {{readonly go?: unknown}} */ (table.row)).go)));
     for (const key of ["body", "branches", "cases", "catches", "else", "then", "cleanup"]) collectStable((/** @type {import("./emit-go-types.ts").WalkNode} */ (v))[key]);
   };
   for (const cls of /** @type {readonly import("./emit-go-types.ts").Class[]} */ (program.classes ?? program)) for (const method of cls.methods ?? []) collectStable(method.body);
@@ -1164,7 +1164,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
  * strings.Builder for it and writes v back once after the loop.
  */
 /** @param {import("./emit-go-types.ts").Expr} e @returns {import("./emit-go-types.ts").Expr} */ const leftmost = (e) => { while (e?.e === "concat") e = e.l; return e; };
-/** @param {import("./emit-go-types.ts").WalkNode | null | undefined} st @param {string} [name] @returns {boolean} */ const isAppend = (st, name) => st?.s === "assign" && (/** @type {Extract<import("./emit-go-types.ts").Expr, {e: "var"}>} */ (st.target)).e === "var" && !(/** @type {Extract<import("./emit-go-types.ts").Expr, {e: "var"}>} */ (st.target)).ref && (/** @type {Extract<import("./emit-go-types.ts").Expr, {e: "var"}>} */ (st.target)).type.k === "string"
+/** @param {import("./emit-go-types.ts").Stmt | null | undefined} st @param {string} [name] @returns {boolean} */ const isAppend = (st, name) => st?.s === "assign" && (/** @type {Extract<import("./emit-go-types.ts").Expr, {e: "var"}>} */ (st.target)).e === "var" && !(/** @type {Extract<import("./emit-go-types.ts").Expr, {e: "var"}>} */ (st.target)).ref && (/** @type {Extract<import("./emit-go-types.ts").Expr, {e: "var"}>} */ (st.target)).type.k === "string"
   && (name === undefined || (/** @type {Extract<import("./emit-go-types.ts").Expr, {e: "var"}>} */ (st.target)).name === name) && (/** @type {import("./emit-go-types.ts").Expr} */ (st.value)).e === "concat" && leftmost((/** @type {import("./emit-go-types.ts").Expr} */ (st.value))).e === "var" && (/** @type {Extract<import("./emit-go-types.ts").Expr, {e: "var"}>} */ (leftmost((/** @type {import("./emit-go-types.ts").Expr} */ (st.value))))).name === (/** @type {Extract<import("./emit-go-types.ts").Expr, {e: "var"}>} */ (st.target)).name;
 
 /** @param {readonly import("./emit-go-types.ts").Stmt[]} body @param {import("./emit-go-types.ts").Context} ctx @param {readonly unknown[]} [outside] @returns {string[]} */ function builders(body, ctx, outside = []) {
@@ -1172,7 +1172,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
   /** @param {unknown} n @returns {void} */ const walk = (n) => {
     if (Array.isArray(n)) { n.forEach(walk); return; }
     if (!n || typeof n !== "object") return;
-    if (isAppend(/** @type {import("./emit-go-types.ts").WalkNode} */ (n))) names.add((/** @type {Extract<import("./emit-go-types.ts").Expr, {e: "var"}>} */ ((/** @type {import("./emit-go-types.ts").WalkNode} */ (n)).target)).name);
+    if (isAppend(/** @type {import("./emit-go-types.ts").Stmt} */ (n))) names.add((/** @type {Extract<import("./emit-go-types.ts").Expr, {e: "var"}>} */ ((/** @type {import("./emit-go-types.ts").WalkNode} */ (n)).target)).name);
     for (const k of Object.keys(n)) if (k !== "type") walk((/** @type {import("./emit-go-types.ts").WalkNode} */ (n))[k]);
   };
   walk(body);
@@ -1197,7 +1197,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
     if (Array.isArray(n)) { n.forEach(walk); return; }
     if (!n || typeof n !== "object") return;
     if ((/** @type {import("./emit-go-types.ts").WalkNode} */ (n)).e === "var" && (/** @type {import("./emit-go-types.ts").WalkNode} */ (n)).name === name) refs += 1;
-    if (isAppend(/** @type {import("./emit-go-types.ts").WalkNode} */ (n), name)) appends += 1;
+    if (isAppend(/** @type {import("./emit-go-types.ts").Stmt} */ (n), name)) appends += 1;
     for (const k of Object.keys(n)) if (k !== "type") walk((/** @type {import("./emit-go-types.ts").WalkNode} */ (n))[k]);
   };
   walk(body);
@@ -1403,7 +1403,7 @@ const LINES = !env("GOGEN_NOLINE");
 
         return [`${t}${place(st.target.base, ctx)} = hSubwrite.X(${expr(st.target.base, ctx)}, ${st.target.off ? expr(st.target.off, ctx) : "0"}, ${expr((/** @type {import("./emit-go-types.ts").Expr} */ (st.target.len)), ctx)}, ${expr(st.value, ctx)})`];
       }
-      if (ctx.builders?.has((/** @type {Extract<import("./emit-go-types.ts").Expr, {e: "var"}>} */ (st.target)).name) && isAppend(/** @type {import("./emit-go-types.ts").WalkNode} */ (/** @type {unknown} */ (st)), (/** @type {Extract<import("./emit-go-types.ts").Expr, {e: "var"}>} */ (st.target)).name)) {
+      if (ctx.builders?.has((/** @type {Extract<import("./emit-go-types.ts").Expr, {e: "var"}>} */ (st.target)).name) && isAppend(st, (/** @type {Extract<import("./emit-go-types.ts").Expr, {e: "var"}>} */ (st.target)).name)) {
         /** @type {import("./emit-go-types.ts").Expr[]} */ const parts = [];
         for (let e = st.value; e.e === "concat"; e = e.l) parts.unshift(e.r);
         return parts.map((x) => `${t}${(/** @type {Map<string, string>} */ (ctx.builders)).get((/** @type {Extract<import("./emit-go-types.ts").Expr, {e: "var"}>} */ (st.target)).name)}.WriteString(${expr(x, ctx)})`);
@@ -2226,7 +2226,7 @@ ${t}	}`));
     // 750 KB value a character at a time and returned from inside the loop,
     // which kept it off the builder and made the append quadratic)
     case "return": return [...[...(ctx.builders ?? new Map())].map(([n, sb]) => `${t}${ident(n)} = abap.Canon(${sb}.String())`), `${t}${leave(ctx, 1)}`];
-    default: throw new Error(`no Go for statement ${(/** @type {import("./emit-go-types.ts").WalkNode} */ (st)).s}`);
+    default: throw new Error(`no Go for statement ${(/** @type {string} */ ((/** @type {{s?: unknown}} */ (st)).s))}`);
   }
 }
 
@@ -2551,7 +2551,7 @@ ${t}	}`));
       return `(${c.op === "=" ? "" : "!"}func() bool { l, r := ${expr(c.l, ctx)}, ${expr(c.r, ctx)}; if len(l) != len(r) { return false }; for i := range l { ${place(c.a, ctx)}, ${place(c.b, ctx)} = l[i], r[i]; if !(${cond(c.rowEq, ctx)}) { return false } }; return true }())`;
     case "or": return `(${cond(c.l, ctx)} || ${cond(c.r, ctx)})`;
     case "not": return `!(${cond(c.x, ctx)})`;
-    default: throw new Error(`no Go for condition ${(/** @type {import("./emit-go-types.ts").WalkNode} */ (c)).c}`);
+    default: throw new Error(`no Go for condition ${(/** @type {string} */ ((/** @type {{c?: unknown}} */ (c)).c))}`);
   }
 }
 
