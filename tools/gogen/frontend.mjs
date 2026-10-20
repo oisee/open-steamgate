@@ -65,7 +65,7 @@ const HOST_REPLACED = new Set(["ZCL_OSD_ENQ_KERNEL"]);
 // hides an object an earlier one holds (osg-build.mjs; ultra/packs)
 export const compileProgram = withProvenance(/** @param {import("./frontend-session-types.ts").CompileOptions} options */ function compileProgram({folders, objects, tolerant = false, skip = () => false, includeTests = false, registry, session, cacheDir, dependencyCache = false, closureContext, strictRoots, discoveryProbe}) {
   const config = abaplint.Config.getDefault().get();
-  config.syntax = {...config.syntax, version: "v758", errorNamespace: "."};
+  config.syntax = {...config.syntax, version: /** @type {NonNullable<(typeof config.syntax)["version"]>} */ ("v758"), errorNamespace: "."};
   // only the syntax check and parser errors are read below (parser_error is a
   // rule too: without it a statement that does not parse is dropped silently);
   // the default config runs every lint rule, which was 45 % of a build
@@ -75,7 +75,7 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
   PERSIST_LOWERING = !!cacheDir;
   /** @type {import("./frontend-session-types.ts").Registry} */ const reg = registry ?? /** @type {import("./frontend-session-types.ts").Registry} */ (new abaplint.Registry(new abaplint.Config(JSON.stringify(config))));
   // Resolve files; diagnose selection.
-  /** @param {string} fn @returns {string} */ const objName = (fn) => fn.split("/").pop().split(".")[0].toLowerCase().replace(/#/g, "/");
+  /** @param {string} fn @returns {string} */ const objName = (fn) => /** @type {string} */ (fn.split("/").pop()).split(".")[0].toLowerCase().replace(/#/g, "/");
   /** @type {import("./frontend-cache-types.ts").CdsSource[]} */ const ddls = discoveryProbe?.cds ?? [];
   /** @param {string} dir @returns {void} */ const walk = (dir) => {
     for (const e of readdirEntries(dir).sort((x, y) => x.name.localeCompare(y.name))) {
@@ -112,7 +112,7 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
     auditedBookkeeping("session-prepare", () => diskFrontend.prepareDiskSession(session, reg)); // Input guards only.
   } else {
     if (session?.disk) {
-      session.classes.clear();
+      /** @type {import("./frontend-session-types.ts").CacheSession} */ (session).classes.clear();
       delete session.disk;
       delete session.diskRoot;
       delete session.cacheDir;
@@ -121,10 +121,10 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
   }
   if (session) session.cdsInputs = cdsIdentity;
   // Every arm is an arrow of the one CompileClass type, so the choice joins exactly.
-  /** @type {import("./frontend-session-types.ts").CompileClass} */ let compile = (ctx, obj, lower, session) => compileClass(ctx, obj, lower, session);
+  /** @type {import("./frontend-session-types.ts").CompileClass} */ let compile = (ctx, obj, lower, session) => compileClass(ctx, /** @type {import("./frontend-session-types.ts").ArtifactInput} */ (obj), lower, session);
   if (discoveryProbe) { const probe = discoveryProbe; compile = (ctx, obj, lower, session) => probe.compile(ctx, obj, lower, session); }
   else if (diskFrontend) compile = (ctx, obj, lower, session) => diskFrontend.compileDiskClass(ctx, obj, lower, session); // Does not use this.
-  const {wanted, diagnostics, broken} = prepareSelection(reg, {objects, tolerant, strictRoots}, session, () => { prepareArtifactDigests(reg, !!session, closureContext); }, discoveryProbe?.selection);
+  const {wanted, diagnostics, broken} = prepareSelection(reg, {objects, tolerant, strictRoots}, /** @type {import("./frontend-diagnostics.ts").DiagnosticsSession | null | undefined} */ (session), () => { prepareArtifactDigests(reg, !!session, closureContext); }, discoveryProbe?.selection);
 
   // Eager collections keep first writes inside the replay proxies. Anonymous
   // type identities use a Map so their ordered effects can be replayed too;
@@ -147,18 +147,18 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
   for (const obj of enumerateObjects(reg, "local-dispatch", [], "scheduling", (o) => o instanceof abaplint.Objects.Class && selectionHas(wanted, o.getName().toLowerCase()) && (includeTests === true || includeTests instanceof Set || LOCAL_CLASSES.has(upper(o.getName()))))) {
     localDiscovery(reg, obj, includeTests === true || (includeTests instanceof Set && includeTests.has(upper(obj.getName()))), () => {
     if (LOCAL_CLASSES.has(upper(obj.getName()))) {
-      const top = new abaplint.SyntaxLogic(reg, obj).run().spaghetti.getTop();
-      for (const file of obj.getABAPFiles()) {
+      const top = new abaplint.SyntaxLogic(reg, /** @type {import("@abaplint/core").Objects.Class} */ (obj)).run().spaghetti.getTop();
+      for (const file of /** @type {import("@abaplint/core").Objects.Class} */ (obj).getABAPFiles()) {
         for (const name of localInterfaceNames(file.getRaw())) {
           const def = top.getChildren().find((s) => s.findInterfaceDefinition(name))?.findInterfaceDefinition(name);
-          if (def) program.localInterfaces.set(`${upper(obj.getName())}|${name}`, {def, source: file.getRaw()});
+          if (def) /** @type {NonNullable<import("./frontend-types.ts").FrontendProgram["localInterfaces"]>} */ (program.localInterfaces).set(`${upper(obj.getName())}|${name}`, {def, source: file.getRaw()});
         }
       }
     }
-    for (const l of localClasses(reg, obj, includeTests === true || (includeTests instanceof Set && includeTests.has(upper(obj.getName()))))) {
-      program.locals.set(`${upper(obj.getName())}|${l.local}`, l.name);
+    for (const l of localClasses(reg, /** @type {import("@abaplint/core").Objects.Class} */ (obj), includeTests === true || (includeTests instanceof Set && includeTests.has(upper(obj.getName()))))) {
+      /** @type {NonNullable<import("./frontend-types.ts").FrontendProgram["locals"]>} */ (program.locals).set(`${upper(obj.getName())}|${l.local}`, l.name);
       program.wanted.add(l.name);
-      (PERSIST_LOWERING ? program.localDefs : LOCAL_DEFS).set(l.name, l.def);
+      /** @type {Map<string, import("@abaplint/core").IClassDefinition>} */ (PERSIST_LOWERING ? program.localDefs : LOCAL_DEFS).set(l.name, l.def);
       localDefs.push(l);
     }
     return {names: [.../** @type {NonNullable<import("./frontend-types.ts").FrontendProgram["localInterfaces"]>} */ (program.localInterfaces).keys(), .../** @type {Map<string, string>} */ (program.locals).values()].filter((k) => k.startsWith(`${upper(obj.getName())}|`) || k.startsWith(`${upper(obj.getName())}:`)), value: undefined}; });
@@ -172,9 +172,9 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
   // a group the front end cannot even read (an error that is not a refusal)
   // is left out whole, named in skipped, and its modules stay refused
   const readable = groups.filter((g) => {
-    try { withArtifact(ctx0, g, () => functionGroupSignatures(ctx0, g), "function-signature"); return true; } catch (e) {
-      program.skipped.push(`${fugrOwner(g)}: ${e.message}`);
-      for (const [k, v] of program.functionModules) if (v.owner === fugrOwner(g)) program.functionModules.delete(k);
+    try { withArtifact(ctx0, g, () => functionGroupSignatures(ctx0, /** @type {import("@abaplint/core").Objects.FunctionGroup} */ (g)), "function-signature"); return true; } catch (e) {
+      program.skipped.push(`${fugrOwner(/** @type {import("@abaplint/core").Objects.FunctionGroup} */ (g))}: ${/** @type {{message: string}} */ (e).message}`);
+      for (const [k, v] of program.functionModules) if (v.owner === fugrOwner(/** @type {import("@abaplint/core").Objects.FunctionGroup} */ (g))) program.functionModules.delete(k);
       return false;
     }
   });
@@ -182,11 +182,11 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
   // part of every generated ENQUEUE / DEQUEUE argument
   program.lockObjects = lockObjectRegistry(reg, program);
   program.caught = caughtIndex(reg, program.wanted,
-    (c) => clasDef(reg, c)?.getSuperClass()?.toUpperCase() ?? RUNTIME_CX_SUPER[c]);
-  const lowerClass = (ctx, obj) => {
+    (c) => clasDef(reg, c)?.getSuperClass()?.toUpperCase() ?? /** @type {Record<string, string | undefined>} */ (RUNTIME_CX_SUPER)[c]);
+  /** @param {import("./frontend-types.ts").CompilationContext} ctx @param {import("./frontend-session-types.ts").ClassObject} obj */ const lowerClass = (ctx, obj) => {
     const saved = PROGRAM;
     PROGRAM = ctx.program; // Global type helpers must use the tracked program too.
-    try { return classIr(ctx, obj); } finally { PROGRAM = saved; }
+    try { return classIr(ctx, /** @type {import("./frontend-types.ts").ClassSource} */ (obj)); } finally { PROGRAM = saved; }
   };
   for (const obj of enumerateObjects(reg, "selected-classes", wanted, "scheduling", (o) => o instanceof abaplint.Objects.Class && selectionHas(wanted, o.getName().toLowerCase()) && (!discoveryProbe || discoveryProbe.owners.has(upper(o.getName()))))) {
     if (!(obj instanceof abaplint.Objects.Class)) continue;
@@ -196,10 +196,10 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
       getDefinition: /** @returns {import('@abaplint/core').IClassDefinition | undefined} */ () => obj.getDefinition(),
       getMainABAPFile: /** @returns {import('@abaplint/core').ABAPFile | undefined} */ () => obj.getMainABAPFile(),
       getABAPFiles: /** @returns {readonly import('@abaplint/core').ABAPFile[]} */ () => obj.getABAPFiles()};
-    program.classes.push(compile(ctx0, source, lowerClass, session));
+    program.classes.push(compile(ctx0, source, lowerClass, /** @type {import("./frontend-session-types.ts").CacheSession | null | undefined} */ (session)));
   }
-  for (const l of localDefs.filter(l => !discoveryProbe || discoveryProbe.owners.has(l.owner))) program.classes.push(compile(ctx0, l, lowerClass, session));
-  for (const g of readable.filter(() => !discoveryProbe)) program.classes.push(withArtifact(ctx0, g, () => functionGroupIr(ctx0, g)));
+  for (const l of localDefs.filter(l => !discoveryProbe || discoveryProbe.owners.has(l.owner))) program.classes.push(compile(ctx0, l, lowerClass, /** @type {import("./frontend-session-types.ts").CacheSession | null | undefined} */ (session)));
+  for (const g of readable.filter(() => !discoveryProbe)) program.classes.push(withArtifact(ctx0, g, () => functionGroupIr(ctx0, /** @type {import("@abaplint/core").Objects.FunctionGroup} */ (g))));
   if (discoveryProbe) return program;
   // every interface used as a reference type: its methods whose signature
   // types, which is what a class must provide to satisfy it
@@ -212,7 +212,7 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
       // inside an interface), which are called as COMP~M through it
       /** @type {import("./frontend-types.ts").MethodSignature[]} */ const sigs = [];
       for (const i of [name, ...componentInterfaces(reg, name)]) {
-        const def = reg.getObject("INTF", i)?.getDefinition();
+        const def = /** @type {import("@abaplint/core").Objects.Interface | undefined} */ (reg.getObject("INTF", i))?.getDefinition();
         if (!def) continue;
         append(sigs, methodDefinitions(def).map((m) => methodSignature(ictx, i, `${i}~${upper(m.getName())}`)));
       }
@@ -220,10 +220,10 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
       /** @type {Map<string, readonly import("./ir.ts").Method[]>} */ (program.interfaceMethods).set(name, /** @type {import("./ir.ts").Method[]} */ (/** @type {unknown} */ (sigs.filter((x) => !x.unsupported && !/** @type {import("./frontend-types.ts").Signature} */ (x).static))));
       interfaceAttributes(program, name);
     }
-    pending = [...program.interfaces].filter((n) => !program.interfaceMethods.has(n));
+    pending = [...program.interfaces].filter((n) => !/** @type {NonNullable<import("./frontend-types.ts").FrontendProgram["interfaceMethods"]>} */ (program.interfaceMethods).has(n));
   }
   });
-  finalOutput(reg, "dynamic-statics", () => prepareDynamicStatics(program, {defaultValue, aliasTarget})); program.rtti = finalOutput(reg, "rtti", () => rttiTable(reg, program));
+  finalOutput(reg, /** @type {Parameters<typeof finalOutput>[1]} */ ("dynamic-statics"), () => prepareDynamicStatics(program, {defaultValue, aliasTarget})); program.rtti = finalOutput(reg, "rtti", () => rttiTable(reg, program));
   program.exceptionSupers = finalOutput(reg, "exception-supers", () => exceptionSupers(reg, program));
   program.cdsViews = cdsViewsByRegistry.get(reg) ?? cdsViewsByRegistry.get(inputOrigin(reg)) ?? {};
   program.tables = finalOutput(reg, "tables", () => tableRegistry(reg, program));
@@ -248,13 +248,13 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
 /** the table registry as the column registry of the dynamic Open SQL
  * condition parser: {NAME: {view, client, key, columns: [{name, kind, len,
  * dec, key, type}]}}, JSON as it stands (README "The table registry") */
-export function columnRegistry(program) {
+/** @param {import("./frontend-types.ts").FrontendProgram} program */ export function columnRegistry(program) {
   return {
-    tables: Object.fromEntries((program.tables ?? []).map((t) => [t.name, {view: t.view, client: t.client, key: t.key,
+    tables: Object.fromEntries((program.tables ?? []).map(/** @param {import("./frontend-types.ts").FrontendTable} t */ (t) => [t.name, {view: t.view, client: t.client, key: t.key,
       ...(t.sqlView ? {sqlView: t.sqlView} : {}), ...(t.cds ? {cds: t.cds} : {}),
       // tools/ir-osql-where.mjs osqlWherePredicate(text, columns) as it is
       columns: whereColumns(t),
-      fields: t.columns.map((c) => ({name: c.name, kind: c.kind, len: c.len, dec: c.dec, key: c.key}))}])),
+      fields: t.columns.map(/** @param {import("./ir.ts").TableColumn} c */ (c) => ({name: c.name, kind: c.kind, len: c.len, dec: c.dec, key: c.key}))}])),
     cdsViews: program.cdsViews ?? {},
   };
 }
@@ -262,13 +262,13 @@ export function columnRegistry(program) {
 /** {COL: {type, kind?}}: the columns argument of osqlWherePredicate
  * (tools/ir-osql-where.mjs), NUMC marked; a column with no IR type is left
  * out, as the parser could not compare it anyway */
-export function whereColumns(t) {
-  return Object.fromEntries(t.columns.filter((c) => c.type !== null).map((c) => [c.name, c.kind === "N" ? {type: c.type, kind: "NUMC"} : {type: c.type}]));
+/** @param {import("./frontend-types.ts").FrontendTable} t */ export function whereColumns(t) {
+  return Object.fromEntries(t.columns.filter(/** @param {import("./ir.ts").TableColumn} c */ (c) => c.type !== null).map(/** @param {import("./ir.ts").TableColumn} c */ (c) => [c.name, c.kind === "N" ? {type: c.type, kind: "NUMC"} : {type: c.type}]));
 }
 
-/** @param {import("@abaplint/core").IRegistry} reg @param {import("./frontend-types.ts").FrontendProgram} program @returns {import("./frontend-types.ts").FrontendTable[]} */ export function tableRegistry(reg, program) {
+/** @param {import("./frontend-session-types.ts").Registry} reg @param {import("./frontend-types.ts").FrontendProgram} program @returns {import("./frontend-types.ts").FrontendTable[]} */ export function tableRegistry(reg, program) {
   /** @type {import("./frontend-types.ts").FrontendTable[]} */ const out = [];
-  const saved = [program.currentClass, program.currentTypes];
+  /** @type {[string | undefined, Set<string> | undefined]} */ const saved = [program.currentClass, program.currentTypes];
   program.currentClass = undefined;
   program.currentTypes = undefined;
   try {
@@ -283,12 +283,12 @@ export function whereColumns(t) {
       let st;
       try { st = table !== undefined ? table.parseType(reg) : viewObject?.parseType(reg); } catch { return; }
       if (!(st instanceof BasicTypes.StructureType)) return;
-      let key = [];
+      /** @type {string[]} */ let key = [];
       try { key = view ? [] : (table?.listKeys?.(reg) ?? []).map(upper); } catch { key = []; }
       const columns = st.getComponents().map((c) => {
         const kind = typeKindOf(c.type);
-        const len = ["C", "N", "X"].includes(kind) ? c.type.getLength() : kind === "P" ? c.type.getLength() : 0;
-        const dec = kind === "P" ? c.type.getDecimals() : 0;
+        const len = ["C", "N", "X"].includes(kind) ? /** @type {() => number} */ ((/** @type {{getLength?: unknown}} */ (c.type)).getLength)() : kind === "P" ? /** @type {() => number} */ ((/** @type {{getLength?: unknown}} */ (c.type)).getLength)() : 0;
+        const dec = kind === "P" ? /** @type {() => number} */ ((/** @type {{getDecimals?: unknown}} */ (c.type)).getDecimals)() : 0;
         /** @type {Partial<Record<string, import("./ir.ts").WriteType>>} */ const types = {C: {abap: "C", len}, N: {abap: "C", len}, I: {abap: "I"}, "8": {abap: "INT8"}, P: {abap: "P", len: 2 * len - 1, dec},
           g: {abap: "STRING"}, D: {abap: "D"}, X: {abap: "X", len}, y: {abap: "XSTRING"}}; const ir = types[kind] ?? null;
         return {name: upper(c.name), kind, len, dec, key: key.includes(upper(c.name)), type: ir};
@@ -300,7 +300,7 @@ export function whereColumns(t) {
       if (view && !entry.client) {
         const hidden = [...new Set((viewObject?.getFields() ?? []).map((f) => upper(f.TABNAME)))].find((b) => {
           try {
-            /** @type {import("@abaplint/core").Objects.Table | undefined} */ const baseTable = reg.getObject("TABL", b); const bt = baseTable?.parseType(reg);
+            const baseTable = /** @type {import("@abaplint/core").Objects.Table | undefined} */ (reg.getObject("TABL", b)); const bt = baseTable?.parseType(reg);
             return bt instanceof BasicTypes.StructureType && bt.getComponents().some((c) => upper(c.name) === "MANDT");
           } catch { return false; }
         });
@@ -328,18 +328,18 @@ export function whereColumns(t) {
   }
   // the other names of the dictionary: CREATE DATA ... TYPE (name) of one
   // of them is refused by name, an unknown name is CX_SY_CREATE_DATA_ERROR
-  program.ddicNames = [...program.rtti.known].filter((n) => !/=>/.test(n) && !out.some((t) => t.name === n)).sort();
+  program.ddicNames = [.../** @type {NonNullable<import("./frontend-types.ts").FrontendProgram["rtti"]>} */ (program.rtti).known].filter((n) => !/=>/.test(n) && !out.some((t) => t.name === n)).sort();
   return out.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /** each ENQU object's primary table, keyed by the object name */
-/** @param {import("@abaplint/core").IRegistry} reg @param {import("./frontend-types.ts").FrontendProgram} program @param {string} [role] @returns {Map<string, import("./frontend-types.ts").LockObject>} */ export function lockObjectRegistry(reg, program, role = "scheduling") {
+/** @param {import("./frontend-session-types.ts").Registry} reg @param {import("./frontend-types.ts").FrontendProgram} program @param {import("./frontend-session-types.ts").Role} [role] @returns {Map<string, import("./frontend-types.ts").LockObject>} */ export function lockObjectRegistry(reg, program, role = "scheduling") {
   /** @type {Map<string, import("./frontend-types.ts").LockObject>} */ const out = new Map();
   for (const obj of enumerateObjects(reg, "lock-inventory", [], role, (o) => o instanceof abaplint.Objects.LockObject)) {
     withArtifact({reg}, obj, () => {
     const name = upper(obj.getName());
-    const table = upper(obj.getPrimaryTable() ?? "");
-    /** @type {import("@abaplint/core").Objects.Table | undefined} */ const tableObject = reg.getObject("TABL", table);
+    const table = upper(/** @type {import("@abaplint/core").Objects.LockObject} */ (obj).getPrimaryTable() ?? "");
+    const tableObject = /** @type {import("@abaplint/core").Objects.Table | undefined} */ (reg.getObject("TABL", table));
     if (tableObject === undefined) return;
     try {
       const key = (tableObject.listKeys?.(reg) ?? []).map(upper);
@@ -349,9 +349,9 @@ export function whereColumns(t) {
         const type = columns.get(field), kind = typeKindOf(type);
         // Node request(): getLength() when supplied, otherwise the length
         // of the component's initial value (integer zero is "0").
-        const length = ["C", "N", "X", "P"].includes(kind) ? type.getLength()
+        const length = ["C", "N", "X", "P"].includes(kind) ? /** @type {() => number} */ ((/** @type {{getLength?: unknown}} */ (/** @type {import("@abaplint/core").AbstractType} */ (type))).getLength)()
           : ({D: 8, T: 6, I: 1, "8": 1})[kind];
-        if (!Number.isInteger(length) || length <= 0) throw new Unsupported(`lock table ${table} field ${field}: cannot size key kind ${kind}`);
+        if (!Number.isInteger(length) || /** @type {number} */ (length) <= 0) throw new Unsupported(`lock table ${table} field ${field}: cannot size key kind ${kind}`);
         return {name: field, kind, length};
       });
       out.set(name, {name, table, key, fields});
@@ -372,14 +372,14 @@ export function whereColumns(t) {
  * so a name that exists but is not a structure dumps instead of reading as
  * TYPE_NOT_FOUND.
  */
-/** @param {import("@abaplint/core").IRegistry} reg @param {import("./frontend-types.ts").FrontendProgram} program @returns {import("./frontend-types.ts").RttiTable} */ function rttiTable(reg, program) {
+/** @param {import("./frontend-session-types.ts").Registry} reg @param {import("./frontend-types.ts").FrontendProgram} program @returns {import("./frontend-types.ts").RttiTable} */ function rttiTable(reg, program) {
   /** @type {Map<string, {name: string; kind: string}[]>} */ const structs = new Map();
   /** @param {string} name @param {import("@abaplint/core").AbstractType} t @returns {void} */ const add = (name, t) => {
     if (!(t instanceof BasicTypes.StructureType)) return;
     structs.set(name, t.getComponents().map((c) => ({name: upper(c.name), kind: typeKindOf(c.type)})));
   };
   const known = /** @type {Set<string>} */ (new Set()), classSupers = /** @type {Map<string, string | null>} */ (new Map());
-  for (const obj of rttiClassInventory(enumerateObjects(reg, "rtti-inventory", [], "final-output"), classSupers)) {
+  for (const obj of rttiClassInventory(/** @type {Iterable<import("@abaplint/core").IObject>} */ (enumerateObjects(reg, "rtti-inventory", [], "final-output")), classSupers)) {
     const n = upper(obj.getName());
     if (["TABL", "DTEL", "TTYP", "DOMA", "CLAS", "INTF", "VIEW", "DDLS"].includes(obj.getType())) known.add(n);
     try {
@@ -401,11 +401,11 @@ export function whereColumns(t) {
 
 
 /** ALIASES a FOR i~m of a class or interface (or a superclass): i~m */
-/** @param {import("@abaplint/core").IRegistry} reg @param {string} owner @param {string} name @returns {string | undefined} */ function aliasTarget(reg, owner, name) {
+/** @param {import("./frontend-session-types.ts").Registry} reg @param {string} owner @param {string} name @returns {string | undefined} */ function aliasTarget(reg, owner, name) {
   for (const o of [owner, ...ancestors(reg, owner)]) {
-    const def = reg.getObject("INTF", o)?.getDefinition() ?? clasDef(reg, o);
-    const all = def?.getAliases?.();
-    /** @type {ReturnType<import("@abaplint/core").IInterfaceDefinition["getAliases"]>} */ const list = Array.isArray(all) ? all : all?.getAll?.() ?? [];
+    const def = /** @type {import("@abaplint/core").Objects.Interface | undefined} */ (reg.getObject("INTF", o))?.getDefinition() ?? clasDef(reg, o);
+    /** @type {ReturnType<import("@abaplint/core").IInterfaceDefinition["getAliases"]> | {getAll?: () => ReturnType<import("@abaplint/core").IInterfaceDefinition["getAliases"]>} | undefined} */ const all = def?.getAliases?.();
+    /** @type {ReturnType<import("@abaplint/core").IInterfaceDefinition["getAliases"]>} */ const list = Array.isArray(all) ? all : /** @type {{getAll?: () => ReturnType<import("@abaplint/core").IInterfaceDefinition["getAliases"]>}} */ (all)?.getAll?.() ?? [];
     const hit = list.find((x) => upper(x.getName()) === name);
     if (hit) return upper(hit.getComponent());
   }
@@ -428,7 +428,7 @@ export function whereColumns(t) {
 
 /** the interfaces an interface includes, transitively */
 /** @param {import("@abaplint/core").IRegistry} reg @param {string} intf @param {Set<string>} [seen] @returns {string[]} */ function componentInterfaces(reg, intf, seen = new Set()) {
-  for (const c of reg.getObject("INTF", intf)?.getDefinition()?.getImplementing?.() ?? []) {
+  for (const c of /** @type {import("@abaplint/core").Objects.Interface | undefined} */ (reg.getObject("INTF", intf))?.getDefinition()?.getImplementing?.() ?? []) {
     const n = upper(c.name);
     if (!seen.has(n)) { seen.add(n); componentInterfaces(reg, n, seen); }
   }
@@ -456,7 +456,7 @@ const LOCAL_CLASSES = new Set(["CL_EXPRESS_ICF_SHIM", "/UI2/CL_JSON", "CL_SXML_S
 // retain main's module-local map, without adding reads to their transcripts.
 /** @type {Map<string, import("@abaplint/core").IClassDefinition>} */ const LOCAL_DEFS = new Map();
 let PERSIST_LOWERING = false;
-/** @param {import("@abaplint/core").IRegistry} reg @param {string} name @returns {import("@abaplint/core").IClassDefinition | undefined} */ const clasDef = (reg, name) => (PERSIST_LOWERING ? PROGRAM.localDefs : LOCAL_DEFS).get(name) ?? reg.getObject("CLAS", name)?.getDefinition();
+/** @param {import("./frontend-session-types.ts").Registry} reg @param {string} name @returns {import("@abaplint/core").IClassDefinition | undefined} */ const clasDef = (reg, name) => /** @type {Map<string, import("@abaplint/core").IClassDefinition>} */ (PERSIST_LOWERING ? /** @type {NonNullable<typeof PROGRAM>} */ (PROGRAM).localDefs : LOCAL_DEFS).get(name) ?? reg.getObject("CLAS", name)?.getDefinition();
 
 /** @param {import("@abaplint/core").IRegistry} reg @param {import("@abaplint/core").Objects.Class} obj @param {boolean} [includeTests] @returns {import("./frontend-types.ts").LocalClass[]} */ function localClasses(reg, obj, includeTests = false) {
   const owner = upper(obj.getName());
@@ -504,9 +504,9 @@ export function deriveProgramWanted(reg, options, session, capture) {
  * global data (DATA in its TOP include) or a module with a global
  * interface is not compiled: its modules are stubs that dump.
  */
-function fugrOwner(g) { return `FUGR:${upper(g.getName())}`; }
+/** @param {import("@abaplint/core").Objects.FunctionGroup} g @returns {string} */ function fugrOwner(g) { return `FUGR:${upper(g.getName())}`; }
 
-function functionGroupSignatures(ctx0, g) {
+/** @param {import("./frontend-types.ts").CompilationContext} ctx0 @param {import("@abaplint/core").Objects.FunctionGroup} g @returns {void} */ function functionGroupSignatures(ctx0, g) {
   const {reg, program} = ctx0;
   const owner = fugrOwner(g);
   program.wanted.add(owner);
@@ -516,7 +516,7 @@ function functionGroupSignatures(ctx0, g) {
   let spaghetti;
   try { spaghetti = new abaplint.SyntaxLogic(reg, g).run().spaghetti; } catch { spaghetti = undefined; }
   const top = spaghetti?.getTop();
-  const globalData = g.getABAPFiles().some((f) => /top\.abap$/i.test(f.getFilename()) && f.getStatements().some((st) => st.get() instanceof Statements.Data || st.get() instanceof Statements.DataBegin || st.get() instanceof Statements.Tables));
+  const globalData = g.getABAPFiles().some(/** @param {import("@abaplint/core").ABAPFile} f */ (f) => /top\.abap$/i.test(f.getFilename()) && f.getStatements().some(/** @param {import("@abaplint/core").Nodes.StatementNode} st */ (st) => st.get() instanceof Statements.Data || st.get() instanceof Statements.DataBegin || st.get() instanceof Statements.Tables));
   const updateModules = new Set([...(g.getXMLFile()?.getRaw() ?? "").matchAll(/<item>([\s\S]*?)<\/item>/g)]
     .filter((m) => /<UPDATE_TASK>/.test(m[1])).map((m) => upper(/<FUNCNAME>([^<]*)<\/FUNCNAME>/.exec(m[1])?.[1] ?? "")));
   for (const m of g.getModules()) {
@@ -529,7 +529,7 @@ function functionGroupSignatures(ctx0, g) {
       const scope = top && findScopeNamed(top, "function", name);
       if (!scope) throw new Unsupported(`${name}: no function scope`);
       const vars = scope.getData().vars;
-      const params = m.getParameters().map((p) => {
+      const params = m.getParameters().map(/** @param {import("@abaplint/core").Types.IFunctionModuleParameter} p */ (p) => {
         const pn = upper(p.name);
         const id = vars[pn] ?? vars[pn.toLowerCase()];
         if (!id) throw new Unsupported(`${name}: parameter ${pn} has no type in the function scope`);
@@ -537,12 +537,12 @@ function functionGroupSignatures(ctx0, g) {
         // types it as a table with a header line and no access kind); the
         // header line itself is not in the subset, a use of it is refused
         const it = id.getType();
-        let type = p.direction === "tables" && it instanceof BasicTypes.TableType
+        /** @type {import("./ir.ts").Type} */ let type = p.direction === "tables" && it instanceof BasicTypes.TableType
           ? {k: "table", row: typeOf(it.getRowType(), `${where} ${pn}`, program), skey: "default"} : typeOf(it, `${where} ${pn}`, program);
         if (p.direction === "tables" && type.k !== "table") throw new Unsupported(`${name}: TABLES ${pn} is a ${type.k}`);
         // Untyped TABLES must retain the caller's row descriptor and storage.
-        if (p.direction === "tables" && type.row.k === "data") type = {k: "data", table: true};
-        const dir = p.direction === "tables" ? "changing" : p.direction;
+        if (p.direction === "tables" && /** @type {import("./frontend-types.ts").TableType} */ (type).row.k === "data") type = {k: "data", table: true};
+        const dir = /** @type {"importing" | "exporting" | "changing"} */ (p.direction === "tables" ? "changing" : p.direction);
         return {name: pn, dir, byValue: p.direction === "tables" ? false : p.passByValue, type,
           default: p.defaultValue, optional: p.optional || p.defaultValue !== undefined || p.direction === "exporting" || p.direction === "tables",
           tables: p.direction === "tables"};
@@ -565,26 +565,26 @@ function functionGroupSignatures(ctx0, g) {
   /** @type {Map<string, import("./frontend-types.ts").MethodSignature>} */ const signatures = new Map();
   /** @type {import("./frontend-types.ts").FrontendClass} */ const cls = {name: owner, attributes: [], methods: [], constructor: null, stubs: [], interfaces: [], super: null, abstract: false, abstracts: [], signatures, instanceEvents: false};
   const fms = [...program.functionModules.values()].filter((x) => x.owner === owner);
-  for (const x of fms) signatures.set(x.sig.name ?? upper(x.module.getName()), x.sig);
+  for (const x of fms) signatures.set(/** @type {import("./frontend-types.ts").MethodSignature} */ (x.sig).name ?? upper(/** @type {import("@abaplint/core").Types.FunctionModuleDefinition} */ (x.module).getName()), /** @type {import("./frontend-types.ts").MethodSignature} */ (x.sig));
   for (const x of fms) {
-    const name = upper(x.module.getName());
+    const name = upper(/** @type {import("@abaplint/core").Types.FunctionModuleDefinition} */ (x.module).getName());
     const sig = x.sig;
     const file = g.getABAPFiles().find((f) => f.getStructure()?.findAllStructures(Structures.FunctionModule)
       .some((fm) => upper(fm.findFirstExpression(Expressions.Field)?.concatTokens() ?? "") === name));
     const node = file?.getStructure()?.findAllStructures(Structures.FunctionModule)
       .find((fm) => upper(fm.findFirstExpression(Expressions.Field)?.concatTokens() ?? "") === name);
-    const skip = (why) => {
+    /** @param {string} why @returns {void} */ const skip = (why) => {
       program.skipped.push(`${owner}=>${name}: ${why}`);
-      if (!sig.unsupported) cls.stubs.push({...sig, reason: why, ...(node ? {pos: {file: file.getFilename().split("/").pop(), row: node.getFirstToken().getStart().getRow()}} : {})});
+      if (!sig.unsupported) /** @type {NonNullable<import("./frontend-types.ts").FrontendClass["stubs"]>} */ (cls.stubs).push(/** @type {import("./frontend-types.ts").MethodSignature & {reason: string}} */ ({...sig, reason: why, ...(node ? {pos: {file: /** @type {string} */ (/** @type {import("@abaplint/core").ABAPFile} */ (file).getFilename().split("/").pop()), row: node.getFirstToken().getStart().getRow()}} : {})}));
     };
     if (sig.unsupported) { skip(sig.unsupported); continue; }
     if (!file || !node) { skip("no source"); continue; }
     try {
-      const scope = findScopeNamed(x.top, "function", name);
-      const ctx = {program, reg, className: owner, scopeName: owner, owner, method: name, sig, signatures, scope, file, spaghetti: x.spaghetti, locals: new Map(), temps: 0};
-      const known = new Set(sig.params.map((p) => p.name));
+      const scope = findScopeNamed(/** @type {import("@abaplint/core").ISpaghettiScopeNode} */ (x.top), "function", name);
+      const ctx = /** @type {import("./frontend-types.ts").MethodContext} */ ({program, reg, className: owner, scopeName: owner, owner, method: name, sig, signatures, scope, file, spaghetti: /** @type {import("@abaplint/core").ISpaghettiScope} */ (x.spaghetti), locals: new Map(), temps: 0});
+      const known = new Set(/** @type {import("./frontend-types.ts").Signature} */ (sig).params.map((p) => p.name));
       ctx.fieldSymbols = new Map();
-      for (const [vname, id] of Object.entries(scope.getData().vars)) {
+      for (const [vname, id] of Object.entries(/** @type {import("@abaplint/core").ISpaghettiScopeNode} */ (scope).getData().vars)) {
         if (known.has(vname)) continue;
         const t = typeOf(id.getType(), `${owner}=>${name} ${vname}`, program);
         if (vname.startsWith("<")) {
@@ -599,18 +599,18 @@ function functionGroupSignatures(ctx0, g) {
       ctx.inits = [];
       hoistLocalConstants(body, ctx, {Nodes, Structures, Statements, Expressions, isTok, isExpr, isStruct, isStmt, upper, goName, initialValue, Unsupported});
       const bodyStatements = body === undefined ? [] : block(body, ctx);
-      const compiled = [];
+      /** @type {import("./frontend-types.ts").FrontendStmt[]} */ const compiled = [];
       append(compiled, ctx.inits, bodyStatements);
       // an update-task module marks the LUW on entry, after its caller's
       // arguments are evaluated, like Node's wrapper (osd-enq-host.mjs)
       if (x.updateTask) compiled.unshift({s: "note_update_task"});
-      cls.methods.push({...sig, fieldSymbols: [...ctx.fieldSymbols].map(([n, t]) => ({name: n, type: t})), locals: [...ctx.locals].map(([n, t]) => ({name: n, type: t})).sort((a, b) => a.name.localeCompare(b.name)),
-        body: compiled, sinkUnsafe: !!ctx.sinkUnsafe, calls: ctx.calls ?? [], pos: {file: file.getFilename().split("/").pop(), row: node.getFirstToken().getStart().getRow()}});
+      cls.methods.push({.../** @type {import("./frontend-types.ts").Signature} */ (sig), fieldSymbols: [...ctx.fieldSymbols].map(([n, t]) => ({name: n, type: t})), locals: [...ctx.locals].map(([n, t]) => ({name: n, type: t})).sort((a, b) => a.name.localeCompare(b.name)),
+        body: compiled, sinkUnsafe: !!ctx.sinkUnsafe, calls: ctx.calls ?? [], pos: {file: /** @type {string} */ (file.getFilename().split("/").pop()), row: node.getFirstToken().getStart().getRow()}});
     } catch (e) {
       // a module is not a class: a path of the front end written for classes
       // may fail outside a refusal; such a module becomes a dumping stub
-      if (e.message.startsWith("local constant name collision:")) throw e;
-      skip(e instanceof Unsupported ? e.message : `the front end failed on a function module: ${e.message}`);
+      if (/** @type {{message: string}} */ (e).message.startsWith("local constant name collision:")) throw e;
+      skip(e instanceof Unsupported ? e.message : `the front end failed on a function module: ${/** @type {{message: string}} */ (e).message}`);
     }
   }
   return cls;
@@ -618,7 +618,7 @@ function functionGroupSignatures(ctx0, g) {
 
 
 /** kept for the numeric bench sample: one folder, every class in it */
-export function readClass(folder) {
+/** @param {string} folder @returns {readonly import("./frontend-types.ts").FrontendClass[]} */ export function readClass(folder) {
   const objects = [...new Set(readdirNames(folder).map((f) => f.split(".")[0]))];
   return compileProgram({folders: [folder], objects}).classes;
 }

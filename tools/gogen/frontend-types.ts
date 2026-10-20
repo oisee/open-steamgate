@@ -39,7 +39,10 @@ export type MethodSignature = Signature | RefusedSignature;
 export interface SuppliedMethod { name: string; found: string[] }
 export interface RttiTable { classSupers: Map<string, string | null>; structs: Map<string, {name: string; kind: string}[]>; known: Set<string> }
 export type LockObject = import("./frontend-session-types.ts").LockDescriptor;
-export interface FrontendTable extends DatabaseTable { row?: Type; hidesClient?: string; why?: string }
+// sqlView/cds are discovered after the entry is built, so the frontend's view
+// of a table is writable where the finished IR (DatabaseTable) is readonly.
+type WritableTableBase = Omit<DatabaseTable, "sqlView" | "cds">;
+export interface FrontendTable extends WritableTableBase { sqlView?: string; cds?: string; row?: Type; hidesClient?: string; why?: string }
 export interface LocalClass {
   name: string; owner: string; local: string; obj: abaplint.Objects.Class;
   def: abaplint.IClassDefinition; file: abaplint.ABAPFile;
@@ -57,11 +60,11 @@ export interface FrontendClass extends Omit<Mutable<Class>, "methods" | "attribu
   stubs?: (MethodSignature & {reason: string; pos?: {file: string; row: number}})[];
   ctorBroken?: string;
 }
-export interface FrontendProgram extends Omit<Mutable<Program>, "classes" | "structs" | "sigs" | "skipped" | "partial" | "frontendCounts" | "tables" | "consts" | "intfOwnAttrs" | "interfaceAttrs" | "exceptionSupers"> {
+export interface FrontendProgram extends Omit<Mutable<Program>, "classes" | "structs" | "sigs" | "skipped" | "partial" | "frontendCounts" | "tables" | "consts" | "intfOwnAttrs" | "interfaceAttrs" | "exceptionSupers" | "functionModules"> {
   reg: Registry;
   locals?: Map<string, string>;
   localInterfaces?: Map<string, {def: abaplint.IInterfaceDefinition; source: string}>;
-  supplied: Map<string, Set<string>>; functionModules: Map<string, FunctionModule>;
+  supplied: Map<string, Set<string>>; functionModules: Map<string, import("./frontend-session-types.ts").FunctionModule>;
   classes: FrontendClass[]; structs: Map<string, StructType>; sigs: Map<string, MethodSignature>;
   anonStructs: Map<abaplint.AbstractType, string>; badStructs: Map<string, string>; ddicOutputLen: Map<string, number>;
   dynamicDispatch?: {key: string; owner: string; method: string; defaults: {name: string; value: Expr}[]}[];
