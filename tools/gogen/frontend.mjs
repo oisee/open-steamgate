@@ -1855,8 +1855,8 @@ export function deriveProgramWanted(reg, options, session, capture) {
   // further down.
   if (isStmt(node, Statements.Concatenate)) {
     const keywords = /** @type {StNode} */ (node).getChildren().filter((k) => k instanceof Nodes.TokenNode).map((k) => upper(tokenStr(k)));
-    const hasKeywords = (...words) => keywords.some((_, i) => words.every((word, j) => keywords[i + j] === word));
-    const endsWithKeywords = (...words) => {
+    /** @param {...string} words @returns {boolean} */ const hasKeywords = (...words) => keywords.some((_, i) => words.every((word, j) => keywords[i + j] === word));
+    /** @param {...string} words @returns {boolean} */ const endsWithKeywords = (...words) => {
       const end = keywords.at(-1) === "." ? keywords.length - 1 : keywords.length;
       const start = end - words.length;
       return start >= 0 && words.every((word, i) => keywords[start + i] === word);
@@ -1921,10 +1921,10 @@ export function deriveProgramWanted(reg, options, session, capture) {
       // DATA(x) = ... takes the type of what is assigned. abaplint types some
       // built-ins by a fixed return (frac( ) as i, _builtin.js), where ABAP
       // gives the argument's type: frac( f ) is an f (A4H: pulse 0.25, not 0)
-      const name = upper(inline.findFirstExpression(Expressions.TargetField).concatTokens());
+      const name = upper(/** @type {import("./frontend-types.ts").TokenText} */ (inline.findFirstExpression(Expressions.TargetField)).concatTokens());
       const declared = ctx.locals.get(name);
       // abaplint types DATA(x) = 'ab' & 'cd' as the first literal, c LENGTH 2
-      const joined = declared?.k === "c" && src.findFirstExpression(Expressions.ConcatenatedConstant);
+      const joined = declared?.k === "c" && /** @type {import("./frontend-types.ts").CallChain} */ (src).findFirstExpression(Expressions.ConcatenatedConstant);
       if (declared && (numeric(declared) || joined)) {
         let t;
         try { t = source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (src), ctx).type; } catch (e) { if (!(e instanceof Unsupported)) throw e; }
@@ -1952,7 +1952,7 @@ export function deriveProgramWanted(reg, options, session, capture) {
   if (isStmt(node, Statements.Append) && /^APPEND\s+LINES\s+OF\b/i.test(text)) {
     if (/\b(ASSIGNING|REFERENCE|SORTED BY)\b/i.test(text)) throw new Unsupported(`APPEND form: ${text}`);
     const table = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findDirectExpression(Expressions.Target)), ctx);
-    if (table.type.k !== "table" || table.type.hashed) throw new Unsupported(`APPEND LINES OF into a ${table.type.hashed ? "hashed table" : table.type.k}`);
+    if (table.type.k !== "table" || /** @type {import("./frontend-types.ts").TableType} */ (table.type).hashed) throw new Unsupported(`APPEND LINES OF into a ${/** @type {import("./frontend-types.ts").TableType} */ (table.type).hashed ? "hashed table" : table.type.k}`);
     const kids = /** @type {StNode} */ (node).getChildren();
     const srcNode = /** @type {StNode} */ (node).findDirectExpression(Expressions.SimpleSource4) ?? /** @type {StNode} */ (node).findDirectExpression(Expressions.Source);
     const src = source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (srcNode), ctx);
@@ -1990,7 +1990,7 @@ export function deriveProgramWanted(reg, options, session, capture) {
     const table = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findDirectExpression(Expressions.Target)), ctx);
     if (table.type.k !== "table") throw new Unsupported(`APPEND ... ASSIGNING to a ${table.type.k}`);
     refuseSorted(table, "APPEND to");
-    if (!fsType || fsType.k === "data" || !sameType(fsType, table.type.row) || (fsType.k === "struct" && fsType.go !== table.type.row.go)) throw new Unsupported(`APPEND ... ASSIGNING ${fsName}: ${text}`);
+    if (!fsType || fsType.k === "data" || !sameType(fsType, table.type.row) || (fsType.k === "struct" && /** @type {import("./frontend-types.ts").StructType} */ (fsType).go !== /** @type {import("./frontend-types.ts").StructType} */ (table.type.row).go)) throw new Unsupported(`APPEND ... ASSIGNING ${fsName}: ${text}`);
     if (table.type.row.k === "struct") {
         /** @type {import("./frontend-types.ts").Mutable<import("./frontend-types.ts").TableType>} */ const tableType = table.type; tableType.stable = true; }
     const value = /** @type {StNode} */ (node).findDirectExpression(Expressions.SimpleSource4) ?? /** @type {StNode} */ (node).findDirectExpression(Expressions.Source);
@@ -2003,7 +2003,7 @@ export function deriveProgramWanted(reg, options, session, capture) {
   if (isStmt(node, Statements.Concatenate)) {
     const kids = /** @type {StNode} */ (node).getChildren();
     const keywords = /** @type {StNode} */ (node).getChildren().filter((k) => k instanceof Nodes.TokenNode).map((k) => upper(tokenStr(k)));
-    const hasKeywords = (...words) => keywords.some((_, i) => words.every((word, j) => keywords[i + j] === word));
+    /** @param {...string} words @returns {boolean} */ const hasKeywords = (...words) => keywords.some((_, i) => words.every((word, j) => keywords[i + j] === word));
     const respecting = hasKeywords("RESPECTING", "BLANKS");
     const lines = keywords[1] === "LINES" && keywords[2] === "OF";
     const target = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findDirectExpression(Expressions.Target)), ctx);
@@ -2073,7 +2073,7 @@ export function deriveProgramWanted(reg, options, session, capture) {
     }
     const ss2 = /** @type {StNode} */ (node).findDirectExpression(Expressions.SimpleSource2);
     if (!ss2) throw new Unsupported(`READ TABLE table form: ${text}`);
-    const table = sourceOperand(ss2.getFirstChild(), ctx);
+    const table = sourceOperand(/** @type {import("./frontend-types.ts").SyntaxNode} */ (ss2.getFirstChild()), ctx);
     if (table.type.k !== "table") throw new Unsupported("READ TABLE of a non-table");
     const cc = /** @type {StNode} */ (node).findDirectExpression(Expressions.ComponentCompareSimple);
     if (!cc) throw new Unsupported(`READ TABLE key form: ${text}`);
@@ -2119,13 +2119,13 @@ export function deriveProgramWanted(reg, options, session, capture) {
       const key = secondaryKey(table.type, named[1], ctx, text, true);
       if (key === null) throw new Unsupported(`READ TABLE WITH KEY primary_key COMPONENTS: ${text}`);
       // read_key refuses the same in emit-go; the hashed path does not convert the row
-      if (key.hashed && into?.conv) throw new Unsupported(`READ TABLE WITH KEY ${key.name} INTO a work area of another type (${text})`);
+      if (key.hashed && (/** @type {{conv?: unknown}} */ (into))?.conv) throw new Unsupported(`READ TABLE WITH KEY ${key.name} INTO a work area of another type (${text})`);
       const given = keys.map((x) => x.name);
       if (keys.some((x) => x.line) || given.length !== key.comps.length || new Set(given).size !== given.length || !key.comps.every((c) => given.includes(c.name))) {
         throw new Unsupported(`READ TABLE WITH KEY ${key.name}: not every component of the key once (${text})`);
       }
       // the values in the key's own order
-      const values = key.comps.map((c) => keys.find((x) => x.name === c.name).value);
+      const values = key.comps.map((c) => /** @type {import("./frontend-types.ts").ValueExpr} */ ((/** @type {{value?: unknown}} */ (keys.find((x) => x.name === c.name))).value));
       return {s: "read_seckey", table, key, values, into, fs, refInto};
     }
     // ultra/events (fix round): a SORTED table is searched by its key (A4H
@@ -2142,9 +2142,9 @@ export function deriveProgramWanted(reg, options, session, capture) {
       const line = table.type.sorted.length === 1 && table.type.sorted[0] === "TABLE_LINE";
       const prefix = [];
       for (const k of table.type.sorted) {
-        const hit = line ? keys.find((x) => x.line) : keys.find((x) => !x.line && x.name === fieldOf(ctx, table.type.row, k, text).name);
+        const hit = line ? keys.find((x) => x.line) : keys.find((x) => !x.line && x.name === fieldOf(ctx, /** @type {import("./frontend-types.ts").TableType} */ (table.type).row, k, text).name);
         if (!hit) break;
-        const kt = line ? table.type.row : fieldOf(ctx, table.type.row, k, text).type;
+        const kt = line ? /** @type {import("./frontend-types.ts").TableType} */ (table.type).row : fieldOf(ctx, /** @type {import("./frontend-types.ts").TableType} */ (table.type).row, k, text).type;
         if (!["c", "string", "n", "d", "t", "i", "int8"].includes(kt.k)) throw new Unsupported(`READ TABLE of a SORTED table keyed on a ${kt.k}`);
         prefix.push(keys.indexOf(hit));
       }
@@ -2156,7 +2156,7 @@ export function deriveProgramWanted(reg, options, session, capture) {
     if (!/\bINDEX\b/i.test(text) || /\b(WITH KEY|REFERENCE|TRANSPORTING|BINARY|CASTING)\b/i.test(text)) {
       throw new Unsupported(`READ TABLE form: ${text}`);
     }
-    const table = sourceOperand(/** @type {StNode} */ (node).findDirectExpression(Expressions.SimpleSource2).getFirstChild(), ctx);
+    const table = sourceOperand(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {import("@abaplint/core").Nodes.ExpressionNode} */ (/** @type {StNode} */ (node).findDirectExpression(Expressions.SimpleSource2)).getFirstChild()), ctx);
     // a generic table (ultra/sadl): READ TABLE <t> INDEX n ASSIGNING <generic> only
     if (table.type.k === "data" && table.type.table) {
       const fsName = upper(/ASSIGNING\s+(<[\w]+>)/i.exec(text)?.[1] ?? "");
@@ -2170,12 +2170,12 @@ export function deriveProgramWanted(reg, options, session, capture) {
       // TABLE <a>-t ASSIGNING <b> bound <a> (ultra/events, ZCL_GG_HTTP_HANDLER)
       const fsName = upper(/ASSIGNING\s+(?:FIELD-SYMBOL\(\s*)?(<[\w]+>)/i.exec(text)?.[1] ?? "");
       if (!ctx.fieldSymbols.has(fsName)) throw new Unsupported(`READ TABLE ASSIGNING ${fsName}`);
-      /** @type {import("./ir.ts").Type} */ const fsType = ctx.fieldSymbols.get(fsName); if (fsType.k !== "data" && !sameType(fsType, table.type.row)) throw new Unsupported(`READ TABLE ASSIGNING ${fsName}: typed unlike the rows`);
+      const fsType = /** @type {import("./ir.ts").Type} */ (ctx.fieldSymbols.get(fsName)); if (fsType.k !== "data" && !sameType(fsType, table.type.row)) throw new Unsupported(`READ TABLE ASSIGNING ${fsName}: typed unlike the rows`);
       if (table.type.row.k === "struct") {
         /** @type {import("./frontend-types.ts").Mutable<import("./frontend-types.ts").TableType>} */ const tableType = table.type; tableType.stable = true; }
       return {s: "read_index", table, index, fs: fsName};
     }
-    const into = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findFirstExpression(Expressions.ReadTableTarget).findFirstExpression(Expressions.Target)), ctx);
+    const into = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {import("@abaplint/core").Nodes.ExpressionNode} */ (/** @type {StNode} */ (node).findFirstExpression(Expressions.ReadTableTarget)).findFirstExpression(Expressions.Target)), ctx);
     return {s: "read_index", table, index, into};
   }
   // ultra/itab: SORT itab [ASCENDING|DESCENDING] [STABLE] [BY c [ASC|DESC] ...]
@@ -2193,11 +2193,11 @@ export function deriveProgramWanted(reg, options, session, capture) {
     if (targetAt !== 1 || modifiers.some((k) => !isTok(k, "ASCENDING") && !isTok(k, "DESCENDING") && !isTok(k, "STABLE"))
       || sortKids.some((k, i) => isTok(k, "AS") && isTok(sortKids[i + 1], "TEXT"))) throw new Unsupported(`SORT form: ${text}`);
     const table = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findDirectExpression(Expressions.Target) ?? /** @type {StNode} */ (node).findFirstExpression(Expressions.Target)), ctx);
-    if (table.type.k !== "table" || table.type.hashed) throw new Unsupported(`SORT of a ${table.type.hashed ? "hashed table" : table.type.k}`);
+    if (table.type.k !== "table" || /** @type {import("./frontend-types.ts").TableType} */ (table.type).hashed) throw new Unsupported(`SORT of a ${/** @type {import("./frontend-types.ts").TableType} */ (table.type).hashed ? "hashed table" : table.type.k}`);
     const allDesc = modifiers.some((k) => isTok(k, "DESCENDING"));
     /** @type {string[] | undefined} */ const byWords = byAt < 0 ? undefined : sortKids.slice(byAt + 1, -1).map((k) => k.concatTokens());
-    const row = table.type.row;
-    const sortable = (t) => ["i", "int8", "f", "p", "c", "string", "n", "d", "t", "x", "xstring"].includes(t.k);
+    const row = /** @type {import("./frontend-types.ts").TableType} */ (table.type).row;
+    /** @param {import("./ir.ts").Type} t @returns {boolean} */ const sortable = (t) => ["i", "int8", "f", "p", "c", "string", "n", "d", "t", "x", "xstring"].includes(t.k);
     /** @type {import("./ir.ts").SortKey[]} */ const keys = [];
     if (byWords === undefined) {
       if (row.k !== "struct") {
@@ -2205,7 +2205,7 @@ export function deriveProgramWanted(reg, options, session, capture) {
         if (!sortable(row)) throw new Unsupported(`SORT of a table of ${row.k}`);
         keys.push({line: true, type: row, desc: allDesc});
       } else if (table.type.skey === "default") {
-        for (const f of PROGRAM.structs.get(row.go).fields) {
+        for (const f of /** @type {readonly import("./ir.ts").Field[]} */ (/** @type {import("./frontend-types.ts").StructType} */ (/** @type {NonNullable<typeof PROGRAM>} */ (PROGRAM).structs.get(/** @type {import("./frontend-types.ts").StructType} */ (row).go)).fields)) {
           if (f.type.k === "c" || f.type.k === "string") keys.push({name: f.name, type: f.type, desc: allDesc});
           else if (!["i", "int8", "f", "p"].includes(f.type.k)) throw new Unsupported(`SORT by the default key of a structure with a ${f.type.k} component: not measured`);
         }
@@ -2243,9 +2243,9 @@ export function deriveProgramWanted(reg, options, session, capture) {
     return {s: "sort", table, keys};
   }
   if (isStmt(node, Statements.DeleteInternal) && /^DELETE\s+ADJACENT\s+DUPLICATES\s+FROM\s+\S+\s+COMPARING\s+ALL\s+FIELDS\s*\.?$/i.test(text)) {
-    const name = /^DELETE\s+ADJACENT\s+DUPLICATES\s+FROM\s+(\S+)/i.exec(text)[1];
+    const name = /** @type {RegExpExecArray} */ (/^DELETE\s+ADJACENT\s+DUPLICATES\s+FROM\s+(\S+)/i.exec(text))[1];
     const table = variable(name, ctx);
-    if (table.type.k !== "table" || table.type.hashed || table.type.row.k !== "struct") throw new Unsupported(`DELETE ADJACENT DUPLICATES from a ${table.type.k}`);
+    if (table.type.k !== "table" || /** @type {import("./frontend-types.ts").TableType} */ (table.type).hashed || table.type.row.k !== "struct") throw new Unsupported(`DELETE ADJACENT DUPLICATES from a ${table.type.k}`);
     keyGuard(table.type, "DELETE ADJACENT DUPLICATES");
     const fields = ctx.program.structs.get(table.type.row.go)?.fields ?? [];
     if (!fields.length || fields.some((f) => !["string", "c", "n", "d", "t", "i", "int8", "f"].includes(f.type.k))) throw new Unsupported(`DELETE ADJACENT DUPLICATES of a row with deep or unsupported fields`);
@@ -2271,7 +2271,7 @@ export function deriveProgramWanted(reg, options, session, capture) {
     const given = /** @type {StNode} */ (node).findDirectExpressions(Expressions.ComponentCompare).map((cc) => {
       const kids = cc.getChildren();
       if (kids.length !== 3 || kids[1].concatTokens() !== "=") throw new Unsupported(`DELETE TABLE key form: ${cc.concatTokens()}`);
-      const f = fieldOf(ctx, table.type.row, kids[0].concatTokens(), text);
+      const f = fieldOf(ctx, /** @type {import("./frontend-types.ts").TableType} */ (table.type).row, kids[0].concatTokens(), text);
       return {name: f.name, value: convert(source(kids[2], ctx, f.type), f.type)};
     });
     const names = given.map((x) => x.name);
@@ -2279,9 +2279,9 @@ export function deriveProgramWanted(reg, options, session, capture) {
       throw new Unsupported(`DELETE TABLE WITH TABLE KEY ${key.name}: not every component of the key once (${text})`);
     }
     keyGuard(table.type, "DELETE TABLE");
-    const bare = (x) => JSON.stringify(x, (k, v) => (k === "type" ? undefined : v));
+    /** @param {unknown} x @returns {string} */ const bare = (x) => JSON.stringify(x, (k, v) => (k === "type" ? undefined : v));
     if (ctx.loopStack?.some((l) => bare(l.table) === bare(table))) throw new Unsupported(`${text.replace(/\s*\.$/, "")} inside a LOOP over the same table: the loop index and its field symbol were not adjusted`);
-    return {s: "delete_seckey", table, key, values: key.comps.map((c) => given.find((x) => x.name === c.name).value)};
+    return {s: "delete_seckey", table, key, values: key.comps.map((c) => /** @type {import("./frontend-types.ts").ValueExpr} */ ((/** @type {{value?: unknown}} */ (given.find((x) => x.name === c.name))).value))};
   }
   if (isStmt(node, Statements.DeleteInternal) && /^DELETE\s+TABLE\s+\S+\s+WITH\s+TABLE\s+KEY\s+/i.test(text)) {
     const table = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findDirectExpression(Expressions.Target)), ctx);
@@ -2305,7 +2305,7 @@ export function deriveProgramWanted(reg, options, session, capture) {
     keyGuard(type, "DELETE TABLE");
     // critic of #688: inside a LOOP over the same table a system steps the
     // loop back and unassigns its field symbol; neither emitter does
-    const bare = (x) => JSON.stringify(x, (k, v) => (k === "type" ? undefined : v));
+    /** @param {unknown} x @returns {string} */ const bare = (x) => JSON.stringify(x, (k, v) => (k === "type" ? undefined : v));
     if (ctx.loopStack?.some((l) => bare(l.table) === bare(table))) throw new Unsupported(`${text.replace(/\s*\.$/, "")} inside a LOOP over the same table: the loop index and its field symbol were not adjusted`);
     const vNode = node.findDirectExpression(Expressions.Source) ?? /** @type {StNode} */ (node).findDirectExpression(Expressions.SimpleSource2);
     if (!vNode) throw new Unsupported(`DELETE form: ${text}`);
@@ -2326,11 +2326,11 @@ export function deriveProgramWanted(reg, options, session, capture) {
   if (isStmt(node, Statements.DeleteInternal) && /^DELETE\s+[^\s.]+\s*\.?$/i.test(text)) {
     const table = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findDirectExpression(Expressions.Target)), ctx);
     const loop = ctx.loopStack?.[ctx.loopStack.length - 1];
-    const same = (a, b) => JSON.stringify(a, (k, v) => (k === "type" ? undefined : v)) === JSON.stringify(b, (k, v) => (k === "type" ? undefined : v));
+    /** @param {unknown} a @param {unknown} b @returns {boolean} */ const same = (a, b) => JSON.stringify(a, (k, v) => (k === "type" ? undefined : v)) === JSON.stringify(b, (k, v) => (k === "type" ? undefined : v));
     if (!loop || table.type.k !== "table" || !same(loop.table, table)) throw new Unsupported(`DELETE itab outside a LOOP over it: ${text}`);
     // critic fix: LOOP ... TO n with a deletion was not measured (the TO
     // bound would stay absolute while the index steps back)
-    if (loop.to !== null) throw new Unsupported(`DELETE itab inside LOOP ... TO: not measured: ${text}`);
+    if (/** @type {TableLoopState} */ (loop).to !== null) throw new Unsupported(`DELETE itab inside LOOP ... TO: not measured: ${text}`);
     // critic fix: what <fs> of LOOP ... ASSIGNING <fs> is after its row went
     // was not measured (Go would see the next row, JS the deleted one), so
     // any later use of it in the method is refused (fsCheck)
@@ -2345,9 +2345,9 @@ export function deriveProgramWanted(reg, options, session, capture) {
     if (!/^DELETE\s+\S+\s+INDEX\s+/i.test(text)) throw new Unsupported(`DELETE form: ${text}`);
     const table = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findDirectExpression(Expressions.Target)), ctx);
     // Like DELETE current, INDEX at or before the cursor steps it back.
-    const same = (a, b) => JSON.stringify(a, (k, v) => k === "type" ? undefined : v) === JSON.stringify(b, (k, v) => k === "type" ? undefined : v);
+    /** @param {unknown} a @param {unknown} b @returns {boolean} */ const same = (a, b) => JSON.stringify(a, (k, v) => k === "type" ? undefined : v) === JSON.stringify(b, (k, v) => k === "type" ? undefined : v);
     const loops = (ctx.loopStack ?? []).filter((loop) => same(loop.table, table));
-    if (loops.some((loop) => loop.to || loop.key || loop.dynamicKeys)) throw new Unsupported(`DELETE INDEX inside LOOP with TO / USING KEY: not measured: ${text}`);
+    if (loops.some((loop) => /** @type {TableLoopState} */ (loop).to || /** @type {TableLoopState} */ (loop).key || /** @type {TableLoopState} */ (loop).dynamicKeys)) throw new Unsupported(`DELETE INDEX inside LOOP with TO / USING KEY: not measured: ${text}`);
     const tokens = loops.map((loop) => loop.token);
     // a generic table (ultra/sadl): the same rule through its descriptor
     if (table.type.k === "data" && table.type.table) return {s: "delete_index_data", table, tokens, index: convert(source(/** @type {StNode} */ (node).findDirectExpressions(Expressions.Source).slice(-1)[0], ctx, I), I)};
@@ -2362,7 +2362,7 @@ export function deriveProgramWanted(reg, options, session, capture) {
       const srcNode = /** @type {StNode} */ (node).findDirectExpression(Expressions.SimpleSource4) ?? /** @type {StNode} */ (node).findDirectExpression(Expressions.Source);
       const src = source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (srcNode), ctx);
       if (table.type.k !== "table" || src.type.k !== "table" || !table.type.sorted || !table.type.unique || !sameType(src.type.row, table.type.row)) throw new Unsupported(`INSERT LINES OF form: ${text}`);
-      const keys = table.type.sorted.map((k) => ({name: fieldOf(ctx, table.type.row, k, text).name, type: fieldOf(ctx, table.type.row, k, text).type}));
+      const keys = table.type.sorted.map((k) => ({name: fieldOf(ctx, /** @type {import("./frontend-types.ts").TableType} */ (table.type).row, k, text).name, type: fieldOf(ctx, /** @type {import("./frontend-types.ts").TableType} */ (table.type).row, k, text).type}));
       return {s: "insert_lines_sorted", table, src, keys};
     }
     if (/\b(LINES OF|INITIAL LINE|ASSIGNING)\b/i.test(text)) throw new Unsupported(`INSERT form: ${text}`);
@@ -2391,7 +2391,7 @@ export function deriveProgramWanted(reg, options, session, capture) {
         /** @type {import("./frontend-types.ts").Mutable<import("./frontend-types.ts").TableType>} */ const tableType = table.type; tableType.stable = true; }
       if (!table.type.unique) throw new Unsupported(`INSERT INTO TABLE of a SORTED table with a NON-UNIQUE key`);
       const line = table.type.sorted.length === 1 && table.type.sorted[0] === "TABLE_LINE";
-      /** @type {import("./ir.ts").SortKey[]} */ const sortKeys = line ? [{line: true, type: table.type.row}] : table.type.sorted.map((k) => ({name: fieldOf(ctx, table.type.row, k, text).name, type: fieldOf(ctx, table.type.row, k, text).type}));
+      /** @type {import("./ir.ts").SortKey[]} */ const sortKeys = line ? [{line: true, type: table.type.row}] : table.type.sorted.map((k) => ({name: fieldOf(ctx, /** @type {import("./frontend-types.ts").TableType} */ (table.type).row, k, text).name, type: fieldOf(ctx, /** @type {import("./frontend-types.ts").TableType} */ (table.type).row, k, text).type}));
       for (const k of sortKeys) if (!["c", "string", "n", "d", "t", "i", "int8"].includes(k.type.k)) throw new Unsupported(`SORTED table keyed on a ${k.type.k}`);
       return {s: "insert_sorted", table, value: convert(source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (vNode), ctx, table.type.row), table.type.row), keys: sortKeys, refInto};
     }
@@ -2472,7 +2472,7 @@ export function deriveProgramWanted(reg, options, session, capture) {
   if (isStmt(node, Statements.GetTime)) {
     if (!/^GET\s+TIME\s+STAMP\s+FIELD\s+\S+\s*\.?$/i.test(text)) throw new Unsupported(`GET TIME form: ${text}`);
     const target = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findDirectExpression(Expressions.Target)), ctx);
-    if (target.type.k !== "p" || !((target.type.len === 8 && (target.type.dec ?? 0) === 0) || (target.type.len === 11 && target.type.dec === 7))) throw new Unsupported(`GET TIME STAMP into a ${target.type.k}(${target.type.len},${target.type.dec ?? 0})`);
+    if (target.type.k !== "p" || !((target.type.len === 8 && (target.type.dec ?? 0) === 0) || (target.type.len === 11 && target.type.dec === 7))) throw new Unsupported(`GET TIME STAMP into a ${target.type.k}(${/** @type {number} */ ((/** @type {{len?: unknown}} */ (target.type)).len)},${/** @type {number} */ ((/** @type {{dec?: unknown}} */ (target.type)).dec ?? 0)})`);
     return {s: "get_timestamp", target, dec: target.type.dec ?? 0};
   }
   // class events (ultra/events): SET HANDLER and RAISE EVENT, see setHandler
@@ -2484,7 +2484,7 @@ export function deriveProgramWanted(reg, options, session, capture) {
     const raising = /** @type {StNode} */ (node).findDirectExpression(Expressions.ExceptionName);
     const msg = /** @type {StNode} */ (node).findDirectExpression(Expressions.MessageSource);
     if (!raising || !msg || /DISPLAY LIKE|INTO/i.test(text)) throw new Unsupported(`MESSAGE form: ${text}`);
-    let id, ty, no;
+    /** @type {import("./ir.ts").Expr | undefined} */ let id, ty, no;
     const short = msg.findDirectExpression(Expressions.MessageTypeAndNumber);
     if (short) {
       const m = /^([a-z])(\d{3})$/i.exec(short.concatTokens());
@@ -2495,7 +2495,7 @@ export function deriveProgramWanted(reg, options, session, capture) {
       no = {e: "str", value: m[2], type: S};
     } else {
       const kids = msg.getChildren();
-      const read = (key) => {
+      /** @param {string} key @returns {import("./frontend-types.ts").ValueExpr} */ const read = (key) => {
         const i = kids.findIndex((k) => isTok(k, key));
         if (i < 0) throw new Unsupported(`MESSAGE missing ${key}`);
         return source(kids[i + 1], ctx);
@@ -2506,9 +2506,9 @@ export function deriveProgramWanted(reg, options, session, capture) {
     }
     const values = /** @type {StNode} */ (node).findDirectExpressions(Expressions.MessageSourceSource).map((x) => convert(source(x, ctx), C(50)));
     if (values.length > 4) throw new Unsupported(`MESSAGE WITH more than four values: ${text}`);
-    const name = {e: "str", value: upper(raising.concatTokens()), type: S};
-    const method = {e: "str", value: ctx.method, type: S};
-    /** @type {import("./ir.ts").Argument[]} */ const args = [{value: id}, {value: ty}, {value: no}, {value: name}, {value: method}];
+    /** @type {import("./ir.ts").Expr} */ const name = {e: "str", value: upper(raising.concatTokens()), type: S};
+    /** @type {import("./ir.ts").Expr} */ const method = {e: "str", value: ctx.method, type: S};
+    /** @type {import("./ir.ts").Argument[]} */ const args = [{value: /** @type {import("./ir.ts").Expr} */ (id)}, {value: /** @type {import("./ir.ts").Expr} */ (ty)}, {value: /** @type {import("./ir.ts").Expr} */ (no)}, {value: name}, {value: method}];
     for (const value of values) args.push({value});
     return {s: "native", fn: "abap.MessageRaise", stmt: true, args};
   }
@@ -2548,7 +2548,7 @@ export function deriveProgramWanted(reg, options, session, capture) {
     const table = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findDirectExpression(Expressions.Target)), ctx);
     if (table.type.k !== "table") throw new Unsupported("MODIFY of a non-table");
     const kids = /** @type {StNode} */ (node).getChildren();
-    const after = (kw) => { const at = kids.findIndex((c) => isTok(c, kw)); return at < 0 || !isExpr(kids[at + 1], Expressions.Source) ? undefined : kids[at + 1]; };
+    /** @param {string} kw @returns {import("@abaplint/core").Nodes.ExpressionNode | undefined} */ const after = (kw) => { const at = kids.findIndex((c) => isTok(c, kw)); return at < 0 || !isExpr(kids[at + 1], Expressions.Source) ? undefined : /** @type {import("@abaplint/core").Nodes.ExpressionNode} */ (kids[at + 1]); };
     const idx = after("INDEX");
     const val = after("FROM");
     if (!idx || !val || /** @type {StNode} */ (node).findDirectExpressions(Expressions.Source).length !== 2) throw new Unsupported(`MODIFY form: ${text}`);
@@ -2575,9 +2575,9 @@ export function deriveProgramWanted(reg, options, session, capture) {
     // overlap, n is 0 and sy-subrc 4 when there is none; REGEX may be a
     // CL_ABAP_REGEX object (open-abap-core's: its PATTERN and MV_IGNORE_CASE)
     const tw = words.filter((w) => w !== "" && w !== ".").join(" ");
-    const matches = (...parts) => parts.reduce(/** @param {string[]} forms */ (forms, part) => forms.flatMap((form) =>
+    /** @param {...(string | readonly string[])} parts @returns {boolean} */ const matches = (...parts) => parts.reduce(/** @param {string[]} forms */ (forms, part) => forms.flatMap((form) =>
       (Array.isArray(part) ? part : [part]).map((p) => [form, p].filter(Boolean).join(" "))), [""]).includes(tw);
-    const hasKeywords = (...seq) => words.some((_, i) => seq.every((w, j) => words[i + j] === w));
+    /** @param {...string} seq @returns {boolean} */ const hasKeywords = (...seq) => words.some((_, i) => seq.every((w, j) => words[i + j] === w));
     if (matches("FIND ALL OCCURRENCES OF IN", ["", "IGNORING CASE"], "MATCH COUNT") && /** @type {StNode} */ (node).findDirectExpressions(Expressions.Source).length === 2) {
       const [pat, subj] = /** @type {StNode} */ (node).findDirectExpressions(Expressions.Source);
       const kind = upper(/** @type {StNode} */ (node).findDirectExpression(Expressions.FindType)?.concatTokens() ?? "");
@@ -2642,7 +2642,7 @@ export function deriveProgramWanted(reg, options, session, capture) {
       out.secOff = so ? convert(source(so, ctx, I), I) : null;
       out.secLen = sl ? convert(source(sl, ctx, I), I) : null;
     } else out.subject = convert(source(subj, ctx), S);
-    let mode = null;
+    /** @type {"sub" | "off" | "len" | "line" | null} */ let mode = null;
     for (let i = 0; i < kids.length; i += 1) {
       const w = words[i];
       if (w === "SUBMATCHES") { mode = "sub"; continue; }
@@ -2654,11 +2654,11 @@ export function deriveProgramWanted(reg, options, session, capture) {
       const t = lvalue(kids[i], ctx);
       if (mode === "sub") {
         if (!charlike(t.type)) throw new Unsupported(`SUBMATCHES into a ${t.type.k}`);
-        out.subs.push({target: t, value: convert({e: "temp", name: `fsub[${out.subs.length}]`, type: S}, t.type)});
+        out.subs.push({target: t, value: convert(/** @type {import("./frontend-types.ts").ValueExpr} */ ({e: "temp", name: `fsub[${out.subs.length}]`, type: S}), t.type)});
       } else {
         if (t.type.k !== "i") throw new Unsupported(`MATCH ${mode.toUpperCase()} into a ${t.type.k}`);
         if (mode === "line" && !inTable) throw new Unsupported(`MATCH LINE without IN TABLE: ${text}`);
-        out[mode] = t;
+        /** @type {{"off"?: import("./frontend-types.ts").ValueExpr, "len"?: import("./frontend-types.ts").ValueExpr, "line"?: import("./frontend-types.ts").ValueExpr}} */ (out)[mode] = t;
       }
     }
     return out;
@@ -2682,8 +2682,8 @@ export function deriveProgramWanted(reg, options, session, capture) {
   if (isStmt(node, Statements.Write)) {
     // a kernel line the host implements (KERNEL)
     const k = kernelOf(node, ctx);
-    if (k?.fn !== undefined) return {s: "native", fn: k.fn, args: nativeArgs(k.args, ctx), stmt: true};
-    if (k?.bound !== undefined && ctx.kernelLoop?.binds.includes(k.bound)) return {s: "nop"};
+    if (k?.fn !== undefined) return {s: "native", fn: k.fn, args: nativeArgs(/** @type {string[]} */ (k.args), ctx), stmt: true};
+    if (k?.bound !== undefined && /** @type {import("./frontend-types.ts").BoundKernelSpec} */ (ctx.kernelLoop)?.binds.includes(k.bound)) return {s: "nop"};
     // a line whose work the host does elsewhere (a JavaScript declaration the
     // host function of a later line does not need)
     if (k?.nop === true) return {s: "nop"};

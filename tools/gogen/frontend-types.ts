@@ -85,6 +85,8 @@ export interface CompilationContext { reg: Registry; program: FrontendProgram }
 export interface NativeMe { fn: string; params: [string, "importing" | "exporting", "string" | "xstring" | "i", boolean?][] }
 export interface NativeArgument { ref: boolean; value: ValueExpr }
 export interface KernelSpec { fn?: string; args?: string[]; loop?: string; binds?: string[]; end?: boolean; bound?: string; nop?: boolean }
+// A kernel loop with a bound name always carries its binds.
+export interface BoundKernelSpec extends KernelSpec { binds: string[] }
 export type LoopState = (Omit<Mutable<Extract<FrontendStmt, {s: "loop"}>>, "body"> | Omit<Mutable<Extract<FrontendStmt, {s: "loop_data"}>>, "body">) & {body?: FrontendStmt[]};
 export interface MethodContext extends CompilationContext {
   className: string; scopeName?: string; owner?: string; method: string; sig: Signature;
