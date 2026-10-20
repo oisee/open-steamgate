@@ -180,15 +180,15 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
       return false;
     }
   });
-  // lock objects must be known before methods compile: their key order is
-  // part of every generated ENQUEUE / DEQUEUE argument
+  // lock objects must be known before methods compile: their key order is part of every generated ENQUEUE / DEQUEUE argument
   program.lockObjects = lockObjectRegistry(reg, program);
   program.caught = caughtIndex(reg, program.wanted,
     (c) => clasDef(reg, c)?.getSuperClass()?.toUpperCase() ?? /** @type {Record<string, string | undefined>} */ (RUNTIME_CX_SUPER)[c]);
   /** @param {import("./frontend-types.ts").CompilationContext} ctx @param {import("./frontend-session-types.ts").ClassObject} obj */ const lowerClass = (ctx, obj) => {
     const saved = PROGRAM;
     PROGRAM = ctx.program; // Global type helpers must use the tracked program too.
-    try { return classIr(ctx, /** @type {import("./frontend-types.ts").ClassSource} */ (obj)); } finally { PROGRAM = saved; }
+    // @ts-expect-error -- abapiti form pending
+    try { return classIr(ctx, obj); } finally { PROGRAM = saved; }
   };
   for (const obj of enumerateObjects(reg, "selected-classes", wanted, "scheduling", (o) => o instanceof abaplint.Objects.Class && selectionHas(wanted, o.getName().toLowerCase()) && (!discoveryProbe || discoveryProbe.owners.has(upper(o.getName()))))) {
     if (!(obj instanceof abaplint.Objects.Class)) continue;
@@ -270,7 +270,7 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
 
 /** @param {import("./frontend-session-types.ts").Registry} reg @param {import("./frontend-types.ts").FrontendProgram} program @returns {import("./frontend-types.ts").FrontendTable[]} */ export function tableRegistry(reg, program) {
   /** @type {import("./frontend-types.ts").FrontendTable[]} */ const out = [];
-  /** @type {[string | undefined, Set<string> | undefined]} */ const saved = [program.currentClass, program.currentTypes];
+  const saved = [program.currentClass, program.currentTypes];
   program.currentClass = undefined;
   program.currentTypes = undefined;
   try {
@@ -289,16 +289,16 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
       try { key = view ? [] : (table?.listKeys?.(reg) ?? []).map(upper); } catch { key = []; }
       const columns = st.getComponents().map((c) => {
         const kind = typeKindOf(c.type);
-        const len = ["C", "N", "X"].includes(kind) ? /** @type {() => number} */ ((/** @type {{getLength?: unknown}} */ (c.type)).getLength)() : kind === "P" ? /** @type {() => number} */ ((/** @type {{getLength?: unknown}} */ (c.type)).getLength)() : 0;
-        const dec = kind === "P" ? /** @type {() => number} */ ((/** @type {{getDecimals?: unknown}} */ (c.type)).getDecimals)() : 0;
+        // @ts-expect-error -- abapiti form pending
+        const len = ["C", "N", "X"].includes(kind) ? c.type.getLength() : kind === "P" ? c.type.getLength() : 0;
+        // @ts-expect-error -- abapiti form pending
+        const dec = kind === "P" ? c.type.getDecimals() : 0;
         /** @type {Partial<Record<string, import("./ir.ts").WriteType>>} */ const types = {C: {abap: "C", len}, N: {abap: "C", len}, I: {abap: "I"}, "8": {abap: "INT8"}, P: {abap: "P", len: 2 * len - 1, dec},
           g: {abap: "STRING"}, D: {abap: "D"}, X: {abap: "X", len}, y: {abap: "XSTRING"}}; const ir = types[kind] ?? null;
         return {name: upper(c.name), kind, len, dec, key: key.includes(upper(c.name)), type: ir};
       });
       /** @type {import("./frontend-types.ts").FrontendTable} */ const entry = {name, view, client: columns.some((c) => c.name === "MANDT"), key, columns};
-      // a view over a client-dependent table without MANDT hides the client
-      // (dbTable refuses it at build time; a read by name at run time does
-      // the same, go/abap selectdyn.go)
+      // a view over a client-dependent table without MANDT hides the client (dbTable refuses it at build time; a read by name at run time does the same, go/abap selectdyn.go)
       if (view && !entry.client) {
         const hidden = [...new Set((viewObject?.getFields() ?? []).map((f) => upper(f.TABNAME)))].find((b) => {
           try {
@@ -308,9 +308,7 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
         });
         if (hidden) entry.hidesClient = hidden;
       }
-      // a CDS name and its SQL view (both are views here, gen/cds writes the
-      // DDIC view under each name); the client is the SQL view's, which is
-      // where MANDT is (open-steamgate #45)
+      // a CDS name and its SQL view (both are views here, gen/cds writes the DDIC view under each name); the client is the SQL view's, which is where MANDT is (open-steamgate #45)
       const sqlView = view ? program.cdsViews?.[name] : undefined;
       if (sqlView && sqlView !== name) entry.sqlView = sqlView;
       const cds = Object.entries(program.cdsViews ?? {}).find(([, v]) => v === name)?.[0];
@@ -326,10 +324,10 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
       out.push(entry); }, "table-output");
     }
   } finally {
+    // @ts-expect-error -- abapiti form pending
     [program.currentClass, program.currentTypes] = saved;
   }
-  // the other names of the dictionary: CREATE DATA ... TYPE (name) of one
-  // of them is refused by name, an unknown name is CX_SY_CREATE_DATA_ERROR
+  // the other names of the dictionary: CREATE DATA ... TYPE (name) of one of them is refused by name, an unknown name is CX_SY_CREATE_DATA_ERROR
   program.ddicNames = [.../** @type {NonNullable<import("./frontend-types.ts").FrontendProgram["rtti"]>} */ (program.rtti).known].filter((n) => !/=>/.test(n) && !out.some((t) => t.name === n)).sort();
   return out.sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -406,8 +404,9 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
 /** @param {import("./frontend-session-types.ts").Registry} reg @param {string} owner @param {string} name @returns {string | undefined} */ function aliasTarget(reg, owner, name) {
   for (const o of [owner, ...ancestors(reg, owner)]) {
     const def = /** @type {import("@abaplint/core").Objects.Interface | undefined} */ (reg.getObject("INTF", o))?.getDefinition() ?? clasDef(reg, o);
-    /** @type {ReturnType<import("@abaplint/core").IInterfaceDefinition["getAliases"]> | {getAll?: () => ReturnType<import("@abaplint/core").IInterfaceDefinition["getAliases"]>} | undefined} */ const all = def?.getAliases?.();
-    /** @type {ReturnType<import("@abaplint/core").IInterfaceDefinition["getAliases"]>} */ const list = Array.isArray(all) ? all : /** @type {{getAll?: () => ReturnType<import("@abaplint/core").IInterfaceDefinition["getAliases"]>}} */ (all)?.getAll?.() ?? [];
+    const all = def?.getAliases?.();
+    // @ts-expect-error -- abapiti form pending
+    /** @type {ReturnType<import("@abaplint/core").IInterfaceDefinition["getAliases"]>} */ const list = Array.isArray(all) ? all : all?.getAll?.() ?? [];
     const hit = list.find((x) => upper(x.getName()) === name);
     if (hit) return upper(hit.getComponent());
   }
@@ -1266,10 +1265,9 @@ export function deriveProgramWanted(reg, options, session, capture) {
   if (program.consts.has(go)) return go;
   /** @type {import("./ir.ts").Type} */ let type;
   try { type = typeOf(id.getType(), name, program); } catch (e) { if (e instanceof Unsupported) return undefined; throw e; }
-  /** @type {string | Record<string, string | undefined> | undefined} */ let value = id.getValue?.();
+  let value = id.getValue?.();
   const SCALAR = ["i", "int8", "f", "c", "string", "x", "xstring"];
-  // a quote inside a literal is written twice: '#''"' is #'" (the Zork
-  // alphabet shifted by one character after it until this was read right)
+  // a quote inside a literal is written twice: '#''"' is #'" (the Zork alphabet shifted by one character after it until this was read right)
   /** @param {string | number | undefined} v @returns {string} */ const unquote = (v) => {
     v = String(v);
     if (/^'.*'$/s.test(v)) return v.slice(1, -1).replaceAll("''", "'");
@@ -1280,8 +1278,7 @@ export function deriveProgramWanted(reg, options, session, capture) {
   if (value !== null && typeof value === "object" && type.k === "struct") {
     const fields = program.structs.get(type.go)?.fields ?? [];
     const byName = new Map(Object.entries(value).map(([k, v]) => [upper(k), v]));
-    // an n component (MSGNO of a T100 key) whose VALUE is exactly its digits:
-    // the characters are the value; any other n VALUE is not measured
+    // an n component (MSGNO of a T100 key) whose VALUE is exactly its digits: the characters are the value; any other n VALUE is not measured
     /** @param {import("./ir.ts").Field} f @returns {boolean} */ const nDigits = (f) => f.type.k === "n" && byName.has(f.name) && new RegExp(`^[0-9]{${f.type.len}}$`).test(unquote(byName.get(f.name)));
     if (fields.length === 0 || fields.some((f) => (!SCALAR.includes(f.type.k) && !nDigits(f)) || typeof byName.get(f.name) === "object")) return undefined;
     program.consts.set(go, {go, type, value: Object.fromEntries(fields.map((f) => [f.name, byName.has(f.name) ? unquote(byName.get(f.name)) : undefined]))});
@@ -1672,11 +1669,10 @@ export function deriveProgramWanted(reg, options, session, capture) {
 }
 /** statements that add a row anywhere but the end, or remove one, on a table with a non-unique sorted secondary key */
 /** @param {import("./frontend-types.ts").TableType} tableType @param {string} what @param {import("./frontend-types.ts").MethodContext | null} [ctx] @returns {void} */ function keyGuard(tableType, what, ctx = null) {
-  // AJSON's tree has one node per (path,name). The non-unique secondary
-  // declarations order only array children (path,index) or ordered object
-  // children (path,order); those are unique within their respective sets.
-  // Removing a node therefore cannot reorder equal keys seen by stringify.
-  if (what === "DELETE" && ctx?.className === "ZCL_AJSON" && /** @type {import("./frontend-types.ts").StructType | undefined} */ (tableType.row)?.go === "ZIF_AJSON_TYPES__TY_NODE") return;
+  // AJSON's tree has one node per (path,name). The non-unique secondary declarations order only array children (path,index) or ordered object
+  // children (path,order); those are unique within their respective sets. Removing a node therefore cannot reorder equal keys seen by stringify.
+  // @ts-expect-error -- abapiti form pending
+  if (what === "DELETE" && ctx?.className === "ZCL_AJSON" && tableType.row?.go === "ZIF_AJSON_TYPES__TY_NODE") return;
   const nonUnique = (tableType?.secondary ?? []).filter((k) => !k.unique);
   if (nonUnique.length) throw new Unsupported(`${what} on a table with the non-unique secondary key ${nonUnique[0].name}: the order of its duplicates is measured for rows added at the end only`);
 }
@@ -2659,7 +2655,7 @@ export function deriveProgramWanted(reg, options, session, capture) {
       } else {
         if (t.type.k !== "i") throw new Unsupported(`MATCH ${mode.toUpperCase()} into a ${t.type.k}`);
         if (mode === "line" && !inTable) throw new Unsupported(`MATCH LINE without IN TABLE: ${text}`);
-        /** @type {{"off"?: import("./frontend-types.ts").ValueExpr, "len"?: import("./frontend-types.ts").ValueExpr, "line"?: import("./frontend-types.ts").ValueExpr}} */ (out)[mode] = t;
+        out[mode] = t;
       }
     }
     return out;
@@ -3391,10 +3387,12 @@ const CALC_CODE = {i: "I", int8: "8", f: "F", p: "P", c: "C", string: "g", n: "N
       const v = arith(node, ctx, calc);
       if (leaves === null) {
         leaves = [];
-        /** @param {unknown} n @returns {void} */ const walk = (n) => {
+        // @ts-expect-error -- abapiti form pending
+        const walk = (n) => {
           if (Array.isArray(n)) { n.forEach(walk); return; }
           if (!n || typeof n !== "object") return;
-          if (/** @type {import("./frontend-types.ts").FrontendWalkNode} */ (n).e === "unwrap_calc") { /** @type {import("./frontend-types.ts").ValueExpr[]} */ (leaves).push(/** @type {import("./frontend-types.ts").ValueExpr} */ ((/** @type {{x?: unknown}} */ (n)).x)); return; }
+          // @ts-expect-error -- abapiti form pending
+          if (n.e === "unwrap_calc") { leaves.push(n.x); return; }
           for (const [k, x] of Object.entries(n)) if (k !== "type") walk(x);
         };
         walk(v);
@@ -3527,7 +3525,8 @@ const CALC_CODE = {i: "I", int8: "8", f: "F", p: "P", c: "C", string: "g", n: "N
 // abaplint resolves a local interface's constant types but leaves VALUEs
 // that refer to a class constant undefined. Recover only declared VALUEs;
 // an unresolved expression remains a refusal in registerConst.
-/** @param {import("@abaplint/core").TypedIdentifier} id @param {string} attr @param {{source: string}} local @param {import("./frontend-session-types.ts").Registry} reg @returns {{getType: () => import("@abaplint/core").AbstractType, getValue: () => string | Record<string, string | undefined> | undefined}} */ function localInterfaceConstant(id, attr, local, reg) {
+// @ts-expect-error -- abapiti form pending
+/** @param {string} attr @param {{source: string}} local @param {import("./frontend-session-types.ts").Registry} reg */ function localInterfaceConstant(id, attr, local, reg) {
   /** @param {string} name @param {string} source @returns {string | Record<string, string | undefined> | undefined} */ const resolve = (name, source) => {
     const m = new RegExp(`\\b${name}\\s+TYPE\\s+[^\\n,.]+?\\s+VALUE\\s+([^,\\n.]+)`, "i").exec(source);
     if (!m) return undefined;
@@ -5421,7 +5420,8 @@ const FUNCTIONS = {
   if ((exceptions || receiving) && !statement) throw new Unsupported(`RECEIVING / EXCEPTIONS in an expression: ${chainText}`);
   if (receiving && (resolved.returning === null || !sameType(receiving.type, /** @type {NonNullable<import("./frontend-types.ts").Signature["returning"]>} */ (resolved.returning).type))) throw new Unsupported(`RECEIVING into a ${receiving.type.k}: ${chainText}`);
   // SUPER->constructor( ) of a chain where no superclass has a constructor does nothing
-  if (resolved.none) { const result = /** @type {Extract<import("./ir.ts").Expr, {e: "nop_call"}>} */ (/** @type {unknown} */ ({e: "nop_call", type: {k: "void"}})); return result; }
+  // @ts-expect-error -- abapiti form pending
+  if (resolved.none) { /** @type {Extract<import("./ir.ts").Expr, {e: "nop_call"}>} */ const result = {e: "nop_call", type: {k: "void"}}; return result; }
   return /** @type {import("./frontend-types.ts").ValueExpr} */ ({e: "call", method: qualified, static: resolved.static, owner, receiver, sup, args, type: resolved.returning?.type ?? {k: "void"},
     exceptions, receiving, callee: qualified});
 }
@@ -5430,7 +5430,7 @@ const FUNCTIONS = {
   let t = /** @type {string} */ (p.default);
   // A system field in a signature default is read when the call is made.
   // ASSERT_SUBRC's ACT defaults to sy-subrc.
-  if (SY_MESSAGES[upper(t)]) return convert(/** @type {import("./frontend-types.ts").ValueExpr} */ ({e: "sy", .../** @type {{field: string}} */ (SY_MESSAGES[upper(t)])}), p.type);
+  if (SY_MESSAGES[upper(t)]) return convert({e: "sy", ...SY_MESSAGES[upper(t)]}, p.type);
   if (/** @type {Record<string, string>} */ (SY)[upper(t)] !== undefined) return convert(/** @type {import("./frontend-types.ts").ValueExpr} */ ({e: "sy", field: /** @type {Record<string, string>} */ (SY)[upper(t)], type: I}), p.type);
   // SPACE is a built-in value, not an attribute of the class which declares
   // the method. GUI_UPLOAD's optional CODEPAGE uses exactly this default.
@@ -5595,7 +5595,7 @@ const FUNCTIONS = {
   }
   if (expr.type.k === "data") {
     // ultra/itab: an operand of generic arithmetic, read into one calculation type
-    if (GEN_CALC && (["i", "int8", "f"].includes(to.k) || (to.k === "p" && /** @type {{calc?: unknown}} */ (to).calc))) return {e: "unwrap_calc", x: expr, type: to};
+    if (GEN_CALC && (["i", "int8", "f"].includes(to.k) || (to.k === "p" && to.calc))) return {e: "unwrap_calc", x: expr, type: to};
     if (!["string", "c", "i", "d", "t", "p"].includes(to.k) || /** @type {{calc?: unknown}} */ (to).calc) throw new Unsupported(`a generic value moved into a ${to.k}`);
     return {e: "unwrap", x: expr, type: to};
   }
