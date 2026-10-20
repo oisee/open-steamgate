@@ -10,7 +10,8 @@ export type RefType = Extract<Type, {k: "ref"}>;
 export type PackedType = Extract<Type, {k: "p"}>;
 export type ValueExpr = (TypedExpr | {readonly e: "nop_call"; readonly type: Extract<Type, {k: "void"}>}) & {readonly arith?: boolean; readonly fromP?: PackedType};
 // Shapes still emitted by the JavaScript frontend, including explicit absence values.
-export interface FrontendSqlPredicate extends Omit<SqlPredicate, "type" | "kind"> { readonly type: WriteType; readonly kind?: string }
+// `after` is filled in when the host pred is bound (loweredArgs), not at push time.
+export interface FrontendSqlPredicate extends Omit<SqlPredicate, "type" | "kind" | "after"> { readonly type: WriteType; readonly kind?: string; readonly after?: number }
 type StatementShape<T> = T extends {readonly s: "call_enq"} ? Omit<T, "fields"> & {readonly fields?: readonly LockObject["fields"][number][]}
   : T extends {readonly s: "concat"} ? Omit<T, "sep"> & {readonly sep: Expr | null}
   : T extends {readonly s: "select_dyn"} ? Omit<T, "fields" | "where"> & {readonly fields: Expr | null; readonly where: Expr | null}
@@ -165,5 +166,20 @@ export interface FrontendWalkNode {
   readonly elseifs?: readonly {readonly body?: readonly unknown[]}[];
   readonly catches?: readonly {readonly body?: readonly unknown[]}[];
   readonly [key: string]: unknown;
+}
+
+// The SELECT path's working view of a table (dbTable): its columns by name
+// and their IR types computed on demand, not the finished FrontendTable.
+export interface DbTableShape {
+  readonly name: string; readonly client: boolean; readonly key: readonly string[];
+  readonly columns: ReadonlyMap<string, import("@abaplint/core").BasicTypes.IStructureComponent>;
+  colType: (n: string) => import("./ir.ts").Type;
+}
+
+// A host value the SELECT path binds: the expression alone or wrapped with
+// the fit markers the emitter's binding forms read (sqlValue, loweredArgs).
+export interface HostMarker {
+  v?: import("./ir.ts").Expr; fit?: number; xstring?: boolean; xhex?: number; xexact?: number;
+  [key: string]: unknown;
 }
 export interface FrontendSelectFae { name: string; row: StructType; n: number; table: TypedExpr }

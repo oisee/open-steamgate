@@ -51,6 +51,7 @@ import {source, componentsOf, arith, sourceOperand, callMethodChain, excHolder,
   omittedArgument, omittedFactoryCall} from "./frontend-expressions-calls.mjs";
 /** @typedef {import("./frontend-types.ts").MethodSignature} ClassSignature */
 /** @typedef {import("@abaplint/core").Nodes.StatementNode} StNode */
+/** @typedef {{hosts: import("./frontend-types.ts").HostMarker[], ranges: import("./frontend-types.ts").FrontendSqlPredicate[]}} SqlAcc */
 /** @typedef {typeof byteStatementHelpers} ByteStatementHelpers */ const byteStatementHelpers = {source, lvalue, convert, findResults};
 /** @type {WeakMap<import("./frontend-session-types.ts").Registry, Record<string, string>>} */ const cdsViewsByRegistry = new WeakMap();
 const HOST_REPLACED = new Set(["ZCL_OSD_ENQ_KERNEL"]);
@@ -1265,7 +1266,7 @@ export function deriveProgramWanted(reg, options, session, capture) {
   if (program.consts.has(go)) return go;
   /** @type {import("./ir.ts").Type} */ let type;
   try { type = typeOf(id.getType(), name, program); } catch (e) { if (e instanceof Unsupported) return undefined; throw e; }
-  let value = id.getValue?.();
+  /** @type {string | Record<string, string | undefined> | undefined} */ let value = id.getValue?.();
   const SCALAR = ["i", "int8", "f", "c", "string", "x", "xstring"];
   // a quote inside a literal is written twice: '#''"' is #'" (the Zork
   // alphabet shifted by one character after it until this was read right)
@@ -2812,8 +2813,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "dref_field", "fs", "r
 
 // the built-in string functions: repeat( ) replace( ) condense( )
 // shift_left( ) shift_right( ) to_mixed( ), measured on A4H 2026-09-23. A c
-// argument loses its trailing blanks (replace( ) with sub = ' ' raises for
-// an empty sub), which is how a c value is stored here already.
+// argument loses its trailing blanks (replace( ) with sub = ' ' raises for an empty sub), which is how a c value is stored here already.
 const STRING_FNS = {
   REPEAT: ["VAL", "OCC"], REPLACE: ["VAL", "SUB", "REGEX", "WITH", "OCC"], CONDENSE: ["VAL", "DEL", "FROM", "TO"],
   SHIFT_LEFT: ["VAL", "PLACES", "CIRCULAR", "SUB"], SHIFT_RIGHT: ["VAL", "PLACES", "CIRCULAR", "SUB"], TO_MIXED: ["VAL", "SEP", "CASE", "MIN"],
@@ -3378,23 +3378,23 @@ const CALC_CODE = {i: "I", int8: "8", f: "F", p: "P", c: "C", string: "g", n: "N
   if (outer.k !== "data") {
     if (charlike(outer)) charTarget = true;
     else if (outer.k === "x") statics.push("I");
-    else if (["i", "int8", "f", "p"].includes(outer.k)) statics.push(CALC_CODE[outer.k]);
+    else if (["i", "int8", "f", "p"].includes(outer.k)) statics.push(/** @type {Record<string, string>} */ (CALC_CODE)[outer.k]);
     else throw new Unsupported(`calculation type of ${text} into a ${outer.k}`);
   }
   const target = outer.k === "data" ? ctx.genTarget : null;
   if (target === undefined || (outer.k === "data" && !target)) throw new Unsupported(`generic arithmetic into a generic value that is not a target: ${text}`);
   /** @type {Record<string, import("./frontend-types.ts").ValueExpr | {readonly reason: string}>} */ const branches = {};
   /** @type {import("./frontend-types.ts").ValueExpr[] | null} */ let leaves = null;
-  for (const [code, calc] of [["I", I], ["8", INT8], ["P", P31], ["F", F]]) {
+  for (const [code, calc] of /** @type {[string, import("./ir.ts").Type][]} */ ([["I", I], ["8", INT8], ["P", P31], ["F", F]])) {
     GEN_CALC = true;
     try {
       const v = arith(node, ctx, calc);
       if (leaves === null) {
         leaves = [];
-        const walk = (n) => {
+        /** @param {unknown} n @returns {void} */ const walk = (n) => {
           if (Array.isArray(n)) { n.forEach(walk); return; }
           if (!n || typeof n !== "object") return;
-          if (n.e === "unwrap_calc") { leaves.push(n.x); return; }
+          if (/** @type {import("./frontend-types.ts").FrontendWalkNode} */ (n).e === "unwrap_calc") { /** @type {import("./frontend-types.ts").ValueExpr[]} */ (leaves).push(/** @type {import("./frontend-types.ts").ValueExpr} */ ((/** @type {{x?: unknown}} */ (n)).x)); return; }
           for (const [k, x] of Object.entries(n)) if (k !== "type") walk(x);
         };
         walk(v);
@@ -3414,12 +3414,12 @@ const CALC_CODE = {i: "I", int8: "8", f: "F", p: "P", c: "C", string: "g", n: "N
 }
 
 /** @param {import("@abaplint/core").Nodes.ExpressionNode} n @param {import("./frontend-types.ts").MethodContext} ctx @returns {import("./frontend-types.ts").ValueExpr} */ function fieldChain(n, ctx) {
-  return fieldChainParts(isExpr(n, Expressions.SourceField) ? [n] : n.getChildren(), () => n.concatTokens(), ctx);
+  return fieldChainParts(isExpr(n, Expressions.SourceField) ? [n] : /** @type {import("@abaplint/core").Nodes.ExpressionNode} */ (n).getChildren(), () => n.concatTokens(), ctx);
 }
 /** @param {readonly import("@abaplint/core").INode[]} kids @param {() => string} tokenText @param {import("./frontend-types.ts").MethodContext} ctx @returns {import("./frontend-types.ts").ValueExpr} */ function fieldChainParts(kids, tokenText, ctx) {
   const text = upper(tokenText());
   if (SY_MESSAGES[text]) return {e: "sy", ...SY_MESSAGES[text]};
-  if (SY[text] !== undefined) return {e: "sy", field: SY[text], type: I};
+  if (/** @type {Record<string, string>} */ (SY)[text] !== undefined) return {e: "sy", field: /** @type {Record<string, string>} */ (SY)[text], type: I};
   // the logon client: the transpiler runtime's constant (abap.Mandt)
   if (text === "SY-MANDT") return {e: "sy_mandt", type: C(3)};
   if (text === "SY-BATCH") return {e: "chars", value: "", type: C(1)};
@@ -3445,44 +3445,44 @@ const CALC_CODE = {i: "I", int8: "8", f: "F", p: "P", c: "C", string: "g", n: "N
   let i = 0;
   if (isExpr(kids[0], Expressions.ClassName) && isTok(kids[1], "=>")) {
     const owner = upper(kids[0].concatTokens());
-    const attr = upper(kids[2].concatTokens());
+    const attr = upper(/** @type {import("./frontend-types.ts").TokenText} */ (/** @type {unknown} */ (kids[2])).concatTokens());
     place = resolveStatic(owner, attr, ctx);
     i = 3;
-  } else if ((isTok(kids[0], "ME") || upper(kids[0].concatTokens()) === "ME") && isTok(kids[1], "->")) {
-    const name = upper(kids[2].concatTokens());
-    const type = findAttribute(ctx, upper(kids[2].concatTokens()))?.type;
-    if (type === undefined) throw new Unsupported(`me->${kids[2].concatTokens()}: not an attribute`);
+  } else if ((isTok(kids[0], "ME") || upper(/** @type {import("./frontend-types.ts").TokenText} */ (/** @type {unknown} */ (kids[0])).concatTokens()) === "ME") && isTok(kids[1], "->")) {
+    const name = upper(/** @type {import("./frontend-types.ts").TokenText} */ (/** @type {unknown} */ (kids[2])).concatTokens());
+    const type = findAttribute(ctx, upper(/** @type {import("./frontend-types.ts").TokenText} */ (/** @type {unknown} */ (kids[2])).concatTokens()))?.type;
+    if (type === undefined) throw new Unsupported(`me->${/** @type {import("./frontend-types.ts").TokenText} */ (/** @type {unknown} */ (kids[2])).concatTokens()}: not an attribute`);
     place = {e: "attr", name, type};
     i = 3;
   } else if (isExpr(kids[0], Expressions.SourceField) || isExpr(kids[0], Expressions.SourceFieldSymbol)) {
     place = variable(kids[0].concatTokens(), ctx);
     i = 1;
   } else if (isTok(kids[0], "ME") || (isExpr(kids[0], Expressions.SourceField) && upper(kids[0].concatTokens()) === "ME")) {
-    /** @type {import("./frontend-types.ts").ValueExpr} */ const attr = findAttribute(ctx, upper(kids[2].concatTokens())); place = {e: "attr", name: upper(kids[2].concatTokens()), type: attr.type};
+    const attr = /** @type {import("./frontend-types.ts").ValueExpr} */ (findAttribute(ctx, upper(/** @type {import("./frontend-types.ts").TokenText} */ (/** @type {unknown} */ (kids[2])).concatTokens()))); place = {e: "attr", name: upper(/** @type {import("./frontend-types.ts").TokenText} */ (/** @type {unknown} */ (kids[2])).concatTokens()), type: attr.type};
     i = 3;
   } else {
     throw new Unsupported(`field chain ${tokenText()}`);
   }
   for (; i < kids.length; i += 1) {
     if (isExpr(kids[i], Expressions.TableExpression)) {
-      place = rowOf(place, kids[i], ctx);
+      place = rowOf(place, /** @type {import("@abaplint/core").Nodes.ExpressionNode} */ (kids[i]), ctx);
     } else if (isTok(kids[i], "-") && isExpr(kids[i + 1], Expressions.ComponentName)) {
-      const f = fieldOf(ctx, place.type, kids[i + 1].concatTokens(), tokenText());
+      const f = fieldOf(ctx, place.type, /** @type {import("./frontend-types.ts").TokenText} */ (/** @type {unknown} */ (kids[i + 1])).concatTokens(), tokenText());
       place = {e: "field", base: place, name: f.name, type: f.type};
       i += 1;
     } else if (isTok(kids[i], "->") && isExpr(kids[i + 1], Expressions.AttributeName) && ["ref", "exc"].includes(place.type.k)) {
-      place = refAttribute(place, kids[i + 1], ctx);
+      place = refAttribute(place, /** @type {import("./frontend-types.ts").TokenText} */ (/** @type {unknown} */ (kids[i + 1])), ctx);
       i += 1;
     } else if (isTok(kids[i], "->") && isExpr(kids[i + 1], Expressions.AttributeName) && place.type.k === "dref") {
-      place = dataRefField(place, kids[i + 1], ctx);
+      place = dataRefField(/** @type {import("./frontend-types.ts").ValueExpr & {type: Extract<import("./ir.ts").Type, {k: "dref"}>}} */ (place), /** @type {import("@abaplint/core").Nodes.ExpressionNode} */ (kids[i + 1]), ctx);
       i += 1;
-    } else if (isTok(kids[i], "->") && upper(kids[i - 1].concatTokens()) === "ME") {
-      /** @type {import("./frontend-types.ts").ValueExpr} */ const attr = findAttribute(ctx, upper(kids[i + 1].concatTokens())); place = {e: "attr", name: upper(kids[i + 1].concatTokens()), type: attr.type};
+    } else if (isTok(kids[i], "->") && upper(/** @type {import("./frontend-types.ts").TokenText} */ (/** @type {unknown} */ (kids[i - 1])).concatTokens()) === "ME") {
+      const attr = /** @type {import("./frontend-types.ts").ValueExpr} */ (findAttribute(ctx, upper(/** @type {import("./frontend-types.ts").TokenText} */ (/** @type {unknown} */ (kids[i + 1])).concatTokens()))); place = {e: "attr", name: upper(/** @type {import("./frontend-types.ts").TokenText} */ (/** @type {unknown} */ (kids[i + 1])).concatTokens()), type: attr.type};
       i += 1;
     } else if (isExpr(kids[i], Expressions.FieldOffset) || isExpr(kids[i], Expressions.FieldLength)) {
-      const off = isExpr(kids[i], Expressions.FieldOffset) ? offsetValue(kids[i], ctx) : null;
+      const off = isExpr(kids[i], Expressions.FieldOffset) ? offsetValue(/** @type {import("@abaplint/core").Nodes.ExpressionNode} */ (kids[i]), ctx) : null;
       if (off !== null) i += 1;
-      const len = isExpr(kids[i], Expressions.FieldLength) ? offsetValue(kids[i], ctx) : null;
+      const len = isExpr(kids[i], Expressions.FieldLength) ? offsetValue(/** @type {import("@abaplint/core").Nodes.ExpressionNode} */ (kids[i]), ctx) : null;
       if (i < kids.length - 1) throw new Unsupported(`field chain ${tokenText()}`);
       return substring(place, off, len, tokenText);
     } else {
@@ -3500,7 +3500,7 @@ const CALC_CODE = {i: "I", int8: "8", f: "F", p: "P", c: "C", string: "g", n: "N
     if (!/^\d+$/.test(tokenStr(v))) throw new Unsupported(`offset ${node.concatTokens()}`);
     return {e: "int", value: Number(tokenStr(v)), type: I};
   }
-  return convert(fieldChain(v, ctx), I);
+  return convert(fieldChain(/** @type {import("@abaplint/core").Nodes.ExpressionNode} */ (/** @type {unknown} */ (v)), ctx), I);
 }
 
 /**
@@ -3511,14 +3511,14 @@ const CALC_CODE = {i: "I", int8: "8", f: "F", p: "P", c: "C", string: "g", n: "N
 /** @param {import("./frontend-types.ts").ValueExpr} base @param {import("./frontend-types.ts").ValueExpr | null} off @param {import("./frontend-types.ts").ValueExpr | null} len @param {() => string} text @returns {import("./frontend-types.ts").ValueExpr} */ function substring(base, off, len, text) {
   // a d or t is read as the c of its length (measured on A4H: t '123456'
   // gives 12 and 34 for (2) and +2(2) into i)
-  if (base.type.k === "d" || base.type.k === "t") base = {...base, type: C(base.type.len)};
+  if (base.type.k === "d" || base.type.k === "t") base = {...base, type: C(/** @type {number} */ (/** @type {{len?: unknown}} */ (base.type).len))};
   // an n the same way: its digits (A4H: n 10 '9000000123'+1(9) is 123 into
   // an i and 000000123 into an n 9; ultra/demodata)
-  if (base.type.k === "n") base = {...base, type: C(base.type.len)};
+  if (base.type.k === "n") base = {...base, type: C(/** @type {number} */ (/** @type {{len?: unknown}} */ (base.type).len))};
   const k = base.type.k;
   if (!["string", "c", "xstring", "x"].includes(k)) throw new Unsupported(`offset on a ${k}: ${text()}`);
   const litLen = len?.e === "int" ? len.value : undefined;
-  const type = k === "string" ? S : k === "xstring" ? XS : k === "c" ? C(litLen ?? base.type.len) : X(litLen ?? base.type.len);
+  const type = k === "string" ? S : k === "xstring" ? XS : k === "c" ? C(litLen ?? /** @type {number} */ (/** @type {{len?: unknown}} */ (base.type).len)) : X(litLen ?? /** @type {number} */ (/** @type {{len?: unknown}} */ (base.type).len));
   return {e: "substr", x: base, off, len, base: base.type, type};
 }
 
@@ -3527,8 +3527,8 @@ const CALC_CODE = {i: "I", int8: "8", f: "F", p: "P", c: "C", string: "g", n: "N
 // abaplint resolves a local interface's constant types but leaves VALUEs
 // that refer to a class constant undefined. Recover only declared VALUEs;
 // an unresolved expression remains a refusal in registerConst.
-function localInterfaceConstant(id, attr, local, reg) {
-  const resolve = (name, source) => {
+/** @param {import("@abaplint/core").TypedIdentifier} id @param {string} attr @param {{source: string}} local @param {import("./frontend-session-types.ts").Registry} reg @returns {{getType: () => import("@abaplint/core").AbstractType, getValue: () => string | Record<string, string | undefined> | undefined}} */ function localInterfaceConstant(id, attr, local, reg) {
+  /** @param {string} name @param {string} source @returns {string | Record<string, string | undefined> | undefined} */ const resolve = (name, source) => {
     const m = new RegExp(`\\b${name}\\s+TYPE\\s+[^\\n,.]+?\\s+VALUE\\s+([^,\\n.]+)`, "i").exec(source);
     if (!m) return undefined;
     const value = m[1].split('"')[0].trim();
@@ -3537,10 +3537,10 @@ function localInterfaceConstant(id, attr, local, reg) {
     return reg.getObject("CLAS", upper(ref[1]))?.getDefinition()?.getAttributes().getConstants()
       .find((c) => upper(c.getName()) === upper(ref[2]))?.getValue();
   };
-  let value = id.getValue?.();
+  /** @type {string | Record<string, string | undefined> | undefined} */ let value = id.getValue?.();
   if (value && typeof value === "object") {
     const begin = new RegExp(`\\bBEGIN\\s+OF\\s+${attr}\\s*,([\\s\\S]*?)\\bEND\\s+OF\\s+${attr}\\s*[,.]`, "i").exec(local.source)?.[1];
-    if (begin) value = Object.fromEntries(Object.keys(value).map((k) => [k, resolve(k, begin)]));
+    if (begin) value = Object.fromEntries(Object.keys(value).map((k) => [k, /** @type {string | undefined} */ (resolve(k, begin))]));
   } else if (value === undefined) value = resolve(attr, local.source);
   return {...id, getType: () => id.getType(), getValue: () => value};
 }
@@ -3556,13 +3556,13 @@ function localInterfaceConstant(id, attr, local, reg) {
 /** @param {import("./frontend-types.ts").ConstructorItem} c @param {import("./frontend-types.ts").MethodContext} ctx @param {import("./ir.ts").Type} [inferred] @returns {import("./frontend-types.ts").ValueExpr} */ function constructor(c, ctx, inferred) {
   if (c.kw === "CONV") {
     const to = namedType(c.typeNode, ctx, inferred);
-    if (c.body === null || c.body.getChildren().length !== 1) throw new Unsupported(`CONV with LET or empty: ${c.text}`);
+    if (c.body === null || /** @type {NonNullable<import("./frontend-types.ts").ConstructorItem["body"]>} */ (c.body).getChildren().length !== 1) throw new Unsupported(`CONV with LET or empty: ${c.text}`);
     // the type of CONV takes part in the calculation type of its argument
-    return convert(source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (c.body.findDirectExpression(Expressions.Source)), ctx, to), to);
+    return convert(source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {NonNullable<import("./frontend-types.ts").ConstructorItem["body"]>} */ (c.body).findDirectExpression(Expressions.Source)), ctx, to), to);
   }
   if (c.kw === "VALUE") {
     const to = namedType(c.typeNode, ctx, inferred);
-    return valueBody(c.body, to, ctx, c.text);
+    return valueBody(/** @type {NonNullable<import("./frontend-types.ts").ConstructorItem["body"]>} */ (c.body), to, ctx, c.text);
   }
   // CORRESPONDING type( struct ) without BASE / MAPPING / EXCEPT (ultra/zvdb,
   // A4H 2026-09-24, ZCL_GOGEN_T_XCONV): a new structure, initial but for the
@@ -3589,8 +3589,8 @@ function localInterfaceConstant(id, attr, local, reg) {
       /** @type {Extract<import("./ir.ts").Expr, {e: "var"}>} */ const row = {e: "var", name: `CORR_${ctx.temps++}`, type: from.type.row};
       ctx.locals.set(row.name, from.type.row);
       const fields = [];
-      for (const f of dst.fields) {
-        const g = src.fields.find((x) => x.name === f.name);
+      for (const f of /** @type {readonly import("./ir.ts").Field[]} */ (dst.fields)) {
+        const g = /** @type {readonly import("./ir.ts").Field[]} */ (src.fields).find((x) => x.name === f.name);
         if (!g) continue;
         if (["struct", "table"].includes(f.type.k) || ["struct", "table"].includes(g.type.k)) throw new Unsupported(`CORRESPONDING with a deep component ${f.name}`);
         fields.push({name: f.name, value: convert({e: "field", base: row, name: g.name, type: g.type}, f.type)});
@@ -3604,8 +3604,8 @@ function localInterfaceConstant(id, attr, local, reg) {
     const dst = structOf(ctx, to);
     if (!src || !dst) throw new Unsupported(`CORRESPONDING: a structure not in the program`);
     const fields = [];
-    for (const f of dst.fields) {
-      const g = src.fields.find((x) => x.name === f.name);
+    for (const f of /** @type {readonly import("./ir.ts").Field[]} */ (dst.fields)) {
+      const g = /** @type {readonly import("./ir.ts").Field[]} */ (src.fields).find((x) => x.name === f.name);
       if (!g) continue;
       if (["struct", "table"].includes(f.type.k) || ["struct", "table"].includes(g.type.k)) throw new Unsupported(`CORRESPONDING with a deep component ${f.name}`);
       fields.push({name: f.name, value: convert({e: "field", base: from, name: g.name, type: g.type}, f.type)});
@@ -3642,7 +3642,7 @@ function localInterfaceConstant(id, attr, local, reg) {
     if (to.k !== "ref") throw new Unsupported(`NEW of a ${to.k}: ${c.text}`);
     if (!ctx.program.wanted.has(to.name)) throw notInProgram(ctx, to.name, `NEW ${to.name}: the class is not compiled in this program`);
     const sig = constructorSignature(ctx, to.name); const given = new Map();
-    /** @type {import("@abaplint/core").Nodes.ExpressionNode | null} */ const body = c.body;
+    const body = /** @type {import("@abaplint/core").Nodes.ExpressionNode | null} */ (c.body);
     if (body !== null) {
       let positional = isExpr(body, Expressions.Source); // Keep other expression kinds in the false branch.
       if (positional) {
@@ -3650,7 +3650,7 @@ function localInterfaceConstant(id, attr, local, reg) {
         given.set(imp.find((p) => p.default === undefined)?.name ?? imp[0]?.name, body);
       } else {
         for (const p of body.findAllExpressions(Expressions.ParameterS)) {
-          given.set(upper(p.findDirectExpression(Expressions.ParameterName).concatTokens()), p.findDirectExpression(Expressions.Source));
+          given.set(upper(/** @type {import("./frontend-types.ts").TokenText} */ (p.findDirectExpression(Expressions.ParameterName)).concatTokens()), p.findDirectExpression(Expressions.Source));
         }
       }
     }
@@ -3677,13 +3677,13 @@ function localInterfaceConstant(id, attr, local, reg) {
  */
 /** @param {import("./frontend-types.ts").CompilationContext} ctx @param {string} owner @param {string} name @returns {import("./frontend-types.ts").MethodSignature} */ function methodSignature(ctx, owner, name) {
   const key = `${owner}=>${name}`;
-  if (ctx.program.sigs.has(key)) return suppliedSignature(ctx, owner, name, ctx.program.sigs.get(key));
-  if (NATIVE_ME.has(key)) { ctx.program.sigs.set(key, nativeMeSig(ctx.program, key, name)); return ctx.program.sigs.get(key); }
+  if (ctx.program.sigs.has(key)) return suppliedSignature(ctx, owner, name, /** @type {import("./frontend-types.ts").MethodSignature} */ (ctx.program.sigs.get(key)));
+  if (NATIVE_ME.has(key)) { ctx.program.sigs.set(key, nativeMeSig(ctx.program, key, name)); return /** @type {import("./frontend-types.ts").MethodSignature} */ (ctx.program.sigs.get(key)); }
   /** @type {import("./frontend-types.ts").MethodSignature} */ let sig;
   try {
     const [intf, meth] = name.includes("~") ? name.split("~") : [null, name];
     const defOwner = intf ?? owner;
-    /** @type {import("@abaplint/core").IInterfaceDefinition | import("@abaplint/core").IClassDefinition | undefined} */ const def = ctx.reg.getObject("INTF", defOwner)?.getDefinition() ?? clasDef(ctx.reg, defOwner);
+    /** @type {import("@abaplint/core").IInterfaceDefinition | import("@abaplint/core").IClassDefinition | undefined} */ const def = /** @type {import("@abaplint/core").Objects.Interface | undefined} */ (ctx.reg.getObject("INTF", defOwner))?.getDefinition() ?? clasDef(ctx.reg, defOwner);
     if (def === undefined) throw new Unsupported(`${defOwner} is not in the program`);
     /** @type {import("./frontend-types.ts").MethodDefinition | undefined} */ const m = intf ? methodDefinitions(def).find((x) => upper(x.getName()) === meth)
       : declaredMethod(ctx.reg, defOwner, meth);
@@ -3700,7 +3700,7 @@ function localInterfaceConstant(id, attr, local, reg) {
       ctx.program.currentClass = goName(intf);
       try { return typeOf(t, key, ctx.program); } finally { ctx.program.currentClass = saved; }
     };
-    /** @param {import("@abaplint/core").TypedIdentifier} x @param {NonNullable<import("./ir.ts").Param["dir"]>} dir @returns {import("./frontend-types.ts").FrontendParam} */ const param = (x, dir) => ({name: upper(x.getName()), dir, byValue: x.getMeta().includes("pass_by_value"), type: typeIn(x.getType()), default: defaultOf(p, x),
+    /** @param {import("@abaplint/core").TypedIdentifier} x @param {NonNullable<import("./ir.ts").Param["dir"]>} dir @returns {import("./frontend-types.ts").FrontendParam} */ const param = (x, dir) => ({name: upper(x.getName()), dir, byValue: /** @type {string[]} */ (x.getMeta()).includes("pass_by_value"), type: typeIn(x.getType()), default: defaultOf(p, x),
       optional: optional.has(upper(x.getName())), defaultOwner: intf ?? declaringClass(ctx.reg, defOwner, meth, "method") ?? defOwner, defOwner: intf ?? declaringClass(ctx.reg, defOwner, meth, "method") ?? defOwner});
     const ret = p.getReturning();
     const own = [...p.getImporting().map((x) => param(x, "importing")), ...p.getExporting().map((x) => param(x, "exporting")),
@@ -3718,7 +3718,7 @@ function localInterfaceConstant(id, attr, local, reg) {
 }
 
 /** the superclasses of a class, nearest first, as far as the registry has them */
-/** @param {import("@abaplint/core").IRegistry} reg @param {string} cls @returns {string[]} */ export function ancestors(reg, cls) {
+/** @param {import("./frontend-session-types.ts").Registry} reg @param {string} cls @returns {string[]} */ export function ancestors(reg, cls) {
   const out = [];
   for (let c = clasDef(reg, cls)?.getSuperClass(), g = 0; c && g < 30; g += 1) {
     out.push(upper(c));
@@ -3729,7 +3729,7 @@ function localInterfaceConstant(id, attr, local, reg) {
 
 /** the definition of a method as a class has it: its own, else the nearest
  * superclass's; a REDEFINITION declares no parameters, so its origin's */
-/** @param {import("@abaplint/core").IRegistry} reg @param {string} cls @param {string} meth @returns {import("./frontend-types.ts").MethodDefinition | undefined} */ function declaredMethod(reg, cls, meth) {
+/** @param {import("./frontend-session-types.ts").Registry} reg @param {string} cls @param {string} meth @returns {import("./frontend-types.ts").MethodDefinition | undefined} */ function declaredMethod(reg, cls, meth) {
   for (const c of [cls, ...ancestors(reg, cls)]) {
     const m = clasDef(reg, c)?.getMethodDefinitions().getByName(meth);
     if (m && !m.isRedefinition()) return m;
@@ -3739,7 +3739,7 @@ function localInterfaceConstant(id, attr, local, reg) {
 
 /** the class in cls's chain, itself first, that declares a method or attribute */
 /** the class of cls and its ancestors that lists intf in its INTERFACES */
-/** @param {import("@abaplint/core").IRegistry} reg @param {string} cls @param {string} intf @returns {string | undefined} */ function implementingClass(reg, cls, intf) {
+/** @param {import("./frontend-session-types.ts").Registry} reg @param {string} cls @param {string} intf @returns {string | undefined} */ function implementingClass(reg, cls, intf) {
   for (const c of [cls, ...ancestors(reg, cls)]) {
     const def = clasDef(reg, c);
     if (!def) return undefined;
@@ -3748,7 +3748,7 @@ function localInterfaceConstant(id, attr, local, reg) {
   return undefined;
 }
 
-/** @param {import("@abaplint/core").IRegistry} reg @param {string} cls @param {string} name @param {"method" | "attr"} kind @returns {string | undefined} */ function declaringClass(reg, cls, name, kind) {
+/** @param {import("./frontend-session-types.ts").Registry} reg @param {string} cls @param {string} name @param {"method" | "attr"} kind @returns {string | undefined} */ function declaringClass(reg, cls, name, kind) {
   for (const c of [cls, ...ancestors(reg, cls)]) {
     const def = clasDef(reg, c);
     if (!def) return undefined;
@@ -3777,19 +3777,19 @@ function localInterfaceConstant(id, attr, local, reg) {
  */
 
 /** a table of the dictionary: its columns (typed on demand), its key, whether it has a client */
-function dbTable(ctx, tableName, verb) {
+/** @param {import("./frontend-types.ts").CompilationContext} ctx @param {string} tableName @param {string} verb @returns {import("./frontend-types.ts").DbTableShape} */ function dbTable(ctx, tableName, verb) {
   const mappings = cdsViewsByRegistry.get(ctx.reg) ?? cdsViewsByRegistry.get(inputOrigin(ctx.reg));
-  const mappingError = cdsMappingError(mappings, tableName);
+  const mappingError = cdsMappingError(/** @type {Record<string, string>} */ (mappings), tableName);
   if (mappingError) throw new Unsupported(mappingError);
   // a DDIC view (the SQL views of OSG's CDS entities, created as SQLite views
   // by the transpiler's DatabaseSetup) is read like a table: its fields are
   // its columns, MANDT among them when it has one (ultra/sadl). It is never
   // written: a write to a view is refused
-  const view = verb === "SELECT FROM" ? ctx.reg.getObject("VIEW", tableName) : undefined;
-  const tabl = ctx.reg.getObject("TABL", tableName) ?? view;
+  const view = verb === "SELECT FROM" ? /** @type {import("@abaplint/core").Objects.View | undefined} */ (ctx.reg.getObject("VIEW", tableName)) : undefined;
+  const tabl = /** @type {import("@abaplint/core").Objects.Table | import("@abaplint/core").Objects.View | undefined} */ (ctx.reg.getObject("TABL", tableName)) ?? view;
   if (!tabl) throw new Unsupported(`${verb} ${tableName}: not a table of the dictionary in this program`);
   let tType;
-  try { tType = tabl.parseType(ctx.reg); } catch { throw new Unsupported(`${verb} ${tableName}: its type does not resolve`); }
+  try { tType = /** @type {import("@abaplint/core").Objects.Table | import("@abaplint/core").Objects.View} */ (tabl).parseType(ctx.reg); } catch { throw new Unsupported(`${verb} ${tableName}: its type does not resolve`); }
   if (!(tType instanceof BasicTypes.StructureType)) throw new Unsupported(`${verb} ${tableName}: its type does not resolve`);
   const columns = new Map(tType.getComponents().map((c) => [upper(c.name), c]));
   // a view over a client-dependent table that does not carry MANDT hides
@@ -3797,27 +3797,27 @@ function dbTable(ctx, tableName, verb) {
   // has MANDT), this one would read every client's. Refused, not served
   // unfiltered (OSG's tools/cds2ddic.mjs leaves MANDT out of such views)
   if (tabl === view && !columns.has("MANDT")) {
-    const hidden = [...new Set((view.getFields() ?? []).map((f) => upper(f.TABNAME)))].find((t) => {
+    const hidden = [...new Set((/** @type {import("@abaplint/core").Objects.View} */ (view).getFields() ?? []).map((f) => upper(f.TABNAME)))].find((t) => {
       try {
-        const bt = ctx.reg.getObject("TABL", t)?.parseType(ctx.reg);
+        const bt = /** @type {import("@abaplint/core").Objects.Table | undefined} */ (ctx.reg.getObject("TABL", t))?.parseType(ctx.reg);
         return bt instanceof BasicTypes.StructureType && bt.getComponents().some((c) => upper(c.name) === "MANDT");
       } catch { return false; }
     });
     if (hidden) throw new Unsupported(`${verb} ${tableName}: a view over the client-dependent ${hidden} without MANDT`);
   }
-  const colType = (n) => {
+  /** @param {string} n @returns {import("./ir.ts").Type} */ const colType = (n) => {
     const c = columns.get(n);
     if (!c) throw new Unsupported(`${verb}: ${tableName} has no column ${n}`);
     return typeOf(c.type, `${tableName}-${n}`, ctx.program);
   };
-  let key = [];
-  try { key = tabl.listKeys?.(ctx.reg)?.map(upper) ?? []; } catch { key = []; }
+  /** @type {string[]} */ let key = [];
+  try { key = /** @type {import("@abaplint/core").Objects.Table} */ (tabl).listKeys?.(ctx.reg)?.map(upper) ?? []; } catch { key = []; }
   return {name: tableName, columns, colType, key, client: columns.has("MANDT")};
 }
 
 
 /** one comparison of a WHERE: col op value, or col IN range (a hostPred) */
-function sqlCompare(p, ctx, tb, acc) {
+/** @param {import("@abaplint/core").Nodes.ExpressionNode} p @param {import("./frontend-types.ts").MethodContext} ctx @param {import("./frontend-types.ts").DbTableShape} tb @param {SqlAcc} acc @returns {object} */ function sqlCompare(p, ctx, tb, acc) {
   const kids = p.getChildren();
   const text = p.concatTokens();
   if (!isExpr(kids[0], Expressions.SQLFieldName) || kids[0].concatTokens().includes("~")) throw new Unsupported(`WHERE compare: ${text}`);
@@ -3841,13 +3841,13 @@ function sqlCompare(p, ctx, tb, acc) {
     const fields = new Map((ctx.program.structs.get(range.type.row.go)?.fields ?? []).map((x) => [String(x.name).toUpperCase(), x]));
     if (!["SIGN", "OPTION", "LOW", "HIGH"].every((x) => fields.has(x))) throw new Unsupported(`IN of a table that is not a ranges table`);
     for (const f of ["LOW", "HIGH"]) {
-      if (!["c", "string", "i", "n", "d", "t"].includes(fields.get(f).type.k)) throw new Unsupported(`IN: a range whose ${f} is a ${fields.get(f).type.k}`);
+      if (!["c", "string", "i", "n", "d", "t"].includes(/** @type {import("./ir.ts").Field} */ (fields.get(f)).type.k)) throw new Unsupported(`IN: a range whose ${f} is a ${/** @type {import("./ir.ts").Field} */ (fields.get(f)).type.k}`);
     }
     if (!["c", "string", "i", "n", "t"].includes(ct.k)) throw new Unsupported(`IN on a ${ct.k} column: ${text}`);
     // a d column: tools/ir-ranges.mjs refuses dates, so every range with a
     // row would be NOT_COMPILED at run time; refused here until it does
     const id = String(acc.ranges.length);
-    const low = fields.get("LOW").type;
+    const low = /** @type {import("./ir.ts").Field} */ (fields.get("LOW")).type;
     const kind = ct.k === "n" ? "NUMC" : undefined;
     const irT = sqlIrType(ct);
     acc.ranges.push({id, column: lowName(col), type: irT, kind, lowLen: low.k === "c" || low.k === "n" ? low.len ?? 0 : 0, range});
@@ -3863,7 +3863,7 @@ function sqlCompare(p, ctx, tb, acc) {
         || kids.length !== between + 4) throw new Unsupported(`WHERE BETWEEN form: ${text}`);
     if (!["c", "string", "i", "n", "d", "t", "int8", "p"].includes(ct.k)) throw new Unsupported(`WHERE BETWEEN on a ${ct.k} column: ${text}`);
     const colIr = RIR.col(lowName(col), sqlIrType(ct));
-    const bound = (node) => sqlValue(sqlHost(node, [], ctx, text), ct, sqlIrType(ct), acc);
+    /** @param {import("@abaplint/core").Nodes.ExpressionNode} node */ const bound = (node) => sqlValue(sqlHost(node, [], ctx, text), ct, sqlIrType(ct), acc);
     const both = RIR.bin("AND", RIR.bin(">=", colIr, bound(lowSrc), RIR.T.bool),
       RIR.bin("<=", colIr, bound(highSrc), RIR.T.bool), RIR.T.bool);
     return between === 2 ? RIR.not(both) : both;
@@ -3871,7 +3871,7 @@ function sqlCompare(p, ctx, tb, acc) {
   const op = p.findDirectExpression(Expressions.SQLCompareOperator);
   const src = p.findDirectExpression(Expressions.SQLSource);
   if (!op || !src || kids[1] !== op || kids[2] !== src) throw new Unsupported(`WHERE compare: ${text}`);
-  const sqlOp = SQL_OPS[upper(op.concatTokens())];
+  const sqlOp = /** @type {Record<string, string>} */ (SQL_OPS)[upper(op.concatTokens())];
   if (sqlOp === undefined) throw new Unsupported(`WHERE operator ${op.concatTokens()}`);
   if (!["c", "string", "i", "n", "d", "t", "int8", "x", "p"].includes(ct.k)) throw new Unsupported(`WHERE on a ${ct.k} column: ${text}`);
   const v = sqlHost(src, kids.slice(3), ctx, text);
@@ -3880,7 +3880,7 @@ function sqlCompare(p, ctx, tb, acc) {
 
 /** a WHERE (SQLCond) as an IR predicate: comparisons, IN range, AND, OR,
  * NOT and parentheses, with ABAP's precedence (NOT, AND, OR) */
-function sqlCond(node, ctx, tb, acc) {
+/** @param {import("@abaplint/core").Nodes.ExpressionNode} node @param {import("./frontend-types.ts").MethodContext} ctx @param {import("./frontend-types.ts").DbTableShape} tb @param {SqlAcc} acc @returns {object} */ function sqlCond(node, ctx, tb, acc) {
   const items = node.getChildren();
   let i = 0;
   const text = node.concatTokens();
@@ -3895,11 +3895,11 @@ function sqlCond(node, ctx, tb, acc) {
     if (isExpr(n, Expressions.SQLCompare)) return sqlCompare(n, ctx, tb, acc);
     throw new Unsupported(`WHERE form: ${text}`);
   };
-  const notExpr = () => {
+  /** @returns {object} */ const notExpr = () => {
     if (isTok(items[i], "NOT")) { i += 1; return RIR.not(notExpr()); }
     return primary();
   };
-  const andExpr = () => {
+  /** @returns {object} */ const andExpr = () => {
     let l = notExpr();
     while (isTok(items[i], "AND")) { i += 1; l = RIR.bin("AND", l, notExpr(), RIR.T.bool); }
     return l;
@@ -3911,7 +3911,7 @@ function sqlCond(node, ctx, tb, acc) {
 }
 
 /** the client and the WHERE of a statement, AND'ed */
-function wherePred(node, ctx, tb, acc) {
+/** @param {import("@abaplint/core").Nodes.ExpressionNode} node @param {import("./frontend-types.ts").MethodContext} ctx @param {import("./frontend-types.ts").DbTableShape} tb @param {SqlAcc} acc @returns {object | null} */ function wherePred(node, ctx, tb, acc) {
   const cond = node.findDirectExpression(Expressions.SQLCond);
   let pred = tb.client ? mandtPred() : null;
   if (cond) pred = andIr(pred, sqlCond(cond, ctx, tb, acc));
@@ -3919,23 +3919,23 @@ function wherePred(node, ctx, tb, acc) {
 }
 
 /** a lowered statement's parameters as the emitter binds them, and its ranges */
-function loweredArgs(lowered, acc) {
-  const args = lowered.params.map((p) => {
+/** @param {{params: readonly {name?: string, value?: string | number | null}[], hostPreds?: readonly {id: unknown, after: unknown}[]}} lowered @param {SqlAcc} acc @returns {{args: import("./ir.ts").SqlArgument[], preds: import("./frontend-types.ts").FrontendSqlPredicate[]}} */ function loweredArgs(lowered, acc) {
+  /** @type {import("./ir.ts").SqlArgument[]} */ const args = lowered.params.map((p) => {
     const m = /^@@host:(\d+)@@$/.exec(String(p.name ?? ""));
     if (m) {
-      const h = acc.hosts[Number(m[1])];
-      return h.fit !== undefined ? {host: h.v, fit: h.fit} : h.xstring ? {host: h.v, xstring: true} : h.xhex !== undefined ? {host: h.v, xhex: h.xhex}
-        : h.xexact !== undefined ? {host: h.v, xexact: h.xexact} : {host: h};
+      const h = /** @type {import("./frontend-types.ts").HostMarker} */ (acc.hosts[Number(m[1])]);
+      return h.fit !== undefined ? {host: /** @type {import("./ir.ts").Expr} */ (h.v), fit: h.fit} : h.xstring ? {host: /** @type {import("./ir.ts").Expr} */ (h.v), xstring: true} : h.xhex !== undefined ? {host: /** @type {import("./ir.ts").Expr} */ (h.v), xhex: h.xhex}
+        : h.xexact !== undefined ? {host: /** @type {import("./ir.ts").Expr} */ (h.v), xexact: h.xexact} : {host: /** @type {import("./ir.ts").Expr} */ (/** @type {unknown} */ (h))};
     }
     if (p.name === "SY-MANDT") return {mandt: true};
-    return {value: p.value};
+    return {value: /** @type {string | number | null} */ (p.value)};
   });
-  const preds = (lowered.hostPreds ?? []).map((h) => ({...acc.ranges[Number(h.id)], after: h.after}));
+  const preds = (lowered.hostPreds ?? []).map((h) => /** @type {import("./frontend-types.ts").FrontendSqlPredicate} */ (/** @type {unknown} */ ({...acc.ranges[Number(h.id)], after: h.after})));
   return {args, preds};
 }
 
-function lowerOrRefuse(verb, rel) {
-  try { return lowerRelation(rel, "sqlite"); } catch (e) { throw new Unsupported(`${verb}: the relational IR refused it: ${e.message}`); }
+/** @param {string} verb @param {object} rel @returns {object} */ /** @param {string} verb @param {object} rel @returns {{sql: string, params: readonly {name?: string, value?: string | number | null}[], hostPreds?: readonly {id: unknown, after: unknown}[]}} */ function lowerOrRefuse(verb, rel) {
+  try { return lowerRelation(rel, "sqlite"); } catch (e) { throw new Unsupported(`${verb}: the relational IR refused it: ${/** @type {{message: string}} */ (e).message}`); }
 }
 
 /** the field list of a SELECT: * or plain columns */
@@ -3966,7 +3966,7 @@ function lowerOrRefuse(verb, rel) {
   // the first column is an SQLField, the ones after it bare SQLFieldNames
   const gcols = gb?.getChildren().filter((c) => !isTok(c, "GROUP") && !isTok(c, "BY") && !isTok(c, ",")) ?? [];
   const groupBy = gcols.map((f) => {
-    const n = isExpr(f, Expressions.SQLFieldName) ? f : f.findDirectExpression(Expressions.SQLFieldName);
+    const n = isExpr(f, Expressions.SQLFieldName) ? f : /** @type {import("@abaplint/core").Nodes.ExpressionNode} */ (/** @type {unknown} */ (f)).findDirectExpression(Expressions.SQLFieldName);
     if (!n || (!isExpr(f, Expressions.SQLFieldName) && f.getChildren().length !== 1)) throw new Unsupported(`GROUP BY ${f.concatTokens()}`);
     const name = upper(n.concatTokens());
     tb.colType(name);
@@ -4015,7 +4015,7 @@ function lowerOrRefuse(verb, rel) {
 }
 
 /** ORDER BY f [ASCENDING|DESCENDING] ..., by columns of the table */
-function orderByOf(sel, tb) {
+/** @param {import("@abaplint/core").Nodes.ExpressionNode} sel @param {import("./frontend-types.ts").DbTableShape} tb @returns {{col: string, desc: boolean}[]} */ function orderByOf(sel, tb) {
   const order = [];
   const ob = sel.findDirectExpression(Expressions.SQLOrderBy);
   if (ob) {
@@ -4052,20 +4052,20 @@ function orderByOf(sel, tb) {
   const st = node.findDirectStatement(Statements.SelectLoop);
   const text = st?.concatTokens() ?? "";
   const sel = st?.findDirectExpression(Expressions.Select);
-  if (!sel || /\b(SINGLE|UP\s+TO|DISTINCT|HAVING|JOIN|FOR\s+ALL|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION|FOR\s+UPDATE)\b/i.test(selectShape(sel))) throw new Unsupported(`SELECT loop form: ${text}`);
+  if (!sel || /\b(SINGLE|UP\s+TO|DISTINCT|HAVING|JOIN|FOR\s+ALL|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION|FOR\s+UPDATE)\b/i.test(/** @type {string} */ (/** @type {unknown} */ (selectShape(sel))))) throw new Unsupported(`SELECT loop form: ${text}`);
   if (sel.findDirectExpression(Expressions.SQLIntoTable)) throw new Unsupported(`SELECT loop INTO TABLE: ${text}`);
   const tb = selectTable(sel, ctx, text);
   const grouped = !!sel.findDirectExpression(Expressions.SQLGroupBy);
   const cols = grouped ? groupedColumns(sel, tb, text) : selectColumns(sel, tb, text);
-  const {assign, target} = intoWorkArea(sel, ctx, text, cols, "SELECT loop");
+  const {assign, target} = /** @type {{assign: unknown, target: import("./ir.ts").Expr}} */ (intoWorkArea(sel, ctx, text, cols, "SELECT loop"));
   const acc = {hosts: [], ranges: []};
   const pred = wherePred(sel, ctx, tb, acc);
   const order = orderByOf(sel, tb);
-  let rel = RIR.scan(lowName(tb.name));
+  /** @type {import("../sqlscript-ir.mjs").Rel} */ let rel = RIR.scan(lowName(tb.name));
   if (pred !== null) rel = RIR.filter(rel, pred);
   if (grouped) {
-    rel = RIR.aggregate(rel, cols.groupBy.map(lowName), cols.filter((c) => c.agg).map((c) => ({as: lowName(c.name), expr: c.agg.star
-      ? {...RIR.call("COUNT", [], RIR.T.int), star: true} : RIR.call(c.agg.fn, [RIR.col(lowName(c.agg.col), sqlIrType(c.type))], sqlIrType(c.type))})));
+    rel = RIR.aggregate(rel, /** @type {string[]} */ (cols.groupBy).map(lowName), cols.filter((c) => c.agg).map((c) => ({as: lowName(c.name), expr: /** @type {NonNullable<import("./frontend-types.ts").FrontendSelectColumn["agg"]>} */ (c.agg).star
+      ? {...RIR.call("COUNT", [], RIR.T.int), star: true} : RIR.call(/** @type {string} */ (/** @type {NonNullable<import("./frontend-types.ts").FrontendSelectColumn["agg"]>} */ (c.agg).fn), [RIR.col(lowName(/** @type {string} */ (/** @type {NonNullable<import("./frontend-types.ts").FrontendSelectColumn["agg"]>} */ (c.agg).col)), sqlIrType(c.type))], sqlIrType(c.type))})));
   }
   rel = RIR.project(rel, cols.map((c) => ({as: lowName(c.name), expr: RIR.col(lowName(c.name), sqlIrType(c.type))})));
   if (order.length > 0) rel = RIR.order(rel, order.map((o) => ({col: lowName(o.col), desc: o.desc})));
@@ -4073,11 +4073,11 @@ function orderByOf(sel, tb) {
   const body = bodyOf(node, ctx);
   // a write to the table being read, inside the loop: refused (see above)
   const writes = [];
-  const walk = (n) => {
+  /** @param {unknown} n @returns {void} */ const walk = (n) => {
     if (Array.isArray(n)) { n.forEach(walk); return; }
     if (!n || typeof n !== "object") return;
-    if ((n.s === "db_write" || n.s === "db_write_sql") && n.table === tb.name) writes.push(n);
-    for (const k of Object.keys(n)) if (k !== "type") walk(n[k]);
+    if ((/** @type {import("./frontend-types.ts").FrontendWalkNode} */ (n).s === "db_write" || /** @type {import("./frontend-types.ts").FrontendWalkNode} */ (n).s === "db_write_sql") && /** @type {{table?: unknown}} */ (n).table === tb.name) writes.push(n);
+    for (const k of Object.keys(n)) if (k !== "type") walk(/** @type {Record<string, unknown>} */ (n)[k]);
   };
   walk(body);
   if (writes.length > 0) throw new Unsupported(`SELECT loop over ${tb.name} that writes ${tb.name}: what the cursor sees of it is not measured`);
@@ -4086,14 +4086,14 @@ function orderByOf(sel, tb) {
 
 // Clause checks must inspect the parsed SELECT, not its source text: a WHERE
 // string can contain any of these keywords without adding a SQL clause.
-/** @param {import("@abaplint/core").Nodes.StatementNode} sel @returns {unknown[]} */ function selectShape(sel) {
+/** @param {import("@abaplint/core").Nodes.ExpressionNode} sel @returns {string} */ function selectShape(sel) {
   return sel.getChildren().map((child) => {
     if (isTok(child)) return tokenStr(child);
     if (isExpr(child, Expressions.SQLIntoTable)) return isTok(child.getFirstChild(), "APPENDING") ? "APPENDING TABLE" : "INTO TABLE";
-    if (isExpr(child, Expressions.SQLFrom)) return /\bJOIN\b/i.test(child.concatTokens()) ? "JOIN" : "FROM";
+    if (isExpr(child, Expressions.SQLFrom)) return /\bJOIN\b/i.test(/** @type {import("./frontend-types.ts").TokenText} */ (child).concatTokens()) ? "JOIN" : "FROM";
     if (isExpr(child, Expressions.SQLSetOp)) return "UNION";
-    if (isExpr(child, Expressions.SQLOptions)) return child.concatTokens();
-    const clauses = [
+    if (isExpr(child, Expressions.SQLOptions)) return /** @type {import("./frontend-types.ts").TokenText} */ (child).concatTokens();
+    /** @type {[import("./frontend-types.ts").NodeClass, string][]} */ const clauses = [
       [Expressions.SQLUpTo, "UP TO"], [Expressions.SQLGroupBy, "GROUP BY"],
       [Expressions.SQLOrderBy, "ORDER BY"], [Expressions.SQLForAllEntries, "FOR ALL"],
       [Expressions.SQLHaving, "HAVING"], [Expressions.SQLPackageSize, "PACKAGE"],
@@ -4115,7 +4115,7 @@ function orderByOf(sel, tb) {
   if (sel && /^SELECT\s+SINGLE\b/i.test(text)) return selectSingle(sel, ctx, text);
   if (sel && /^SELECT\s+COUNT\s*\(\s*\*\s*\)\s+FROM\b/i.test(text)) return selectCount(sel, ctx, text);
   if (sel && /^SELECT\s+SUM\s*\(/i.test(text) && !sel.findDirectExpression(Expressions.SQLGroupBy)) return selectSum(sel, ctx, text);
-  if (!sel || /\b(SINGLE|DISTINCT|HAVING|JOIN|PACKAGE|BYPASSING|CLIENT|UNION)\b/i.test(selectShape(sel))) throw new Unsupported(`SELECT form: ${text}`);
+  if (!sel || /\b(SINGLE|DISTINCT|HAVING|JOIN|PACKAGE|BYPASSING|CLIENT|UNION)\b/i.test(/** @type {string} */ (/** @type {unknown} */ (selectShape(sel))))) throw new Unsupported(`SELECT form: ${text}`);
   // parity-wave1: SELECT ... FOR ALL ENTRIES IN itab WHERE ... itab-comp ...
   // (A4H ZCL_GOGEN_T_FAE): the statement once per driving row, the rows
   // made unique over the columns selected (sy-dbcnt counts them), and an
@@ -4286,7 +4286,7 @@ function dynamicTokens(dyn, ctx, what, text) {
  */
 /** @param {import("@abaplint/core").Nodes.ExpressionNode} sel @param {import("./frontend-types.ts").MethodContext} ctx @param {string} text @returns {import("./frontend-types.ts").FrontendStmt} */ function dynamicSelect(sel, ctx, text) {
   if (/^SELECT\s+SINGLE\b/i.test(text)) throw new Unsupported(`dynamic SELECT SINGLE: ${text}`);
-  if (/\b(UP\s+TO|DISTINCT|HAVING|JOIN|FOR\s+ALL|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION|CONNECTION|OFFSET)\b/i.test(selectShape(sel))) throw new Unsupported(`dynamic SELECT form: ${text}`);
+  if (/\b(UP\s+TO|DISTINCT|HAVING|JOIN|FOR\s+ALL|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION|CONNECTION|OFFSET)\b/i.test(/** @type {string} */ (/** @type {unknown} */ (selectShape(sel))))) throw new Unsupported(`dynamic SELECT form: ${text}`);
   const from = sel.findDirectExpression(Expressions.SQLFrom)?.findAllExpressions(Expressions.DatabaseTable) ?? [];
   if (from.length !== 1) throw new Unsupported(`dynamic SELECT FROM form: ${text}`);
   /** @type {import("./frontend-types.ts").ValueExpr} */ let table;
@@ -4362,7 +4362,7 @@ function dynamicTokens(dyn, ctx, what, text) {
  * the count (A4H, ANORMALIES select-count-dbcnt), sy-subrc 4 when it is 0.
  */
 /** @param {import("@abaplint/core").Nodes.ExpressionNode} sel @param {import("./frontend-types.ts").MethodContext} ctx @param {string} text @returns {import("./frontend-types.ts").FrontendStmt} */ function selectCount(sel, ctx, text) {
-  if (/\b(SINGLE|UP\s+TO|DISTINCT|GROUP|HAVING|JOIN|FOR\s+ALL|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION|ORDER\s+BY|TABLE)\b/i.test(selectShape(sel))) throw new Unsupported(`SELECT COUNT form: ${text}`);
+  if (/\b(SINGLE|UP\s+TO|DISTINCT|GROUP|HAVING|JOIN|FOR\s+ALL|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION|ORDER\s+BY|TABLE)\b/i.test(/** @type {string} */ (/** @type {unknown} */ (selectShape(sel))))) throw new Unsupported(`SELECT COUNT form: ${text}`);
   const fl = sel.findDirectExpression(Expressions.SQLFieldList);
   if (!/^COUNT\s*\(\s*\*\s*\)$/i.test(fl?.concatTokens() ?? "")) throw new Unsupported(`SELECT COUNT form: ${text}`);
   const tb = selectTable(sel, ctx, text);
@@ -4382,7 +4382,7 @@ function dynamicTokens(dyn, ctx, what, text) {
 
 /** Narrow scalar SUM of an i column, into an i field. */
 /** @param {import("@abaplint/core").Nodes.ExpressionNode} sel @param {import("./frontend-types.ts").MethodContext} ctx @param {string} text @returns {import("./frontend-types.ts").FrontendStmt} */ function selectSum(sel, ctx, text) {
-  if (/\b(SINGLE|UP\s+TO|DISTINCT|GROUP|HAVING|JOIN|FOR\s+ALL|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION|ORDER\s+BY|TABLE)\b/i.test(selectShape(sel))) throw new Unsupported(`SELECT SUM form: ${text}`);
+  if (/\b(SINGLE|UP\s+TO|DISTINCT|GROUP|HAVING|JOIN|FOR\s+ALL|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION|ORDER\s+BY|TABLE)\b/i.test(/** @type {string} */ (/** @type {unknown} */ (selectShape(sel))))) throw new Unsupported(`SELECT SUM form: ${text}`);
   const fl = sel.findDirectExpression(Expressions.SQLFieldList);
   const field = /^SUM\s*\(\s*([\w]+)\s*\)$/i.exec(fl?.concatTokens() ?? "")?.[1];
   if (!field) throw new Unsupported(`SELECT SUM form: ${text}`);
@@ -4602,7 +4602,7 @@ function intoWorkArea(sel, ctx, text, cols, verb) {
  * bound; MANDT is the logon client, as for a table.
  */
 /** @param {import("@abaplint/core").Nodes.ExpressionNode} sel @param {import("./frontend-types.ts").MethodContext} ctx @param {string} text @returns {import("./frontend-types.ts").FrontendStmt} */ function selectSingle(sel, ctx, text) {
-  if (/\b(UP\s+TO|DISTINCT|GROUP|HAVING|JOIN|FOR\s+ALL|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION|ORDER\s+BY|FOR\s+UPDATE)\b/i.test(selectShape(sel))) throw new Unsupported(`SELECT form: ${text}`);
+  if (/\b(UP\s+TO|DISTINCT|GROUP|HAVING|JOIN|FOR\s+ALL|APPENDING|PACKAGE|BYPASSING|CLIENT|UNION|ORDER\s+BY|FOR\s+UPDATE)\b/i.test(/** @type {string} */ (/** @type {unknown} */ (selectShape(sel))))) throw new Unsupported(`SELECT form: ${text}`);
   const tb = selectTable(sel, ctx, text);
   const cols = selectColumns(sel, tb, text);
   const {assign, target} = intoWorkArea(sel, ctx, text, cols, "SELECT SINGLE");
