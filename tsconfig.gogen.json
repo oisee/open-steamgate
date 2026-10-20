@@ -54,6 +54,7 @@
     "tools/gogen/frontend-static.mjs",
     "tools/gogen/frontend-classes-native.mjs",
     "tools/gogen/frontend-types-signatures.mjs",
-    "tools/gogen/frontend-analysis.mjs"
+    "tools/gogen/frontend-analysis.mjs",
+    "tools/gogen/frontend-base.mjs"
   ]
 }
