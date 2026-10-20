@@ -2464,12 +2464,12 @@ export function deriveProgramWanted(reg, options, session, capture) {
       convert(source(inputs.get("DATE"), ctx), S), convert(source(inputs.get("TIME"), ctx), S), zone,
       convert(stamp, {k: "data"})].map((value) => ({value}))};
   }
-  // ultra/events: GET TIME STAMP FIELD ts into a TIMESTAMP p(8,0) or a
-  // TIMESTAMPL p(11,7): UTC, as sy-datum and sy-uzeit are here
+  // ultra/events: GET TIME STAMP FIELD ts into a TIMESTAMP p(8,0) or a TIMESTAMPL p(11,7): UTC, as sy-datum and sy-uzeit are here
   if (isStmt(node, Statements.GetTime)) {
     if (!/^GET\s+TIME\s+STAMP\s+FIELD\s+\S+\s*\.?$/i.test(text)) throw new Unsupported(`GET TIME form: ${text}`);
     const target = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findDirectExpression(Expressions.Target)), ctx);
-    if (target.type.k !== "p" || !((target.type.len === 8 && (target.type.dec ?? 0) === 0) || (target.type.len === 11 && target.type.dec === 7))) throw new Unsupported(`GET TIME STAMP into a ${target.type.k}(${/** @type {number} */ ((/** @type {{len?: unknown}} */ (target.type)).len)},${/** @type {number} */ ((/** @type {{dec?: unknown}} */ (target.type)).dec ?? 0)})`);
+    // @ts-expect-error -- abapiti form pending
+    if (target.type.k !== "p" || !((target.type.len === 8 && (target.type.dec ?? 0) === 0) || (target.type.len === 11 && target.type.dec === 7))) throw new Unsupported(`GET TIME STAMP into a ${target.type.k}(${target.type.len},${target.type.dec ?? 0})`);
     return {s: "get_timestamp", target, dec: target.type.dec ?? 0};
   }
   // class events (ultra/events): SET HANDLER and RAISE EVENT, see setHandler
