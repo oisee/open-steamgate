@@ -6,10 +6,10 @@ import {Expressions, Unsupported, upper, I, F, P31, S, XS, numeric} from "./fron
  * @param {import("@abaplint/core").Nodes.ExpressionNode | undefined} direct
  * @param {import("@abaplint/core").Nodes.ExpressionNode | undefined} named
  * @param {import("./frontend-types.ts").MethodContext} ctx
- * @param {{FUNCTIONS: Record<string, string>, source: typeof import("./frontend-expressions-calls.mjs").source, convert: typeof import("./frontend.mjs").convert}} api
  * @param {import("./ir.ts").Type | undefined} [calc]
  * @returns {import("./frontend-types.ts").ValueExpr}
  */
+// @ts-expect-error -- abapiti form pending
 export function builtin(name, direct, named, ctx, api, calc) {
   const {FUNCTIONS, source, convert} = api;
   const kind = FUNCTIONS[name];

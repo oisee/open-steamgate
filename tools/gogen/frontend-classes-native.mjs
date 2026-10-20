@@ -260,7 +260,8 @@ const AMC_CALLER = /\b(CL_AMC_CHANNEL_MANAGER|IF_AMC_MESSAGE_PRODUCER\w*|IF_AMC_
 const amcProgramOf = (cls) => upper(cls).padEnd(30, "=") + "CP";
 
 /** the body of an AMC host method, and CX_AMC_ERROR for its refusals */
-/** @param {{op: string, cls?: string, type?: string, args: Record<string, string>}} spec @param {import("./frontend-types.ts").NativeContext} ctx */
+/** @param {import("./frontend-types.ts").NativeContext} ctx */
+// @ts-expect-error -- abapiti form pending
 function amcMethod(spec, ctx) {
   const args = Object.fromEntries(Object.entries(spec.args).map(([k, n]) => [k, variable(n, ctx)]));
   /** @type {import("./frontend-types.ts").ValueExpr} */ const err = {e: "var", name: "LV_AMC_ERROR", type: S};
