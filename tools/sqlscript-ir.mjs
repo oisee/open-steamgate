@@ -40,11 +40,11 @@ export const T = {
 // ---------------------------------------------------------------- expressions
 
 /** @param {string} [source] */
-/** @param {string} name @param {object} [type] @param {string} [source] */ export const col = (name, type, source) => source === undefined
+/** @param {string} name @param {object} [type] @param {string} [source] @returns {import("./sqlscript-types.ts").SqlExpr} */ export const col = (name, type, source) => source === undefined
   ? ({node: "col", name, type}) : ({node: "col", name, type, source});
 export const lit = (value, type) => ({node: "lit", value, type});
 /** a host value: bound by the driver, never rendered into the text */
-/** @param {string} name @param {object} type @param {boolean} [isNull] */ export const param = (name, type, isNull = false) => ({node: "param", name, type, isNull});
+/** @param {string} name @param {object} type @param {boolean} [isNull] @returns {import("./sqlscript-types.ts").SqlExpr} */ export const param = (name, type, isNull = false) => ({node: "param", name, type, isNull});
 /** A value owned by the AMDP execution context rather than by the database
  *  connection chosen to execute a relational plan. It must be captured into
  *  a bound parameter before lowering; no backend is allowed to substitute
@@ -56,12 +56,12 @@ export const sessionValue = (kind, name, type = T.str) => ({node: "session", kin
  * and it is required: integer division and decimal division are different
  * operations that look identical in the source.
  */
-/** @param {string} op @param {object} left @param {object} right @param {object} type */ export const bin = (op, left, right, type) => ({node: "bin", op, left, right, type});
-/** @param {string} fn @param {readonly unknown[]} args @param {object} type */ export const call = (fn, args, type) => ({node: "call", fn, args, type});
+/** @param {string} op @param {object} left @param {object} right @param {object} type @returns {import("./sqlscript-types.ts").SqlExpr} */ export const bin = (op, left, right, type) => ({node: "bin", op, left, right, type});
+/** @param {string} fn @param {readonly unknown[]} args @param {object} type @returns {import("./sqlscript-types.ts").SqlExpr} */ export const call = (fn, args, type) => ({node: "call", fn, args, type});
 export const cast = (expr, type) => ({node: "cast", expr, type});
 export const isNull = (expr) => ({node: "isnull", expr, type: T.bool});
 /** NOT, as its own node rather than a `bin` with one side missing */
-/** @param {object} expr */ export const not = (expr) => ({node: "not", expr, type: T.bool});
+/** @param {object} expr @returns {import("./sqlscript-types.ts").SqlExpr} */ export const not = (expr) => ({node: "not", expr, type: T.bool});
 /** `x [NOT] LIKE p [ESCAPE e]` -- three operands, so it is not a `bin` */
 export const like = (expr, pattern, escape, negated = false) =>
   ({node: "like", expr, pattern, escape, negated, type: T.bool});
