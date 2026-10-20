@@ -57,6 +57,7 @@
     "tools/gogen/frontend-analysis.mjs",
     "tools/gogen/frontend-base.mjs",
     "tools/gogen/frontend-components.mjs",
-    "tools/gogen/frontend-local-constants.mjs"
+    "tools/gogen/frontend-local-constants.mjs",
+    "tools/gogen/frontend-dynamic-call.mjs"
   ]
 }
