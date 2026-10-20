@@ -50,6 +50,7 @@
     "tools/gogen/frontend-source.mjs",
     "tools/gogen/frontend-selection.mjs",
     "tools/gogen/frontend-query-contract.mjs",
-    "tools/gogen/frontend-expressions-calls.mjs"
+    "tools/gogen/frontend-expressions-calls.mjs",
+    "tools/gogen/frontend-static.mjs"
   ]
 }
