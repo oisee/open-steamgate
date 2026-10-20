@@ -45,6 +45,7 @@
     "tools/gogen/emit-constructors.ts",
     "tools/gogen/frontend-find-results.ts",
     "tools/osd-samc.mjs",
-    "tools/gogen/frontend-discovery-references.mjs"
+    "tools/gogen/frontend-discovery-references.mjs",
+    "tools/gogen/frontend-timing.mjs"
   ]
 }
