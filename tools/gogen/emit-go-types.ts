@@ -29,7 +29,7 @@ export interface SubstringExpr extends Omit<RuntimeFields<Extract<IR.Expr, {e: '
 }
 // Flags synthesized as str_fn arguments carry no type; every other flag does.
 export interface UntypedFlagExpr { readonly e: 'flag'; readonly value: boolean; readonly conv?: boolean; readonly fromP?: Extract<IR.Type, {k: 'p'}> }
-type StrFnExpr = RuntimeFields<Omit<Extract<IR.Expr, {e: 'str_fn'}>, 'args'>> & {readonly args: readonly (Expr | UntypedFlagExpr)[]};
+interface StrFnExpr extends Omit<RuntimeFields<Extract<IR.Expr, {e: 'str_fn'}>>, 'args'> {readonly args: readonly (Expr | UntypedFlagExpr)[]}
 export type Expr = RuntimeFields<Exclude<IR.Expr, {e: 'call' | 'int' | 'flag' | 'strlist' | 'str_fn' | 'struct' | 'upcast' | 'substr'}>> | CallExpr | SubstringExpr | StrFnExpr
   | (RuntimeFields<Omit<Extract<IR.Expr, {e: 'struct'}>, 'type'>> & {readonly type: Extract<IR.Type, {k: 'struct'}>}) | (RuntimeFields<Omit<Extract<IR.Expr, {e: 'upcast'}>, 'type'>> & {readonly type: Extract<IR.Type, {k: 'ref'}>})
   | {readonly e: 'int' | 'float'; readonly value: number; readonly type: IR.Type; readonly conv?: boolean; readonly fromP?: Extract<IR.Type, {k: 'p'}>}
@@ -83,7 +83,9 @@ export interface EventArgument {
   readonly fitc?: number;
 }
 export interface DynamicResultMove { readonly key: string; readonly type: IR.Type; readonly value: Expr }
-export type DynamicSqlStrings = RuntimeFields<Extract<IR.Expr, {e: 'strlist'}>> | (Expr & {readonly type: IR.Type});
+// Every arm of Expr carries its type, so the string positions accept any of
+// them beside the strlist, without an intersection view.
+export type DynamicSqlStrings = RuntimeFields<Extract<IR.Expr, {e: 'strlist'}>> | Expr;
 // whereOf emits INITIAL only with fx, and comparisons only with a value.
 export type Where = {readonly op: 'initial' | 'notinitial'; readonly fx: TypedExpr}
   | {readonly op: '=' | '<>' | '<' | '<=' | '>' | '>='; readonly name?: string;
@@ -105,7 +107,8 @@ export type StructType = Extract<IR.Type, {k: 'struct'}>;
 export type PackedType = Extract<IR.Type, {k: 'p'}>;
 // The conversion kind implies its operand kinds; the emitter reads their
 // lengths and decimals without narrowing, through the inspection view.
-export type Conversion = Extract<Expr, {e: 'conv'}> & {readonly from: TypeProbe; readonly to: TypeProbe};
+export interface ConvExpr extends RuntimeFields<Extract<IR.Expr, {e: 'conv'}>> {}
+export interface Conversion extends ConvExpr { readonly from: TypeProbe; readonly to: TypeProbe }
 export type Builtin = Extract<Expr, {e: 'fn'}>;
 export interface DynamicLoopBranch { readonly name: string; readonly key: IR.ResolvedKey | null }
 export type KeyLoop = Extract<Stmt, {s: 'loop'}> & {readonly key: IR.ResolvedKey};
