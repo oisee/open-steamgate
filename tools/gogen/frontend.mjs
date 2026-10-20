@@ -1,3 +1,4 @@
+// @ts-check
 import {normalizeSource} from "./frontend-source.mjs";
 import {dynamicStaticCall, prepareDynamicStatics} from "./frontend-dynamic-call.mjs";
 import {require, abaplint, Rearranger, Nodes, Statements, Structures, Expressions, BasicTypes,
