@@ -50,6 +50,7 @@ import {sqlIrType, writeIrType, irCheck, lowName, mandtPred, andIr, sqlHost, sql
 import {source, componentsOf, arith, sourceOperand, callMethodChain, excHolder,
   omittedArgument, omittedFactoryCall} from "./frontend-expressions-calls.mjs";
 /** @typedef {import("./frontend-types.ts").MethodSignature} ClassSignature */
+/** @typedef {import("@abaplint/core").Nodes.StatementNode} StNode */
 /** @typedef {typeof byteStatementHelpers} ByteStatementHelpers */ const byteStatementHelpers = {source, lvalue, convert, findResults};
 /** @type {WeakMap<import("./frontend-session-types.ts").Registry, Record<string, string>>} */ const cdsViewsByRegistry = new WeakMap();
 const HOST_REPLACED = new Set(["ZCL_OSD_ENQ_KERNEL"]);
@@ -1795,16 +1796,16 @@ export function deriveProgramWanted(reg, options, session, capture) {
     && ctx.reg.getObject("TABL", upper(text.split(/\s+/)[1]))) return dbWriteStatement("delete", node, ctx, text);
   // GET REFERENCE OF x INTO r: r is bound to x itself
   if (isStmt(node, Statements.GetReference)) {
-    const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    const target = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findDirectExpression(Expressions.Target)), ctx);
     if (target.type.k !== "dref") throw new Unsupported(`GET REFERENCE INTO a ${target.type.k}`);
-    return {s: "get_ref", target, value: convert(source(node.findDirectExpression(Expressions.Source), ctx), {k: "data"})};
+    return {s: "get_ref", target, value: convert(source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findDirectExpression(Expressions.Source)), ctx), {k: "data"})};
   }
   // DESCRIBE FIELD x TYPE k: the type kind (cl_abap_typedescr=>typekind_*)
   if (isStmt(node, Statements.Describe)) {
     if (!/^DESCRIBE\s+FIELD\s+\S+\s+TYPE\s+\S+\s*\.?$/i.test(text)) throw new Unsupported(`DESCRIBE form: ${text}`);
-    const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    const target = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findDirectExpression(Expressions.Target)), ctx);
     if (target.type.k !== "c" && target.type.k !== "string") throw new Unsupported(`DESCRIBE ... TYPE into a ${target.type.k}`);
-    return {s: "describe_kind", x: convert(source(node.findDirectExpression(Expressions.Source), ctx), {k: "data"}), target};
+    return {s: "describe_kind", x: convert(source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findDirectExpression(Expressions.Source)), ctx), {k: "data"}), target};
   }
   // CONDENSE x [NO-GAPS]
   // SHIFT s RIGHT DELETING TRAILING mask on a string, measured on A4H
@@ -1813,9 +1814,9 @@ export function deriveProgramWanted(reg, options, session, capture) {
   // blank not in the mask stops it. Every other SHIFT form is refused.
   if (isStmt(node, Statements.Shift)) {
     if (/^SHIFT\s+\S+(?:\s+BY\s+\S+(?:\s+PLACES)?)?(?:\s+(?:LEFT|RIGHT))?(?:\s+CIRCULAR)?\s*\.?$/i.test(text)) {
-      const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+      const target = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findDirectExpression(Expressions.Target)), ctx);
       if (!["string", "c"].includes(target.type.k)) throw new Unsupported(`character SHIFT of a ${target.type.k}`);
-      const amount = node.findDirectExpression(Expressions.Source);
+      const amount = /** @type {StNode} */ (node).findDirectExpression(Expressions.Source);
       return {s: "shift_places", target, amount: amount ? convert(source(amount, ctx), I) : {e: "int", value: 1, type: I}, left: !/\sRIGHT\b/i.test(text), circular: /\sCIRCULAR\b/i.test(text)};
     }
 
@@ -1823,7 +1824,7 @@ export function deriveProgramWanted(reg, options, session, capture) {
     // little-endian int2; A4H 2026-09-24, ZCL_GOGEN_T_ZIP: AABB is BBAA,
     // 01020304 is 02030401)
     if (/^SHIFT\s+\S+\s+LEFT\s+CIRCULAR\s+IN\s+BYTE\s+MODE\s*\.?$/i.test(text)) {
-      const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+      const target = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findDirectExpression(Expressions.Target)), ctx);
       if (target.type.k !== "x") throw new Unsupported(`SHIFT LEFT CIRCULAR IN BYTE MODE of a ${target.type.k}`);
       return {s: "shift_left_circ_bytes", target};
     }
@@ -1832,16 +1833,16 @@ export function deriveProgramWanted(reg, options, session, capture) {
     // keeps its trailing blanks, so `space` deletes blanks. A c target is
     // stored without trailing blanks, so nothing is padded here.
     if (/^SHIFT\s+\S+\s+LEFT\s+DELETING\s+LEADING\s/i.test(text)) {
-      const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+      const target = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findDirectExpression(Expressions.Target)), ctx);
       if (target.type.k !== "string" && target.type.k !== "c") throw new Unsupported(`SHIFT LEFT DELETING LEADING of a ${target.type.k}`);
-      const mask = source(node.findDirectExpression(Expressions.Source), ctx);
+      const mask = source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findDirectExpression(Expressions.Source)), ctx);
       if (mask.type.k !== "c" && mask.type.k !== "string") throw new Unsupported(`SHIFT ... DELETING LEADING a ${mask.type.k}`);
       return {s: "shift_left_leading", target, mask: convert(mask, S), maskLen: mask.type.k === "c" ? mask.type.len ?? 1 : undefined};
     }
     if (!/^SHIFT\s+\S+\s+RIGHT\s+DELETING\s+TRAILING\s/i.test(text)) throw new Unsupported(`statement Shift: ${text}`);
-    const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    const target = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findDirectExpression(Expressions.Target)), ctx);
     if (target.type.k !== "string") throw new Unsupported(`SHIFT RIGHT DELETING TRAILING of a ${target.type.k}`);
-    const mask = source(node.findDirectExpression(Expressions.Source), ctx);
+    const mask = source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findDirectExpression(Expressions.Source)), ctx);
     if (mask.type.k !== "c" && mask.type.k !== "string") throw new Unsupported(`SHIFT ... DELETING TRAILING a ${mask.type.k}`);
     return {s: "shift_right_trailing", target, mask: convert(mask, S), maskLen: mask.type.k === "c" ? mask.type.len ?? 1 : undefined};
   }
@@ -1853,7 +1854,7 @@ export function deriveProgramWanted(reg, options, session, capture) {
   // stay refused in byte mode; character mode is ultra/events' CONCATENATE
   // further down.
   if (isStmt(node, Statements.Concatenate)) {
-    const keywords = node.getChildren().filter((k) => k instanceof Nodes.TokenNode).map((k) => upper(tokenStr(k)));
+    const keywords = /** @type {StNode} */ (node).getChildren().filter((k) => k instanceof Nodes.TokenNode).map((k) => upper(tokenStr(k)));
     const hasKeywords = (...words) => keywords.some((_, i) => words.every((word, j) => keywords[i + j] === word));
     const endsWithKeywords = (...words) => {
       const end = keywords.at(-1) === "." ? keywords.length - 1 : keywords.length;
@@ -1862,11 +1863,11 @@ export function deriveProgramWanted(reg, options, session, capture) {
     };
     if (hasKeywords("IN", "BYTE", "MODE")) {
       if (!endsWithKeywords("IN", "BYTE", "MODE") || hasKeywords("SEPARATED") || hasKeywords("RESPECTING")) throw new Unsupported(`CONCATENATE form: ${text}`);
-      const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+      const target = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findDirectExpression(Expressions.Target)), ctx);
       // CONCATENATE LINES OF itab INTO xstr IN BYTE MODE: the rows joined once,
       // the way a reader gathers its pieces without copying the whole each time
       if (hasKeywords("LINES", "OF") && keywords[1] === "LINES" && keywords[2] === "OF") {
-        const table = source(node.findDirectExpressions(Expressions.SimpleSource3)[0] ?? node.findDirectExpression(Expressions.Source), ctx);
+        const table = source(/** @type {StNode} */ (node).findDirectExpressions(Expressions.SimpleSource3)[0] ?? /** @type {StNode} */ (node).findDirectExpression(Expressions.Source), ctx);
         if (target.type.k !== "xstring" || table?.type.k !== "table" || table.type.row.k !== "xstring") throw new Unsupported(`CONCATENATE form: ${text}`);
         /** @type {import("./ir.ts").ConcatBytesTable} */ const result = {s: "concat_bytes", target, table, row: {e: "temp", name: "ConcatRow", type: table.type.row}}; return result;
       }
@@ -1875,26 +1876,26 @@ export function deriveProgramWanted(reg, options, session, capture) {
       // cut to the length and sy-subrc 4 when longer; the operands, the target
       // among them, are read first
       if (target.type.k !== "xstring" && target.type.k !== "x") throw new Unsupported(`CONCATENATE IN BYTE MODE into a ${target.type.k}`);
-      /** @type {import("./frontend-types.ts").ValueExpr[]} */ const parts = node.findDirectExpressions(Expressions.SimpleSource3).map((n) => source(n, ctx));
+      /** @type {import("./frontend-types.ts").ValueExpr[]} */ const parts = /** @type {StNode} */ (node).findDirectExpressions(Expressions.SimpleSource3).map((n) => source(n, ctx));
       if (parts.length < 2) throw new Unsupported(`CONCATENATE form: ${text}`);
       for (const p of parts) if (p.type.k !== "x" && p.type.k !== "xstring") throw new Unsupported(`CONCATENATE IN BYTE MODE of a ${p.type.k}`);
       /** @type {import("./ir.ts").ConcatBytesParts} */ const result = {s: "concat_bytes", target, parts: parts.map((p) => convert(p, XS)), fixed: target.type.k === "x" ? target.type.len : undefined}; return result;
     }
   }
   if (isStmt(node, Statements.Condense)) {
-    const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    const target = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findDirectExpression(Expressions.Target)), ctx);
     if (target.type.k !== "c" && target.type.k !== "string") throw new Unsupported(`CONDENSE of a ${target.type.k}`);
     return {s: "condense", target, noGaps: /\bNO\s*-\s*GAPS\b/i.test(text)};
   }
   // ASSERT: a false condition ends the program (ASSERTION_FAILED, a runtime
   // error no CATCH reaches); no checkpoint group, so always active
   if (isStmt(node, Statements.Assert)) {
-    if (/\bID\b/i.test(node.concatTokens())) throw new Unsupported(`ASSERT with a checkpoint group: ${node.concatTokens()}`);
-    return {s: "assert", cond: cond(node.findDirectExpression(Expressions.Cond), ctx), text: node.concatTokens()};
+    if (/\bID\b/i.test(/** @type {StNode} */ (node).concatTokens())) throw new Unsupported(`ASSERT with a checkpoint group: ${/** @type {StNode} */ (node).concatTokens()}`);
+    return {s: "assert", cond: cond(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findDirectExpression(Expressions.Cond)), ctx), text: /** @type {StNode} */ (node).concatTokens()};
   }
   if ([Statements.Add, Statements.Subtract, Statements.Multiply, Statements.Divide].some((kind) => isStmt(node, kind))) {
-    const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
-    const operand = source(node.findDirectExpression(Expressions.Source), ctx);
+    const target = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findDirectExpression(Expressions.Target)), ctx);
+    const operand = source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findDirectExpression(Expressions.Source)), ctx);
     const kinds = [target.type.k, operand.type.k];
     if (!kinds.every((k) => ["i", "int8", "p", "f", "c", "string", "n", "x"].includes(k))) {
       throw new Unsupported(`arithmetic statement types ${kinds.join(" and ")}: ${text}`);
@@ -1912,9 +1913,9 @@ export function deriveProgramWanted(reg, options, session, capture) {
     return {s: "assign", target, value: convert({e: "bin", op, l: left, r: right, type: calc}, target.type)};
   }
   if (isStmt(node, Statements.Move)) {
-    const targets = node.findDirectExpressions(Expressions.Target);
+    const targets = /** @type {StNode} */ (node).findDirectExpressions(Expressions.Target);
     if (targets.length !== 1) throw new Unsupported("chained assignment");
-    const src = node.findDirectExpression(Expressions.Source);
+    const src = /** @type {StNode} */ (node).findDirectExpression(Expressions.Source);
     const inline = targets[0].getChildren()[0];
     if (isExpr(inline, Expressions.InlineData)) {
       // DATA(x) = ... takes the type of what is assigned. abaplint types some
@@ -1926,21 +1927,21 @@ export function deriveProgramWanted(reg, options, session, capture) {
       const joined = declared?.k === "c" && src.findFirstExpression(Expressions.ConcatenatedConstant);
       if (declared && (numeric(declared) || joined)) {
         let t;
-        try { t = source(src, ctx).type; } catch (e) { if (!(e instanceof Unsupported)) throw e; }
+        try { t = source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (src), ctx).type; } catch (e) { if (!(e instanceof Unsupported)) throw e; }
         if (t && ((numeric(t) && declared.k !== t.k) || (joined && t.k === "c" && t.len !== declared.len))) ctx.locals.set(name, t);
       }
     }
     const target = lvalue(targets[0], ctx);
     // a ?= b: a down-cast, checked at run time
-    if (node.getChildren().some((c) => isTok(c, "?="))) return {s: "assign", target, value: downCast(source(src, ctx), target.type, node.concatTokens())};
+    if (/** @type {StNode} */ (node).getChildren().some((c) => isTok(c, "?="))) return {s: "assign", target, value: downCast(source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (src), ctx), target.type, /** @type {StNode} */ (node).concatTokens())};
     // a generic target is a binding: the value is written into its slot
     // (ultra/itab: genericArith reads the target's kind through ctx.genTarget)
     if (target.type.k === "data") {
       ctx.genTarget = target;
-      try { return {s: "set_data", target, value: convert(source(src, ctx, target.type), target.type)}; } finally { ctx.genTarget = undefined; }
+      try { return {s: "set_data", target, value: convert(source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (src), ctx, target.type), target.type)}; } finally { ctx.genTarget = undefined; }
     }
     // the calculation type of an assignment includes the TARGET
-    return {s: "assign", target, value: convert(source(src, ctx, target.type), target.type)};
+    return {s: "assign", target, value: convert(source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (src), ctx, target.type), target.type)};
   }
   // ultra/itab: APPEND LINES OF src [FROM i] [TO j] TO itab (A4H 2026-09-24,
   // ZCL_GOGEN_T_APPL): the rows i..j of src in order, j clamped to lines(src),
@@ -1950,11 +1951,11 @@ export function deriveProgramWanted(reg, options, session, capture) {
   // move (c into string); src evaluated once, so itab TO itab doubles it
   if (isStmt(node, Statements.Append) && /^APPEND\s+LINES\s+OF\b/i.test(text)) {
     if (/\b(ASSIGNING|REFERENCE|SORTED BY)\b/i.test(text)) throw new Unsupported(`APPEND form: ${text}`);
-    const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    const table = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findDirectExpression(Expressions.Target)), ctx);
     if (table.type.k !== "table" || table.type.hashed) throw new Unsupported(`APPEND LINES OF into a ${table.type.hashed ? "hashed table" : table.type.k}`);
-    const kids = node.getChildren();
-    const srcNode = node.findDirectExpression(Expressions.SimpleSource4) ?? node.findDirectExpression(Expressions.Source);
-    const src = source(srcNode, ctx);
+    const kids = /** @type {StNode} */ (node).getChildren();
+    const srcNode = /** @type {StNode} */ (node).findDirectExpression(Expressions.SimpleSource4) ?? /** @type {StNode} */ (node).findDirectExpression(Expressions.Source);
+    const src = source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (srcNode), ctx);
     if (src.type.k !== "table") throw new Unsupported(`APPEND LINES OF a ${src.type.k}`);
     let from = null;
     let to = null;
@@ -1970,42 +1971,42 @@ export function deriveProgramWanted(reg, options, session, capture) {
   }
   // APPEND REFERENCE INTO binds the new row, including after later appends.
   if (isStmt(node, Statements.Append) && /\bREFERENCE\s+INTO\b/i.test(text)) {
-    const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
-    const name = node.findDirectExpressions(Expressions.Target)[1]?.concatTokens();
+    const table = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findDirectExpression(Expressions.Target)), ctx);
+    const name = /** @type {StNode} */ (node).findDirectExpressions(Expressions.Target)[1]?.concatTokens();
     if (table.type.k !== "table" || !name) throw new Unsupported(`APPEND REFERENCE INTO form: ${text}`);
     refuseSorted(table, "APPEND to");
     const refInto = variable(name, ctx);
     if (refInto.type.k !== "dref") throw new Unsupported(`APPEND REFERENCE INTO a ${refInto.type.k}`);
     const initial = /\bINITIAL\s+LINE\b/i.test(text);
-    const valueNode = node.findDirectExpression(Expressions.SimpleSource4) ?? node.findDirectExpression(Expressions.Source);
+    const valueNode = /** @type {StNode} */ (node).findDirectExpression(Expressions.SimpleSource4) ?? /** @type {StNode} */ (node).findDirectExpression(Expressions.Source);
     if (!initial && !valueNode) throw new Unsupported(`APPEND REFERENCE INTO form: ${text}`);
     /** @type {import("./frontend-types.ts").Mutable<import("./frontend-types.ts").TableType>} */ const tableType = table.type; tableType.stable = true;
-    return {s: "append", table, value: initial ? {e: "zero", type: table.type.row} : convert(source(valueNode, ctx, table.type.row), table.type.row), refInto};
+    return {s: "append", table, value: initial ? {e: "zero", type: table.type.row} : convert(source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (valueNode), ctx, table.type.row), table.type.row), refInto};
   }
   // APPEND ASSIGNING gives the field symbol the new row's address.
   if (isStmt(node, Statements.Append) && /\bASSIGNING\b/i.test(text) && !/\b(LINES OF|INITIAL LINE|REFERENCE|SORTED BY)\b/i.test(text)) {
-    const fsName = upper(node.findDirectExpression(Expressions.FSTarget)?.concatTokens() ?? "");
+    const fsName = upper(/** @type {StNode} */ (node).findDirectExpression(Expressions.FSTarget)?.concatTokens() ?? "");
     const fsType = ctx.fieldSymbols.get(fsName);
-    const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    const table = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findDirectExpression(Expressions.Target)), ctx);
     if (table.type.k !== "table") throw new Unsupported(`APPEND ... ASSIGNING to a ${table.type.k}`);
     refuseSorted(table, "APPEND to");
     if (!fsType || fsType.k === "data" || !sameType(fsType, table.type.row) || (fsType.k === "struct" && fsType.go !== table.type.row.go)) throw new Unsupported(`APPEND ... ASSIGNING ${fsName}: ${text}`);
     if (table.type.row.k === "struct") {
         /** @type {import("./frontend-types.ts").Mutable<import("./frontend-types.ts").TableType>} */ const tableType = table.type; tableType.stable = true; }
-    const value = node.findDirectExpression(Expressions.SimpleSource4) ?? node.findDirectExpression(Expressions.Source);
-    return {s: "append", table, value: convert(source(value, ctx, table.type.row), table.type.row), fs: fsName};
+    const value = /** @type {StNode} */ (node).findDirectExpression(Expressions.SimpleSource4) ?? /** @type {StNode} */ (node).findDirectExpression(Expressions.Source);
+    return {s: "append", table, value: convert(source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (value), ctx, table.type.row), table.type.row), fs: fsName};
   }
   // ultra/events: CONCATENATE (A4H ZCL_GOGEN_T_WGUI1): a c operand without
   // its trailing blanks unless RESPECTING BLANKS, a string as it is, the
   // separator with its blanks; into a c the result is cut (sy-subrc 4),
   // else sy-subrc 0; LINES OF an empty table clears the target
   if (isStmt(node, Statements.Concatenate)) {
-    const kids = node.getChildren();
-    const keywords = node.getChildren().filter((k) => k instanceof Nodes.TokenNode).map((k) => upper(tokenStr(k)));
+    const kids = /** @type {StNode} */ (node).getChildren();
+    const keywords = /** @type {StNode} */ (node).getChildren().filter((k) => k instanceof Nodes.TokenNode).map((k) => upper(tokenStr(k)));
     const hasKeywords = (...words) => keywords.some((_, i) => words.every((word, j) => keywords[i + j] === word));
     const respecting = hasKeywords("RESPECTING", "BLANKS");
     const lines = keywords[1] === "LINES" && keywords[2] === "OF";
-    const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    const target = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findDirectExpression(Expressions.Target)), ctx);
     if (!["string", "c", "n", "d"].includes(target.type.k)) throw new Unsupported(`CONCATENATE into a ${target.type.k}`);
     /** @param {import("./frontend-types.ts").ValueExpr} x @returns {import("./frontend-types.ts").ValueExpr} */ const piece = (x) => {
       if (x.type.k === "c") return respecting ? {e: "padc", x, n: x.type.len, type: S} : convert(x, S);
@@ -2038,9 +2039,9 @@ export function deriveProgramWanted(reg, options, session, capture) {
   // STRING_TO_TAB, over a generic STANDARD TABLE): a new initial row, <fs>
   // on it, sy-tabix its index
   if (isStmt(node, Statements.Append) && /^APPEND\s+INITIAL\s+LINE\s+TO\s+\S+\s+ASSIGNING\s+<[\w]+>\s*\.?$/i.test(text)) {
-    const fsName = upper(node.findDirectExpression(Expressions.FSTarget)?.concatTokens() ?? "");
+    const fsName = upper(/** @type {StNode} */ (node).findDirectExpression(Expressions.FSTarget)?.concatTokens() ?? "");
     const fsType = ctx.fieldSymbols.get(fsName);
-    const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    const table = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findDirectExpression(Expressions.Target)), ctx);
     if (table.type.k === "data" && table.type.table && fsType?.k === "data") return {s: "append_initial_data", table, fs: fsName};
     if (table.type.k !== "table" || !fsType || fsType.k === "data" || !sameType(fsType, table.type.row)) throw new Unsupported(`APPEND form: ${text}`);
     refuseSorted(table, "APPEND to");
@@ -2049,18 +2050,18 @@ export function deriveProgramWanted(reg, options, session, capture) {
   }
   if (isStmt(node, Statements.Append)) {
     if (/\b(LINES OF|INITIAL LINE|ASSIGNING|REFERENCE|SORTED BY)\b/i.test(text)) throw new Unsupported(`APPEND form: ${text}`);
-    const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    const table = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findDirectExpression(Expressions.Target)), ctx);
     // APPEND wa TO <generic table> (a field symbol TYPE STANDARD TABLE, the
     // rows of CREATE DATA ... TYPE STANDARD TABLE OF (name)): a new row, the
     // value moved into it as a move into generic data converts it
     if (table.type.k === "data") {
-      const value = node.findDirectExpression(Expressions.SimpleSource4) ?? node.findDirectExpression(Expressions.Source);
-      return {s: "append_data", table, value: convert(source(value, ctx), {k: "data"})};
+      const value = /** @type {StNode} */ (node).findDirectExpression(Expressions.SimpleSource4) ?? /** @type {StNode} */ (node).findDirectExpression(Expressions.Source);
+      return {s: "append_data", table, value: convert(source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (value), ctx), {k: "data"})};
     }
     if (table.type.k !== "table") throw new Unsupported("APPEND to a non-table");
-    const value = node.findDirectExpression(Expressions.SimpleSource4) ?? node.findDirectExpression(Expressions.Source);
+    const value = /** @type {StNode} */ (node).findDirectExpression(Expressions.SimpleSource4) ?? /** @type {StNode} */ (node).findDirectExpression(Expressions.Source);
     refuseSorted(table, "APPEND to");
-    return {s: "append", table, value: convert(source(value, ctx, table.type.row), table.type.row)};
+    return {s: "append", table, value: convert(source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (value), ctx, table.type.row), table.type.row)};
   }
   if (isStmt(node, Statements.ReadTable) && /\bWITH\s+(TABLE\s+)?KEY\b/i.test(text)) {
     // READ TABLE t [INTO wa | ASSIGNING <fs> | TRANSPORTING NO FIELDS] WITH [TABLE] KEY c = v ...:
@@ -2070,11 +2071,11 @@ export function deriveProgramWanted(reg, options, session, capture) {
     if (/\b(BINARY|CASTING|COMPARING)\b/i.test(text) || (/\bTRANSPORTING\b/i.test(text) && !/\bTRANSPORTING\s+NO\s+FIELDS\b/i.test(text))) {
       throw new Unsupported(`READ TABLE form: ${text}`);
     }
-    const ss2 = node.findDirectExpression(Expressions.SimpleSource2);
+    const ss2 = /** @type {StNode} */ (node).findDirectExpression(Expressions.SimpleSource2);
     if (!ss2) throw new Unsupported(`READ TABLE table form: ${text}`);
     const table = sourceOperand(ss2.getFirstChild(), ctx);
     if (table.type.k !== "table") throw new Unsupported("READ TABLE of a non-table");
-    const cc = node.findDirectExpression(Expressions.ComponentCompareSimple);
+    const cc = /** @type {StNode} */ (node).findDirectExpression(Expressions.ComponentCompareSimple);
     if (!cc) throw new Unsupported(`READ TABLE key form: ${text}`);
     const kids = cc.getChildren();
     /** @type {{name?: string; line?: true; value: import("./frontend-types.ts").ValueExpr}[]} */ const keys = [];
@@ -2089,7 +2090,7 @@ export function deriveProgramWanted(reg, options, session, capture) {
         keys.push({name: f.name, value: convert(source(kids[i + 2], ctx, f.type), f.type)});
       }
     }
-    const rt = node.findFirstExpression(Expressions.ReadTableTarget);
+    const rt = /** @type {StNode} */ (node).findFirstExpression(Expressions.ReadTableTarget);
     let into = null;
     let fs = null;
     let refInto = false;
@@ -2155,15 +2156,15 @@ export function deriveProgramWanted(reg, options, session, capture) {
     if (!/\bINDEX\b/i.test(text) || /\b(WITH KEY|REFERENCE|TRANSPORTING|BINARY|CASTING)\b/i.test(text)) {
       throw new Unsupported(`READ TABLE form: ${text}`);
     }
-    const table = sourceOperand(node.findDirectExpression(Expressions.SimpleSource2).getFirstChild(), ctx);
+    const table = sourceOperand(/** @type {StNode} */ (node).findDirectExpression(Expressions.SimpleSource2).getFirstChild(), ctx);
     // a generic table (ultra/sadl): READ TABLE <t> INDEX n ASSIGNING <generic> only
     if (table.type.k === "data" && table.type.table) {
       const fsName = upper(/ASSIGNING\s+(<[\w]+>)/i.exec(text)?.[1] ?? "");
       if (!fsName || ctx.fieldSymbols.get(fsName)?.k !== "data") throw new Unsupported(`READ TABLE form over a generic table: ${text}`);
-      return {s: "read_index_data", table, index: convert(source(node.findDirectExpression(Expressions.Source), ctx, I), I), fs: fsName};
+      return {s: "read_index_data", table, index: convert(source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findDirectExpression(Expressions.Source)), ctx, I), I), fs: fsName};
     }
     if (table.type.k !== "table") throw new Unsupported(`READ TABLE ... INDEX of a ${table.type.k}`);
-    const index = convert(source(node.findDirectExpression(Expressions.Source), ctx, I), I);
+    const index = convert(source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findDirectExpression(Expressions.Source)), ctx, I), I);
     if (/\bASSIGNING\b/i.test(text)) {
       // the field symbol after ASSIGNING, not the first one in the text: READ
       // TABLE <a>-t ASSIGNING <b> bound <a> (ultra/events, ZCL_GG_HTTP_HANDLER)
@@ -2174,7 +2175,7 @@ export function deriveProgramWanted(reg, options, session, capture) {
         /** @type {import("./frontend-types.ts").Mutable<import("./frontend-types.ts").TableType>} */ const tableType = table.type; tableType.stable = true; }
       return {s: "read_index", table, index, fs: fsName};
     }
-    const into = lvalue(node.findFirstExpression(Expressions.ReadTableTarget).findFirstExpression(Expressions.Target), ctx);
+    const into = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findFirstExpression(Expressions.ReadTableTarget).findFirstExpression(Expressions.Target)), ctx);
     return {s: "read_index", table, index, into};
   }
   // ultra/itab: SORT itab [ASCENDING|DESCENDING] [STABLE] [BY c [ASC|DESC] ...]
@@ -2185,13 +2186,13 @@ export function deriveProgramWanted(reg, options, session, capture) {
   // left out); the direction after SORT itab is that of every component that
   // names none. AS TEXT (locale collation) is not measured: refused.
   if (isStmt(node, Statements.Sort)) {
-    const sortKids = node.getChildren();
+    const sortKids = /** @type {StNode} */ (node).getChildren();
     const targetAt = sortKids.findIndex((k) => isExpr(k, Expressions.Target));
     const byAt = sortKids.findIndex((k, i) => i > targetAt && isTok(k, "BY"));
     const modifiers = sortKids.slice(targetAt + 1, byAt < 0 ? -1 : byAt);
     if (targetAt !== 1 || modifiers.some((k) => !isTok(k, "ASCENDING") && !isTok(k, "DESCENDING") && !isTok(k, "STABLE"))
       || sortKids.some((k, i) => isTok(k, "AS") && isTok(sortKids[i + 1], "TEXT"))) throw new Unsupported(`SORT form: ${text}`);
-    const table = lvalue(node.findDirectExpression(Expressions.Target) ?? node.findFirstExpression(Expressions.Target), ctx);
+    const table = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findDirectExpression(Expressions.Target) ?? /** @type {StNode} */ (node).findFirstExpression(Expressions.Target)), ctx);
     if (table.type.k !== "table" || table.type.hashed) throw new Unsupported(`SORT of a ${table.type.hashed ? "hashed table" : table.type.k}`);
     const allDesc = modifiers.some((k) => isTok(k, "DESCENDING"));
     /** @type {string[] | undefined} */ const byWords = byAt < 0 ? undefined : sortKids.slice(byAt + 1, -1).map((k) => k.concatTokens());
@@ -2251,9 +2252,9 @@ export function deriveProgramWanted(reg, options, session, capture) {
     return {s: "delete_adjacent", table, fields: fields.map((f) => f.name)};
   }
   if (isStmt(node, Statements.DeleteInternal) && /^DELETE\s+\S+\s+WHERE\s+/i.test(text)) {
-    const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    const table = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findDirectExpression(Expressions.Target)), ctx);
     if (table.type.k !== "table") throw new Unsupported("DELETE from a non-table");
-    const cc = node.findDirectExpression(Expressions.ComponentCond);
+    const cc = /** @type {StNode} */ (node).findDirectExpression(Expressions.ComponentCond);
     if (!cc) throw new Unsupported(`DELETE form: ${text}`);
     keyGuard(table.type, "DELETE", ctx);
     return {s: "delete_where", table, where: whereOf(cc, table.type.row, ctx, text)};
@@ -2263,11 +2264,11 @@ export function deriveProgramWanted(reg, options, session, capture) {
   // (abapiti's maps, a hashed key; secondaryKey)
   const namedDelete = /^DELETE\s+TABLE\s+\S+\s+WITH\s+TABLE\s+KEY\s+([\w~]+)\s+COMPONENTS\b/i.exec(text);
   if (isStmt(node, Statements.DeleteInternal) && namedDelete) {
-    const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    const table = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findDirectExpression(Expressions.Target)), ctx);
     if (table.type.k !== "table") throw new Unsupported("DELETE from a non-table");
     const key = secondaryKey(table.type, namedDelete[1], ctx, text, true);
     if (key === null || !key.unique) throw new Unsupported(`DELETE TABLE WITH TABLE KEY ${upper(namedDelete[1])}: not a unique secondary key (${text})`);
-    const given = node.findDirectExpressions(Expressions.ComponentCompare).map((cc) => {
+    const given = /** @type {StNode} */ (node).findDirectExpressions(Expressions.ComponentCompare).map((cc) => {
       const kids = cc.getChildren();
       if (kids.length !== 3 || kids[1].concatTokens() !== "=") throw new Unsupported(`DELETE TABLE key form: ${cc.concatTokens()}`);
       const f = fieldOf(ctx, table.type.row, kids[0].concatTokens(), text);
@@ -2283,11 +2284,11 @@ export function deriveProgramWanted(reg, options, session, capture) {
     return {s: "delete_seckey", table, key, values: key.comps.map((c) => given.find((x) => x.name === c.name).value)};
   }
   if (isStmt(node, Statements.DeleteInternal) && /^DELETE\s+TABLE\s+\S+\s+WITH\s+TABLE\s+KEY\s+/i.test(text)) {
-    const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
-    const compares = node.findDirectExpressions(Expressions.ComponentCompare);
+    const table = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findDirectExpression(Expressions.Target)), ctx);
+    const compares = /** @type {StNode} */ (node).findDirectExpressions(Expressions.ComponentCompare);
     const keyExpr = compares[0];
     const value = keyExpr?.getChildren()[2];
-    if (compares.length !== 1 || node.findDirectExpression(Expressions.SimpleName) || !value || table.type.k !== "table" || table.type.row.k !== "struct") throw new Unsupported(`DELETE form: ${text}`);
+    if (compares.length !== 1 || /** @type {StNode} */ (node).findDirectExpression(Expressions.SimpleName) || !value || table.type.k !== "table" || table.type.row.k !== "struct") throw new Unsupported(`DELETE form: ${text}`);
     const field = fieldOf(ctx, table.type.row, keyExpr.getChildren()[0].concatTokens(), text);
     keyGuard(table.type, "DELETE TABLE");
     return {s: "delete_key", table, key: field.name, value: convert(source(value, ctx, field.type), field.type)};
@@ -2296,7 +2297,7 @@ export function deriveProgramWanted(reg, options, session, capture) {
   // goes (the ADT front's namespace bindings, a HASHED table); a key that
   // is a standard table's default key or the whole line is not here
   if (isStmt(node, Statements.DeleteInternal) && /^DELETE\s+TABLE\s+[^\s.]+\s+FROM\s+[^\s.]+\s*\.?$/i.test(text)) {
-    const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    const table = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findDirectExpression(Expressions.Target)), ctx);
     const type = table.type; const keys = type.k === "table" ? type.hashed ?? type.sorted : null;
     if (!keys || type.k !== "table" || type.row.k !== "struct" || keys.includes("TABLE_LINE")) throw new Unsupported(`DELETE form: ${text}`);
     const fields = keys.map((k) => fieldOf(ctx, type.row, k, text));
@@ -2306,14 +2307,14 @@ export function deriveProgramWanted(reg, options, session, capture) {
     // loop back and unassigns its field symbol; neither emitter does
     const bare = (x) => JSON.stringify(x, (k, v) => (k === "type" ? undefined : v));
     if (ctx.loopStack?.some((l) => bare(l.table) === bare(table))) throw new Unsupported(`${text.replace(/\s*\.$/, "")} inside a LOOP over the same table: the loop index and its field symbol were not adjusted`);
-    const vNode = node.findDirectExpression(Expressions.Source) ?? node.findDirectExpression(Expressions.SimpleSource2);
+    const vNode = node.findDirectExpression(Expressions.Source) ?? /** @type {StNode} */ (node).findDirectExpression(Expressions.SimpleSource2);
     if (!vNode) throw new Unsupported(`DELETE form: ${text}`);
     return {s: "delete_from", table, value: convert(source(vNode, ctx, type.row), type.row), keys: fields.map((f) => f.name)};
   }
   if (isStmt(node, Statements.DeleteInternal) && /^DELETE\s+\S+\s+FROM\s+/i.test(text)) {
-    const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    const table = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findDirectExpression(Expressions.Target)), ctx);
     if (table.type.k !== "table" || table.type.hashed || table.type.sorted) throw new Unsupported(`DELETE range of a ${table.type.k}`);
-    const indices = node.findDirectExpressions(Expressions.Source);
+    const indices = /** @type {StNode} */ (node).findDirectExpressions(Expressions.Source);
     if (indices.length < 1 || indices.length > 2) throw new Unsupported(`DELETE range form: ${text}`);
     keyGuard(table.type, "DELETE range");
     return {s: "delete_range", table, from: convert(source(indices[0], ctx, I), I),
@@ -2323,7 +2324,7 @@ export function deriveProgramWanted(reg, options, session, capture) {
   // current row goes and the loop goes on with the row after it (A4H
   // ZCL_GOGEN_T_NSCN); only in the innermost loop, over that same table
   if (isStmt(node, Statements.DeleteInternal) && /^DELETE\s+[^\s.]+\s*\.?$/i.test(text)) {
-    const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    const table = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findDirectExpression(Expressions.Target)), ctx);
     const loop = ctx.loopStack?.[ctx.loopStack.length - 1];
     const same = (a, b) => JSON.stringify(a, (k, v) => (k === "type" ? undefined : v)) === JSON.stringify(b, (k, v) => (k === "type" ? undefined : v));
     if (!loop || table.type.k !== "table" || !same(loop.table, table)) throw new Unsupported(`DELETE itab outside a LOOP over it: ${text}`);
@@ -2342,38 +2343,38 @@ export function deriveProgramWanted(reg, options, session, capture) {
   }
   if (isStmt(node, Statements.DeleteInternal)) {
     if (!/^DELETE\s+\S+\s+INDEX\s+/i.test(text)) throw new Unsupported(`DELETE form: ${text}`);
-    const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    const table = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findDirectExpression(Expressions.Target)), ctx);
     // Like DELETE current, INDEX at or before the cursor steps it back.
     const same = (a, b) => JSON.stringify(a, (k, v) => k === "type" ? undefined : v) === JSON.stringify(b, (k, v) => k === "type" ? undefined : v);
     const loops = (ctx.loopStack ?? []).filter((loop) => same(loop.table, table));
     if (loops.some((loop) => loop.to || loop.key || loop.dynamicKeys)) throw new Unsupported(`DELETE INDEX inside LOOP with TO / USING KEY: not measured: ${text}`);
     const tokens = loops.map((loop) => loop.token);
     // a generic table (ultra/sadl): the same rule through its descriptor
-    if (table.type.k === "data" && table.type.table) return {s: "delete_index_data", table, tokens, index: convert(source(node.findDirectExpressions(Expressions.Source).slice(-1)[0], ctx, I), I)};
+    if (table.type.k === "data" && table.type.table) return {s: "delete_index_data", table, tokens, index: convert(source(/** @type {StNode} */ (node).findDirectExpressions(Expressions.Source).slice(-1)[0], ctx, I), I)};
     if (table.type.k !== "table") throw new Unsupported("DELETE from a non-table");
-    const idx = node.findDirectExpressions(Expressions.Source).slice(-1)[0];
+    const idx = /** @type {StNode} */ (node).findDirectExpressions(Expressions.Source).slice(-1)[0];
     keyGuard(table.type, "DELETE", ctx);
     return {s: "delete_index", table, tokens, index: convert(source(idx, ctx, I), I)};
   }
   if (isStmt(node, Statements.InsertInternal) && /\bINTO\s+TABLE\b/i.test(text)) {
     if (/^INSERT\s+LINES\s+OF\b/i.test(text)) {
-      const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
-      const srcNode = node.findDirectExpression(Expressions.SimpleSource4) ?? node.findDirectExpression(Expressions.Source);
-      const src = source(srcNode, ctx);
+      const table = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findDirectExpression(Expressions.Target)), ctx);
+      const srcNode = /** @type {StNode} */ (node).findDirectExpression(Expressions.SimpleSource4) ?? /** @type {StNode} */ (node).findDirectExpression(Expressions.Source);
+      const src = source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (srcNode), ctx);
       if (table.type.k !== "table" || src.type.k !== "table" || !table.type.sorted || !table.type.unique || !sameType(src.type.row, table.type.row)) throw new Unsupported(`INSERT LINES OF form: ${text}`);
       const keys = table.type.sorted.map((k) => ({name: fieldOf(ctx, table.type.row, k, text).name, type: fieldOf(ctx, table.type.row, k, text).type}));
       return {s: "insert_lines_sorted", table, src, keys};
     }
     if (/\b(LINES OF|INITIAL LINE|ASSIGNING)\b/i.test(text)) throw new Unsupported(`INSERT form: ${text}`);
-    const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
-    const vNode = node.findDirectExpression(Expressions.SimpleSource4) ?? node.findDirectExpression(Expressions.Source);
+    const table = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findDirectExpression(Expressions.Target)), ctx);
+    const vNode = /** @type {StNode} */ (node).findDirectExpression(Expressions.SimpleSource4) ?? /** @type {StNode} */ (node).findDirectExpression(Expressions.Source);
     // INSERT v INTO TABLE <generic table> (ultra/json, /UI2/CL_JSON): a
     // standard table appends, as INSERT INTO TABLE does to one; any other
     // kind is refused at run time (abap.InsertData)
-    if (table.type.k === "data" && table.type.table) return {s: "insert_data", table, value: convert(source(vNode, ctx), {k: "data"})};
+    if (table.type.k === "data" && table.type.table) return {s: "insert_data", table, value: convert(source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (vNode), ctx), {k: "data"})};
     if (table.type.k !== "table") throw new Unsupported("INSERT into a non-table");
-    const hasReference = node.findDirectTokenByText("REFERENCE") !== undefined;
-    const refName = hasReference ? node.findDirectExpressions(Expressions.Target)[1]?.concatTokens() : undefined;
+    const hasReference = /** @type {StNode} */ (node).findDirectTokenByText("REFERENCE") !== undefined;
+    const refName = hasReference ? /** @type {StNode} */ (node).findDirectExpressions(Expressions.Target)[1]?.concatTokens() : undefined;
     if (hasReference && !refName) throw new Unsupported(`INSERT REFERENCE INTO form: ${text}`);
     const refInto = refName ? variable(refName, ctx) : null;
     if (refInto && refInto.type.k !== "dref") throw new Unsupported(`INSERT REFERENCE INTO a ${refInto.type.k}`);
@@ -2392,19 +2393,19 @@ export function deriveProgramWanted(reg, options, session, capture) {
       const line = table.type.sorted.length === 1 && table.type.sorted[0] === "TABLE_LINE";
       /** @type {import("./ir.ts").SortKey[]} */ const sortKeys = line ? [{line: true, type: table.type.row}] : table.type.sorted.map((k) => ({name: fieldOf(ctx, table.type.row, k, text).name, type: fieldOf(ctx, table.type.row, k, text).type}));
       for (const k of sortKeys) if (!["c", "string", "n", "d", "t", "i", "int8"].includes(k.type.k)) throw new Unsupported(`SORTED table keyed on a ${k.type.k}`);
-      return {s: "insert_sorted", table, value: convert(source(vNode, ctx, table.type.row), table.type.row), keys: sortKeys, refInto};
+      return {s: "insert_sorted", table, value: convert(source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (vNode), ctx, table.type.row), table.type.row), keys: sortKeys, refInto};
     }
     if (refInto) throw new Unsupported(`INSERT REFERENCE INTO a non-sorted table: ${text}`);
-    return {s: "insert_table", table, value: convert(source(vNode, ctx, table.type.row), table.type.row), unique: !!table.type.hashed, keys};
+    return {s: "insert_table", table, value: convert(source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (vNode), ctx, table.type.row), table.type.row), unique: !!table.type.hashed, keys};
   }
   if (isStmt(node, Statements.InsertInternal)) {
     const m = /\bINDEX\b/i.test(text);
     if (!m || /\b(LINES OF|INITIAL LINE|ASSIGNING|REFERENCE)\b/i.test(text)) throw new Unsupported(`INSERT form: ${text}`);
-    const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    const table = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findDirectExpression(Expressions.Target)), ctx);
     if (table.type.k !== "table") throw new Unsupported("INSERT into a non-table");
-    const srcs = node.findDirectExpressions(Expressions.Source).concat(node.findDirectExpressions(Expressions.SimpleSource4));
-    const vNode = node.findDirectExpression(Expressions.SimpleSource4) ?? srcs[0];
-    const idxNode = node.findDirectExpressions(Expressions.Source).slice(-1)[0];
+    const srcs = /** @type {StNode} */ (node).findDirectExpressions(Expressions.Source).concat(/** @type {StNode} */ (node).findDirectExpressions(Expressions.SimpleSource4));
+    const vNode = /** @type {StNode} */ (node).findDirectExpression(Expressions.SimpleSource4) ?? srcs[0];
+    const idxNode = /** @type {StNode} */ (node).findDirectExpressions(Expressions.Source).slice(-1)[0];
     keyGuard(table.type, "INSERT ... INDEX");
     uniqueGuard(table.type, "INSERT ... INDEX");
     refuseSorted(table, "INSERT ... INDEX into");
@@ -2414,7 +2415,7 @@ export function deriveProgramWanted(reg, options, session, capture) {
   if (isStmt(node, Statements.Translate)) {
     const m = /\bTO\s+(UPPER|LOWER)\s+CASE\b/i.exec(text);
     if (m === null) throw new Unsupported(`TRANSLATE form: ${text}`);
-    const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    const target = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findDirectExpression(Expressions.Target)), ctx);
     if (!charlike(target.type)) throw new Unsupported("TRANSLATE of a non-character field");
     return {s: "translate", target, upper: upper(m[1]) === "UPPER"};
   }
@@ -2422,9 +2423,9 @@ export function deriveProgramWanted(reg, options, session, capture) {
   // messages to this session until c holds (0) or the time is up (8)
   if (isStmt(node, Statements.Wait) && /^WAIT\s+FOR\s+MESSAGING\s+CHANNELS\s+UNTIL\b/i.test(text)) {
     if (/\bPUSH\s+CHANNELS\b|\bASYNCHRONOUS\s+TASKS\b/i.test(text)) throw new Unsupported(`WAIT FOR more than MESSAGING CHANNELS: ${text}`);
-    const up = node.findDirectExpression(Expressions.Source);
+    const up = /** @type {StNode} */ (node).findDirectExpression(Expressions.Source);
     if (!up) throw new Unsupported(`WAIT FOR MESSAGING CHANNELS without UP TO: ${text}`);
-    return {s: "amc_wait", cond: cond(node.findDirectExpression(Expressions.Cond), ctx), seconds: convert(sourceOperand(up, ctx), {k: "f"})};
+    return {s: "amc_wait", cond: cond(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findDirectExpression(Expressions.Cond)), ctx), seconds: convert(sourceOperand(up, ctx), {k: "f"})};
   }
   // X0: the DATASET statements, as the transpiler's runtime does them
   // (go/abap/dataset.go, docs/dataset.md): the file system behind the
@@ -2435,12 +2436,12 @@ export function deriveProgramWanted(reg, options, session, capture) {
   }
   // GET RUN TIME FIELD: monotonic microseconds since the first call (FIX.md).
   if (isStmt(node, Statements.GetRunTime)) {
-    const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    const target = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findDirectExpression(Expressions.Target)), ctx);
     if (target.type.k !== "i") throw new Unsupported(`GET RUN TIME FIELD into a ${target.type.k}`);
     return {s: "get_runtime", target};
   }
   if (isStmt(node, Statements.Convert)) {
-    const kids = node.getChildren();
+    const kids = /** @type {StNode} */ (node).getChildren();
     const inputs = new Map(), outputs = new Map();
     for (let i = 0; i < kids.length; i++) {
       if (!isExpr(kids[i], Expressions.Source) && !isExpr(kids[i], Expressions.Target)) continue;
@@ -2470,7 +2471,7 @@ export function deriveProgramWanted(reg, options, session, capture) {
   // TIMESTAMPL p(11,7): UTC, as sy-datum and sy-uzeit are here
   if (isStmt(node, Statements.GetTime)) {
     if (!/^GET\s+TIME\s+STAMP\s+FIELD\s+\S+\s*\.?$/i.test(text)) throw new Unsupported(`GET TIME form: ${text}`);
-    const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    const target = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findDirectExpression(Expressions.Target)), ctx);
     if (target.type.k !== "p" || !((target.type.len === 8 && (target.type.dec ?? 0) === 0) || (target.type.len === 11 && target.type.dec === 7))) throw new Unsupported(`GET TIME STAMP into a ${target.type.k}(${target.type.len},${target.type.dec ?? 0})`);
     return {s: "get_timestamp", target, dec: target.type.dec ?? 0};
   }
@@ -2480,8 +2481,8 @@ export function deriveProgramWanted(reg, options, session, capture) {
   // RAISE EXCEPTION TYPE cls [EXPORTING ...] / RAISE EXCEPTION obj
   if (isStmt(node, Statements.Raise) && /^RAISE\s+(EXCEPTION|RESUMABLE|SHORTDUMP)\b/i.test(text)) return raiseException(node, ctx, text);
   if (isStmt(node, Statements.Message)) {
-    const raising = node.findDirectExpression(Expressions.ExceptionName);
-    const msg = node.findDirectExpression(Expressions.MessageSource);
+    const raising = /** @type {StNode} */ (node).findDirectExpression(Expressions.ExceptionName);
+    const msg = /** @type {StNode} */ (node).findDirectExpression(Expressions.MessageSource);
     if (!raising || !msg || /DISPLAY LIKE|INTO/i.test(text)) throw new Unsupported(`MESSAGE form: ${text}`);
     let id, ty, no;
     const short = msg.findDirectExpression(Expressions.MessageTypeAndNumber);
@@ -2503,7 +2504,7 @@ export function deriveProgramWanted(reg, options, session, capture) {
       ty = convert(read("TYPE"), S);
       no = convert(read("NUMBER"), {k: "n", len: 3});
     }
-    const values = node.findDirectExpressions(Expressions.MessageSourceSource).map((x) => convert(source(x, ctx), C(50)));
+    const values = /** @type {StNode} */ (node).findDirectExpressions(Expressions.MessageSourceSource).map((x) => convert(source(x, ctx), C(50)));
     if (values.length > 4) throw new Unsupported(`MESSAGE WITH more than four values: ${text}`);
     const name = {e: "str", value: upper(raising.concatTokens()), type: S};
     const method = {e: "str", value: ctx.method, type: S};
@@ -2513,18 +2514,18 @@ export function deriveProgramWanted(reg, options, session, capture) {
   }
   // RAISE name: a classic exception, for the caller's EXCEPTIONS list
   if (isStmt(node, Statements.Raise) && !/^RAISE\s+(EXCEPTION|RESUMABLE)\b/i.test(text)) {
-    const n = node.findDirectExpression(Expressions.ExceptionName);
+    const n = /** @type {StNode} */ (node).findDirectExpression(Expressions.ExceptionName);
     if (!n) throw new Unsupported(`RAISE form: ${text}`);
     return {s: "raise_classic", name: upper(n.concatTokens()), method: ctx.method};
   }
   // CALL METHOD (class)=>m EXPORTING ...: a static method by class name,
   // through the program's registry of static methods
-  if (isStmt(node, Statements.Call) && node.findDirectExpression(Expressions.MethodSource)?.findDirectExpression(Expressions.Dynamic)) {
+  if (isStmt(node, Statements.Call) && /** @type {StNode} */ (node).findDirectExpression(Expressions.MethodSource)?.findDirectExpression(Expressions.Dynamic)) {
     return dynamicStaticCall(node, ctx, {sourceOperand, source, convert, lvalue});
   }
   if (isStmt(node, Statements.CallFunction)) return callFunction(node, ctx, text);
   if (isStmt(node, Statements.Call)) {
-    const chain = node.findDirectExpression(Expressions.MethodCallChain) ?? callMethodChain(node);
+    const chain = /** @type {StNode} */ (node).findDirectExpression(Expressions.MethodCallChain) ?? callMethodChain(node);
     if (chain === undefined) throw new Unsupported(`CALL form: ${text}`);
     return {s: "call", call: call(chain, ctx, true)};
   }
@@ -2532,7 +2533,7 @@ export function deriveProgramWanted(reg, options, session, capture) {
   if (isStmt(node, Statements.Continue)) return {s: "continue"};
   if (isStmt(node, Statements.Return)) return {s: "return"};
   if (isStmt(node, Statements.Check)) {
-    const condition = node.findDirectExpression(Expressions.Cond);
+    const condition = /** @type {StNode} */ (node).findDirectExpression(Expressions.Cond);
     if (!condition) throw new Unsupported(`CHECK form: ${text}`);
     return {s: "check", cond: cond(condition, ctx)};
   }
@@ -2544,13 +2545,13 @@ export function deriveProgramWanted(reg, options, session, capture) {
     // CL_GUI_CONTROL writes the second): each Source is the one after its word
     const indexFirst = /^MODIFY\s+\S+\s+INDEX\s+.+\s+FROM\s+/i.test(text);
     if (!(indexFirst || /^MODIFY\s+\S+\s+FROM\s+.+\s+INDEX\s+/i.test(text)) || /\b(TRANSPORTING|USING\s+KEY|ASSIGNING|REFERENCE\s+INTO)\b/i.test(text)) throw new Unsupported(`MODIFY form: ${text}`);
-    const table = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    const table = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findDirectExpression(Expressions.Target)), ctx);
     if (table.type.k !== "table") throw new Unsupported("MODIFY of a non-table");
-    const kids = node.getChildren();
+    const kids = /** @type {StNode} */ (node).getChildren();
     const after = (kw) => { const at = kids.findIndex((c) => isTok(c, kw)); return at < 0 || !isExpr(kids[at + 1], Expressions.Source) ? undefined : kids[at + 1]; };
     const idx = after("INDEX");
     const val = after("FROM");
-    if (!idx || !val || node.findDirectExpressions(Expressions.Source).length !== 2) throw new Unsupported(`MODIFY form: ${text}`);
+    if (!idx || !val || /** @type {StNode} */ (node).findDirectExpressions(Expressions.Source).length !== 2) throw new Unsupported(`MODIFY form: ${text}`);
     refuseSorted(table, "MODIFY ... INDEX of");
     return {s: "modify_index", table, index: convert(source(idx, ctx, I), I), value: convert(source(val, ctx, table.type.row), table.type.row)};
   }
@@ -2567,7 +2568,7 @@ export function deriveProgramWanted(reg, options, session, capture) {
     // the start of s, not of the section), and IN TABLE itab of strings
     // [MATCH LINE n] (row by row, the first row with a match). REGEX IN
     // SECTION stays refused: what ^ and $ see there is not measured.
-    const kids = node.getChildren();
+    const kids = /** @type {StNode} */ (node).getChildren();
     const words = kids.map((k) => (k instanceof Nodes.TokenNode ? upper(k.concatTokens()) : ""));
     // ultra/events: FIND ALL OCCURRENCES OF [REGEX] p IN s [IGNORING CASE]
     // MATCH COUNT n and nothing else (A4H ZCL_GOGEN_T_WGUI1): matches do not
@@ -2577,9 +2578,9 @@ export function deriveProgramWanted(reg, options, session, capture) {
     const matches = (...parts) => parts.reduce(/** @param {string[]} forms */ (forms, part) => forms.flatMap((form) =>
       (Array.isArray(part) ? part : [part]).map((p) => [form, p].filter(Boolean).join(" "))), [""]).includes(tw);
     const hasKeywords = (...seq) => words.some((_, i) => seq.every((w, j) => words[i + j] === w));
-    if (matches("FIND ALL OCCURRENCES OF IN", ["", "IGNORING CASE"], "MATCH COUNT") && node.findDirectExpressions(Expressions.Source).length === 2) {
-      const [pat, subj] = node.findDirectExpressions(Expressions.Source);
-      const kind = upper(node.findDirectExpression(Expressions.FindType)?.concatTokens() ?? "");
+    if (matches("FIND ALL OCCURRENCES OF IN", ["", "IGNORING CASE"], "MATCH COUNT") && /** @type {StNode} */ (node).findDirectExpressions(Expressions.Source).length === 2) {
+      const [pat, subj] = /** @type {StNode} */ (node).findDirectExpressions(Expressions.Source);
+      const kind = upper(/** @type {StNode} */ (node).findDirectExpression(Expressions.FindType)?.concatTokens() ?? "");
       if (kind && kind !== "SUBSTRING" && kind !== "REGEX" && kind !== "PCRE") throw new Unsupported(`FIND ${kind}`);
       const regex = kind === "REGEX" || kind === "PCRE";
       const pcre = kind === "PCRE";
@@ -2591,7 +2592,7 @@ export function deriveProgramWanted(reg, options, session, capture) {
         icase = {e: "refattr", base, name: "MV_IGNORE_CASE", type: C(1)};
       } else if (!charlike(pattern.type)) throw new Unsupported(`FIND ALL OCCURRENCES OF a ${pattern.type.k}`);
       else pattern = convert(pattern, S);
-      const count = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+      const count = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findDirectExpression(Expressions.Target)), ctx);
       if (count.type.k !== "i") throw new Unsupported(`MATCH COUNT into a ${count.type.k}`);
       return {s: "find_all", regex, pcre, pattern, icase, subject: convert(source(subj, ctx), S), count};
     }
@@ -2600,11 +2601,11 @@ export function deriveProgramWanted(reg, options, session, capture) {
     // match_result_tab (open-abap-core's CL_ABAP_MATCHER, CL_IXML). A4H
     // 2026-09-25 (ZCL_GOGEN_T_FINDRES, _FINDPCRE): see abap.FindResults
     if (matches("FIND", ["", "FIRST OCCURRENCE OF", "ALL OCCURRENCES OF"], "IN", ["", "IGNORING CASE", "RESPECTING CASE"], "RESULTS")
-      && node.findDirectExpressions(Expressions.Source).length === 2) return findResults(node, ctx, text, tw);
+      && /** @type {StNode} */ (node).findDirectExpressions(Expressions.Source).length === 2) return findResults(node, ctx, text, tw);
     const byteFind = lowerByteFind(node, ctx, text, kids, words, tw, byteStatementHelpers);
     if (byteFind) return byteFind;
     if (words.includes("ALL") || words.includes("RESULTS") || words.includes("RESPECTING") || hasKeywords("MATCH", "COUNT") || hasKeywords("IN", "BYTE", "MODE")) throw new Unsupported(`FIND form: ${text}`);
-    const ft = node.findDirectExpression(Expressions.FindType);
+    const ft = /** @type {StNode} */ (node).findDirectExpression(Expressions.FindType);
     const kind = ft ? upper(ft.concatTokens()) : "";
     if (kind && kind !== "SUBSTRING" && kind !== "REGEX" && kind !== "PCRE") throw new Unsupported(`FIND ${kind}`);
     const inTable = words.some((w, i) => w === "IN" && words[i + 1] === "TABLE");
@@ -2663,7 +2664,7 @@ export function deriveProgramWanted(reg, options, session, capture) {
     return out;
   }
   if (isStmt(node, Statements.Clear)) {
-    const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    const target = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {StNode} */ (node).findDirectExpression(Expressions.Target)), ctx);
     // CLEAR of generic data clears the slot it is bound to
     if (target.type.k === "data") {
       if (/\bWITH\b/i.test(text)) throw new Unsupported(`CLEAR form: ${text}`);
@@ -2672,8 +2673,8 @@ export function deriveProgramWanted(reg, options, session, capture) {
     return {s: "clear", target};
   }
   // FREE is CLEAR that also gives the memory back, which a GC does anyway
-  if (isStmt(node, Statements.Refresh)) return {s: "seq", body: node.findDirectExpressions(Expressions.Target).map((t) => lvalue(t, ctx)).map(/** @param {import("./frontend-types.ts").ValueExpr} target @returns {import("./frontend-types.ts").FrontendStmt} */ (target) => target.type.k === "data" ? {s: "clear_data", target} : {s: "clear", target})};
-  if (isStmt(node, Statements.Free)) return {s: "seq", body: node.findDirectExpressions(Expressions.Target).map((t) => lvalue(t, ctx)).map(/** @param {import("./frontend-types.ts").ValueExpr} target @returns {import("./frontend-types.ts").FrontendStmt} */ (target) => target.type.k === "data" ? {s: "clear_data", target} : {s: "clear", target})};
+  if (isStmt(node, Statements.Refresh)) return {s: "seq", body: /** @type {StNode} */ (node).findDirectExpressions(Expressions.Target).map((t) => lvalue(t, ctx)).map(/** @param {import("./frontend-types.ts").ValueExpr} target @returns {import("./frontend-types.ts").FrontendStmt} */ (target) => target.type.k === "data" ? {s: "clear_data", target} : {s: "clear", target})};
+  if (isStmt(node, Statements.Free)) return {s: "seq", body: /** @type {StNode} */ (node).findDirectExpressions(Expressions.Target).map((t) => lvalue(t, ctx)).map(/** @param {import("./frontend-types.ts").ValueExpr} target @returns {import("./frontend-types.ts").FrontendStmt} */ (target) => target.type.k === "data" ? {s: "clear_data", target} : {s: "clear", target})};
   // WRITE goes to a list; in an APC or HTTP handler nobody ever displays it
   // WRITE is a no-op here, except the transpiler runtime's host code: open-abap-core
   // writes its kernel parts in JS as WRITE '@KERNEL ...', and skipping one would
@@ -2686,11 +2687,11 @@ export function deriveProgramWanted(reg, options, session, capture) {
     // a line whose work the host does elsewhere (a JavaScript declaration the
     // host function of a later line does not need)
     if (k?.nop === true) return {s: "nop"};
-    if (/'@KERNEL/i.test(node.concatTokens())) throw new Unsupported(`@KERNEL: host code of the transpiler runtime`);
+    if (/'@KERNEL/i.test(/** @type {StNode} */ (node).concatTokens())) throw new Unsupported(`@KERNEL: host code of the transpiler runtime`);
     return {s: "nop"};
   }
   if (isStmt(node, Statements.GenerateSubroutine)) return generateSubroutine(node, ctx);
-  throw new Unsupported(`statement ${node.get().constructor.name}: ${text}`);
+  throw new Unsupported(`statement ${/** @type {StNode} */ (node).get().constructor.name}: ${text}`);
 }
 
 /* GENERATE SUBROUTINE POOL: there is no compiler at run time, so the
@@ -2781,9 +2782,9 @@ const PLACES = new Set(["var", "attr", "static", "field", "dref_field", "fs", "r
 // structure or a table on either side is not flat and is refused.
 /** @param {import("@abaplint/core").Nodes.StatementNode} node @param {import("./frontend-types.ts").MethodContext} ctx @param {string} text @returns {import("./frontend-types.ts").FrontendStmt} */ function moveCorresponding(node, ctx, text) {
   if (/\b(EXPANDING|KEEPING)\b/i.test(text)) throw new Unsupported(`MOVE-CORRESPONDING form: ${text}`);
-  const from = source(node.findDirectExpression(Expressions.Source), ctx);
+  const from = source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (node.findDirectExpression(Expressions.Source)), ctx);
   const tNode = node.findDirectExpression(Expressions.SimpleTarget) ?? node.findDirectExpression(Expressions.Target);
-  const to = lvalue(tNode, ctx);
+  const to = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (tNode), ctx);
   if ((from.type.k === "data" || to.type.k === "data") && ["data", "struct"].includes(from.type.k) && ["data", "struct"].includes(to.type.k)) {
     // generic on one side or both: component by component at run time,
     // through bindings to the two structures
@@ -2826,11 +2827,11 @@ const STRING_FNS = {
   for (const k of given.keys()) if (!STRING_FNS[name].includes(k)) throw new Unsupported(`${name.toLowerCase()}( ) with ${k.toLowerCase()}: ${text}`);
   if (!given.has("VAL")) throw new Unsupported(`${name.toLowerCase()}( ) without val: ${text}`);
   const chars = (k) => {
-    const x = source(given.get(k), ctx);
+    const x = source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (given.get(k)), ctx);
     if (!charlike(x.type)) throw new Unsupported(`${name.toLowerCase()}( ) ${k.toLowerCase()} of a ${x.type.k}`);
     return convert(x, S);
   };
-  const int = (k) => convert(source(given.get(k), ctx, I), I);
+  const int = (k) => convert(source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (given.get(k)), ctx, I), I);
   const val = chars("VAL");
   // the text before / after the first occurrence of sub, empty when there is
   // none (A4H ZCL_GOGEN_T_WGUI2)
@@ -3557,7 +3558,7 @@ function localInterfaceConstant(id, attr, local, reg) {
     const to = namedType(c.typeNode, ctx, inferred);
     if (c.body === null || c.body.getChildren().length !== 1) throw new Unsupported(`CONV with LET or empty: ${c.text}`);
     // the type of CONV takes part in the calculation type of its argument
-    return convert(source(c.body.findDirectExpression(Expressions.Source), ctx, to), to);
+    return convert(source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (c.body.findDirectExpression(Expressions.Source)), ctx, to), to);
   }
   if (c.kw === "VALUE") {
     const to = namedType(c.typeNode, ctx, inferred);
@@ -4160,7 +4161,7 @@ function orderByOf(sel, tb) {
   // drop it silently; what ABAP does there is not measured. By position it
   // was measured (ZCL_GOGEN_T_GRPBY) and stays.
   if (corresponding && cols.some((c) => c.agg && !c.named)) throw new Unsupported(`SELECT aggregate without AS INTO CORRESPONDING FIELDS: not measured: ${text}`);
-  const target = lvalue(into.findFirstExpression(Expressions.Target), ctx);
+  const target = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (into.findFirstExpression(Expressions.Target)), ctx);
   if (target.type.k !== "table") throw new Unsupported(`SELECT INTO TABLE of a ${target.type.k}`);
   const elementary = target.type.row.k !== "struct";
   if (elementary && (corresponding || cols.length !== 1 || !["c", "string", "i"].includes(target.type.row.k))) throw new Unsupported(`SELECT INTO TABLE of ${target.type.row.k} rows: ${text}`);
@@ -4349,7 +4350,7 @@ function dynamicTokens(dyn, ctx, what, text) {
   const into = sel.findDirectExpression(Expressions.SQLIntoTable);
   if (!into) throw new Unsupported(`dynamic SELECT INTO form (only INTO [CORRESPONDING FIELDS OF] TABLE): ${text}`);
   const corresponding = /\bCORRESPONDING\s+FIELDS\b/i.test(into.concatTokens());
-  let target = lvalue(into.findFirstExpression(Expressions.Target), ctx);
+  let target = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (into.findFirstExpression(Expressions.Target)), ctx);
   if (target.type.k === "table") target = convert(target, {k: "data", table: true});
   else if (target.type.k !== "data") throw new Unsupported(`dynamic SELECT INTO TABLE of a ${target.type.k}`);
   refuseSorted(target, "SELECT INTO TABLE");
@@ -4672,7 +4673,7 @@ function intoWorkArea(sel, ctx, text, cols, verb) {
   // initial row of the table's line type, a generic table's at run time
   const likeLine = /^CREATE\s+DATA\s+\S+\s+LIKE\s+LINE\s+OF\s+([\w\/~<>-]+)\s*\.?$/i.exec(text);
   if (likeLine) {
-    const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    const target = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (node.findDirectExpression(Expressions.Target)), ctx);
     if (target.type.k !== "dref") throw new Unsupported(`CREATE DATA into a ${target.type.k}`);
     const tb = variable(likeLine[1], ctx);
     if (tb.type.k === "data" && tb.type.table) return {s: "create_data_line", target, table: tb};
@@ -4691,7 +4692,7 @@ function intoWorkArea(sel, ctx, text, cols, verb) {
   // type the reference is declared with (REF TO t)
   const bare = /^CREATE\s+DATA\s+([\w\/~]+)\s*\.?$/i.exec(text);
   if (bare) {
-    const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    const target = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (node.findDirectExpression(Expressions.Target)), ctx);
     if (target.type.k !== "dref") throw new Unsupported(`CREATE DATA into a ${target.type.k}`);
     const declared = ctx.scope.findVariable?.(bare[1])?.getType();
     const inner = declared instanceof BasicTypes.DataReference ? declared.getType() : undefined;
@@ -4706,7 +4707,7 @@ function intoWorkArea(sel, ctx, text, cols, verb) {
   // CX_SY_CREATE_DATA_ERROR with the reference untouched)
   const dyn = /^CREATE\s+DATA\s+\S+\s+TYPE\s+(STANDARD\s+TABLE\s+OF\s+)?\(\s*([^()\s]+)\s*\)(\s+WITH\s+(NON-UNIQUE\s+)?DEFAULT\s+KEY)?\s*\.?$/i.exec(text);
   if (dyn) {
-    const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    const target = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (node.findDirectExpression(Expressions.Target)), ctx);
     if (target.type.k !== "dref") throw new Unsupported(`CREATE DATA into a ${target.type.k}`);
     const src = node.findDirectExpression(Expressions.Dynamic)?.findFirstExpression(Expressions.FieldChain)
       ?? node.findFirstExpression(Expressions.Dynamic)?.findFirstExpression(Expressions.FieldChain);
@@ -4718,7 +4719,7 @@ function intoWorkArea(sel, ctx, text, cols, verb) {
   }
   const m = /^CREATE\s+DATA\s+\S+\s+TYPE\s+(STANDARD\s+TABLE\s+OF\s+)?([\w\/=>~-]+)(\s+WITH\s+(NON-UNIQUE\s+)?DEFAULT\s+KEY)?\s*\.?$/i.exec(text);
   if (!m || /^(REF|LINE|RANGE|SORTED|HASHED|TABLE)$/i.test(m[2])) throw new Unsupported(`statement CreateData: ${text}`);
-  const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+  const target = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (node.findDirectExpression(Expressions.Target)), ctx);
   if (target.type.k !== "dref") throw new Unsupported(`CREATE DATA into a ${target.type.k}`);
   const name = upper(m[2]);
   /** @type {import("./ir.ts").Type} */ let t;
@@ -4741,7 +4742,7 @@ function intoWorkArea(sel, ctx, text, cols, verb) {
  */
 /** @param {import("@abaplint/core").Nodes.StatementNode} node @param {import("./frontend-types.ts").MethodContext} ctx @returns {import("./frontend-types.ts").FrontendStmt} */ function createObject(node, ctx) {
   const text = node.concatTokens();
-  const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+  const target = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (node.findDirectExpression(Expressions.Target)), ctx);
   if (target.type.k !== "ref") throw new Unsupported(`CREATE OBJECT into a ${target.type.k}`);
   const params = node.findDirectExpression(Expressions.ParameterListS);
   if (node.findDirectExpression(Expressions.ParameterListExceptions)) throw new Unsupported(`CREATE OBJECT with EXCEPTIONS: ${text}`);
@@ -4797,7 +4798,7 @@ function intoWorkArea(sel, ctx, text, cols, verb) {
     for (const p of params?.findAllExpressions(Expressions.ParameterS) ?? []) {
       const name = upper(p.findDirectExpression(Expressions.ParameterName).concatTokens());
       if (!given.has(name)) givenNames.push(name);
-      given.set(name, p.findDirectExpression(Expressions.Source));
+      given.set(name, /** @type {import("./frontend-types.ts").SyntaxNode} */ (p.findDirectExpression(Expressions.Source)));
     }
     const sig = constructorSignature(ctx, cls);
     for (const n of givenNames) if (!sig.some((p) => p.name === n)) throw new Unsupported(`RAISE EXCEPTION TYPE ${cls}: no constructor parameter ${n}`);
@@ -5030,12 +5031,12 @@ function eventInfo(ctx, owner, evName) {
     if (name.includes("-")) throw new Unsupported(`VALUE with a nested component path: ${name}`);
     const f = fieldOf(ctx, to, name, text);
     const src = c.findDirectExpression(Expressions.Source);
-    const its = items(src);
+    const its = items(/** @type {import("./frontend-types.ts").SyntaxNode} */ (src));
     /** @type {import("./frontend-types.ts").ValueExpr} */ let v;
     if (its.length === 1 && its[0].ctor && its[0].ctor.typeNode.concatTokens() === "#") {
       v = constructor(its[0].ctor, ctx, f.type);
     } else {
-      v = convert(source(src, ctx, f.type), f.type);
+      v = convert(source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (src), ctx, f.type), f.type);
     }
     fields.push({name, value: v});
   }
@@ -5072,7 +5073,7 @@ function eventInfo(ctx, owner, evName) {
       const txt = templateText(tokenStr(c));
       if (txt !== "") parts.push({text: txt});
     } else if (isExpr(c, Expressions.StringTemplateSource)) {
-      const v = source(c.findDirectExpression(Expressions.Source), ctx);
+      const v = source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (c.findDirectExpression(Expressions.Source)), ctx);
       const fmt = c.findDirectExpression(Expressions.StringTemplateFormatting);
       /** @type {import("./frontend-types.ts").Mutable<import("./ir.ts").TemplateOptions>} */ const opts = {};
       if (fmt) {
@@ -5151,7 +5152,7 @@ const FUNCTIONS = {
     const ps = create.findFirstExpression(Expressions.ParameterListS)?.findDirectExpressions(Expressions.ParameterS) ?? [];
     const arg = (p) => ps.find((x) => upper(x.findDirectExpression(Expressions.ParameterName).concatTokens()) === p)?.findDirectExpression(Expressions.Source);
     if (arg("SEED") || !arg("MIN") || !arg("MAX") || ps.length !== 2) throw new Unsupported(`cl_abap_random_int form: ${chainText}`);
-    return {e: "random", min: convert(source(arg("MIN"), ctx, I), I), max: convert(source(arg("MAX"), ctx, I), I), type: I};
+    return {e: "random", min: convert(source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (arg("MIN")), ctx, I), I), max: convert(source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (arg("MAX")), ctx, I), I), type: I};
   }
   if (isExpr(kids[0], Expressions.NewObject)) {
     if (kids.length !== 1) throw new Unsupported(`a call on a new object: ${chainText}`);
@@ -5218,7 +5219,7 @@ const FUNCTIONS = {
 
   if (receiver === null && owner === null && FUNCTIONS[name] !== undefined && !ctx.signatures.has(name)) return builtin(name, direct, named, ctx, {FUNCTIONS, source, convert}, name === "IPOW" && ["i", "int8", "p", "f"].includes(hint?.k) ? hint : undefined);
   if (receiver === null && name === "LINES" && !ctx.signatures.has(name)) {
-    const t = source(direct, ctx);
+    const t = source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (direct), ctx);
     if (t.type.k === "data") return {e: "lines_data", x: t, type: I};
     if (t.type.k !== "table") throw new Unsupported("lines( ) of a non-table");
     return {e: "lines", table: t, type: I};
@@ -5234,7 +5235,7 @@ const FUNCTIONS = {
     // string, which /UI2/CL_JSON=>SERIALIZE_INT passes)
     const fmt = /^cl_abap_format=>(e_html_attr|e_json_string)$/i.exec(arg("FORMAT")?.concatTokens() ?? "")?.[1]?.toLowerCase();
     if (ps.length !== 2 || !arg("VAL") || !fmt) throw new Unsupported(`escape( ) form: ${chainText}`);
-    const v = source(arg("VAL"), ctx);
+    const v = source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (arg("VAL")), ctx);
     if (!charlike(v.type) && !(fmt === "e_json_string" && v.type.k === "data" && !v.type.table)) throw new Unsupported(`escape( ) of a ${v.type.k}`);
     return {e: "str_fn", fn: fmt === "e_html_attr" ? "EscapeHTMLAttr" : "EscapeJSONString", args: [convert(v, S)], type: S};
   }
@@ -5253,7 +5254,7 @@ const FUNCTIONS = {
     if (tab.type.k !== "table" || tab.type.row.k !== "string") throw new Unsupported(`concat_lines_of( ) of a ${tab.type.k === "table" ? `table of ${tab.type.row.k}` : tab.type.k}: only a table of strings is in the subset`);
     /** @type {import("./frontend-types.ts").ValueExpr} */ let sep = {e: "str", value: "", type: S};
     if (arg("SEP") !== undefined) {
-      const x = source(arg("SEP"), ctx);
+      const x = source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (arg("SEP")), ctx);
       if (!charlike(x.type)) throw new Unsupported(`concat_lines_of( ) sep of a ${x.type.k}`);
       sep = convert(x, S);
     }
@@ -5261,18 +5262,18 @@ const FUNCTIONS = {
   }
   if (receiver === null && owner === null && ["TO_LOWER", "TO_UPPER"].includes(name) && !ctx.signatures.has(name)) {
     const argNode = direct ?? named?.findDirectExpressions(Expressions.ParameterS).find((p) => upper(p.findDirectExpression(Expressions.ParameterName).concatTokens()) === "VAL")?.findDirectExpression(Expressions.Source);
-    return {e: "case_fn", upper: name === "TO_UPPER", x: convert(source(argNode, ctx), S), type: S};
+    return {e: "case_fn", upper: name === "TO_UPPER", x: convert(source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (argNode), ctx), S), type: S};
   }
   if (receiver === null && ["STRLEN", "NUMOFCHAR"].includes(name) && !ctx.signatures.has(name)) {
     // parity-wave1: of a value the backends hold as text only (a generic
     // operand reached it through a function module's untyped parameter and
     // the Go build failed on it)
-    const x = source(direct, ctx);
+    const x = source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (direct), ctx);
     if (["data", "i", "int8", "f", "struct", "table", "ref", "dref", "exc"].includes(x.type.k)) throw new Unsupported(`strlen( ) of a ${x.type.k}`);
     return name === "NUMOFCHAR" ? {e: "str_fn", fn: "Numofchar", args: [convert(x, S)], type: I} : {e: "strlen", x, type: I};
   }
   if (receiver === null && owner === null && name === "REVERSE" && !ctx.signatures.has(name)) {
-    const x = source(direct, ctx);
+    const x = source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (direct), ctx);
     if (!charlike(x.type)) throw new Unsupported(`reverse( ) of a ${x.type.k}`);
     return {e: "reverse", x: convert(x, S), type: S};
   }
@@ -5281,33 +5282,33 @@ const FUNCTIONS = {
     const arg = (p) => named?.findDirectExpressions(Expressions.ParameterS).find((x) => upper(x.findDirectExpression(Expressions.ParameterName).concatTokens()) === p)?.findDirectExpression(Expressions.Source);
     const given = (named?.findDirectExpressions(Expressions.ParameterS) ?? []).map((x) => upper(x.findDirectExpression(Expressions.ParameterName).concatTokens()));
     if (!named || given.some((p) => !["VAL", "SUB", "OFF", "OCC"].includes(p)) || !arg("VAL") || !arg("SUB") || (arg("OCC") && arg("OFF"))) throw new Unsupported(`find( ) form: ${chainText}`);
-    const val = convert(source(arg("VAL"), ctx), S);
-    const sub = convert(source(arg("SUB"), ctx), S);
-    if (arg("OCC")) return {e: "find_occ", val, sub, occ: convert(source(arg("OCC"), ctx, I), I), type: I};
-    return {e: "find", val, sub, off: arg("OFF") ? convert(source(arg("OFF"), ctx, I), I) : null, type: I};
+    const val = convert(source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (arg("VAL")), ctx), S);
+    const sub = convert(source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (arg("SUB")), ctx), S);
+    if (arg("OCC")) return {e: "find_occ", val, sub, occ: convert(source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (arg("OCC")), ctx, I), I), type: I};
+    return {e: "find", val, sub, off: arg("OFF") ? convert(source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (arg("OFF")), ctx, I), I) : null, type: I};
   }
   if (receiver === null && name === "XSTRLEN" && !ctx.signatures.has(name)) {
-    const x = source(direct, ctx);
+    const x = source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (direct), ctx);
     if (x.type.k !== "xstring" && x.type.k !== "x") throw new Unsupported(`xstrlen( ) of a ${x.type.k}`);
     return {e: "xstrlen", x, type: I};
   }
   // the character of a code point (a blank is the empty c, as stored)
   // the code point of a character; a blank c is stored empty and is 32
-  if (owner === "CL_ABAP_CONV_OUT_CE" && name === "UCCPI") return {e: "uccp", x: convert(source(direct, ctx), S), type: I};
+  if (owner === "CL_ABAP_CONV_OUT_CE" && name === "UCCPI") return {e: "uccp", x: convert(source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (direct), ctx), S), type: I};
   if (receiver === null && owner === null && name === "SUBSTRING" && !ctx.signatures.has(name)) {
     const ps = named?.findDirectExpressions(Expressions.ParameterS) ?? [];
     const arg = (p) => ps.find((x) => upper(x.findDirectExpression(Expressions.ParameterName).concatTokens()) === p)?.findDirectExpression(Expressions.Source);
     if (!arg("VAL") || ps.some((x) => !["VAL", "OFF", "LEN"].includes(upper(x.findDirectExpression(Expressions.ParameterName).concatTokens())))) {
       throw new Unsupported(`substring( ) form: ${chainText}`);
     }
-    const val = convert(source(arg("VAL"), ctx), S);
-    return {e: "substr", x: val, base: S, off: arg("OFF") ? convert(source(arg("OFF"), ctx, I), I) : null,
-      len: arg("LEN") ? convert(source(arg("LEN"), ctx, I), I) : null, type: S};
+    const val = convert(source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (arg("VAL")), ctx), S);
+    return {e: "substr", x: val, base: S, off: arg("OFF") ? convert(source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (arg("OFF")), ctx, I), I) : null,
+      len: arg("LEN") ? convert(source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (arg("LEN")), ctx, I), I) : null, type: S};
   }
-  if (owner === "CL_ABAP_CONV_IN_CE" && name === "UCCPI") return {e: "uccpi", x: convert(source(direct, ctx), I), type: C(1)};
+  if (owner === "CL_ABAP_CONV_IN_CE" && name === "UCCPI") return {e: "uccpi", x: convert(source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (direct), ctx), I), type: C(1)};
   // open-abap-core UCCP moves SIMPLE into x(2), then i, retaining a UTF-16 unit.
   if (owner === "CL_ABAP_CONV_IN_CE" && name === "UCCP") {
-    const x = convert(convert(source(direct, ctx), X(2)), I);
+    const x = convert(convert(source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (direct), ctx), X(2)), I);
     return {e: "utf16unit", x, type: C(2)};
   }
   // an ALIASES name is the component it stands for; through an interface
@@ -5378,7 +5379,7 @@ const FUNCTIONS = {
     }
     for (const list of full.findAllExpressions(Expressions.ParameterListT)) {
       for (const p of list.findDirectExpressions(Expressions.ParameterT)) {
-        targets.set(upper(p.findDirectExpression(Expressions.ParameterName).concatTokens()), lvalue(p.findDirectExpression(Expressions.Target), ctx));
+        targets.set(upper(p.findDirectExpression(Expressions.ParameterName).concatTokens()), lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (p.findDirectExpression(Expressions.Target)), ctx));
       }
     }
     void exp;
@@ -5809,7 +5810,7 @@ const FUNCTIONS = {
     if (isExpr(n, Expressions.Compare)) return compare(n, ctx);
     if (isExpr(n, Expressions.CondSub)) {
       const not = n.getChildren().some((c) => isTok(c, "NOT"));
-      const inner = cond(n.findDirectExpression(Expressions.Cond), ctx);
+      const inner = cond(/** @type {import("./frontend-types.ts").SyntaxNode} */ (n.findDirectExpression(Expressions.Cond)), ctx);
       return not ? {c: "not", x: inner} : inner;
     }
     throw new Unsupported(`condition part ${n.get().constructor.name}`);
