@@ -184,10 +184,10 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
   program.lockObjects = lockObjectRegistry(reg, program);
   program.caught = caughtIndex(reg, program.wanted,
     (c) => clasDef(reg, c)?.getSuperClass()?.toUpperCase() ?? /** @type {Record<string, string | undefined>} */ (RUNTIME_CX_SUPER)[c]);
-  /** @param {import("./frontend-types.ts").CompilationContext} ctx @param {import("./frontend-session-types.ts").ClassObject} obj */ const lowerClass = (ctx, obj) => {
+  // @ts-expect-error -- abapiti form pending
+  const lowerClass = (ctx, obj) => {
     const saved = PROGRAM;
     PROGRAM = ctx.program; // Global type helpers must use the tracked program too.
-    // @ts-expect-error -- abapiti form pending
     try { return classIr(ctx, obj); } finally { PROGRAM = saved; }
   };
   for (const obj of enumerateObjects(reg, "selected-classes", wanted, "scheduling", (o) => o instanceof abaplint.Objects.Class && selectionHas(wanted, o.getName().toLowerCase()) && (!discoveryProbe || discoveryProbe.owners.has(upper(o.getName()))))) {
