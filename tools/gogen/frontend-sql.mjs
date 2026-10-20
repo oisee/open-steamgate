@@ -1,3 +1,4 @@
+// @ts-check
 // Open SQL value and type lowering.
 import {T, bin, col, lit, param} from "../sqlscript-ir.mjs";
 import {Unsupported, Expressions, charlike, isExpr, isTok, upper} from "./frontend-base.mjs";
@@ -5,15 +6,23 @@ import {convert, fieldChain, isVariableName} from "./frontend.mjs";
 import {fieldOf} from "./frontend-types-signatures.mjs";
 import {source, sourceOperand} from "./frontend-expressions-calls.mjs";
 
+/** a SQLScript IR type letter ({@link ../sqlscript-ir.mjs} T) as a named shape */
+/** @typedef {{abap: string, bits?: number, len?: number, dec?: number}} SqlIrType */
+/** a lowered predicate node, or null for none */
+/** @typedef {{node: string} | null} SqlPred */
+/** the host bindings a statement collects while its values lower */
+/** @typedef {{hosts: ({xstring: boolean, v: import("./frontend-types.ts").ValueExpr} | {fit: number, v: import("./frontend-types.ts").ValueExpr} | {xhex: number, v: import("./frontend-types.ts").ValueExpr} | {xexact: number, v: import("./frontend-types.ts").ValueExpr} | import("./frontend-types.ts").ValueExpr)[]}} SqlAcc */
 /** the IR type of a column in a predicate or a projection */
 // a DEC column: its digits (2n-1 for p LENGTH n) and decimals, as the IR
 // counts them (ANORMALIES NOTE packed-length-is-bytes)
 // a RAW(n) column is T.bytes(n), a RAWSTRING T.bytes() (ultra/zvdb)
+/** @param {import("./ir.ts").Type} t @returns {SqlIrType} */
 const sqlIrType = (t) => (t.k === "i" ? T.int : t.k === "int8" ? T.int8 : t.k === "string" ? T.str : t.k === "d" ? T.date
   : t.k === "p" ? T.dec(2 * (t.len ?? 8) - 1, t.dec ?? 0) : t.k === "x" ? T.bytes(t.len ?? 1) : t.k === "xstring" ? T.bytes()
-    : T.char(t.len ?? 1));
+    : T.char(/** @type {{len?: number}} */ (t).len ?? 1));
 /** the IR type a written value binds as (tools/ir-writes.mjs bindValue): a
  * d, t or n is its characters, as the column stores them */
+/** @param {import("./ir.ts").Type} t @param {string} where @returns {SqlIrType} */
 function writeIrType(t, where) {
   if (t.k === "i") return T.int;
   if (t.k === "int8") return T.int8;
@@ -40,13 +49,17 @@ function writeIrType(t, where) {
  * bytes yet (bindValue, initialValue), and the shape it renders does not
  * depend on the type, so a STRING stands in for a RAW column there. What
  * runs is the Go runtime's bindValue with the real type (dbwrite.go) */
+/** @param {SqlIrType} t @returns {SqlIrType} */
 const irCheck = (t) => (t.abap === "X" || t.abap === "XSTRING" ? T.str : t);
+/** @param {string} n @returns {string} */
 const lowName = (n) => n.toLowerCase();
 const mandtPred = () => bin("=", col("mandt", T.char(3)), param("SY-MANDT", T.char(3)), T.bool);
+/** @param {SqlPred} a @param {SqlPred} b @returns {SqlPred} */
 const andIr = (a, b) => (a === null ? b : b === null ? a : bin("AND", a, b, T.bool));
 
 /** a host value of Open SQL: [@]name[-comp...], the parser leaving a
  * component after @ as siblings (Dash, SQLFieldName) */
+/** @param {import("@abaplint/core").Nodes.ExpressionNode} src @param {readonly import("@abaplint/core").Nodes.ExpressionNode[]} trailing @param {import("./frontend-types.ts").MethodContext} ctx @param {string} text @returns {import("./frontend-types.ts").ValueExpr} */
 function sqlHost(src, trailing, ctx, text) {
   // FOR ALL ENTRIES IN itab: itab-comp is the component of the driving row
   // the statement is run for (selectStatement, parity-wave1)
@@ -72,14 +85,16 @@ function sqlHost(src, trailing, ctx, text) {
   if (sk.length === 3 && upper(simple.concatTokens()) === "SY" && !isVariableName("SY", ctx) && isTok(sk[1], "-") && isExpr(sk[2], Expressions.SQLFieldName)) {
     const syText = `SY-${upper(sk[2].concatTokens())}`;
     let v;
+    // a duck-typed field chain: fieldChain reads only these two of its node
+    // @ts-expect-error -- abapiti form pending
     try { v = fieldChain({getChildren: () => [], concatTokens: () => syText}, ctx); } catch { v = undefined; }
     if (v === undefined || v.e === undefined) throw new Unsupported(`SQL value: ${text}`);
     return v;
   }
-  let v = sourceOperand(simple.getFirstChild(), ctx);
+  let v = sourceOperand(/** @type {import("./frontend-types.ts").SyntaxNode} */ (simple.getFirstChild()), ctx);
   for (let i = 1; i < sk.length; i += 2) {
     if (!isTok(sk[i], "-") || !isExpr(sk[i + 1], Expressions.SQLFieldName)) throw new Unsupported(`SQL value: ${text}`);
-    const f = fieldOf(ctx, v.type, sk[i + 1].concatTokens(), text);
+    const f = fieldOf(ctx, v.type, /** @type {import("@abaplint/core").Nodes.ExpressionNode} */ (sk[i + 1]).concatTokens(), text);
     v = {e: "field", base: v, name: f.name, type: f.type};
   }
   return v;
@@ -88,6 +103,7 @@ function sqlHost(src, trailing, ctx, text) {
 /** a value compared with or written into a column: a literal of the
  * column's own kind is an IR literal, anything else a host value converted
  * to the column's type and bound at run time */
+/** @param {import("./frontend-types.ts").ValueExpr} v @param {import("./ir.ts").Type} ct @param {SqlIrType} ir @param {SqlAcc} acc @param {boolean} [set] */
 function sqlValue(v, ct, ir, acc, set = false) {
   if (ct.k === "x") return rawValue(v, ct, ir, acc, set);
   if (ct.k === "xstring" && set) {
@@ -123,6 +139,7 @@ function sqlValue(v, ct, ir, acc, set = false) {
  * character value by the move rule (CToX). Bound as the column holds it,
  * upper-case hex of 2n digits.
  */
+/** @param {import("./frontend-types.ts").ValueExpr} v @param {Extract<import("./ir.ts").Type, {k: "x"}>} ct @param {SqlIrType} ir @param {SqlAcc} acc @param {boolean | undefined} set */
 function rawValue(v, ct, ir, acc, set) {
   const n = ct.len ?? 1;
   const where = set ? "SET" : "WHERE";

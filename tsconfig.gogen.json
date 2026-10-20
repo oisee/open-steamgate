@@ -60,6 +60,7 @@
     "tools/gogen/frontend-local-constants.mjs",
     "tools/gogen/frontend-dynamic-call.mjs",
     "tools/gogen/frontend-bytes.mjs",
-    "tools/gogen/frontend-builtins.mjs"
+    "tools/gogen/frontend-builtins.mjs",
+    "tools/gogen/frontend-sql.mjs"
   ]
 }
