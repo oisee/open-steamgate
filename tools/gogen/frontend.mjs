@@ -654,9 +654,9 @@ export function deriveProgramWanted(reg, options, session, capture) {
   if (fm === undefined) throw new Unsupported(`CALL FUNCTION '${name}': no host implementation of this function module`);
   if (/\b(IN\s+UPDATE\s+TASK|STARTING\s+NEW\s+TASK|IN\s+BACKGROUND)\b/i.test(text) || (viaDest === undefined && /\bDESTINATION\b/i.test(text))) throw new Unsupported(`CALL FUNCTION '${name}' form: ${text}`);
   const fp = node.findDirectExpression(Expressions.FunctionParameters);
-  const args = [];
-  let exceptions = null;
-  const side = (pname, want) => {
+  /** @type {import("./ir.ts").Argument[]} */ const args = [];
+  /** @type {{map: Record<string, number>, others: number} | null} */ let exceptions = null;
+  /** @param {string} pname @param {string} want @returns {void} */ const side = (pname, want) => {
     const got = fm.params[pname];
     if (got === undefined) throw new Unsupported(`CALL FUNCTION '${name}': parameter ${pname} is not in the host's signature`);
     if (got !== want) throw new Unsupported(`CALL FUNCTION '${name}': ${pname} passed as ${want}, it is ${got}`);
@@ -667,20 +667,20 @@ export function deriveProgramWanted(reg, options, session, capture) {
       const k = kids[i];
       if (isExpr(k, Expressions.FunctionExporting)) {
         for (const p of k.findDirectExpressions(Expressions.FunctionExportingParameter)) {
-          const pname = upper(p.findDirectExpression(Expressions.ParameterName).concatTokens());
+          const pname = upper(/** @type {import("./frontend-types.ts").TokenText} */ (p.findDirectExpression(Expressions.ParameterName)).concatTokens());
           side(pname, "exporting");
-          args.push({name: pname, value: convert(source(p.findDirectExpression(Expressions.Source), ctx), {k: "data"})});
+          args.push({name: pname, value: convert(source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (p.findDirectExpression(Expressions.Source)), ctx), {k: "data"})});
         }
       } else if (isExpr(k, Expressions.ParameterListT)) {
-        const kw = upper(kids[i - 1]?.concatTokens() ?? "");
+        const kw = upper(/** @type {import("./frontend-types.ts").TokenText} */ (kids[i - 1])?.concatTokens() ?? "");
         const dir = kw === "IMPORTING" ? "importing" : kw === "TABLES" ? "tables" : kw === "CHANGING" ? "changing" : null;
         if (dir === null) throw new Unsupported(`CALL FUNCTION '${name}': ${kw} parameters`);
         for (const p of k.findDirectExpressions(Expressions.ParameterT)) {
-          const pname = upper(p.findDirectExpression(Expressions.ParameterName).concatTokens());
+          const pname = upper(/** @type {import("./frontend-types.ts").TokenText} */ (p.findDirectExpression(Expressions.ParameterName)).concatTokens());
           side(pname, dir);
-          const target = lvalue(p.findDirectExpression(Expressions.Target), ctx);
+          const target = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (p.findDirectExpression(Expressions.Target)), ctx);
           if (dir === "tables" && target.type.k !== "table") throw new Unsupported(`CALL FUNCTION '${name}': TABLES ${pname} is a ${target.type.k}`);
-          if (target.type.hashed) throw new Unsupported(`CALL FUNCTION '${name}': TABLES ${pname} is a hashed table`);
+          if (/** @type {import("./frontend-types.ts").TableType} */ (target.type).hashed) throw new Unsupported(`CALL FUNCTION '${name}': TABLES ${pname} is a hashed table`);
           args.push({name: pname, value: convert(target, {k: "data"})});
         }
       } else if (isExpr(k, Expressions.ParameterListExceptions)) {
@@ -693,7 +693,7 @@ export function deriveProgramWanted(reg, options, session, capture) {
           else exceptions.others = Number(v.concatTokens());
         }
       } else if (!(k instanceof Nodes.TokenNode)) {
-        throw new Unsupported(`CALL FUNCTION '${name}' form: ${k.concatTokens()}`);
+        throw new Unsupported(`CALL FUNCTION '${name}' form: ${/** @type {import("./frontend-types.ts").TokenText} */ (k).concatTokens()}`);
       }
     }
   }
@@ -722,32 +722,32 @@ export function deriveProgramWanted(reg, options, session, capture) {
   return {s: "call_enq", kind: name.startsWith("ENQUEUE_") ? "enqueue" : "dequeue", name, table: lock.table, fields: lock.fields, object, args, exceptions};
 }
 
-function rejectParameters(node, name, params) {
+/** @param {import("@abaplint/core").Nodes.StatementNode} node @param {string} name @param {Set<string>} params @returns {void} */ function rejectParameters(node, name, params) {
   const fp = node.findDirectExpression(Expressions.FunctionParameters);
   if (fp === undefined) return;
   for (const k of fp.getChildren()) {
     if (isExpr(k, Expressions.FunctionExporting)) {
       for (const p of k.findDirectExpressions(Expressions.FunctionExportingParameter)) {
-        const pname = upper(p.findDirectExpression(Expressions.ParameterName).concatTokens());
+        const pname = upper(/** @type {import("./frontend-types.ts").TokenText} */ (p.findDirectExpression(Expressions.ParameterName)).concatTokens());
         if (!params.has(pname)) throw new Unsupported(`CALL FUNCTION '${name}': parameter ${pname} is not in the lock module's signature`);
       }
     } else if (!(k instanceof Nodes.TokenNode) && !isExpr(k, Expressions.ParameterListExceptions)) {
-      throw new Unsupported(`CALL FUNCTION '${name}' form: ${k.concatTokens()}`);
+      throw new Unsupported(`CALL FUNCTION '${name}' form: ${/** @type {import("./frontend-types.ts").TokenText} */ (k).concatTokens()}`);
     }
   }
 }
 
-function lockArguments(node, ctx, name, params) {
+/** @param {import("@abaplint/core").Nodes.StatementNode} node @param {import("./frontend-types.ts").MethodContext} ctx @param {string} name @param {Set<string>} params @returns {{args: import("./ir.ts").Argument[], exceptions: import("./ir.ts").Exceptions | null}} */ function lockArguments(node, ctx, name, params) {
   const fp = node.findDirectExpression(Expressions.FunctionParameters);
-  const args = [];
-  let exceptions = null;
+  /** @type {import("./ir.ts").Argument[]} */ const args = [];
+  /** @type {{map: Record<string, number>, others: number} | null} */ let exceptions = null;
   if (fp === undefined) return {args, exceptions};
   for (const k of fp.getChildren()) {
     if (isExpr(k, Expressions.FunctionExporting)) {
       for (const p of k.findDirectExpressions(Expressions.FunctionExportingParameter)) {
-        const pname = upper(p.findDirectExpression(Expressions.ParameterName).concatTokens());
+        const pname = upper(/** @type {import("./frontend-types.ts").TokenText} */ (p.findDirectExpression(Expressions.ParameterName)).concatTokens());
         if (!params.has(pname)) throw new Unsupported(`CALL FUNCTION '${name}': parameter ${pname} is not in the lock module's signature`);
-        args.push({name: pname, value: convert(source(p.findDirectExpression(Expressions.Source), ctx), {k: "data"})});
+        args.push({name: pname, value: convert(source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (p.findDirectExpression(Expressions.Source)), ctx), {k: "data"})});
       }
     } else if (isExpr(k, Expressions.ParameterListExceptions)) {
       exceptions = {map: {}, others: -1};
@@ -759,7 +759,7 @@ function lockArguments(node, ctx, name, params) {
         else exceptions.others = Number(value.concatTokens());
       }
     } else if (!(k instanceof Nodes.TokenNode)) {
-      throw new Unsupported(`CALL FUNCTION '${name}' form: ${k.concatTokens()}`);
+      throw new Unsupported(`CALL FUNCTION '${name}' form: ${/** @type {import("./frontend-types.ts").TokenText} */ (k).concatTokens()}`);
     }
   }
   return {args, exceptions};
@@ -773,27 +773,27 @@ function lockArguments(node, ctx, name, params) {
  * normally (A4H ZCL_GOGEN_T_FM: after RAISE the caller's fields keep their
  * values, a TABLES table keeps what the module appended). Without
  * EXCEPTIONS sy-subrc is 0 afterwards and a RAISE dumps. */
-function compiledFunctionCall(node, ctx, text, name) {
-  const {owner, sig} = resolvedFunctionModule(ctx, name);
+/** @param {import("@abaplint/core").Nodes.StatementNode} node @param {import("./frontend-types.ts").MethodContext} ctx @param {string} text @param {string} name @returns {import("./frontend-types.ts").FrontendStmt} */ function compiledFunctionCall(node, ctx, text, name) {
+  const {owner, sig} = /** @type {{owner: string, sig: import("./frontend-types.ts").Signature}} */ (resolvedFunctionModule(ctx, name));
   if (/\b(IN\s+UPDATE\s+TASK|STARTING\s+NEW\s+TASK|IN\s+BACKGROUND|DESTINATION|PARAMETER-TABLE|EXCEPTION-TABLE)\b/i.test(text)) throw new Unsupported(`CALL FUNCTION '${name}' form: ${text}`);
   if (sig.unsupported) throw new Unsupported(`CALL FUNCTION '${name}': ${sig.unsupported}`);
   const fp = node.findDirectExpression(Expressions.FunctionParameters);
-  const given = new Map();
-  const targets = new Map();
-  let exceptions = null;
+  /** @type {Map<string, import("@abaplint/core").Nodes.ExpressionNode | undefined>} */ const given = new Map();
+  /** @type {Map<string, {kw: string, target: import("./frontend-types.ts").ValueExpr}>} */ const targets = new Map();
+  /** @type {{map: Record<string, number>, others: number} | null} */ let exceptions = null;
   if (fp !== undefined) {
     const kids = fp.getChildren();
     for (let i = 0; i < kids.length; i++) {
       const k = kids[i];
       if (isExpr(k, Expressions.FunctionExporting)) {
         for (const p of k.findDirectExpressions(Expressions.FunctionExportingParameter)) {
-          given.set(upper(p.findDirectExpression(Expressions.ParameterName).concatTokens()), p.findDirectExpression(Expressions.Source));
+          given.set(upper(/** @type {import("./frontend-types.ts").TokenText} */ (p.findDirectExpression(Expressions.ParameterName)).concatTokens()), p.findDirectExpression(Expressions.Source));
         }
       } else if (isExpr(k, Expressions.ParameterListT)) {
-        const kw = upper(kids[i - 1]?.concatTokens() ?? "");
+        const kw = upper(/** @type {import("./frontend-types.ts").TokenText} */ (kids[i - 1])?.concatTokens() ?? "");
         if (!["IMPORTING", "TABLES", "CHANGING"].includes(kw)) throw new Unsupported(`CALL FUNCTION '${name}': ${kw} parameters`);
         for (const p of k.findDirectExpressions(Expressions.ParameterT)) {
-          targets.set(upper(p.findDirectExpression(Expressions.ParameterName).concatTokens()), {kw, target: lvalue(p.findDirectExpression(Expressions.Target), ctx)});
+          targets.set(upper(/** @type {import("./frontend-types.ts").TokenText} */ (p.findDirectExpression(Expressions.ParameterName)).concatTokens()), {kw, target: lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (p.findDirectExpression(Expressions.Target)), ctx)});
         }
       } else if (isExpr(k, Expressions.ParameterListExceptions)) {
         exceptions = {map: {}, others: -1};
@@ -805,16 +805,16 @@ function compiledFunctionCall(node, ctx, text, name) {
           else exceptions.others = Number(v.concatTokens());
         }
       } else if (!(k instanceof Nodes.TokenNode)) {
-        throw new Unsupported(`CALL FUNCTION '${name}' form: ${k.concatTokens()}`);
+        throw new Unsupported(`CALL FUNCTION '${name}' form: ${/** @type {import("./frontend-types.ts").TokenText} */ (k).concatTokens()}`);
       }
     }
   }
   const known = new Set(sig.params.map((p) => p.name));
   for (const pn of [...given.keys(), ...targets.keys()]) if (!known.has(pn)) throw new Unsupported(`CALL FUNCTION '${name}': ${pn} is not a parameter of the module`);
-  const before = [], after = [];
-  const args = sig.params.map((p) => {
+  /** @type {import("./frontend-types.ts").FrontendStmt[]} */ const before = [], /** @type {import("./frontend-types.ts").FrontendStmt[]} */ after = [];
+  /** @type {import("./ir.ts").Argument[]} */ const args = sig.params.map((p) => {
     if (p.dir === "importing") {
-      if (targets.has(p.name)) throw new Unsupported(`CALL FUNCTION '${name}': importing ${p.name} passed as ${targets.get(p.name).kw}`);
+      if (targets.has(p.name)) throw new Unsupported(`CALL FUNCTION '${name}': importing ${p.name} passed as ${/** @type {{kw: string, target: import("./frontend-types.ts").ValueExpr}} */ (targets.get(p.name)).kw}`);
       const s = given.get(p.name);
       if (s === undefined) {
         if (p.default !== undefined) return {dir: "importing", byValue: p.byValue, type: p.type, value: defaultValue(p, ctx)};
@@ -841,16 +841,16 @@ function compiledFunctionCall(node, ctx, text, name) {
       throw new Unsupported(`CALL FUNCTION '${name}': ${want} ${p.name} into a ${t.type.k}, the parameter is ${p.type.k}`);
     }
     if (!p.byValue && direct) return {dir: p.dir, byValue: false, place: t, type: p.type};
-    const tmp = {e: "var", name: `FMV_${ctx.temps++}`, type: p.type};
+    /** @type {import("./frontend-types.ts").ValueExpr} */ const tmp = {e: "var", name: `FMV_${ctx.temps++}`, type: p.type};
     ctx.locals.set(tmp.name, p.type);
     if (p.dir === "changing") before.push({s: "assign", target: tmp, value: convert(t, p.type)});
     else before.push({s: "clear", target: tmp});
     after.push({s: "assign", target: t, value: convert(tmp, t.type)});
     return {dir: p.dir, byValue: p.byValue, place: tmp, type: p.type};
   });
-  const call = {s: "call", call: {e: "call", method: name, static: true, owner, receiver: null, sup: null, args, type: {k: "void"}, exceptions, receiving: null, callee: name}};
-  const subrc = {e: "sy", field: "Subrc", type: I};
-  const tail = exceptions
+  /** @type {import("./frontend-types.ts").FrontendStmt} */ const call = {s: "call", call: {e: "call", method: name, static: true, owner, receiver: null, sup: null, args, type: {k: "void"}, exceptions, receiving: null, callee: name}};
+  /** @type {import("./ir.ts").Expr} */ const subrc = {e: "sy", field: "Subrc", type: I};
+  /** @type {import("./frontend-types.ts").FrontendStmt[]} */ const tail = exceptions
     ? (after.length ? [{s: "if", branches: [{cond: {c: "cmp", op: "=", l: subrc, r: {e: "int", value: 0, type: I}, type: I}, body: after}], else: null}] : [])
     : [...after, {s: "assign", target: subrc, value: {e: "int", value: 0, type: I}}];
   return {s: "seq", body: [...before, call, ...tail]};
@@ -867,10 +867,10 @@ function compiledFunctionCall(node, ctx, text, name) {
  * left out, and RTTI keeps refusing it.
  */
 /** @param {string} name @returns {void} */ function ddicOutputLength(name) {
-  const map = PROGRAM.ddicOutputLen;
+  const map = /** @type {NonNullable<typeof PROGRAM>} */ (PROGRAM).ddicOutputLen;
   if (map.has(name) || name.includes("-") || !REG) return;
-  const xmlOf = (type, n) => REG.getObject(type, n)?.getXMLFile?.()?.getRaw?.() ?? "";
-  const tag = (xml, t) => new RegExp(`<${t}>([^<]*)</${t}>`).exec(xml)?.[1];
+  /** @param {string | undefined} type @param {string} n @returns {string} */ const xmlOf = (type, n) => /** @type {import("./frontend-session-types.ts").Registry} */ (REG).getObject(type, n)?.getXMLFile?.()?.getRaw?.() ?? "";
+  /** @param {string} xml @param {string} t @returns {string | undefined} */ const tag = (xml, t) => new RegExp(`<${t}>([^<]*)</${t}>`).exec(xml)?.[1];
   const dtel = xmlOf("DTEL", name);
   if (!dtel) return;
   const dom = tag(dtel, "DOMNAME");
@@ -889,11 +889,11 @@ function compiledFunctionCall(node, ctx, text, name) {
   program.currentOwner = upper(obj.owner ?? obj.getName());
   const file = obj.getMainABAPFile();
   // the type names this class declares itself (class and method TYPES)
-  program.currentTypes = new Set(currentTypeNames(file.getRaw()));
-  const def = obj.getDefinition();
+  program.currentTypes = new Set(currentTypeNames(/** @type {import("@abaplint/core").ABAPFile} */ (file).getRaw()));
+  const def = /** @type {import("@abaplint/core").IClassDefinition} */ (obj.getDefinition());
   // a local class (localClasses) is read in the scopes of its owner
-  const spaghetti = new abaplint.SyntaxLogic(reg, obj.obj ?? obj).run().spaghetti;
-  const tree = rearrangedClass(file.getStructure(), Rearranger);
+  const spaghetti = new abaplint.SyntaxLogic(reg, /** @type {import("@abaplint/core").ABAPObject} */ (obj.obj ?? obj)).run().spaghetti;
+  const tree = /** @type {import("@abaplint/core").Nodes.StructureNode} */ (rearrangedClass(/** @type {import("@abaplint/core").Nodes.StructureNode} */ (/** @type {import("@abaplint/core").ABAPFile} */ (file).getStructure()), Rearranger));
   const className = upper(obj.getName());
   const scopeName = obj.local ?? className;
   if (obj.local !== undefined && def.getSuperClass()) throw new Error(`${className}: a local class with a superclass is not compiled (LOCAL_CLASSES)`);
@@ -927,12 +927,12 @@ function compiledFunctionCall(node, ctx, text, name) {
       const names = st.findDirectExpressions(Expressions.ClassName).map((x) => upper(x.concatTokens()));
       if (!privateAttrs.has(nm) || !RUNTIME_CX.some((cx) => names.some((x) => isSubclass(reg, cx, x)))) continue;
       const scope = spaghetti.lookupPosition(st.getFirstToken().getStart(), file.getFilename());
-      if (inThisClass(scope) && scope.getData().vars[nm] === undefined) excInto.add(nm);
+      if (inThisClass(scope) && /** @type {import("./frontend-types.ts").Scope} */ (scope).getData().vars[nm] === undefined) excInto.add(nm);
     }
   }
   for (const [name, id] of Object.entries(classVars)) {
     if (name === "ME" || name === "SUPER") continue;
-    const meta = id.getMeta();
+    const meta = /** @type {string[]} */ (id.getMeta());
     if (id instanceof abaplint.Types.ClassConstant || (meta.includes("read_only") && meta.includes("static") && name.includes("~"))) {
       registerConst(program, name, id, className);
       continue;
@@ -961,7 +961,7 @@ function compiledFunctionCall(node, ctx, text, name) {
     if (NATIVE_ME.has(where)) { signatures.set(name, nativeMeSig(program, where, name)); return; }
     try {
       const optional = new Set((p.getOptional?.() ?? []).map(upper));
-      /** @param {import("@abaplint/core").TypedIdentifier} x @param {NonNullable<import("./ir.ts").Param["dir"]>} dir @returns {import("./frontend-types.ts").FrontendParam} */ const param = (x, dir) => ({name: upper(x.getName()), dir, byValue: x.getMeta().includes("pass_by_value"), type: typeOf(x.getType(), where, program),
+      /** @param {import("@abaplint/core").TypedIdentifier} x @param {NonNullable<import("./ir.ts").Param["dir"]>} dir @returns {import("./frontend-types.ts").FrontendParam} */ const param = (x, dir) => ({name: upper(x.getName()), dir, byValue: /** @type {string[]} */ (x.getMeta()).includes("pass_by_value"), type: typeOf(x.getType(), where, program),
         default: defaultOf(p, x), defaultOwner: prefix ? prefix.slice(0, -1) : className, defOwner: prefix ? prefix.slice(0, -1) : className, optional: optional.has(upper(x.getName()))});
       const ret = p.getReturning();
       const own = [...p.getImporting().map((x) => param(x, "importing")), ...p.getExporting().map((x) => param(x, "exporting")),
@@ -985,7 +985,7 @@ function compiledFunctionCall(node, ctx, text, name) {
     const nm = upper(name);
     if (nm.includes("~")) {
       const [intf, meth] = nm.split("~");
-      /** @type {import("@abaplint/core").IInterfaceDefinition | undefined} */ const idef = reg.getObject("INTF", intf)?.getDefinition();
+      /** @type {import("@abaplint/core").IInterfaceDefinition | undefined} */ const idef = /** @type {import("@abaplint/core").Objects.Interface | undefined} */ (reg.getObject("INTF", intf))?.getDefinition();
       const all = idef && methodDefinitions(idef);
       const found = all && all.find((x) => upper(x.getName()) === meth);
       if (!found) throw new Unsupported(`${className}: the interface method of REDEFINITION ${nm} is not in the program`);
@@ -1023,7 +1023,7 @@ function compiledFunctionCall(node, ctx, text, name) {
     .flatMap((i) => [upper(i.name), ...componentInterfaces(reg, upper(i.name))])));
   append(attributes, implementedAttributes(program, implemented.filter((i) => !inherited.has(i))));
   for (const intf of implemented.map((name) => ({name}))) {
-    /** @type {import("@abaplint/core").IInterfaceDefinition | undefined} */ const idef = reg.getObject("INTF", intf.name)?.getDefinition();
+    /** @type {import("@abaplint/core").IInterfaceDefinition | undefined} */ const idef = /** @type {import("@abaplint/core").Objects.Interface | undefined} */ (reg.getObject("INTF", intf.name))?.getDefinition();
     if (idef === undefined) throw new Unsupported(`${className}: interface ${intf.name} not in the program`);
     const all = methodDefinitions(idef);
     // typed as the interface's, as methodSignature types them for a caller
@@ -1067,19 +1067,19 @@ function compiledFunctionCall(node, ctx, text, name) {
   // superclass's, an interface's): the backends give it its registrations
   // (ultra/events, go/abap/events.go)
   cls.instanceEvents = [className, ...ancestors(reg, className)].some((c) => {
-    /** @type {import("@abaplint/core").IClassDefinition | undefined} */ const d = reg.getObject("CLAS", c)?.getDefinition();
+    /** @type {import("@abaplint/core").IClassDefinition | undefined} */ const d = /** @type {import("@abaplint/core").Objects.Class | undefined} */ (reg.getObject("CLAS", c))?.getDefinition();
     if (!d) return false;
     if (d.getEvents().some((e) => !e.isStatic())) return true;
     return d.getImplementing().some((i) => [upper(i.name), ...componentInterfaces(reg, upper(i.name))]
       .some((n) => {
-        /** @type {import("@abaplint/core").IInterfaceDefinition | undefined} */ const intf = reg.getObject("INTF", n)?.getDefinition(); return intf?.getEvents?.().some((e) => !e.isStatic()); }));
+        /** @type {import("@abaplint/core").IInterfaceDefinition | undefined} */ const intf = /** @type {import("@abaplint/core").Objects.Interface | undefined} */ (reg.getObject("INTF", n))?.getDefinition(); return intf?.getEvents?.().some((e) => !e.isStatic()); }));
   });
   // a local class's methods are the ones of its own CLASS ... IMPLEMENTATION
   const methodNodes = obj.local === undefined ? tree.findAllStructures(Structures.Method)
-    : tree.findAllStructures(Structures.ClassImplementation).filter((ci) => upper(ci.findFirstExpression(Expressions.ClassName).concatTokens()) === obj.local)
+    : tree.findAllStructures(Structures.ClassImplementation).filter((ci) => upper(/** @type {import("./frontend-types.ts").TokenText} */ (ci.findFirstExpression(Expressions.ClassName)).concatTokens()) === obj.local)
       .flatMap((ci) => ci.findAllStructures(Structures.Method));
   for (const node of methodNodes) {
-    const written = upper(node.findFirstExpression(Expressions.MethodName).concatTokens());
+    const written = upper(/** @type {import("./frontend-types.ts").TokenText} */ (node.findFirstExpression(Expressions.MethodName)).concatTokens());
     const name = redefinedAlias.get(written) ?? written;
     const candidate = signatures.get(name);
     /** @param {string} why */ const skip = (why) => {
@@ -1087,7 +1087,7 @@ function compiledFunctionCall(node, ctx, text, name) {
       // a method with a typed signature still exists as a stub that raises
       // when called, so its callers compile; only an untyped signature
       // cannot be called at all
-      if (typed.has(name)) /** @type {NonNullable<typeof cls.stubs>} */ (cls.stubs).push({.../** @type {import("./frontend-types.ts").Signature} */ (typed.get(name)), reason: why, pos: {file: /** @type {string} */ (/** @type {NonNullable<typeof file>} */ (file).getFilename().split("/").pop()), row: node.getFirstToken().getStart().getRow()}});
+      if (typed.has(name)) /** @type {NonNullable<typeof cls.stubs>} */ (cls.stubs).push({.../** @type {import("./frontend-types.ts").Signature} */ (typed.get(name)), reason: why, pos: {file: /** @type {string} */ (/** @type {import("@abaplint/core").ABAPFile} */ (file).getFilename().split("/").pop()), row: node.getFirstToken().getStart().getRow()}});
       else signatures.set(name, {name, unsupported: why});
     };
     if (candidate === undefined) { skip("no signature"); continue; }
@@ -1099,7 +1099,7 @@ function compiledFunctionCall(node, ctx, text, name) {
     // @KERNEL code) is replaced by a call into the host
     if (nativeMethodBody(NATIVE_ME, className, name)) {
       cls.methods.push({...sig, locals: [], fieldSymbols: [], calls: [], body: [{s: "native", fn: /** @type {string} */ (nativeMethodBody(NATIVE_ME, className, name)), me: true}],
-        pos: {file: file.getFilename().split("/").pop(), row: node.getFirstToken().getStart().getRow()}});
+        pos: {file: /** @type {string} */ (/** @type {import("@abaplint/core").ABAPFile} */ (file).getFilename().split("/").pop()), row: node.getFirstToken().getStart().getRow()}});
       continue;
     }
     const spec = AMC_HOST.get(`${className}=>${name}`);
@@ -1108,9 +1108,9 @@ function compiledFunctionCall(node, ctx, text, name) {
       // the host classes the body makes are references, so a closure grown
       // from references (unit.mjs, referencedClasses) compiles them
       /** @type {Readonly<Record<string, string>>} */ const hostRefs = {create_producer: "ZCL_AMC_PRODUCER", create_consumer: "ZCL_AMC_CONSUMER", start: "ZCL_AMC_MESSAGE_CONTEXT"};
-      const locals = [{name: "LV_AMC_ERROR", type: S}, ...(hostRefs[spec.op] ? [{name: "LO_AMC_HOST", type: {k: "ref", name: hostRefs[spec.op], intf: false}}] : [])];
+      /** @type {{name: string, type: import("./ir.ts").Type}[]} */ const locals = [{name: "LV_AMC_ERROR", type: S}, ...(hostRefs[spec.op] ? [{name: "LO_AMC_HOST", type: /** @type {import("./ir.ts").Type} */ ({k: "ref", name: hostRefs[spec.op], intf: false})}] : [])];
       cls.methods.push({...sig, locals, fieldSymbols: [], calls: [], body: [amcMethod(spec, actx)],
-        pos: {file: file.getFilename().split("/").pop(), row: node.getFirstToken().getStart().getRow()}});
+        pos: {file: /** @type {string} */ (/** @type {import("@abaplint/core").ABAPFile} */ (file).getFilename().split("/").pop()), row: node.getFirstToken().getStart().getRow()}});
       continue;
     }
     if (NATIVE.has(`${className}=>${name}`)) {
@@ -1120,20 +1120,20 @@ function compiledFunctionCall(node, ctx, text, name) {
       // (attributes and parameters, "&" for a place it writes) instead of
       // the parameters in their order
       /** @type {import("./frontend-types.ts").NativeContext | undefined} */ const nativeCtx = typeof native === "string" ? undefined : {program, reg, className, scopeName, method: name, sig, signatures, spaghetti, locals: /** @type {Map<string, import("./ir.ts").Type>} */ (new Map()), fieldSymbols: /** @type {Map<string, import("./ir.ts").Type>} */ (new Map())};
-      /** @type {import("./frontend-types.ts").FrontendStmt} */ const st = typeof native === "string" ? {s: "native", fn: native} : {s: "native", fn: native.fn, args: nativeArgs(native.args, nativeCtx)};
+      /** @type {import("./frontend-types.ts").FrontendStmt} */ const st = typeof native === "string" ? {s: "native", fn: native} : {s: "native", fn: /** @type {string} */ (/** @type {import("./frontend-types.ts").KernelSpec} */ (native).fn), args: nativeArgs(/** @type {string[]} */ (/** @type {import("./frontend-types.ts").KernelSpec} */ (native).args), /** @type {import("./frontend-types.ts").NativeContext} */ (nativeCtx))};
       cls.methods.push({...sig, locals: [], fieldSymbols: [], calls: [], body: [st],
-        pos: {file: file.getFilename().split("/").pop(), row: node.getFirstToken().getStart().getRow()}});
+        pos: {file: /** @type {string} */ (/** @type {import("@abaplint/core").ABAPFile} */ (file).getFilename().split("/").pop()), row: node.getFirstToken().getStart().getRow()}});
       continue;
     }
     try {
-      const scope = spaghetti.lookupPosition(node.getFirstToken().getStart(), file.getFilename());
-      /** @type {import("./frontend-types.ts").MethodContext} */ const ctx = {program, reg, className, scopeName, owner: obj.owner ?? className, method: name, sig, signatures, scope, file, spaghetti, locals: new Map(), fieldSymbols: new Map(), inits: [], temps: 0};
+      const scope = spaghetti.lookupPosition(node.getFirstToken().getStart(), /** @type {import("@abaplint/core").ABAPFile} */ (file).getFilename());
+      const ctx = /** @type {import("./frontend-types.ts").MethodContext} */ ({program, reg, className, scopeName, owner: obj.owner ?? className, method: name, sig, signatures, scope, file, spaghetti, locals: new Map(), fieldSymbols: new Map(), inits: [], temps: 0});
       const body = node.findDirectStructure(Structures.Body);
       ctx.sinkUnsafe = !!body?.findAllExpressionsRecursive(Expressions.Dynamic).length;
       const known = new Set([...sig.params.map((p) => p.name), sig.returning?.name].filter(Boolean));
       const inlineTables = inlineTableLocals(body);
       const inlineResults = inlineFindResultTypes(body, reg, program, {Statements, Expressions, typeOf, Unsupported});
-      for (const [vname, id] of Object.entries(scope.getData().vars)) {
+      for (const [vname, id] of Object.entries(/** @type {import("./frontend-types.ts").Scope} */ (scope).getData().vars)) {
         if (known.has(vname) || vname === "ME" || vname === "SUPER") continue;
         // abaplint leaves SELECT ... INTO TABLE @DATA(x) without a row type.
         // The SELECT field list supplies it when the statement is lowered.
@@ -1156,12 +1156,12 @@ function compiledFunctionCall(node, ctx, text, name) {
       /** @type {import("./frontend-types.ts").FrontendStmt[]} */ const compiled = [];
       append(compiled, ctx.inits, bodyStatements);
       /** @type {import("./frontend-types.ts").FrontendMethod} */ const ir = {...sig, fieldSymbols: [...ctx.fieldSymbols].map(([n, t]) => ({name: n, type: t})), locals: [...ctx.locals].map(([n, t]) => ({name: n, type: t})).sort((a, b) => a.name.localeCompare(b.name)),
-        body: compiled, sinkUnsafe: !!ctx.sinkUnsafe, calls: ctx.calls ?? [], pos: {file: file.getFilename().split("/").pop(), row: node.getFirstToken().getStart().getRow()}};
+        body: compiled, sinkUnsafe: !!ctx.sinkUnsafe, calls: ctx.calls ?? [], pos: {file: /** @type {string} */ (/** @type {import("@abaplint/core").ABAPFile} */ (file).getFilename().split("/").pop()), row: node.getFirstToken().getStart().getRow()}};
       // by the class, not the method: a producer kept in an attribute and
       // sent from a method that never names the type is this class's call
       // too (the critic on #263). The AMC classes are not callers, as Node's
       // callerProgram skips them
-      if (amcSource(file.getRaw()) && !/^(CL_AMC_|ZCL_AMC_)/.test(upper(ctx.owner))) ir.amcProgram = amcProgramOf(ctx.owner);
+      if (amcSource(/** @type {import("@abaplint/core").ABAPFile} */ (file).getRaw()) && !/^(CL_AMC_|ZCL_AMC_)/.test(upper(ctx.owner))) ir.amcProgram = amcProgramOf(ctx.owner);
       if (name === "CONSTRUCTOR") cls.constructor = ir; else cls.methods.push(ir);
     } catch (e) {
       if (!(e instanceof Unsupported)) throw e;
@@ -1184,7 +1184,7 @@ function compiledFunctionCall(node, ctx, text, name) {
       if (bad && !m.dropped) {
         m.dropped = true; changed = true;
         program.skipped.push(`${className}=>${m.name}: calls ${bad}, which was skipped`);
-        if (typed.has(m.name)) cls.stubs.push({...typed.get(m.name), reason: `calls ${bad}`});
+        if (typed.has(m.name)) /** @type {NonNullable<import("./frontend-types.ts").FrontendClass["stubs"]>} */ (cls.stubs).push({.../** @type {import("./frontend-types.ts").Signature} */ (typed.get(m.name)), reason: `calls ${bad}`});
         signatures.set(m.name, {name: m.name, unsupported: `calls ${bad}`});
       }
     }
@@ -1194,12 +1194,12 @@ function compiledFunctionCall(node, ctx, text, name) {
   // a constructor that did not compile: the object can still be created, so
   // the classes that create it compile, but none of its methods runs on a
   // state the constructor never set -- they all raise, with the reason
-  const hasCtor = methodNodes.some((n) => upper(n.findFirstExpression(Expressions.MethodName).concatTokens()) === "CONSTRUCTOR");
+  const hasCtor = methodNodes.some((n) => upper(/** @type {import("./frontend-types.ts").TokenText} */ (n.findFirstExpression(Expressions.MethodName)).concatTokens()) === "CONSTRUCTOR");
   if (hasCtor && cls.constructor === null) {
     const why = program.skipped.find((x) => x.startsWith(`${className}=>CONSTRUCTOR:`))?.replace(/^[^:]+: /, "") ?? "?";
     cls.ctorBroken = why;
     cls.ctorParams = typed.get("CONSTRUCTOR")?.params ?? [];
-    for (const m of cls.methods) cls.stubs.push({...m, reason: `the constructor did not compile: ${why}`});
+    for (const m of cls.methods) /** @type {NonNullable<import("./frontend-types.ts").FrontendClass["stubs"]>} */ (cls.stubs).push(/** @type {import("./frontend-types.ts").MethodSignature & {reason: string}} */ ({...m, reason: `the constructor did not compile: ${why}`}));
     cls.methods = [];
   }
   return cls;
@@ -1320,7 +1320,7 @@ function compiledFunctionCall(node, ctx, text, name) {
     // a host loop (KERNEL): the statements up to its closing line are its body
     const k = kernelOf(child, ctx);
     if (k?.loop !== undefined) {
-      /** @type {import("./ir.ts").Position} */ const pos = {file: ctx.file.getFilename().split("/").pop(), row: child.getFirstToken().getStart().getRow()};
+      /** @type {import("./ir.ts").Position} */ const pos = {file: /** @type {string} */ (ctx.file.getFilename().split("/").pop()), row: child.getFirstToken().getStart().getRow()};
       const j = children.findIndex((c, x) => x > i && kernelOf(c, ctx)?.end === true);
       const inner = children.slice(i + 1, j);
       const where = `${ctx.className}=>${ctx.method} (${pos.file}:${pos.row})`;
@@ -1332,10 +1332,10 @@ function compiledFunctionCall(node, ctx, text, name) {
         continue;
       }
       try {
-        const binds = k.binds.map((b) => variable(b, ctx));
-        if (binds.some((b) => b.type.k !== "string")) throw new Unsupported(`kernel loop binds ${k.binds.join(", ")}: not strings`);
+        const binds = /** @type {string[]} */ (k.binds).map((b) => variable(b, ctx));
+        if (binds.some((b) => b.type.k !== "string")) throw new Unsupported(`kernel loop binds ${/** @type {string[]} */ (k.binds).join(", ")}: not strings`);
         ctx.kernelLoop = k;
-        out.push({s: "kernel_loop", fn: k.loop, args: nativeArgs(k.args, ctx), binds, body: blockList(inner, ctx), pos});
+        out.push({s: "kernel_loop", fn: k.loop, args: nativeArgs(/** @type {string[]} */ (k.args), ctx), binds, body: blockList(inner, ctx), pos});
       } catch (e) {
         if (!(e instanceof Unsupported)) throw e;
         ctx.program.partial.push(`${where}: ${e.message}`);
@@ -1350,7 +1350,7 @@ function compiledFunctionCall(node, ctx, text, name) {
     // becomes a stub that raises NOT_COMPILED when it runs, as a system
     // dumps; the rest of the method compiles, and nothing is skipped
     // silently: execution never passes the stub
-    /** @type {import("./ir.ts").Position} */ const pos = {file: ctx.file.getFilename().split("/").pop(), row: child.getFirstToken().getStart().getRow()};
+    /** @type {import("./ir.ts").Position} */ const pos = {file: /** @type {string} */ (ctx.file.getFilename().split("/").pop()), row: child.getFirstToken().getStart().getRow()};
     try {
       if (child instanceof Nodes.StructureNode) out.push({...structure(child, ctx), pos});
       else if (child instanceof Nodes.StatementNode) {
@@ -1372,7 +1372,7 @@ function compiledFunctionCall(node, ctx, text, name) {
 // when an up cast from it to the target is legal (A4H 7.58, 2026-10-08:
 // REF TO zcl_a -> zcl_a true, -> a subclass false; REF TO object -> zcl_a
 // false; REF TO zif_x -> zif_x true)
-/** @param {import("@abaplint/core").IRegistry} reg @param {import("./frontend-types.ts").RefType} from @param {import("./frontend-types.ts").RefType} to @returns {boolean} */ function upcastable(reg, from, to) {
+/** @param {import("./frontend-session-types.ts").Registry} reg @param {import("./frontend-types.ts").RefType} from @param {import("./frontend-types.ts").RefType} to @returns {boolean} */ function upcastable(reg, from, to) {
   if (to.name === "OBJECT" || from.name === to.name) return true;
   if (from.name === "OBJECT") return false;
   if (!to.intf) return !from.intf && isSubclass(reg, from.name, to.name);
@@ -1381,18 +1381,18 @@ function compiledFunctionCall(node, ctx, text, name) {
     .some((i) => upper(i.name) === to.name || componentInterfaces(reg, upper(i.name)).includes(to.name)));
 }
 
-/** @param {import("@abaplint/core").IRegistry} reg @param {string} cls @param {string} ancestor @returns {boolean} */ function isSubclass(reg, cls, ancestor) {
-  return chainHas(PROGRAM ?? reg, reg, cls, ancestor, (c) => clasDef(reg, c)?.getSuperClass()?.toUpperCase() ?? RUNTIME_CX_SUPER[c]);
+/** @param {import("./frontend-session-types.ts").Registry} reg @param {string} cls @param {string} ancestor @returns {boolean} */ function isSubclass(reg, cls, ancestor) {
+  return chainHas(PROGRAM ?? reg, reg, cls, ancestor, (c) => clasDef(reg, c)?.getSuperClass()?.toUpperCase() ?? /** @type {Record<string, string | undefined>} */ (RUNTIME_CX_SUPER)[c]);
 }
 
-/** @param {readonly import("./frontend-types.ts").FrontendStmt[] | null | undefined} stmts @param {boolean} [inLoop] @returns {boolean} */ function leaves(stmts, inLoop = false) {
+/** @param {readonly unknown[] | null | undefined} stmts @param {boolean} [inLoop] @returns {boolean} */ function leaves(stmts, inLoop = false) {
   for (const st of stmts ?? []) {
-    if (st.s === "return") return true;
-    if ((st.s === "exit" || st.s === "continue") && !inLoop) return true;
-    const loop = st.s === "loop" || st.s === "do" || st.s === "while" || st.s === "select_loop";
-    for (const k of ["body", "then", "else"]) if (Array.isArray(st[k]) && leaves(st[k], inLoop || loop)) return true;
-    for (const b of st.branches ?? st.cases ?? st.elseifs ?? []) if (leaves(b.body, inLoop || loop)) return true;
-    for (const c of st.catches ?? []) if (leaves(c.body, inLoop)) return true;
+    if ((/** @type {import("./frontend-types.ts").FrontendWalkNode} */ (st)).s === "return") return true;
+    if (((/** @type {import("./frontend-types.ts").FrontendWalkNode} */ (st)).s === "exit" || (/** @type {import("./frontend-types.ts").FrontendWalkNode} */ (st)).s === "continue") && !inLoop) return true;
+    const loop = (/** @type {import("./frontend-types.ts").FrontendWalkNode} */ (st)).s === "loop" || (/** @type {import("./frontend-types.ts").FrontendWalkNode} */ (st)).s === "do" || (/** @type {import("./frontend-types.ts").FrontendWalkNode} */ (st)).s === "while" || (/** @type {import("./frontend-types.ts").FrontendWalkNode} */ (st)).s === "select_loop";
+    for (const k of ["body", "then", "else"]) if (Array.isArray((/** @type {import("./frontend-types.ts").FrontendWalkNode} */ (st))[k]) && leaves((/** @type {import("./frontend-types.ts").FrontendWalkNode} */ (st))[k], inLoop || loop)) return true;
+    for (const b of (/** @type {import("./frontend-types.ts").FrontendWalkNode} */ (st)).branches ?? (/** @type {import("./frontend-types.ts").FrontendWalkNode} */ (st)).cases ?? (/** @type {import("./frontend-types.ts").FrontendWalkNode} */ (st)).elseifs ?? []) if (leaves(b.body, inLoop || loop)) return true;
+    for (const c of (/** @type {import("./frontend-types.ts").FrontendWalkNode} */ (st)).catches ?? []) if (leaves(c.body, inLoop)) return true;
   }
   return false;
 }
@@ -1402,7 +1402,7 @@ function compiledFunctionCall(node, ctx, text, name) {
   /** @type {string[]} */ const seen = [];
   /** @type {import("./frontend-types.ts").FrontendCatch[]} */ const catches = node.findDirectStructures(Structures.Catch).map((c) => {
     const st = c.findDirectStatement(Statements.Catch);
-    const names = st.findDirectExpressions(Expressions.ClassName).map((n) => upper(n.concatTokens()));
+    const names = /** @type {import("@abaplint/core").Nodes.StatementNode} */ (st).findDirectExpressions(Expressions.ClassName).map((n) => upper(n.concatTokens()));
     // a class after a CATCH of its superclass does not activate on a system
     // (A4H 2026-09-23: "a CATCH clause already exists ... uses the superclass")
     const shadow = names.find((n) => seen.some((e) => isSubclass(ctx.reg, n, e)));
@@ -1419,9 +1419,9 @@ function compiledFunctionCall(node, ctx, text, name) {
     // reference type and receives the object itself
     let into = null;
     /** @type {import("./ir.ts").Catch["intoKind"]} */ let intoKind = null;
-    if (/\bINTO\b/i.test(st.concatTokens())) {
-      const target = st.findDirectExpression(Expressions.Target);
-      const nm = upper((target.findFirstExpression(Expressions.TargetField) ?? target).concatTokens());
+    if (/\bINTO\b/i.test(/** @type {import("@abaplint/core").Nodes.StatementNode} */ (st).concatTokens())) {
+      const target = /** @type {import("@abaplint/core").Nodes.StatementNode} */ (st).findDirectExpression(Expressions.Target);
+      const nm = upper((/** @type {import("@abaplint/core").Nodes.ExpressionNode} */ (target).findFirstExpression(Expressions.TargetField) ?? /** @type {import("@abaplint/core").Nodes.ExpressionNode} */ (target)).concatTokens());
       if (ctx.sig.params.some((x) => x.name === nm) || ctx.sig.returning?.name === nm) throw new Unsupported(`CATCH ... INTO ${nm}: a parameter`);
       if (!ctx.locals.has(nm)) {
         // an attribute of the class: a report's global data, which the
@@ -1434,9 +1434,9 @@ function compiledFunctionCall(node, ctx, text, name) {
         if (covers.length > 0 && attr.type.k !== "exc") throw new Unsupported(`CATCH ... INTO ${nm}: runtime exceptions INTO an attribute that is not private to ${ctx.className}`);
         if (covers.length === 0 && attr.type.k !== "ref") throw new Unsupported(`CATCH ... INTO ${nm}: an attribute of type ${attr.type.k}`);
         if (attr.type.k === "ref" && !attr.type.intf && attr.type.name !== "OBJECT" && !ctx.program.wanted.has(attr.type.name)) throw new Unsupported(`CATCH ... INTO ${nm}: REF TO ${attr.type.name}, which is not compiled`);
-        return {classes: names, into: nm, intoPlace: attr, intoKind: covers.length > 0 ? "exc" : "ref", intoType: attr.type, covers, own, body: bodyOf(c, ctx)};
+        return {classes: names, into: nm, intoPlace: /** @type {import("./ir.ts").Expr} */ (attr), intoKind: covers.length > 0 ? "exc" : "ref", intoType: attr.type, covers, own, body: bodyOf(c, ctx)};
       }
-      /** @type {import("./ir.ts").Type} */ const declared = ctx.locals.get(nm);
+      const declared = /** @type {import("./ir.ts").Type} */ (ctx.locals.get(nm));
       if (covers.length > 0) {
         ctx.locals.set(nm, EXC);
         intoKind = "exc";
@@ -1447,7 +1447,7 @@ function compiledFunctionCall(node, ctx, text, name) {
       }
       into = nm;
     }
-    return {classes: names, into, intoKind, intoType: into ? ctx.locals.get(into) : null, covers, own, body: bodyOf(c, ctx)};
+    return {classes: names, into, intoKind, intoType: into ? /** @type {import("./ir.ts").Type} */ (ctx.locals.get(into)) : null, covers, own, body: bodyOf(c, ctx)};
   });
   // CLEANUP: runs when a class-based exception leaves the TRY body for a
   // handler further out, inner CLEANUPs first, then the handler (A4H
@@ -1526,13 +1526,13 @@ function compiledFunctionCall(node, ctx, text, name) {
     if (/\b(REFERENCE\s+INTO|GROUP\s+BY|AT\s+GROUP|CASTING)\b/i.test(text) || (/\bUSING\b/i.test(text) && using === null && dynamicUsing === null)) throw new Unsupported(`LOOP form: ${text}`);
     // LOOP AT ref->* (ultra/json, CL_SXML_STRING_READER's reader): what a data
     // reference points to, generic data in Go and JS alike
-    const derefLoop = /^([\w\/~]+)->\*$/.exec(st.findFirstExpression(Expressions.LoopSource).concatTokens());
+    const derefLoop = /^([\w\/~]+)->\*$/.exec(/** @type {import("./frontend-types.ts").TokenText} */ (st.findFirstExpression(Expressions.LoopSource)).concatTokens());
     /** @type {import("./frontend-types.ts").ValueExpr} */ let table;
     if (derefLoop) {
       const ref = variable(derefLoop[1], ctx);
       if (ref.type.k !== "dref") throw new Unsupported(`LOOP AT ->* of a ${ref.type.k}`);
       table = {...ref, type: {k: "data", table: true}};
-    } else table = sourceOperand(st.findFirstExpression(Expressions.LoopSource).getFirstChild().getFirstChild(), ctx);
+    } else table = sourceOperand(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {import("@abaplint/core").Nodes.ExpressionNode} */ (/** @type {import("@abaplint/core").Nodes.ExpressionNode} */ (st.findFirstExpression(Expressions.LoopSource)).getFirstChild()).getFirstChild()), ctx);
     if (using !== null || dynamicUsing !== null) {
       if (table.type.k !== "table") throw new Unsupported(`LOOP ... USING KEY over a ${table.type.k}`);
       if (/\b(FROM|TO)\b/i.test(text)) throw new Unsupported(`LOOP ... USING KEY with FROM / TO: ${text}`);
@@ -1545,7 +1545,7 @@ function compiledFunctionCall(node, ctx, text, name) {
       // key order taken once would not: refused, not silently wrong.
       // Over-refusal (lo->mt of another instance) is accepted.
       /** @param {string} t @returns {string} */ const bare = (t) => upper(t).replace(/\s+/g, "").replace(/\[.*$/, "").replace(/^.*(=>|->)/, "");
-      const name = bare(st.findFirstExpression(Expressions.LoopSource).concatTokens());
+      const name = bare(/** @type {import("./frontend-types.ts").TokenText} */ (st.findFirstExpression(Expressions.LoopSource)).concatTokens());
       const esc = name.replace(/[^\w]/g, "\\$&");
       /** @param {string} t @returns {boolean} */ const hit = (t) => { const b = bare(t); return b === name || name.startsWith(`${b}-`) || b.startsWith(`${name}-`); };
       for (const s of node.findAllStatementNodes()) {
@@ -1570,10 +1570,10 @@ function compiledFunctionCall(node, ctx, text, name) {
       if (!nm || !fsType || (fsType.k !== "data" && fsType.k !== "struct") || /\b(WHERE|FROM|TO|INTO|USING)\b/i.test(text.replace(/ASSIGNING.*/i, ""))) throw new Unsupported(`LOOP form over a generic table: ${text}`);
       // a typed field symbol (ultra/json): each row must be a value of that
       // structure, checked at run time as ASSIGN ref->* TO <typed> is
-      /** @type {GenericLoopState} */ const loop = {s: "loop_data", table, fs: upper(nm), ...(fsType.k === "struct" ? {fsType, text} : {}), token: {}};
+      const loop = /** @type {GenericLoopState} */ ({s: "loop_data", table, fs: upper(nm), ...(fsType.k === "struct" ? {fsType, text} : {}), token: {}});
       (ctx.loopStack ??= []).push(loop);
       try { loop.body = bodyOf(node, ctx); } finally { ctx.loopStack.pop(); }
-      return loop;
+      return /** @type {import("./frontend-types.ts").FrontendStmt} */ (loop);
     }
     if (table.type.k !== "table") throw new Unsupported("LOOP over a non-table");
     const lt = st.findFirstExpression(Expressions.LoopTarget);
@@ -1590,7 +1590,7 @@ function compiledFunctionCall(node, ctx, text, name) {
     } else {
       // (ultra/events) LOOP ... TRANSPORTING NO FIELDS and the like have no target
       if (!lt?.findFirstExpression(Expressions.Target)) throw new Unsupported(`LOOP form: ${text}`);
-      into = lvalue(lt.findFirstExpression(Expressions.Target), ctx);
+      into = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (lt.findFirstExpression(Expressions.Target)), ctx);
       // Moving a fixed character row into a string is lossless; both are
       // represented as strings here, and ABAP trims the fixed row at its
       // declared edge rather than requiring identical static types.
@@ -1613,20 +1613,20 @@ function compiledFunctionCall(node, ctx, text, name) {
     if ((using !== null || dynamicUsing !== null) && where !== null && where.some((w) => w.fx)) throw new Unsupported(`LOOP ... USING KEY with a WHERE on a component of another type or a nested one: ${text}`);
     const dynamicKeys = dynamicUsing === null ? null : {
       value: convert(variable(dynamicUsing[1], ctx), S),
-      options: (table.type.secondary ?? []).filter((x) => x.sorted).map((x) => { /** @type {import("./ir.ts").ResolvedKey} */ const key = secondaryKey(table.type, x.name, ctx, text); return key; }),
+      options: (table.type.secondary ?? []).filter((x) => x.sorted).map((x) => { /** @type {import("./ir.ts").ResolvedKey} */ const key = /** @type {import("./ir.ts").ResolvedKey} */ (secondaryKey(/** @type {import("./frontend-types.ts").TableType} */ (table.type), x.name, ctx, text)); return key; }),
     };
     // ultra/itab: the loop is known to its body, for DELETE itab (the
     // current row) inside it
     // (a shared token object, not the loop itself, so the IR stays a tree)
-    /** @type {TableLoopState} */ const loop = {s: "loop", table, into, fs, where, from: bound("FROM"), to: bound("TO"), rowType: table.type.row, ...(key ? {key} : {}), ...(dynamicKeys ? {dynamicKeys} : {}), token: {}};
+    const loop = /** @type {TableLoopState} */ ({s: "loop", table, into, fs, where, from: bound("FROM"), to: bound("TO"), rowType: table.type.row, ...(key ? {key} : {}), ...(dynamicKeys ? {dynamicKeys} : {}), token: {}});
     (ctx.loopStack ??= []).push(loop);
     // critic fix: inside the body the loop's field symbol is freshly
     // assigned on every pass until a DELETE of the current row makes it
     // stale (fsCheck below)
     const fresh = fs ? {name: fs, stale: false} : null;
     if (fresh) (ctx.fsFresh ??= []).push(fresh);
-    try { loop.body = bodyOf(node, ctx); } finally { ctx.loopStack.pop(); if (fresh) ctx.fsFresh.pop(); }
-    return loop;
+    try { loop.body = bodyOf(node, ctx); } finally { ctx.loopStack.pop(); if (fresh) /** @type {NonNullable<import("./frontend-types.ts").MethodContext["fsFresh"]>} */ (ctx.fsFresh).pop(); }
+    return /** @type {import("./frontend-types.ts").FrontendStmt} */ (loop);
   }
   throw new Unsupported(`structure ${node.get().constructor.name}`);
 }
@@ -1666,7 +1666,7 @@ function compiledFunctionCall(node, ctx, text, name) {
     if (!["string", "c", "n", "d", "t", "i", "int8", "f"].includes(f.type.k)) throw new Unsupported(`key ${name}: component ${c} of type ${f.type.k}`);
     return {name: f.name, type: f.type, num: numeric(f.type)};
   });
-  return {name, unique: k.unique, comps, ...(k.sorted ? {} : {hashed: true})};
+  return {name, unique: /** @type {boolean} */ (k.unique), comps, ...(k.sorted ? {} : {hashed: true})};
 }
 /** statements that add a row anywhere but the end, or remove one, on a table with a non-unique sorted secondary key */
 /** @param {import("./frontend-types.ts").TableType} tableType @param {string} what @param {import("./frontend-types.ts").MethodContext | null} [ctx] @returns {void} */ function keyGuard(tableType, what, ctx = null) {
@@ -1674,7 +1674,7 @@ function compiledFunctionCall(node, ctx, text, name) {
   // declarations order only array children (path,index) or ordered object
   // children (path,order); those are unique within their respective sets.
   // Removing a node therefore cannot reorder equal keys seen by stringify.
-  if (what === "DELETE" && ctx?.className === "ZCL_AJSON" && tableType.row?.go === "ZIF_AJSON_TYPES__TY_NODE") return;
+  if (what === "DELETE" && ctx?.className === "ZCL_AJSON" && /** @type {import("./frontend-types.ts").StructType | undefined} */ (tableType.row)?.go === "ZIF_AJSON_TYPES__TY_NODE") return;
   const nonUnique = (tableType?.secondary ?? []).filter((k) => !k.unique);
   if (nonUnique.length) throw new Unsupported(`${what} on a table with the non-unique secondary key ${nonUnique[0].name}: the order of its duplicates is measured for rows added at the end only`);
 }
@@ -1727,7 +1727,7 @@ function compiledFunctionCall(node, ctx, text, name) {
       where.push({fx: compared, op, value: convert(v, calc), calc});
       continue;
     }
-    let fx = null;
+    /** @type {import("./ir.ts").Expr | null} */ let fx = null;
     if (path.length > 1 || initial) {
       fx = {e: "lrow", type: rowType};
       for (const part of path) {
@@ -1737,22 +1737,22 @@ function compiledFunctionCall(node, ctx, text, name) {
       }
     }
     if (initial) {
-      where.push({fx, op: kids.length === 4 ? "notinitial" : "initial"});
+      where.push(/** @type {import("./ir.ts").Where} */ ({fx, op: kids.length === 4 ? "notinitial" : "initial"}));
       continue;
     }
     const [comp, opN, src] = kids;
-    /** @type {import("./ir.ts").Field} */ const f = fx !== null ? {name: fx.name, type: fx.type} : fieldOf(ctx, rowType, comp.concatTokens(), text);
+    /** @type {import("./ir.ts").Field} */ const f = fx !== null ? {name: /** @type {Extract<import("./ir.ts").Expr, {e: "field"}>} */ (fx).name, type: fx.type} : /** @type {import("./ir.ts").Field} */ (fieldOf(ctx, rowType, comp.concatTokens(), text));
     const opT = upper(opN.concatTokens());
     const op = OPS[opT] ?? opT;
-    const sc = ["CP", "NP", "CA", "NA", "CS", "NS", "CO", "CN"].includes(op) ? stringComparison(op, fx ?? {e: "field", base: {e: "lrow", type: rowType}, name: f.name, type: f.type}, source(src, ctx, f.type)) : null;
+    const sc = ["CP", "NP", "CA", "NA", "CS", "NS", "CO", "CN"].includes(op) ? stringComparison(op, fx ?? /** @type {import("./frontend-types.ts").ValueExpr} */ ({e: "field", base: {e: "lrow", type: rowType}, name: f.name, type: f.type}), source(src, ctx, f.type)) : null;
     if (sc) { where.push({fx: {e: "bool", cond: sc, blank: "", type: C(1)}, op: "=", value: {e: "chars", value: "X", type: C(1)}, calc: S}); continue; }
     if (!["=", "<>", "<", "<=", ">", ">="].includes(op)) throw new Unsupported(`WHERE operator ${op}`);
     const v = source(src, ctx, f.type);
     const calc = numeric(f.type) || numeric(v.type) ? whereCalc(f.type, v.type) : S;
     if (calc !== S && (charlike(f.type) || charlike(v.type))) throw new Unsupported("WHERE comparing characters with a number");
     // a component of another numeric type is compared in the calculation type
-    const fxc = calc !== S && numeric(f.type) && calc.k !== f.type.k ? convert(fx ?? {e: "field", base: {e: "lrow", type: rowType}, name: f.name, type: f.type}, calc) : fx;
-    where.push({name: f.name, ftype: f.type, op, value: convert(v, calc), calc, ...(fxc !== null ? {fx: fxc} : {})});
+    const fxc = calc !== S && numeric(f.type) && calc.k !== f.type.k ? convert(fx ?? /** @type {import("./frontend-types.ts").ValueExpr} */ ({e: "field", base: {e: "lrow", type: rowType}, name: f.name, type: f.type}), calc) : fx;
+    where.push({name: f.name, ftype: f.type, op, value: convert(v, calc), calc, ...(fxc !== null ? {fx: /** @type {import("./ir.ts").Expr} */ (fxc)} : {})});
   }
   return where;
 }
@@ -4047,7 +4047,7 @@ function orderByOf(sel, tb) {
  * transpiler does the same); what a system's cursor shows of a write to the
  * same table inside the loop is not measured, so such a body is refused.
  */
-function selectLoop(node, ctx) {
+/** @param {import("@abaplint/core").Nodes.StructureNode} node @param {import("./frontend-types.ts").MethodContext} ctx @returns {import("./frontend-types.ts").FrontendStmt} */ function selectLoop(node, ctx) {
   const st = node.findDirectStatement(Statements.SelectLoop);
   const text = st?.concatTokens() ?? "";
   const sel = st?.findDirectExpression(Expressions.Select);
@@ -4085,7 +4085,7 @@ function selectLoop(node, ctx) {
 
 // Clause checks must inspect the parsed SELECT, not its source text: a WHERE
 // string can contain any of these keywords without adding a SQL clause.
-function selectShape(sel) {
+/** @param {import("@abaplint/core").Nodes.StatementNode} sel @returns {unknown[]} */ function selectShape(sel) {
   return sel.getChildren().map((child) => {
     if (isTok(child)) return tokenStr(child);
     if (isExpr(child, Expressions.SQLIntoTable)) return isTok(child.getFirstChild(), "APPENDING") ? "APPENDING TABLE" : "INTO TABLE";
@@ -4253,7 +4253,7 @@ let FAE_N = 0;
 
 /** a SELECT with a part given at run time: FROM (name), a field list,
  * WHERE, GROUP BY or ORDER BY in parentheses */
-function isDynamicSelect(sel) {
+/** @returns {boolean} */ function isDynamicSelect(sel) {
   const dyn = (n) => n?.findDirectExpression(Expressions.Dynamic) !== undefined && n?.findDirectExpression(Expressions.Dynamic) !== null;
   const tables = sel.findDirectExpression(Expressions.SQLFrom)?.findAllExpressions(Expressions.DatabaseTable) ?? [];
   const cond = sel.findDirectExpression(Expressions.SQLCond);

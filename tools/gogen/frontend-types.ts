@@ -22,7 +22,10 @@ type FrontendIR<T> = T extends SqlPredicate ? FrontendSqlPredicate
   : T extends object ? {readonly [K in keyof StatementShape<T>]: FrontendIR<StatementShape<T>[K]>} : T;
 export type FrontendStmt = FrontendIR<Stmt> & {readonly pos?: import("./ir.ts").Position};
 export type FrontendCatch = FrontendIR<Catch>;
-export interface FrontendMethod extends Omit<Method, "body"> { readonly body?: readonly FrontendStmt[] }
+// dropped/amcProgram are decided after the method is built, so the frontend's
+// method-in-progress is writable where the finished IR (Method) is readonly.
+type WritableMethodBase = Omit<Method, "body" | "dropped" | "amcProgram">;
+export interface FrontendMethod extends WritableMethodBase { readonly body?: readonly FrontendStmt[]; dropped?: boolean; amcProgram?: string }
 export interface FrontendConstant { go: string; type: Type; value?: string | Record<string, string | undefined>; init?: ConstantInitializer; fieldInits?: Record<string, ConstantInitializer | undefined> }
 export type FrontendAttribute = (Omit<Attribute, "value"> & {readonly value?: string; readonly unsupported?: undefined})
   | {readonly name: string; readonly unsupported: string; readonly type?: undefined; readonly value?: undefined; readonly static?: boolean; readonly private?: boolean};
@@ -150,4 +153,15 @@ export interface FrontendSelectStar { readonly star: true; readonly fn?: undefin
 export interface FrontendSelectField { readonly fn: string; readonly col: string; readonly star?: undefined }
 export interface FrontendSelectColumn { readonly name: string; readonly type: Type; readonly sql?: string; readonly named?: boolean; readonly agg?: FrontendSelectStar | FrontendSelectField }
 export interface FrontendSelectColumns extends Array<FrontendSelectColumn> { grouped?: boolean; groupBy?: string[] }
+
+// Object walkers inspect a few fields and recurse over the remaining values;
+// emit-go's WalkNode is the precedent for this view.
+export interface FrontendWalkNode {
+  readonly s?: string;
+  readonly branches?: readonly {readonly body?: readonly unknown[]}[];
+  readonly cases?: readonly {readonly body?: readonly unknown[]}[];
+  readonly elseifs?: readonly {readonly body?: readonly unknown[]}[];
+  readonly catches?: readonly {readonly body?: readonly unknown[]}[];
+  readonly [key: string]: unknown;
+}
 export interface FrontendSelectFae { name: string; row: StructType; n: number; table: TypedExpr }
