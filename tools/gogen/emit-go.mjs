@@ -458,19 +458,19 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
     out.push(`func init() {`, `\tabap.RegisterClass(${JSON.stringify(cls.name)}, (*${typeName(cls.name)})(nil), func(s *abap.Session) any { ${make} })`, "}", "");
   }
   append(out, exceptionSupers(program));
-  if (classes.some(c => c.methods.some(m => (/** @type {readonly import("./emit-go-types.ts").WalkNode[] | undefined} */ (m.body))?.[0]?.fn === "Native_GET_SUPER_CLASS_TYPE"))) append(out, superClassGo((/** @type {import("./emit-go-types.ts").Program & {readonly rtti: import("./emit-go-types.ts").Rtti}} */ (program)), {goType, ident}));
-  if (classes.some(c => c.methods.some(m => (/** @type {readonly import("./emit-go-types.ts").WalkNode[] | undefined} */ (m.body))?.[0]?.fn === "Native_DESCRIBE_BY_OBJECT_REF" || (/** @type {readonly import("./emit-go-types.ts").WalkNode[] | undefined} */ (m.body))?.[0]?.fn === "Native_GET_SUPER_CLASS_TYPE"))) append(out, (/** @type {import("./emit-go-types.ts").ObjectRttiGo} */ (objectRttiGo))(program, {goType, ident}));
+  if (classes.some(c => c.methods.some(m => (/** @type {{fn?: unknown} | undefined} */ (m.body?.[0]))?.fn === "Native_GET_SUPER_CLASS_TYPE"))) append(out, superClassGo((/** @type {import("./emit-go-types.ts").Program & {readonly rtti: import("./emit-go-types.ts").Rtti}} */ (program)), {goType, ident}));
+  if (classes.some(c => c.methods.some(m => (/** @type {{fn?: unknown} | undefined} */ (m.body?.[0]))?.fn === "Native_DESCRIBE_BY_OBJECT_REF" || (/** @type {{fn?: unknown} | undefined} */ (m.body?.[0]))?.fn === "Native_GET_SUPER_CLASS_TYPE"))) append(out, (/** @type {import("./emit-go-types.ts").ObjectRttiGo} */ (objectRttiGo))(program, {goType, ident}));
   append(out, hostRaiseGlue(program, classes, layers));
   if (!layers) append(out, dispatcher(classes));
   append(out, staticRegistry(program, classes));
-  if (classes.some((c) => c.methods.some((m) => (/** @type {readonly import("./emit-go-types.ts").WalkNode[] | undefined} */ (m.body))?.[0]?.fn === "Native_DESCRIBE_BY_NAME"))) append(out, nativeRtti(program));
-  if (classes.some((c) => c.methods.some((m) => (/** @type {readonly import("./emit-go-types.ts").WalkNode[] | undefined} */ (m.body))?.[0]?.fn === "Native_GET_TEXT_FOR_MESSAGE"))) append(out, (/** @type {import("./emit-go-types.ts").NativeMessageText} */ (nativeMessageText))(program, {goType, ident, classes: CLASSES, poly: POLY, ancestorsOf}));
-  if (classes.some((c) => c.methods.some((m) => (/** @type {readonly import("./emit-go-types.ts").WalkNode[] | undefined} */ (m.body))?.[0]?.fn === "Native_DESCRIBE_BY_DATA"))) append(out, nativeRttiData(program));
-  if (classes.some((c) => c.methods.some((m) => (/** @type {readonly import("./emit-go-types.ts").WalkNode[] | undefined} */ (m.body))?.[0]?.fn === "Native_JSON_PARSE"))) append(out, nativeJsonParse());
-  if (classes.some((c) => c.methods.some((m) => (/** @type {readonly import("./emit-go-types.ts").WalkNode[] | undefined} */ (m.body))?.[0]?.fn === "Native_AJSON_ENCODE"))) {
+  if (classes.some((c) => c.methods.some((m) => (/** @type {{fn?: unknown} | undefined} */ (m.body?.[0]))?.fn === "Native_DESCRIBE_BY_NAME"))) append(out, nativeRtti(program));
+  if (classes.some((c) => c.methods.some((m) => (/** @type {{fn?: unknown} | undefined} */ (m.body?.[0]))?.fn === "Native_GET_TEXT_FOR_MESSAGE"))) append(out, (/** @type {import("./emit-go-types.ts").NativeMessageText} */ (nativeMessageText))(program, {goType, ident, classes: CLASSES, poly: POLY, ancestorsOf}));
+  if (classes.some((c) => c.methods.some((m) => (/** @type {{fn?: unknown} | undefined} */ (m.body?.[0]))?.fn === "Native_DESCRIBE_BY_DATA"))) append(out, nativeRttiData(program));
+  if (classes.some((c) => c.methods.some((m) => (/** @type {{fn?: unknown} | undefined} */ (m.body?.[0]))?.fn === "Native_JSON_PARSE"))) append(out, nativeJsonParse());
+  if (classes.some((c) => c.methods.some((m) => (/** @type {{fn?: unknown} | undefined} */ (m.body?.[0]))?.fn === "Native_AJSON_ENCODE"))) {
     out.push("func Native_AJSON_ENCODE(s *abap.Session, input string) string { return abap.EncodeText(\"utf8\", input) }", "");
   }
-  if (classes.some((c) => c.methods.some((m) => (/** @type {readonly import("./emit-go-types.ts").WalkNode[] | undefined} */ (m.body))?.[0]?.fn === "Native_AJSON_DECODE"))) {
+  if (classes.some((c) => c.methods.some((m) => (/** @type {{fn?: unknown} | undefined} */ (m.body?.[0]))?.fn === "Native_AJSON_DECODE"))) {
     out.push("func Native_AJSON_DECODE(s *abap.Session, input string) string { return abap.DecodeText(\"utf8\", false, input) }", "");
   }
   append(out, nativeCodepage(classes));
@@ -499,7 +499,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
  */
 /** @param {readonly import("./emit-go-types.ts").Class[]} classes @returns {string[]} */ function nativeCodepage(classes) {
   /** @type {string[]} */ const out = [];
-  /** @param {string} fn @returns {boolean} */ const has = (fn) => classes.some((c) => c.methods.some((m) => (/** @type {readonly import("./emit-go-types.ts").WalkNode[] | undefined} */ (m.body))?.[0]?.fn === fn));
+  /** @param {string} fn @returns {boolean} */ const has = (fn) => classes.some((c) => c.methods.some((m) => (/** @type {{fn?: unknown} | undefined} */ (m.body?.[0]))?.fn === fn));
   /** @param {string} cls @param {string} meth @param {string} p @returns {boolean | undefined} */ const sup = (cls, meth, p) => classes.find((c) => c.name === cls)?.methods.find((m) => m.name === meth)?.params.some((x) => x.suppliedOf === p);
   if (has("Native_CONV_OUT_CONVERT")) {
     const withSup = sup("CL_ABAP_CONV_OUT_CE", "CONVERT", "N");
