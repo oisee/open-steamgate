@@ -32,7 +32,7 @@ const {Expressions, ExpressionsCDS, Nodes, Structures} = abaplint;
     }
     inlineTables.set(body, names);
   }
-// @ts-expect-error -- abapiti form pending
+  // @ts-expect-error -- abapiti form pending
   return inlineTables.get(body);
 }
 

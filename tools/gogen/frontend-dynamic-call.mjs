@@ -94,7 +94,7 @@ export function prepareDynamicStatics(program, {defaultValue, aliasTarget}) {
       program.currentTypes = undefined;
       for (const p of /** @type {{params?: readonly import("./frontend-types.ts").FrontendParam[]}} */ (impl).params ?? []) if (p.default !== undefined)
         defaults.push({name: p.name, value: defaultValue(p, {reg: program.reg, program, className: owner})});
-// @ts-expect-error -- abapiti form pending
+    // @ts-expect-error -- abapiti form pending
     } finally { [program.currentOwner, program.currentClass, program.currentTypes] = saved; }
     program.dynamicDispatch.push({key: `${cls.name}=>${method}`, owner, method: name, defaults});
   }

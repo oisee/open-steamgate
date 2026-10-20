@@ -331,7 +331,7 @@ const DESTINATION_FM = new Map([
 /** @param {import("./frontend-types.ts").FrontendProgram} program @param {string} key @param {string} name @returns {import("./frontend-types.ts").Signature} */ const nativeMeSig = (program, key, name) => {
   const n = NATIVE_ME.get(key);
   const T = {string: S, xstring: XS, i: I};
-// @ts-expect-error -- abapiti form pending
+  // @ts-expect-error -- abapiti form pending
   const own = n.params.map(([pn, dir, t, optional]) => ({name: pn, dir, byValue: false, type: T[t], optional: optional === true}));
   return {name, static: false, private: false, abstract: false, params: withSupplied(program, key, own), returning: null};
 };

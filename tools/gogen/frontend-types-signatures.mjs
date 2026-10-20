@@ -135,7 +135,7 @@ import {P_GENERIC} from "./frontend-classes-native.mjs";
       else program.anonStructs.set(t, go);
     }
     const shape = comps.map((c) => upper(c.name)).join(",");
-// @ts-expect-error -- abapiti form pending
+    // @ts-expect-error -- abapiti form pending
     for (let n = 2; program.structs.has(go) && program.structs.get(go).shape !== undefined && program.structs.get(go).shape !== shape; n += 1) {
       go = `${go.replace(/_V\d+$/, "")}_V${n}`;
     }
@@ -149,7 +149,7 @@ import {P_GENERIC} from "./frontend-classes-native.mjs";
         // a field outside the subset: the structure is not in the program,
         // and every later use of it is refused with the same reason
         program.structs.delete(go);
-// @ts-expect-error -- abapiti form pending
+        // @ts-expect-error -- abapiti form pending
         program.badStructs.set(go, e.message);
         throw e;
       }
@@ -209,7 +209,7 @@ import {P_GENERIC} from "./frontend-classes-native.mjs";
     OBJECT: {k: "ref", name: "OBJECT", intf: true},
     P: {k: "p", len: 8, dec: 0}, C: C(1), N: {k: "n", len: 1}, X: X(1), ABAP_BOOL: C(1),
   }[t];
-// @ts-expect-error -- abapiti form pending
+  // @ts-expect-error -- abapiti form pending
   if (builtin) return builtin;
   const pool = t.includes("_") ? ctx.reg.getObject("TYPE", t.split("_")[0]) : undefined;
   const poolType = pool ? new abaplint.SyntaxLogic(ctx.reg, /** @type {import("@abaplint/core").ABAPObject} */ (pool)).run().spaghetti.getFirstChild()?.getFirstChild()?.findType(t) : undefined;

@@ -20,7 +20,7 @@ export function resolveStatic(owner, attr, ctx, deps, write = false) {
     const go = registerConst(ctx.program, `${ctx.program.currentOwner ?? owner}:${owner}~${attr}`,
       local ? localInterfaceConstant(c, attr, local, ctx.reg) : c, owner);
     if (go === undefined) throw new Unsupported(`constant ${owner}=>${attr} is outside the subset`);
-// @ts-expect-error -- abapiti form pending
+    // @ts-expect-error -- abapiti form pending
     return {e: "const", go, type: ctx.program.consts.get(go).type};
   }
   // a constant a superclass declares, named through the subclass
@@ -34,7 +34,7 @@ export function resolveStatic(owner, attr, ctx, deps, write = false) {
       if (write) throw new Unsupported(`${owner}=>${attr}: a write to a constant`);
       const go = registerConst(ctx.program, `${anc}~${attr}`, ac, anc);
       if (go === undefined) throw new Unsupported(`constant ${anc}=>${attr} is outside the subset`);
-// @ts-expect-error -- abapiti form pending
+      // @ts-expect-error -- abapiti form pending
       return {e: "const", go, type: ctx.program.consts.get(go).type};
     }
   }
