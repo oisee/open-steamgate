@@ -458,7 +458,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
     out.push(`func init() {`, `\tabap.RegisterClass(${JSON.stringify(cls.name)}, (*${typeName(cls.name)})(nil), func(s *abap.Session) any { ${make} })`, "}", "");
   }
   append(out, exceptionSupers(program));
-  if (classes.some(c => c.methods.some(m => (/** @type {{fn?: unknown} | undefined} */ (m.body?.[0]))?.fn === "Native_GET_SUPER_CLASS_TYPE"))) append(out, superClassGo((/** @type {import("./emit-go-types.ts").Program & {readonly rtti: import("./emit-go-types.ts").Rtti}} */ (program)), {goType, ident}));
+  if (classes.some(c => c.methods.some(m => (/** @type {{fn?: unknown} | undefined} */ (m.body?.[0]))?.fn === "Native_GET_SUPER_CLASS_TYPE"))) append(out, superClassGo((/** @type {import("./emit-go-types.ts").ProgramWithRtti} */ (program)), {goType, ident}));
   if (classes.some(c => c.methods.some(m => (/** @type {{fn?: unknown} | undefined} */ (m.body?.[0]))?.fn === "Native_DESCRIBE_BY_OBJECT_REF" || (/** @type {{fn?: unknown} | undefined} */ (m.body?.[0]))?.fn === "Native_GET_SUPER_CLASS_TYPE"))) append(out, (/** @type {import("./emit-go-types.ts").ObjectRttiGo} */ (objectRttiGo))(program, {goType, ident}));
   append(out, hostRaiseGlue(program, classes, layers));
   if (!layers) append(out, dispatcher(classes));
@@ -555,7 +555,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
 /** @param {import("./emit-go-types.ts").ProgramInput} program @returns {string[]} */ function nativeRtti(program) {
   const sd = CLASSES.get("CL_ABAP_STRUCTDESCR");
   const ed = CLASSES.get("CL_ABAP_ELEMDESCR");
-  const comp = (/** @type {import("./emit-go-types.ts").SupportedAttribute & {readonly type: import("./emit-go-types.ts").TableType & {readonly row: import("./emit-go-types.ts").StructType}} | undefined} */ (sd?.attributes.find((a) => a.name === "MT_REFS_COMP")));
+  const comp = sd?.attributes.find((a) => a.name === "MT_REFS_COMP");
   const ret = goType({k: "ref", name: "CL_ABAP_TYPEDESCR"});
   const head = `func Native_DESCRIBE_BY_NAME(s *abap.Session, p_name string) ${ret} {`;
   if (!sd || !ed || !comp || comp.unsupported || sd.abstract || ed.abstract) {
@@ -566,12 +566,12 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
   const out = ["// the structures RTTI can describe: name -> components (name, type kind)", "var rttiStructs = map[string][][2]string{"];
   for (const [n, cs] of [...(/** @type {import("./emit-go-types.ts").Rtti} */ (program.rtti)).structs].sort()) out.push(`\t${JSON.stringify(n)}: {${cs.map((c) => `{${JSON.stringify(c.name)}, ${JSON.stringify(c.kind)}}`).join(", ")}},`);
   append(out, ["}", "", "var rttiKnown = map[string]bool{"], [...(/** @type {import("./emit-go-types.ts").Rtti} */ (program.rtti)).known].sort().map((n) => `\t${JSON.stringify(n)}: true,`), ["}", ""]);
-  const row = comp.type.row.go;
+  const row = (/** @type {import("./emit-go-types.ts").StructType} */ ((/** @type {import("./emit-go-types.ts").TableType} */ (comp.type)).row)).go;
   append(out, [head, `\tname := strings.ToUpper(strings.TrimRight(p_name, " "))`, "\tfields, ok := rttiStructs[name]", "\tif !ok {",
     "\t\tif rttiKnown[name] {", `\t\t\tpanic(abap.NotCompiled("CL_ABAP_TYPEDESCR=>DESCRIBE_BY_NAME", "RTTI in the Go host describes structures only: "+name))`, "\t\t}",
     `\t\tpanic(abap.ClassicException{Name: "TYPE_NOT_FOUND", Method: "DESCRIBE_BY_NAME"})`, "\t}",
     "\td := Alloc_CL_ABAP_STRUCTDESCR()"], set(sd, "d", "KIND", `"S"`), set(sd, "d", "TYPE_KIND", `"u"`), set(sd, "d", "RELATIVE_NAME", "name"), set(sd, "d", "ABSOLUTE_NAME", "`\\TYPE=` + name"), set(sd, "d", "DDIC", `"X"`), ["\tfor _, f := range fields {", "\t\te := Alloc_CL_ABAP_ELEMDESCR()"], set(ed, "e", "KIND", `"E"`).map((l) => `\t${l}`), set(ed, "e", "TYPE_KIND", "f[1]").map((l) => `\t${l}`), set(ed, "e", "RELATIVE_NAME", "f[0]").map((l) => `\t${l}`), [`\t\tc := ${row}{}`, `\t\tc.${ident("name")} = f[0]`, `\t\tc.${ident("type")} = e`,
-    `\t\td.${ident("mt_refs_comp")} = append(d.${ident("mt_refs_comp")}, ${rowStored(comp.type, "c")})`], has(sd, "MT_REFS") ? [`\t\td.${ident("mt_refs")} = append(d.${ident("mt_refs")}, ${rowStored((/** @type {import("./emit-go-types.ts").TableType} */ ((/** @type {import("./emit-go-types.ts").SupportedAttribute} */ (sd.attributes.find((a) => a.name === "MT_REFS"))).type)), "c")})`] : [], ["\t}", "\treturn d", "}", ""]);
+    `\t\td.${ident("mt_refs_comp")} = append(d.${ident("mt_refs_comp")}, ${rowStored((/** @type {import("./emit-go-types.ts").TableType} */ (comp.type)), "c")})`], has(sd, "MT_REFS") ? [`\t\td.${ident("mt_refs")} = append(d.${ident("mt_refs")}, ${rowStored((/** @type {import("./emit-go-types.ts").TableType} */ ((/** @type {import("./emit-go-types.ts").SupportedAttribute} */ (sd.attributes.find((a) => a.name === "MT_REFS"))).type)), "c")})`] : [], ["\t}", "\treturn d", "}", ""]);
   return out;
 }
 

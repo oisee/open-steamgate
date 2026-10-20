@@ -219,6 +219,8 @@ export interface Program extends Omit<IR.Program, 'functionModules' | 'classes' 
 // Legacy callers can pass a class array with no program metadata.
 export type ClassList = Class[] & Partial<Program>;
 export type ProgramInput = Program | ClassList;
+// superClassGo reads the RTTI the emitGo caller has already gated on.
+export interface ProgramWithRtti extends Program { readonly rtti: Rtti }
 export interface Layers extends Omit<SymbolLayers, 'classes' | 'consts' | 'structs' | 'tables'> {
   readonly classes?: readonly Class[];
   readonly consts?: Map<string, Constant>;
