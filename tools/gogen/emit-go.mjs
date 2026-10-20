@@ -37,7 +37,6 @@ const GO_RESERVED = new Set(("break default func interface select case defer go 
 /** @type {boolean} */ let exportedFields = false, /** @type {import("./emit-go-types.ts").Ownership | undefined} */ OWNERSHIP, /** @type {import("./emit-go-types.ts").SymbolCollector | null | undefined} */ SYMBOLS;
 // WriteType and Type lengths/decimals read through the inspection view: the
 // ABAP kind decides which member is really there, not a narrowed switch.
-/** @typedef {import("./emit-go-types.ts").WriteType & {readonly len?: number; readonly dec?: number}} WriteTypeProbe */
 /** @param {import("./emit-go-types.ts").Field | import("./emit-go-types.ts").SupportedAttribute} v @returns {string} */ const ownedType = (v) => (/** @type {import("./emit-go-types.ts").Ownership} */ (OWNERSHIP)).declarations.has(v) ? (HELPER_IMPORTS.add("xbuf"), (v.type.k === "x" ? `[${v.type.len}]byte` : "hXbuf.Buffer")) : goType(v.type);
 /** @param {string} name @returns {string} */ export const ident = (name) => {
   // A single leading underscore is reserved for compiler-only supplied flags.
@@ -255,7 +254,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
 /** @param {import("./emit-go-types.ts").ProgramInput} program @returns {string[]} */ function tableRegistry(program) {
   const tables = program.tables ?? [];
   if (tables.length === 0) return [];
-/** @param {WriteTypeProbe | null} t @returns {string} */ const irType = (t) => (t === null ? "nil" : `&abap.IRType{Abap: ${JSON.stringify(t.abap)}${t.len ? `, Len: ${t.len}` : ""}${t.dec ? `, Dec: ${t.dec}` : ""}}`);
+/** @param {import("./emit-go-types.ts").WriteType | null} t @returns {string} */ const irType = (t) => (t === null ? "nil" : `&abap.IRType{Abap: ${JSON.stringify(t.abap)}${(/** @type {{readonly len?: unknown}} */ (t)).len ? `, Len: ${(/** @type {number} */ ((/** @type {{readonly len?: unknown}} */ (t)).len))}` : ""}${(/** @type {{readonly dec?: unknown}} */ (t)).dec ? `, Dec: ${(/** @type {number} */ ((/** @type {{readonly dec?: unknown}} */ (t)).dec))}` : ""}}`);
   const lines = tables.map((t) => {
     const cols = t.columns.map((c) => `{Name: ${JSON.stringify(c.name)}, Kind: '${c.kind}', Len: ${c.len}, Dec: ${c.dec}, Key: ${c.key}, IR: ${irType(c.type)}}`);
     const types = t.row ? `Row: ${desc(t.row)}, Rows: ${desc({k: "table", row: t.row})}` : `Why: ${JSON.stringify(t.why)}`;
@@ -312,7 +311,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
         const inner = stable(t) ? `for i := range v {\n\t\tr[i] = ${rowStored(t, needsCopy(t.row) ? `${cloneName(t.row)}(*v[i])` : `*v[i]`)}\n\t}` : needsCopy(t.row) ? `for i := range v {\n\t\tr[i] = ${cloneName(t.row)}(v[i])\n\t}` : "copy(r, v)";
         out.push(`func ${c.name}(v ${goType(t)}) ${goType(t)} {`, "\tif v == nil {", "\t\treturn nil", "\t}", `\tr := make(${goType(t)}, len(v))`, `\t${inner}`, "\treturn r", "}", "");
       } else {
-        const fs = (/** @type {import("./emit-go-types.ts").StructType & {readonly fields: readonly import("./ir.ts").Field[]}} */ (STRUCTDEFS.get(t.go))).fields.filter((f) => needsCopy(f.type));
+        const fs = (/** @type {import("./emit-go-types.ts").StructDefinition} */ (STRUCTDEFS.get(t.go))).fields.filter((f) => needsCopy(f.type));
         append(out, [`func ${c.name}(v ${goType(t)}) ${goType(t)} {`], fs.map((f) => `\tv.${ident(f.name)} = ${cloneName(f.type)}(v.${ident(f.name)})`), ["\treturn v", "}", ""]);
       }
     }
@@ -905,7 +904,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
   if (c.type.k === "f") return String(Number(c.value));
   if (c.type.k === "n") return JSON.stringify(String(c.value));
   if (c.type.k === "string" || c.type.k === "c") return JSON.stringify(c.type.k === "c" ? (/** @type {string} */ (c.value)).replace(/ +$/, "") : c.value);
-  if (c.type.k === "x" || c.type.k === "xstring") return `"${hexBytes((/** @type {string} */ (c.value)), (/** @type {import("./emit-go-types.ts").TypeProbe} */ (c.type)).len).map((b) => `\\x${b.toString(16).padStart(2, "0")}`).join("")}"`;
+  if (c.type.k === "x" || c.type.k === "xstring") return `"${hexBytes((/** @type {string} */ (c.value)), (/** @type {number} */ ((/** @type {{readonly len?: unknown}} */ (c.type)).len))).map((b) => `\\x${b.toString(16).padStart(2, "0")}`).join("")}"`;
   throw new Error(`constant of type ${c.type.k}`);
 }
 
@@ -1322,14 +1321,14 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
     : a.mandt ? "abap.Mandt" : typeof a.value === "number" ? String(a.value) : JSON.stringify(String(a.value)))))).join(", ")}}`;
 }
 
-/** @param {WriteTypeProbe} t @returns {string} */ const irTypeGo = (t) => `&abap.IRType{Abap: ${JSON.stringify(t.abap)}${t.len !== undefined ? `, Len: ${t.len}` : ""}${t.dec ? `, Dec: ${t.dec}` : ""}}`;
+/** @param {import("./emit-go-types.ts").WriteType} t @returns {string} */ const irTypeGo = (t) => `&abap.IRType{Abap: ${JSON.stringify(t.abap)}${(/** @type {{readonly len?: unknown}} */ (t)).len !== undefined ? `, Len: ${(/** @type {number} */ ((/** @type {{readonly len?: unknown}} */ (t)).len))}` : ""}${(/** @type {{readonly dec?: unknown}} */ (t)).dec ? `, Dec: ${(/** @type {number} */ ((/** @type {{readonly dec?: unknown}} */ (t)).dec))}` : ""}}`;
 
 // the ranges of a statement: where lower() put each marker, and the rows of
 // the ranges table as the Go values of their fields
 /** @param {readonly import("./emit-go-types.ts").SqlPredicate[] | undefined} preds @param {import("./emit-go-types.ts").Context} ctx @returns {string} */ function hostPreds(preds, ctx) {
   if (!preds || preds.length === 0) return "nil";
   return `[]abap.HostPred{${preds.map((p) => {
-    const fields = new Map((STRUCTDEFS.get((/** @type {{readonly row: {readonly go: string}}} */ (p.range.type)).row.go)?.fields ?? []).map((f) => [String(f.name).toUpperCase(), f]));
+    const fields = new Map((STRUCTDEFS.get((/** @type {import("./emit-go-types.ts").StructType} */ ((/** @type {import("./emit-go-types.ts").TableType} */ (p.range.type)).row)).go)?.fields ?? []).map((f) => [String(f.name).toUpperCase(), f]));
     /** @param {string} nm @returns {string} */ const v = (nm) => ((/** @type {import("./ir.ts").Field} */ (fields.get(nm))).type.k === "i" ? `int64(r.${ident((/** @type {import("./ir.ts").Field} */ (fields.get(nm))).name)})` : `r.${ident((/** @type {import("./ir.ts").Field} */ (fields.get(nm))).name)}`);
     const rows = `func() []abap.RangeRow { out := []abap.RangeRow{}; for _, r := range ${expr(p.range, ctx)} { out = append(out, abap.RangeRow{Sign: r.${ident((/** @type {import("./ir.ts").Field} */ (fields.get("SIGN"))).name)}, Option: r.${ident((/** @type {import("./ir.ts").Field} */ (fields.get("OPTION"))).name)}, Low: ${v("LOW")}, High: ${v("HIGH")}}) }; return out }()`;
     return `{ID: ${JSON.stringify(p.id)}, After: ${p.after}, Column: ${JSON.stringify(p.column)}, Type: ${irTypeGo(p.type)}, Kind: ${JSON.stringify(p.kind ?? "")}, LowLen: ${p.lowLen}, Rows: ${rows}}`;
@@ -2231,7 +2230,7 @@ ${t}	}`));
 }
 
 // a DEC column read into a p field, rounded to the field's decimals
-/** @param {string} v @param {import("./emit-go-types.ts").TypeProbe} ft @returns {string} */ const dbP = (v, ft) => `abap.DBP(${v}, ${ft.len ?? 8}, ${ft.dec ?? 0})`;
+/** @param {string} v @param {import("./emit-go-types.ts").Type} ft @returns {string} */ const dbP = (v, ft) => `abap.DBP(${v}, ${(/** @type {number} */ ((/** @type {{readonly len?: unknown}} */ (ft)).len)) ?? 8}, ${(/** @type {number} */ ((/** @type {{readonly dec?: unknown}} */ (ft)).dec)) ?? 0})`;
 
 /** @type {Partial<Record<string, string>>} */ const I_OPS = {"+": "abap.AddI", "-": "abap.SubI", "*": "abap.MulI", "/": "abap.DivI", DIV: "abap.DivIntI", MOD: "abap.ModI"};
 /** @type {Partial<Record<string, string>>} */ const P_OPS = {"+": "abap.AddP", "-": "abap.SubP", "*": "abap.MulP", "/": "abap.DivP", DIV: "abap.DivIntP", MOD: "abap.ModP"};
@@ -2332,7 +2331,7 @@ ${t}	}`));
       }
       /** @type {string} */ let call;
       if (e.receiver) {
-        const receiverClass = CLASSES.get((/** @type {import("./emit-go-types.ts").TypeProbe} */ (e.receiver.type)).name ?? "");
+        const receiverClass = CLASSES.get((/** @type {string} */ ((/** @type {{readonly name?: unknown}} */ (e.receiver.type)).name)) ?? "");
         call = `${(/** @type {import("./emit-go-types.ts").ExceptionClass} */ (exceptionClass))(receiverClass, CLASSES) ? `abap.ExceptionRead(${expr(e.receiver, ctx)}, "")` : expr(e.receiver, ctx)}.${typeName(e.method)}(${args.join(", ")})`;
       }
       else if (e.owner) call = `${funcName(e.owner, e.method)}(${args.join(", ")})`;

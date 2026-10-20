@@ -170,7 +170,9 @@ export interface Class extends Omit<IR.Class, 'attributes' | 'methods' | 'constr
   readonly signatures?: ReadonlyMap<string, Method | UnsupportedMethod>;
   readonly super?: string | null;
 }
-export type StructDefinitions = Map<string, StructType & {readonly fields: readonly IR.Field[]}>;
+// A struct definition as the emitter consumes it: the DDIC fields resolved.
+export interface StructDefinition extends StructType { readonly fields: readonly IR.Field[] }
+export type StructDefinitions = Map<string, StructDefinition>;
 export type LiteralValue = string | number | {readonly [name: string]: LiteralValue | undefined};
 export interface Constant {
   readonly type: IR.Type;
