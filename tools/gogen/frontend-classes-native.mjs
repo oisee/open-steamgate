@@ -20,7 +20,8 @@ const TRANSPILER_MEANING = new Map([
 // ultra/events: the host functions whose TYPE p parameters are read as p(16,7) (typeOf)
 const P_GENERIC = new Set(["CL_ABAP_TSTMP=>SUBTRACT", "CL_ABAP_TSTMP=>SUBTRACTSECS"]);
 /** methods whose ABAP is kernel code in the transpiler runtime, and the host function that does their work */
-/** @type {Map<string, string | {fn: string; args: string[]}>} */ const NATIVE = new Map(/** @type {[string, string | {fn: string; args: string[]}][]} */ ([
+// @ts-expect-error -- abapiti form pending
+/** @type {Map<string, string | {fn: string; args: string[]}>} */ const NATIVE = new Map([
   // ultra/events (the WEBGUI's transaction sessions, ZCL_OSD_TRAN_SESSION):
   // the seconds from TSTMP2 to TSTMP1, their fractions cut off, as
   // open-abap-core's kernel lines compute them (its RETURNING is an i; a
@@ -113,7 +114,7 @@ const P_GENERIC = new Set(["CL_ABAP_TSTMP=>SUBTRACT", "CL_ABAP_TSTMP=>SUBTRACTSE
   ["CL_GUI_FRONTEND_SERVICES=>FILE_SAVE_DIALOG", {fn: "abap.FrontendFileSaveDialog", args: ["WINDOW_TITLE:string", "DEFAULT_FILE_NAME:string", "FILE_FILTER:string", "DEFAULT_EXTENSION:string", "INITIAL_DIRECTORY:string", "PROMPT_ON_OVERWRITE:c", "&FILENAME:string", "&PATH:string", "&FULLPATH:string", "&USER_ACTION:i"]}],
   ["CL_GUI_FRONTEND_SERVICES=>DIRECTORY_BROWSE", {fn: "abap.FrontendDirectoryBrowse", args: ["WINDOW_TITLE:string", "INITIAL_FOLDER:string", "&SELECTED_FOLDER:string"]}],
   ["ZCL_OSABAP_RUNTIME=>GETENV", {fn: "abap.FrontendGetenv", args: ["NAME:string"]}],
-]));
+]);
 
 /*
  * The kernel lines of the ICF shim (express-icf-shim's cl_express_icf_shim,
@@ -131,7 +132,8 @@ const P_GENERIC = new Set(["CL_ABAP_TSTMP=>SUBTRACT", "CL_ABAP_TSTMP=>SUBTRACTSE
  *                         statements up to the line {end}
  *   {bound}               a line of that loop whose work the binds do
  */
-/** @type {Map<string, import("./frontend-types.ts").KernelSpec>} */ const KERNEL = new Map(/** @type {[string, import("./frontend-types.ts").KernelSpec][]} */ ([
+// @ts-expect-error -- abapiti form pending
+/** @type {Map<string, import("./frontend-types.ts").KernelSpec>} */ const KERNEL = new Map([
   // ADT capability answers match Node's parent kernel / non-one-runtime host.
   ["ZCL_OSD_ADT_HOST=>ONE_RUNTIME|rv_on.set(abap.context.RFCDestinations.STORE?.localSystem ? \"X\" : \"\");", {fn: "abap.ADTOneRuntime", args: ["&RV_ON:c"]}],
   ["ZCL_OSD_KERNEL_GUARD=>HAS_SERVING_DATABASE|if (globalThis.__osdAdtKernel !== undefined) rv_available.set(\" \");", {fn: "abap.ADTUnavailable", args: ["&RV_AVAILABLE:c"]}],
@@ -156,7 +158,7 @@ const P_GENERIC = new Set(["CL_ABAP_TSTMP=>SUBTRACT", "CL_ABAP_TSTMP=>SUBTRACTSE
   // JavaScript locals of SEND; here they live with the client object (ME).
   // The lines that import the modules, declare postData and pick the agent
   // are nops: HTTPCSend does all of that
-  ...(/** @type {[string, import("./frontend-types.ts").KernelSpec][]} */ ([
+  ...[
     ["let headers = {};", {fn: "abap.HTTPCHeadersNew", args: ["ME:ref"]}],
     ["headers[ls_field.get().name.get()] = ls_field.get().value.get();", {fn: "abap.HTTPCHeader", args: ["ME:ref", "LS_FIELD-NAME:string", "LS_FIELD-VALUE:string"]}],
     ["headers[\"content-type\"] = lv_content_type.get();", {fn: "abap.HTTPCContentType", args: ["ME:ref", "LV_CONTENT_TYPE:string"]}],
@@ -194,8 +196,8 @@ const P_GENERIC = new Set(["CL_ABAP_TSTMP=>SUBTRACT", "CL_ABAP_TSTMP=>SUBTRACTSE
     ["lo_entity.get().mv_content_type.set(response.headers[\"content-type\"] || \"\");", {fn: "abap.HTTPCResponseContentType", args: ["ME:ref", "&LO_ENTITY->MV_CONTENT_TYPE:string"]}],
     ["lo_entity.get().mv_status.set(response.statusCode);", {fn: "abap.HTTPCResponseStatus", args: ["ME:ref", "&LO_ENTITY->MV_STATUS:i"]}],
     ["lo_entity.get().mv_data.set(response.body.toString(\"hex\").toUpperCase());", {fn: "abap.HTTPCResponseBody", args: ["ME:ref", "&LO_ENTITY->MV_DATA:xstring"]}],
-  ])).map(([line, k]) => [`CL_HTTP_CLIENT=>IF_HTTP_CLIENT~SEND|${line}`, k]),
-]));
+  ].map(([line, k]) => [`CL_HTTP_CLIENT=>IF_HTTP_CLIENT~SEND|${line}`, k]),
+]);
 
 /** the line of a WRITE '@KERNEL ...' as the JavaScript it holds, else undefined */
 /** @param {import("./frontend-types.ts").SyntaxNode} node @returns {string | undefined} */ function kernelText(node) {
@@ -326,8 +328,9 @@ const DESTINATION_FM = new Map([
   ["CL_ABAP_CONV_IN_CE=>CONVERT", {fn: "Native_CONV_IN_CONVERT", params: [["INPUT", "importing", "xstring"], ["N", "importing", "i", true], ["DATA", "exporting", "string"]]}],
 ]);
 /** @param {import("./frontend-types.ts").FrontendProgram} program @param {string} key @param {string} name @returns {import("./frontend-types.ts").Signature} */ const nativeMeSig = (program, key, name) => {
-  const n = /** @type {import("./frontend-types.ts").NativeMe} */ (NATIVE_ME.get(key));
+  const n = NATIVE_ME.get(key);
   const T = {string: S, xstring: XS, i: I};
+// @ts-expect-error -- abapiti form pending
   const own = n.params.map(([pn, dir, t, optional]) => ({name: pn, dir, byValue: false, type: T[t], optional: optional === true}));
   return {name, static: false, private: false, abstract: false, params: withSupplied(program, key, own), returning: null};
 };
