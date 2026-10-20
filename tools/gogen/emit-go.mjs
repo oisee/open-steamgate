@@ -38,7 +38,7 @@ const GO_RESERVED = new Set(("break default func interface select case defer go 
 // WriteType and Type lengths/decimals read through the inspection view: the
 // ABAP kind decides which member is really there, not a narrowed switch.
 /** @typedef {import("./emit-go-types.ts").WriteType & {readonly len?: number; readonly dec?: number}} WriteTypeProbe */
-/** @param {import("./emit-go-types.ts").Field | import("./emit-go-types.ts").SupportedAttribute} v @returns {string} */ const ownedType = (v) => OWNERSHIP.declarations.has(v) ? (HELPER_IMPORTS.add("xbuf"), (v.type.k === "x" ? `[${v.type.len}]byte` : "hXbuf.Buffer")) : goType(v.type);
+/** @param {import("./emit-go-types.ts").Field | import("./emit-go-types.ts").SupportedAttribute} v @returns {string} */ const ownedType = (v) => (/** @type {import("./emit-go-types.ts").Ownership} */ (OWNERSHIP)).declarations.has(v) ? (HELPER_IMPORTS.add("xbuf"), (v.type.k === "x" ? `[${v.type.len}]byte` : "hXbuf.Buffer")) : goType(v.type);
 /** @param {string} name @returns {string} */ export const ident = (name) => {
   // A single leading underscore is reserved for compiler-only supplied flags.
   if (name.startsWith("\0")) return `_sup_${ident(name.slice(1))}`;
@@ -1163,14 +1163,14 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
  */
 /** @param {import("./emit-go-types.ts").Expr} e @returns {import("./emit-go-types.ts").Expr} */ const leftmost = (e) => { while (e?.e === "concat") e = e.l; return e; };
 /** @param {import("./emit-go-types.ts").WalkNode | null | undefined} st @param {string} [name] @returns {boolean} */ const isAppend = (st, name) => st?.s === "assign" && st.target.e === "var" && !st.target.ref && st.target.type.k === "string"
-  && (name === undefined || st.target.name === name) && st.value.e === "concat" && leftmost(st.value).e === "var" && leftmost(st.value).name === st.target.name;
+  && (name === undefined || (/** @type {Extract<import("./emit-go-types.ts").Expr, {e: "var"}>} */ (st.target)).name === name) && st.value.e === "concat" && leftmost(st.value).e === "var" && (/** @type {Extract<import("./emit-go-types.ts").Expr, {e: "var"}>} */ (leftmost(st.value))).name === (/** @type {Extract<import("./emit-go-types.ts").Expr, {e: "var"}>} */ (st.target)).name;
 
 /** @param {readonly import("./emit-go-types.ts").Stmt[]} body @param {import("./emit-go-types.ts").Context} ctx @param {readonly unknown[]} [outside] @returns {string[]} */ function builders(body, ctx, outside = []) {
   /** @type {Set<string>} */ const names = new Set();
   /** @param {unknown} n @returns {void} */ const walk = (n) => {
     if (Array.isArray(n)) { n.forEach(walk); return; }
     if (!n || typeof n !== "object") return;
-    if (isAppend(/** @type {import("./emit-go-types.ts").WalkNode} */ (n))) names.add((/** @type {import("./emit-go-types.ts").WalkNode} */ (n)).target.name);
+    if (isAppend(/** @type {import("./emit-go-types.ts").WalkNode} */ (n))) names.add((/** @type {Extract<import("./emit-go-types.ts").Expr, {e: "var"}>} */ ((/** @type {import("./emit-go-types.ts").WalkNode} */ (n)).target)).name);
     for (const k of Object.keys(n)) if (k !== "type") walk((/** @type {import("./emit-go-types.ts").WalkNode} */ (n))[k]);
   };
   walk(body);
@@ -1282,13 +1282,13 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
   ctx.builders ??= new Map();
   for (const n of names) { const loop = Number(ctx.loop); ctx.loop = loop + 1; ctx.builders.set(n, `sb_${ident(n)}_${loop}`); }
   const pre = names.flatMap((n) => {
-    const b = ctx.builders.get(n);
+    const b = (/** @type {Map<string, string>} */ (ctx.builders)).get(n);
     return [`${t}var ${b} strings.Builder`, `${t}${b}.WriteString(${ident(n)})`];
   });
   ctx.loopLevel = (ctx.loopLevel ?? 0) + 1;
   const lines = emitLoop();
   ctx.loopLevel -= 1;
-  const post = names.map((n) => `${t}${ident(n)} = abap.Canon(${ctx.builders.get(n)}.String())`);
+  const post = names.map((n) => `${t}${ident(n)} = abap.Canon(${(/** @type {Map<string, string>} */ (ctx.builders)).get(n)}.String())`);
   for (const n of names) ctx.builders.delete(n);
   return [...pre, ...lines, ...post];
 }
@@ -1388,7 +1388,7 @@ const LINES = !env("GOGEN_NOLINE");
 
 /** @param {import("./emit-go-types.ts").Stmt} st @param {import("./emit-go-types.ts").MethodContext} ctx @param {number} d @returns {string[]} */ function stmtLines(st, ctx, d) {
   const t = tab(d);
-  const owned = ((ownedStatement))(st, ctx, t, {ownership: OWNERSHIP, expr, place, rowValue, helper: helperFn});
+  const owned = ((ownedStatement))(st, ctx, t, {ownership: (/** @type {import("./emit-go-types.ts").Ownership} */ (OWNERSHIP)), expr, place, rowValue, helper: helperFn});
   if (owned) return owned;
   switch (st.s) {
     case "assign":
@@ -1404,7 +1404,7 @@ const LINES = !env("GOGEN_NOLINE");
       if (ctx.builders?.has((/** @type {Extract<import("./emit-go-types.ts").Expr, {e: "var"}>} */ (st.target)).name) && isAppend(/** @type {import("./emit-go-types.ts").WalkNode} */ (/** @type {unknown} */ (st)), (/** @type {Extract<import("./emit-go-types.ts").Expr, {e: "var"}>} */ (st.target)).name)) {
         /** @type {import("./emit-go-types.ts").Expr[]} */ const parts = [];
         for (let e = st.value; e.e === "concat"; e = e.l) parts.unshift(e.r);
-        return parts.map((x) => `${t}${ctx.builders.get((/** @type {Extract<import("./emit-go-types.ts").Expr, {e: "var"}>} */ (st.target)).name)}.WriteString(${expr(x, ctx)})`);
+        return parts.map((x) => `${t}${(/** @type {Map<string, string>} */ (ctx.builders)).get((/** @type {Extract<import("./emit-go-types.ts").Expr, {e: "var"}>} */ (st.target)).name)}.WriteString(${expr(x, ctx)})`);
       }
       return [...(st.target.type.k === "table" ? [`${t}abap.BumpTable(&${place(st.target, ctx)})`] : []), `${t}${place(st.target, ctx)} = ${st.moveTable ? expr(st.value, ctx) : copied(expr(st.value, ctx), st.value.type, st.value)}`];
     case "clear":
@@ -1820,15 +1820,15 @@ ${t}	}`));
     case "assert":
       return [`${t}if !(${cond(st.cond, ctx)}) {`, `${t}\tpanic(abap.ArithmeticError{Class: "ASSERTION_FAILED", Op: ${JSON.stringify(st.text)}})`, `${t}}`];
     case "assign_comp":
-      return [`${t}if c, ok := abap.Component(${expr(st.from, ctx)}, ${expr(st.name, ctx)}); ok {`, `${t}\t${ident(st.fs.name)} = c`, `${t}\ts.Sy.Subrc = 0`,
-        `${t}} else {`, ...(st.name.type.k === "i" ? [`${t}\t${ident(st.fs.name)} = abap.Data{}`] : []), `${t}\ts.Sy.Subrc = 4`, `${t}}`];
+      return [`${t}if c, ok := abap.Component(${expr(st.from, ctx)}, ${expr(st.name, ctx)}); ok {`, `${t}\t${ident((/** @type {Extract<import("./emit-go-types.ts").Expr, {e: "fs"}>} */ (st.fs)).name)} = c`, `${t}\ts.Sy.Subrc = 0`,
+        `${t}} else {`, ...(st.name.type.k === "i" ? [`${t}\t${ident((/** @type {Extract<import("./emit-go-types.ts").Expr, {e: "fs"}>} */ (st.fs)).name)} = abap.Data{}`] : []), `${t}\ts.Sy.Subrc = 4`, `${t}}`];
     case "assign_deref":
-      return [`${t}if r := ${expr(st.ref, ctx)}; r.P != nil {`, `${t}\t${ident(st.fs.name)} = r`, `${t}\ts.Sy.Subrc = 0`, `${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`];
+      return [`${t}if r := ${expr(st.ref, ctx)}; r.P != nil {`, `${t}\t${ident((/** @type {Extract<import("./emit-go-types.ts").Expr, {e: "fs"}>} */ (st.fs)).name)} = r`, `${t}\ts.Sy.Subrc = 0`, `${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`];
     case "assign_deref_typed":
-      return [`${t}if r := ${expr(st.ref, ctx)}; r.P != nil {`, `${t}\t${ident(st.fs.name)} = ${st.fs.type.k === "struct" ? `abap.DerefAs[${goType(st.fs.type)}](r, ${JSON.stringify(st.text)})` : `abap.DirectBinding(abap.DerefAs[${goType(st.fs.type)}](r, ${JSON.stringify(st.text)}))`}`,
+      return [`${t}if r := ${expr(st.ref, ctx)}; r.P != nil {`, `${t}\t${ident((/** @type {Extract<import("./emit-go-types.ts").Expr, {e: "fs"}>} */ (st.fs)).name)} = ${st.fs.type.k === "struct" ? `abap.DerefAs[${goType(st.fs.type)}](r, ${JSON.stringify(st.text)})` : `abap.DirectBinding(abap.DerefAs[${goType(st.fs.type)}](r, ${JSON.stringify(st.text)}))`}`,
         `${t}\ts.Sy.Subrc = 0`, `${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`];
     case "assign_data":
-      return [`${t}${ident(st.fs.name)} = ${expr(st.value, ctx)}`];
+      return [`${t}${ident((/** @type {Extract<import("./emit-go-types.ts").Expr, {e: "fs"}>} */ (st.fs)).name)} = ${expr(st.value, ctx)}`];
     // a move into generic data writes into the slot it is bound to
     case "set_data":
       return [`${t}abap.MoveData(${expr(st.target, ctx)}, ${expr(st.value, ctx)})`];
@@ -1981,7 +1981,7 @@ ${t}	}`));
         `${t}\ts.Sy.Subrc, s.Sy.Dbcnt = 0, 1`, `${t}}`];
     }
     case "unassign":
-      return [`${t}${ident(st.fs.name)} = ${st.fs.type.k === "data" ? "abap.Data{}" : "nil"}`];
+      return [`${t}${ident((/** @type {Extract<import("./emit-go-types.ts").Expr, {e: "fs"}>} */ (st.fs)).name)} = ${st.fs.type.k === "data" ? "abap.Data{}" : "nil"}`];
     case "select_dyn": {
       // dynamic Open SQL (go/abap selectdyn.go): the parts given at run time
       // as strings, the target as generic data
@@ -2237,7 +2237,7 @@ ${t}	}`));
 /** @type {ReadonlyMap<string, string>} */ const FN_F = new Map([["SIN", "abap.Sin"], ["COS", "abap.Cos"], ["TAN", "math.Tan"], ["SQRT", "abap.SqrtF"], ["EXP", "math.Exp"], ["LOG", "abap.LogF"], ["LOG10", "math.Log10"]]);
 
 /** @param {import("./emit-go-types.ts").Expr} e @param {import("./emit-go-types.ts").Context} ctx @returns {string} */ function expr(e, ctx) {
-  const owned = ((ownedExpression))(e, ctx, {ownership: OWNERSHIP, expr, place, helper: helperFn});
+  const owned = ((ownedExpression))(e, ctx, {ownership: (/** @type {import("./emit-go-types.ts").Ownership} */ (OWNERSHIP)), expr, place, helper: helperFn});
   if (owned !== null) return owned;
   switch (e.e) {
     case "static": return place(e, ctx);
@@ -2540,7 +2540,7 @@ ${t}	}`));
       const keys = c.keys.map((k) => (k.line ? `r${n} == ${expr(k.value, ctx)}` : `r${n}.${ident((/** @type {string} */ (k.name)))} == ${expr(k.value, ctx)}`)).join(" && ");
       return `func() bool { for _, r${n} := range ${expr(c.table, ctx)} { if ${keys} { return true } }; return false }()`;
     }
-    case "assigned": return c.fs.type.k === "data" ? `(${ident(c.fs.name)}.P != nil)` : `(${ident(c.fs.name)} != nil)`;
+    case "assigned": return c.fs.type.k === "data" ? `(${ident((/** @type {Extract<import("./emit-go-types.ts").Expr, {e: "fs"}>} */ (c.fs)).name)}.P != nil)` : `(${ident((/** @type {Extract<import("./emit-go-types.ts").Expr, {e: "fs"}>} */ (c.fs)).name)} != nil)`;
     case "data_bound": return `abap.DataBound(${expr(c.x, ctx)})`;
     case "and": return `(${cond(c.l, ctx)} && ${cond(c.r, ctx)})`;
     case "true": return "true";
