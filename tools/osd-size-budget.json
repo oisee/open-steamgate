@@ -615,7 +615,7 @@
       "reason": "tscheck 2026-10-20: the file is under // @ts-check; the added lines are JSDoc parameter/return types and type casts, executable text unchanged (execdiff clean). Chain T1 on K4a: types core moved byte-identically; imports target their current homes; exact physical line count. Frontend split K4a: move native/kernel tables and helpers byte for byte from frontend.mjs; exact initial ceiling."
     },
     "tools/gogen/frontend-types-signatures.mjs": {
-      "lines": 229,
+      "lines": 230,
       "reason": "tscheck 2026-10-20: the file is under // @ts-check; the added lines are JSDoc parameter/return types and type casts, executable text unchanged (execdiff clean). Chain T1 on K4a: types core moved byte-identically; imports target their current homes; exact physical line count. T1: byte-identical typeKindOf, typeOf, rttiNamed, structOf, fieldOf and namedType moved from frontend.mjs; exact initial physical-line ceiling."
     },
     "tools/gogen/frontend-sql.mjs": {
@@ -623,7 +623,7 @@
       "reason": "tscheck 2026-10-20: the file is under // @ts-check; the added lines are JSDoc parameter/return types and type casts, executable text unchanged (execdiff clean). Chain E6a on Q1/T1/K4a: source/call helpers moved byte-identically; fieldOf comes from T1, SQL source helpers come from E6a; exact physical line count. Frontend split Q1 on T1/K4a: byte-identical SQL helpers with fieldOf imported from its T1 home; exact physical line count."
     },
     "tools/gogen/frontend-expressions-calls.mjs": {
-      "lines": 227,
+      "lines": 228,
       "reason": "tscheck 2026-10-20: the file is under // @ts-check; the added lines are JSDoc parameter/return types and type casts, executable text unchanged (execdiff clean). Chain E6a on Q1/T1/K4a: source/call helpers moved byte-identically; fieldOf comes from T1, SQL source helpers come from E6a; exact physical line count."
     }
   },

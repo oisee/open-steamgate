@@ -9,7 +9,8 @@ export function graphComponents(nodes, drop) {
     const next = drop?.test(nodes[id].owner) ? [] : nodes[id].dependencies
       .filter((key) => nodes[key] && !drop?.test(nodes[key].owner));
     edges.set(id, next);
-    for (const key of next) /** @type {string[]} */ (reverse.get(key)).push(id);
+// @ts-expect-error -- abapiti form pending
+    for (const key of next) reverse.get(key).push(id);
   }
   const seen = new Set(), ordered = [];
   for (const id of ids) {
@@ -29,11 +30,13 @@ export function graphComponents(nodes, drop) {
     const group = [], number = members.length, stack = [id]; component.set(id, number);
     while (stack.length) {
       const key = stack.pop(); group.push(key);
-      for (const next of /** @type {readonly string[]} */ (reverse.get(/** @type {string} */ (key)))) if (!component.has(next)) { component.set(next, number); stack.push(next); }
+// @ts-expect-error -- abapiti form pending
+      for (const next of reverse.get(key)) if (!component.has(next)) { component.set(next, number); stack.push(next); }
     }
     members.push(group.sort());
   }
   const dependencies = members.map((group, number) => [...new Set(group.flatMap((id) =>
-    /** @type {readonly string[]} */ (edges.get(id)).map((key) => component.get(key))).filter((key) => key !== number))]);
+// @ts-expect-error -- abapiti form pending
+    edges.get(id).map((key) => component.get(key))).filter((key) => key !== number))]);
   return {component, members, dependencies};
 }

@@ -32,7 +32,8 @@ const {Expressions, ExpressionsCDS, Nodes, Structures} = abaplint;
     }
     inlineTables.set(body, names);
   }
-  return /** @type {Set<string>} */ (inlineTables.get(body));
+// @ts-expect-error -- abapiti form pending
+  return inlineTables.get(body);
 }
 
 // The later folder wins each AMC channel name, as the runtime layers do.

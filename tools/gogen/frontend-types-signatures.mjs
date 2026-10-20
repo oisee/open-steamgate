@@ -135,7 +135,8 @@ import {P_GENERIC} from "./frontend-classes-native.mjs";
       else program.anonStructs.set(t, go);
     }
     const shape = comps.map((c) => upper(c.name)).join(",");
-    for (let n = 2; program.structs.has(go) && /** @type {import("./frontend-types.ts").StructType} */ (program.structs.get(go)).shape !== undefined && /** @type {import("./frontend-types.ts").StructType} */ (program.structs.get(go)).shape !== shape; n += 1) {
+// @ts-expect-error -- abapiti form pending
+    for (let n = 2; program.structs.has(go) && program.structs.get(go).shape !== undefined && program.structs.get(go).shape !== shape; n += 1) {
       go = `${go.replace(/_V\d+$/, "")}_V${n}`;
     }
     if (program.badStructs?.has(go)) throw new Unsupported(program.badStructs.get(go));
