@@ -27,17 +27,22 @@ export type CallExpr = RuntimeFields<Omit<RawCall, 'owner' | 'static' | 'callee'
 export interface SubstringExpr extends Omit<RuntimeFields<Extract<IR.Expr, {e: 'substr'}>>, 'base'> {
   readonly base?: IR.Type;
 }
-export type Expr = RuntimeFields<Exclude<IR.Expr, {e: 'call' | 'int' | 'struct' | 'upcast' | 'substr'}>> | CallExpr | SubstringExpr
+// Flags synthesized as str_fn arguments carry no type; every other flag does.
+export interface UntypedFlagExpr { readonly e: 'flag'; readonly value: boolean; readonly conv?: boolean; readonly fromP?: Extract<IR.Type, {k: 'p'}> }
+type StrFnExpr = RuntimeFields<Omit<Extract<IR.Expr, {e: 'str_fn'}>, 'args'>> & {readonly args: readonly (Expr | UntypedFlagExpr)[]};
+export type Expr = RuntimeFields<Exclude<IR.Expr, {e: 'call' | 'int' | 'flag' | 'strlist' | 'str_fn' | 'struct' | 'upcast' | 'substr'}>> | CallExpr | SubstringExpr | StrFnExpr
   | (RuntimeFields<Omit<Extract<IR.Expr, {e: 'struct'}>, 'type'>> & {readonly type: Extract<IR.Type, {k: 'struct'}>}) | (RuntimeFields<Omit<Extract<IR.Expr, {e: 'upcast'}>, 'type'>> & {readonly type: Extract<IR.Type, {k: 'ref'}>})
-  | {readonly e: 'int' | 'float'; readonly value: number; readonly type?: IR.Type};
+  | {readonly e: 'int' | 'float'; readonly value: number; readonly type: IR.Type}
+  | TypedFlagExpr;
 export interface LockField extends Pick<IR.TableColumn, 'name' | 'kind'> { readonly length: number }
 export interface NativeArgument { readonly value: Expr; readonly ref?: boolean }
 export interface ArithmeticBranchProbe { readonly e?: string; readonly reason?: string }
 // IR.TypedExpr retains raw IR children; use the emitter's recursive operands.
 export interface TypedNumberExpr { readonly e: 'int' | 'float'; readonly value: number; readonly type: IR.Type }
 export interface TypedFlagExpr { readonly e: 'flag'; readonly value: boolean; readonly type: IR.Type; readonly conv?: boolean; readonly fromP?: Extract<IR.Type, {k: 'p'}> }
-export interface TypedStringListExpr { readonly e: 'strlist'; readonly values: readonly string[]; readonly type: IR.Type; readonly conv?: boolean; readonly fromP?: Extract<IR.Type, {k: 'p'}> }
-export type TypedExpr = Exclude<Expr, {e: 'int' | 'float' | 'flag' | 'strlist'}> | TypedNumberExpr | TypedFlagExpr | TypedStringListExpr;
+// strlist carries no type and reaches only the dynamic-SQL string positions,
+// so a typed expression is never a strlist.
+export type TypedExpr = Exclude<Expr, {e: 'int' | 'float' | 'flag'}> | TypedNumberExpr | TypedFlagExpr;
 export interface InitialCondition { readonly c: 'initial'; readonly x: TypedExpr }
 export interface ConcatBytesTable { readonly s: 'concat_bytes'; readonly target: Expr; readonly table: TypedExpr; readonly row: Expr }
 export interface AssignmentStmt { readonly s: 'assign' | 'set_data'; readonly target: Expr; readonly value: Expr }
@@ -48,7 +53,7 @@ type StatementFields<T> = T extends {s: 'assign' | 'set_data'} ? AssignmentStmt 
   : T extends {s: 'call_enq'} ? Omit<T, 'args' | 'fields'> & {readonly args: readonly EventArgument[]; readonly fields?: readonly LockField[]}
   : T extends {s: 'concat_bytes'; table: Expr} ? ConcatBytesTable
   : T extends {s: 'concat'} ? Omit<T, 'sep'> & {readonly sep: Expr | null}
-  : T extends {s: 'select_dyn'} ? Omit<T, 'fields' | 'where'> & {readonly fields: Expr | null; readonly where: Expr | null}
+  : T extends {s: 'select_dyn'} ? Omit<T, 'fields' | 'where' | 'groupBy' | 'orderBy'> & {readonly fields: DynamicSqlStrings | null; readonly where: Expr | null; readonly groupBy: DynamicSqlStrings | null; readonly orderBy: DynamicSqlStrings | null}
   : T extends {s: 'delete_index_data' | 'delete_index'} ? Omit<T, 'tokens'> & {readonly tokens: readonly LoopCursor[]}
   : T extends {s: 'delete_current'} ? Omit<T, 'token'> & {readonly token: LoopCursor}
   : T extends {s: 'stub'} ? Omit<T, 'pos'> & {readonly pos?: IR.Position}
@@ -78,7 +83,7 @@ export interface EventArgument {
   readonly fitc?: number;
 }
 export interface DynamicResultMove { readonly key: string; readonly type: IR.Type; readonly value: Expr }
-export type DynamicSqlStrings = Extract<Expr, {e: 'strlist'}> | (Exclude<Expr, {e: 'strlist'}> & {readonly type: IR.Type});
+export type DynamicSqlStrings = RuntimeFields<Extract<IR.Expr, {e: 'strlist'}>> | (Expr & {readonly type: IR.Type});
 // whereOf emits INITIAL only with fx, and comparisons only with a value.
 export type Where = {readonly op: 'initial' | 'notinitial'; readonly fx: TypedExpr}
   | {readonly op: '=' | '<>' | '<' | '<=' | '>' | '>='; readonly name?: string;

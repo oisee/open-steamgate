@@ -2251,7 +2251,7 @@ ${t}	}`));
     case "temp": return e.name;
     case "padc": return `abap.PadC(${expr(e.x, ctx)}, ${e.n})`;
     case "flag": return String(e.value);
-    case "str_fn": return `abap.${e.fn}(${e.args.map((a) => expr(a, ctx)).join(", ")})`;
+    case "str_fn": return `abap.${e.fn}(${e.args.map((a) => expr((/** @type {import("./emit-go-types.ts").Expr} */ (a)), ctx)).join(", ")})`;
     case "sy": return place(e, ctx);
     case "sy_mandt": return "abap.Mandt";
     case "sy_host": return `abap.${e.name}`;
