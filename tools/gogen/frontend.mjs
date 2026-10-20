@@ -2795,14 +2795,14 @@ const PLACES = new Set(["var", "attr", "static", "field", "dref_field", "fs", "r
   // that cost nothing and do nothing when named twice: a variable, an
   // attribute, a field symbol or a component of one (a table expression, a
   // dereference or a call would run once per component where ABAP runs it once)
-  const plain = (x) => ["var", "attr", "static", "fs"].includes(x.e) || (x.e === "field" && plain(x.base));
+  /** @param {import("./frontend-types.ts").ValueExpr} x @returns {boolean} */ const plain = (x) => ["var", "attr", "static", "fs"].includes(x.e) || (x.e === "field" && plain(/** @type {import("./frontend-types.ts").ValueExpr} */ (x.base)));
   if (!plain(from) || !plain(to)) throw new Unsupported(`MOVE-CORRESPONDING of something other than a variable or its component: ${text}`);
   const src = structOf(ctx, from.type);
   const dst = structOf(ctx, to.type);
   if (!src || !dst) throw new Unsupported(`MOVE-CORRESPONDING: a structure not in the program`);
-  const body = [];
-  for (const f of dst.fields) {
-    const g = src.fields.find((x) => x.name === f.name);
+  /** @type {import("./frontend-types.ts").FrontendStmt[]} */ const body = [];
+  for (const f of /** @type {readonly import("./ir.ts").Field[]} */ (dst.fields)) {
+    const g = /** @type {readonly import("./ir.ts").Field[]} */ (src.fields).find((x) => x.name === f.name);
     if (!g) continue;
     if (["struct", "table"].includes(f.type.k) || ["struct", "table"].includes(g.type.k)) throw new Unsupported(`MOVE-CORRESPONDING with a deep component ${f.name}`);
     body.push({s: "assign", target: {e: "field", base: to, name: f.name, type: f.type}, value: convert({e: "field", base: from, name: g.name, type: g.type}, f.type)});
@@ -2822,16 +2822,16 @@ const STRING_FNS = {
 };
 /** @param {string} name @param {import("@abaplint/core").Nodes.ExpressionNode | undefined} direct @param {import("@abaplint/core").Nodes.ExpressionNode | undefined} named @param {import("./frontend-types.ts").MethodContext} ctx @param {string} text @returns {import("./frontend-types.ts").ValueExpr} */ function stringFn(name, direct, named, ctx, text) {
   const ps = named?.findDirectExpressions(Expressions.ParameterS) ?? [];
-  const given = new Map(ps.map((p) => [upper(p.findDirectExpression(Expressions.ParameterName).concatTokens()), p.findDirectExpression(Expressions.Source)]));
+  const given = new Map(ps.map((p) => [upper(/** @type {import("./frontend-types.ts").TokenText} */ (p.findDirectExpression(Expressions.ParameterName)).concatTokens()), p.findDirectExpression(Expressions.Source)]));
   if (direct) given.set("VAL", direct);
-  for (const k of given.keys()) if (!STRING_FNS[name].includes(k)) throw new Unsupported(`${name.toLowerCase()}( ) with ${k.toLowerCase()}: ${text}`);
+  for (const k of given.keys()) if (!/** @type {Record<string, string[]>} */ (STRING_FNS)[name].includes(k)) throw new Unsupported(`${name.toLowerCase()}( ) with ${k.toLowerCase()}: ${text}`);
   if (!given.has("VAL")) throw new Unsupported(`${name.toLowerCase()}( ) without val: ${text}`);
-  const chars = (k) => {
+  /** @param {string} k @returns {import("./frontend-types.ts").ValueExpr} */ const chars = (k) => {
     const x = source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (given.get(k)), ctx);
     if (!charlike(x.type)) throw new Unsupported(`${name.toLowerCase()}( ) ${k.toLowerCase()} of a ${x.type.k}`);
     return convert(x, S);
   };
-  const int = (k) => convert(source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (given.get(k)), ctx, I), I);
+  /** @param {string} k @returns {import("./frontend-types.ts").ValueExpr} */ const int = (k) => convert(source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (given.get(k)), ctx, I), I);
   const val = chars("VAL");
   // the text before / after the first occurrence of sub, empty when there is
   // none (A4H ZCL_GOGEN_T_WGUI2)
@@ -2854,7 +2854,7 @@ const STRING_FNS = {
     // ZCL_GOGEN_T_STRCR: del = space, del = ' ', del = a c(1) field holding
     // a blank and from = space all strip or match nothing; to = space
     // replaces a run with nothing), which is how a c value is stored here
-    const set = (k) => (given.has(k) ? chars(k) : {e: "str", value: " ", type: S});
+    /** @param {string} k @returns {import("./frontend-types.ts").ValueExpr} */ const set = (k) => (given.has(k) ? chars(k) : {e: "str", value: " ", type: S});
     return {e: "str_fn", fn: "CondenseFn", args: [val, set("DEL"), set("FROM"), set("TO")], type: S};
   }
   if (name === "SHIFT_LEFT" || name === "SHIFT_RIGHT") {
@@ -2874,7 +2874,7 @@ const STRING_FNS = {
 }
 
 /** @param {import("@abaplint/core").Nodes.StatementNode} node @param {import("./frontend-types.ts").MethodContext} ctx @returns {Extract<import("./frontend-types.ts").FrontendStmt, {s: "assign"}>} */ function initialValue(node, ctx) {
-  const name = upper(node.findFirstExpression(Expressions.DefinitionName).concatTokens());
+  const name = upper(/** @type {import("./frontend-types.ts").TokenText} */ (node.findFirstExpression(Expressions.DefinitionName)).concatTokens());
   const type = ctx.locals.get(name);
   if (type === undefined) throw new Unsupported(`${name}: a VALUE for something that is not a local`);
   const val = node.findFirstExpression(Expressions.Value);
@@ -2882,11 +2882,11 @@ const STRING_FNS = {
   if (src === undefined) throw new Unsupported(`VALUE of ${name}`);
   /** @type {import("./frontend-types.ts").ValueExpr} */ let v;
   if (isExpr(src, Expressions.Constant)) v = sourceOperand(src, ctx);
-  else if (upper(src.concatTokens()) === "ABAP_TRUE") v = {e: "chars", value: "X", type: C(1)};
-  else if (upper(src.concatTokens()) === "ABAP_FALSE") v = {e: "chars", value: "", type: C(1)};
-  else if (isExpr(src, Expressions.SimpleFieldChain) && src.getChildren().length === 1) v = variable(upper(src.concatTokens()), ctx);
+  else if (upper(/** @type {import("./frontend-types.ts").TokenText} */ (src).concatTokens()) === "ABAP_TRUE") v = {e: "chars", value: "X", type: C(1)};
+  else if (upper(/** @type {import("./frontend-types.ts").TokenText} */ (src).concatTokens()) === "ABAP_FALSE") v = {e: "chars", value: "", type: C(1)};
+  else if (isExpr(src, Expressions.SimpleFieldChain) && src.getChildren().length === 1) v = variable(upper(/** @type {import("./frontend-types.ts").TokenText} */ (src).concatTokens()), ctx);
   else if (isExpr(src, Expressions.SimpleFieldChain) || isExpr(src, Expressions.FieldChain)) v = fieldChain(src, ctx);
-  else throw new Unsupported(`VALUE ${src.concatTokens()} of ${name}`);
+  else throw new Unsupported(`VALUE ${/** @type {import("./frontend-types.ts").TokenText} */ (src).concatTokens()} of ${name}`);
   if (type.k === "struct" || type.k === "table") throw new Unsupported(`VALUE for a ${type.k}`);
   // ultra/events: VALUE 'C2A0' of an x or xstring is its bytes, as a class
   // constant's is (ZCL_ABAPGIT_GUI_EVENT's class constructor); only hex digits
@@ -2924,7 +2924,7 @@ const STRING_FNS = {
   if (ctx.fieldSymbols?.has(n)) {
     fsCheck(n, ctx);
     /** @type {Extract<import("./frontend-types.ts").ValueExpr, {e: "fs"}>} */
-    const value = {e: "fs", name: n, type: ctx.fieldSymbols.get(n)};
+    const value = {e: "fs", name: n, type: /** @type {import("./ir.ts").Type} */ (ctx.fieldSymbols.get(n))};
     return value;
   }
   const p = ctx.sig.params.find((x) => x.name === n);
@@ -2932,10 +2932,10 @@ const STRING_FNS = {
   // IMPORTING table or structure is a pointer in Go and the object itself in JS)
   if (p) return {e: "var", name: n, type: p.type, ref: p.dir !== "importing" || byRef(p), box: p.dir !== "importing"};
   if (ctx.sig.returning?.name === n) return {e: "var", name: n, type: ctx.sig.returning.type};
-  if (ctx.localConstants?.has(n)) return ctx.localConstants.get(n);
+  if (ctx.localConstants?.has(n)) return /** @type {import("./frontend-types.ts").ValueExpr} */ (ctx.localConstants.get(n));
   if (ctx.locals.has(n)) {
     /** @type {Extract<import("./frontend-types.ts").ValueExpr, {e: "var"}>} */
-    const value = {e: "var", name: n, type: ctx.locals.get(n)};
+    const value = {e: "var", name: n, type: /** @type {import("./ir.ts").Type} */ (ctx.locals.get(n))};
     return value;
   }
   const attr = findAttribute(ctx, n);
@@ -2967,14 +2967,14 @@ const STRING_FNS = {
   const defs = findScope(ctx.spaghetti.getTop(), "class_definition", ctx.scopeName ?? ctx.className);
   const id = impl?.getData().vars[n] ?? defs?.getData().vars[n];
   if (id === undefined) return undefined;
-  if (n.includes("~") && !(id instanceof abaplint.Types.ClassConstant) && !id.getMeta().includes("static")) return ownIntfAttribute(ctx, n);
+  if (n.includes("~") && !(id instanceof abaplint.Types.ClassConstant) && !/** @type {string[]} */ (id.getMeta()).includes("static")) return ownIntfAttribute(ctx, n);
   if (id instanceof abaplint.Types.ClassConstant || n.includes("~")) {
     const go = registerConst(ctx.program, n, id, ctx.className);
     if (go === undefined) throw new Unsupported(`constant ${n} is outside the subset`);
-    return {e: "const", go, type: ctx.program.consts.get(go).type};
+    return {e: "const", go, type: /** @type {NonNullable<import("./frontend-types.ts").FrontendProgram["consts"]>} */ /** @type {import("./frontend-types.ts").FrontendConstant} */ ((ctx.program.consts).get(go)).type};
   }
   const type = ctx.program.excAttrs?.has(`${ctx.className}|${n}`) ? EXC : typeOf(id.getType(), `${ctx.className} ${n}`, ctx.program);
-  if (id.getMeta().includes("static")) return staticSlot(declaringClass(ctx.reg, ctx.className, n, "attr") ?? ctx.className, n, type, goName);
+  if (/** @type {string[]} */ (id.getMeta()).includes("static")) return staticSlot(declaringClass(ctx.reg, ctx.className, n, "attr") ?? ctx.className, n, type, goName);
   return {e: "attr", name: n, type};
 }
 
@@ -2985,48 +2985,48 @@ const STRING_FNS = {
   let i = 0;
   const first = kids[0];
   if (isExpr(first, Expressions.ClassName) && isTok(kids[1], "=>")) {
-    place = resolveStatic(upper(first.concatTokens()), upper(kids[2].concatTokens()), ctx, true);
+    place = resolveStatic(upper(/** @type {import("./frontend-types.ts").TokenText} */ (/** @type {unknown} */ (first)).concatTokens()), upper(/** @type {import("./frontend-types.ts").TokenText} */ (/** @type {unknown} */ (kids[2])).concatTokens()), ctx, true);
     i = 3;
   } else if (isExpr(first, Expressions.InlineData)) {
-    place = variable(first.findFirstExpression(Expressions.TargetField).concatTokens(), ctx);
+    place = variable(/** @type {import("./frontend-types.ts").TokenText} */ (first.findFirstExpression(Expressions.TargetField)).concatTokens(), ctx);
     i = 1;
-  } else if (upper(first.concatTokens()) === "ME" && isTok(kids[1], "->")) {
-    const a = findAttribute(ctx, upper(kids[2].concatTokens()));
-    if (a === undefined) throw new Unsupported(`me->${kids[2].concatTokens()}: not an attribute`);
+  } else if (upper(/** @type {import("./frontend-types.ts").TokenText} */ (/** @type {unknown} */ (first)).concatTokens()) === "ME" && isTok(kids[1], "->")) {
+    const a = findAttribute(ctx, upper(/** @type {import("./frontend-types.ts").TokenText} */ (/** @type {unknown} */ (kids[2])).concatTokens()));
+    if (a === undefined) throw new Unsupported(`me->${/** @type {import("./frontend-types.ts").TokenText} */ (/** @type {unknown} */ (kids[2])).concatTokens()}: not an attribute`);
     place = a;
     i = 3;
-  } else if (upper(first.concatTokens()) === "SY" && isExpr(first, Expressions.TargetField) && kids.length === 3 && isTok(kids[1], "-") && !isVariableName("SY", ctx)) {
-    const key = `SY-${upper(kids[2].concatTokens())}`;
+  } else if (upper(/** @type {import("./frontend-types.ts").TokenText} */ (/** @type {unknown} */ (first)).concatTokens()) === "SY" && isExpr(first, Expressions.TargetField) && kids.length === 3 && isTok(kids[1], "-") && !isVariableName("SY", ctx)) {
+    const key = `SY-${upper(/** @type {import("./frontend-types.ts").TokenText} */ (/** @type {unknown} */ (kids[2])).concatTokens())}`;
     if (SY_MESSAGES[key]) return {e: "sy", ...SY_MESSAGES[key]};
-    if (SY[key]) return {e: "sy", field: SY[key], type: I};
+    if (/** @type {Record<string, string>} */ (SY)[key]) return {e: "sy", field: /** @type {Record<string, string>} */ (SY)[key], type: I};
     throw new Unsupported(`write to ${key}: system field outside the subset`);
   } else if (isExpr(first, Expressions.TargetField) || isExpr(first, Expressions.TargetFieldSymbol)) {
     place = variable(first.concatTokens(), ctx);
-    if (place.e === "const" || ctx.localConstantNames?.has(upper(first.concatTokens()))) throw new Unsupported(`a write to constant ${first.concatTokens()}`);
+    if (place.e === "const" || ctx.localConstantNames?.has(upper(/** @type {import("./frontend-types.ts").TokenText} */ (/** @type {unknown} */ (first)).concatTokens()))) throw new Unsupported(`a write to constant ${first.concatTokens()}`);
     i = 1;
   } else if (isTok(first, "ME")) {
     if (!isTok(kids[1], "->")) throw new Unsupported(`target ${target.concatTokens()}`);
-    /** @type {import("./frontend-types.ts").ValueExpr} */ const attr = findAttribute(ctx, upper(kids[2].concatTokens())); place = {e: "attr", name: upper(kids[2].concatTokens()), type: attr.type};
+    const attr = /** @type {import("./frontend-types.ts").ValueExpr} */ (findAttribute(ctx, upper(/** @type {import("./frontend-types.ts").TokenText} */ (/** @type {unknown} */ (kids[2])).concatTokens()))); place = {e: "attr", name: upper(/** @type {import("./frontend-types.ts").TokenText} */ (/** @type {unknown} */ (kids[2])).concatTokens()), type: attr.type};
     i = 3;
   } else {
     throw new Unsupported(`target ${target.concatTokens()}`);
   }
   for (; i < kids.length; i += 1) {
     if (isExpr(kids[i], Expressions.TableExpression)) {
-      place = rowOf(place, kids[i], ctx);
+      place = rowOf(place, /** @type {import("@abaplint/core").Nodes.ExpressionNode} */ (kids[i]), ctx);
     } else if (isTok(kids[i], "->") && isExpr(kids[i + 1], Expressions.AttributeName)) {
-      place = place.type.k === "dref" ? dataRefField(place, kids[i + 1], ctx) : refAttribute(place, kids[i + 1], ctx, true);
+      place = place.type.k === "dref" ? dataRefField(/** @type {import("./frontend-types.ts").ValueExpr & {type: Extract<import("./ir.ts").Type, {k: "dref"}>}} */ (place), /** @type {import("@abaplint/core").Nodes.ExpressionNode} */ (kids[i + 1]), ctx) : refAttribute(place, /** @type {import("./frontend-types.ts").TokenText} */ (/** @type {unknown} */ (kids[i + 1])), ctx, true);
       i += 1;
     } else if (isTok(kids[i], "-") && isExpr(kids[i + 1], Expressions.ComponentName)) {
-      const f = fieldOf(ctx, place.type, kids[i + 1].concatTokens(), target.concatTokens());
+      const f = fieldOf(ctx, place.type, /** @type {import("./frontend-types.ts").TokenText} */ (/** @type {unknown} */ (kids[i + 1])).concatTokens(), target.concatTokens());
       place = {e: "field", base: place, name: f.name, type: f.type};
       i += 1;
     } else if (isExpr(kids[i], Expressions.FieldOffset) || isExpr(kids[i], Expressions.FieldLength)) {
-      const off = isExpr(kids[i], Expressions.FieldOffset) ? offsetValue(kids[i], ctx) : null;
+      const off = isExpr(kids[i], Expressions.FieldOffset) ? offsetValue(/** @type {import("@abaplint/core").Nodes.ExpressionNode} */ (kids[i]), ctx) : null;
       if (off !== null) i += 1;
-      const len = isExpr(kids[i], Expressions.FieldLength) ? offsetValue(kids[i], ctx) : null;
+      const len = isExpr(kids[i], Expressions.FieldLength) ? offsetValue(/** @type {import("@abaplint/core").Nodes.ExpressionNode} */ (kids[i]), ctx) : null;
       if (i < kids.length - 1 || !["x", "c"].includes(place.type.k) || (place.type.k === "x" && !len)) throw new Unsupported(`write target ${target.concatTokens()}`);
-      const placeType = place.type; return {e: "substr_target", base: place, off, len, type: placeType.k === "x" ? X(len.e === "int" ? len.value : placeType.len) : S};
+      const placeType = place.type; return {e: "substr_target", base: place, off, len, type: placeType.k === "x" ? X(/** @type {{e?: unknown}} */ (len).e === "int" ? /** @type {number} */ ((/** @type {{value?: unknown}} */ (len)).value) : placeType.len) : S};
     } else {
       throw new Unsupported(`target ${target.concatTokens()}`);
     }
@@ -3118,9 +3118,9 @@ const STRING_FNS = {
 
 /** the DATA and CLASS-DATA of one interface (not of those it includes), cached */
 /** @param {import("./frontend-types.ts").FrontendProgram} program @param {string} intf @returns {readonly import("./frontend-types.ts").InterfaceAttribute[]} */ function ownInterfaceAttributes(program, intf) {
-  if (program.intfOwnAttrs.has(intf)) return program.intfOwnAttrs.get(intf);
+  if (program.intfOwnAttrs.has(intf)) return /** @type {readonly import("./frontend-types.ts").InterfaceAttribute[]} */ (program.intfOwnAttrs.get(intf));
   const obj = program.reg.getObject("INTF", intf);
-  const def = obj?.getDefinition();
+  const def = /** @type {import("@abaplint/core").Objects.Interface | undefined} */ (obj)?.getDefinition();
   /** @type {import("./frontend-types.ts").InterfaceAttribute[]} */ const out = [];
   program.intfOwnAttrs.set(intf, out);
   if (!def) return out;
@@ -3137,11 +3137,11 @@ const STRING_FNS = {
       } else if (isStruct(c, Structures.Data)) {
         const begin = c.findDirectStatement(Statements.DataBegin);
         const n = begin?.findDirectExpression(Expressions.DefinitionName);
-        if (n && !stmts.has(upper(n.concatTokens()))) stmts.set(upper(n.concatTokens()), begin);
-      } else if (c instanceof Nodes.StructureNode) walk(c);
+        if (n && !stmts.has(upper(n.concatTokens()))) stmts.set(upper(n.concatTokens()), /** @type {import("@abaplint/core").Nodes.StatementNode} */ (begin));
+      } else if (/** @type {import("@abaplint/core").INode} */ (c) instanceof Nodes.StructureNode) walk(c);
     }
   };
-  const top = obj.getMainABAPFile()?.getStructure();
+  const top = /** @type {import("@abaplint/core").Objects.Interface} */ (obj).getMainABAPFile()?.getStructure();
   if (top) walk(top);
   /** @param {import("@abaplint/core").Nodes.StatementNode | undefined} st @returns {boolean} */ const readOnly = (st) => {
     const t = st?.getTokens().map((x) => upper(x.getStr())) ?? [];
@@ -3175,13 +3175,13 @@ const STRING_FNS = {
   if (!program.interfaceAttrs.has(intf)) {
     program.interfaceAttrs.set(intf, [intf, ...componentInterfaces(program.reg, intf)].flatMap((i) => ownInterfaceAttributes(program, i)));
   }
-  return program.interfaceAttrs.get(intf);
+  return /** @type {readonly import("./frontend-types.ts").InterfaceAttribute[]} */ (program.interfaceAttrs.get(intf));
 }
 
 /** the fields a class gets for the interfaces it implements itself (a subclass inherits them) */
 /** @param {import("./frontend-types.ts").FrontendProgram} program @param {readonly string[]} implemented @returns {import("./frontend-types.ts").FrontendAttribute[]} */ function implementedAttributes(program, implemented) {
   return implemented.flatMap((i) => ownInterfaceAttributes(program, i)).filter((a) => !a.static)
-    .map((a) => (a.unsupported ? {name: a.name, unsupported: a.unsupported} : {name: a.name, type: a.type, static: false, fromIntf: a.intf, readOnly: a.readOnly}));
+    .map((a) => /** @type {import("./frontend-types.ts").FrontendAttribute} */ (a.unsupported ? {name: a.name, unsupported: a.unsupported} : {name: a.name, type: a.type, static: false, fromIntf: a.intf, readOnly: a.readOnly}));
 }
 
 /** INTF~ATTR inside a class that implements INTF (or inherits it) */
@@ -3190,12 +3190,12 @@ const STRING_FNS = {
   const a = ownInterfaceAttributes(ctx.program, intf).find((x) => x.name === n);
   if (a === undefined) throw new Unsupported(`${n}: not an attribute of ${intf} (an alias?)`);
   if (a.unsupported) throw new Unsupported(a.unsupported);
-  return {e: "attr", name: n, type: a.type};
+  return {e: "attr", name: n, type: /** @type {import("./ir.ts").Type} */ (a.type)};
 }
 
 /** ref->attr and ref->comp~attr through a reference to an interface */
 /** @param {import("./frontend-types.ts").ValueExpr} base @param {string} name @param {import("./frontend-types.ts").NamedContext} ctx @param {boolean} write @returns {import("./frontend-types.ts").ValueExpr} */ function intfRefAttribute(base, name, ctx, write) {
-  const intf = base.type.name;
+  const intf = /** @type {import("./frontend-types.ts").RefType} */ (base.type).name;
   if (name.includes("~")) {
     const pre = name.slice(0, name.lastIndexOf("~"));
     // measured on A4H: lo_i->zif_i~a on a reference to zif_i is a syntax error
@@ -3207,7 +3207,7 @@ const STRING_FNS = {
     // a constant or a CLASS-DATA read through the reference is ABAP too, but
     // not in the subset; say so rather than suspect an alias
     const [pre, comp] = full.split("~");
-    /** @type {import("@abaplint/core").IInterfaceDefinition | undefined} */ const idef = ctx.reg.getObject("INTF", pre)?.getDefinition();
+    /** @type {import("@abaplint/core").IInterfaceDefinition | undefined} */ const idef = /** @type {import("@abaplint/core").Objects.Interface | undefined} */ (ctx.reg.getObject("INTF", pre))?.getDefinition();
     if (idef?.getAttributes().getConstants().some((x) => upper(x.getName()) === comp)) {
       throw new Unsupported(`${intf}->${name}: a constant through an interface reference is not in the subset`);
     }
@@ -3218,7 +3218,7 @@ const STRING_FNS = {
   }
   if (a.unsupported) throw new Unsupported(a.unsupported);
   if (write && a.readOnly) throw new Unsupported(`${intf}->${name}: a write to a READ-ONLY attribute through an interface reference (a syntax error on A4H)`);
-  /** @type {import("./ir.ts").Type} */ const type = a.type; return {e: "refattr", base, name: full, type};
+  const type = /** @type {import("./ir.ts").Type} */ (a.type); return {e: "refattr", base, name: full, type};
 }
 
 /** ref->intf~attr through a reference to a class that implements intf */
@@ -3226,16 +3226,16 @@ const STRING_FNS = {
   const pre = name.slice(0, name.lastIndexOf("~"));
   // the topmost class that implements it: the field is its, and a subclass
   // implementing the same interface again shares it
-  const owner = [base.type.name, ...ancestors(ctx.reg, base.type.name)].findLast((c) => (clasDef(ctx.reg, c)?.getImplementing() ?? [])
+  const owner = [/** @type {import("./frontend-types.ts").RefType} */ (base.type).name, ...ancestors(ctx.reg, /** @type {import("./frontend-types.ts").RefType} */ (base.type).name)].findLast((c) => (clasDef(ctx.reg, c)?.getImplementing() ?? [])
     .some((i) => upper(i.name) === pre || componentInterfaces(ctx.reg, upper(i.name)).includes(pre)));
-  if (owner === undefined) throw new Unsupported(`${base.type.name}->${name}: the class does not implement ${pre}`);
-  if (!ctx.program.wanted.has(owner)) throw new Unsupported(`${base.type.name}->${name}: ${owner}, which implements ${pre}, is not compiled`);
+  if (owner === undefined) throw new Unsupported(`${/** @type {import("./frontend-types.ts").RefType} */ (base.type).name}->${name}: the class does not implement ${pre}`);
+  if (!ctx.program.wanted.has(owner)) throw new Unsupported(`${/** @type {import("./frontend-types.ts").RefType} */ (base.type).name}->${name}: ${owner}, which implements ${pre}, is not compiled`);
   const a = ownInterfaceAttributes(ctx.program, pre).find((x) => x.name === name);
-  if (a === undefined) throw new Unsupported(`${base.type.name}->${name}: not an attribute of ${pre} (an alias?)`);
+  if (a === undefined) throw new Unsupported(`${/** @type {import("./frontend-types.ts").RefType} */ (base.type).name}->${name}: not an attribute of ${pre} (an alias?)`);
   if (a.unsupported) throw new Unsupported(a.unsupported);
   const inside = ctx.className === owner || ancestors(ctx.reg, ctx.className).includes(owner);
-  if (write && a.readOnly && !inside) throw new Unsupported(`${base.type.name}->${name}: a write to a READ-ONLY attribute outside ${owner} (a syntax error on A4H)`);
-  return {e: "refattr", base, name, type: a.type};
+  if (write && a.readOnly && !inside) throw new Unsupported(`${/** @type {import("./frontend-types.ts").RefType} */ (base.type).name}->${name}: a write to a READ-ONLY attribute outside ${owner} (a syntax error on A4H)`);
+  return {e: "refattr", base, name, type: /** @type {import("./ir.ts").Type} */ (a.type)};
 }
 
 /* --------------------------------------------------------------- expressions */
@@ -3261,30 +3261,30 @@ const CONSTRUCTORS = new Set(["VALUE", "CONV", "NEW", "REF", "COND", "SWITCH", "
   for (let i = 0; i < kids.length; i += 1) {
     const k = kids[i];
     if (isTok(k) && ["XSDBOOL", "BOOLC"].includes(upper(tokenStr(k))) && isTok(kids[i + 1], "(") && isExpr(kids[i + 2], Expressions.Cond)) {
-      out.push({bool: upper(tokenStr(k)), cond: kids[i + 2]});
+      out.push({bool: upper(tokenStr(k)), cond: /** @type {import("./frontend-types.ts").SyntaxNode} */ (kids[i + 2])});
       i += 3;
     } else if (isTok(k) && CONSTRUCTORS.has(upper(tokenStr(k))) && isExpr(kids[i + 1], Expressions.TypeNameOrInfer)) {
       // KW type ( body ) -- the body may be absent: VALUE #( )
       let j = i + 2;
       if (!isTok(kids[j]) || tokenStr(kids[j]) !== "(") throw new Unsupported(`constructor shape: ${node.concatTokens()}`);
       let body = null;
-      if (!(isTok(kids[j + 1]) && tokenStr(kids[j + 1]) === ")")) { body = kids[j + 1]; j += 1; }
+      if (!(isTok(kids[j + 1]) && tokenStr(kids[j + 1]) === ")")) { body = /** @type {import("@abaplint/core").Nodes.ExpressionNode | null} */ (/** @type {unknown} */ (kids[j + 1])); j += 1; }
       if (!isTok(kids[j + 1]) || tokenStr(kids[j + 1]) !== ")") throw new Unsupported(`constructor shape: ${node.concatTokens()}`);
-      out.push({ctor: {kw: upper(tokenStr(k)), typeNode: kids[i + 1], body, text: node.concatTokens()}});
+      out.push({ctor: {kw: upper(tokenStr(k)), typeNode: /** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {unknown} */ (kids[i + 1])), body, text: node.concatTokens()}});
       i = j + 1;
     } else if (isTok(k) && tokenStr(k) === "(") {
       const close = kids[i + 2];
       if (!isExpr(kids[i + 1], Expressions.Source) || !isTok(close) || tokenStr(close) !== ")") throw new Unsupported(`parenthesis: ${node.concatTokens()}`);
-      out.push({group: kids[i + 1]});
+      out.push({group: /** @type {import("./frontend-types.ts").SyntaxNode} */ (kids[i + 1])});
       i += 2;
     } else if (isExpr(k, Expressions.MethodCallChain) && isExpr(kids[i + 1], Expressions.Arrow) && isExpr(kids[i + 2], Expressions.AttributeChain)) {
       // ultra/events: m( )->attr, an attribute of what the call returns (only
       // describe_by_data( )->type_kind / ->length are compiled: descrAttr)
-      out.push({descr: {call: k, attr: kids[i + 2]}});
+      out.push({descr: {call: k, attr: /** @type {import("./frontend-types.ts").SyntaxNode} */ (kids[i + 2])}});
       i += 2;
     } else if (isExpr(k, Expressions.MethodCallChain) && isTok(kids[i + 1], "-") && isExpr(kids[i + 2], Expressions.ComponentChain)) {
       // m( )-comp: a component of what the call returns
-      out.push({node: k, comps: kids[i + 2]});
+      out.push({node: k, comps: /** @type {import("./frontend-types.ts").SyntaxNode} */ (kids[i + 2])});
       i += 2;
     } else if (isExpr(k, Expressions.ArithOperator)) {
       out.push({op: upper(k.concatTokens())});
@@ -3293,7 +3293,7 @@ const CONSTRUCTORS = new Set(["VALUE", "CONV", "NEW", "REF", "COND", "SWITCH", "
     } else if (isTok(k) && ["-", "+"].includes(tokenStr(k)) && out.length === 0) {
       out.push({sign: tokenStr(k)});
     } else {
-      out.push({node: k});
+      out.push({node: /** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {unknown} */ (k))});
     }
   }
   return out;
@@ -3369,8 +3369,8 @@ const CALC_CODE = {i: "I", int8: "8", f: "F", p: "P", c: "C", string: "g", n: "N
   /** @type {string[]} */ const statics = [];
   for (const t of leafTypes(node, ctx)) {
     if (t.k === "data") continue;
-    if (CALC_CODE[t.k] === undefined) throw new Unsupported(`calculation type with a ${t.k} operand: ${text}`);
-    statics.push(CALC_CODE[t.k]);
+    if (/** @type {Record<string, string>} */ (CALC_CODE)[t.k] === undefined) throw new Unsupported(`calculation type with a ${t.k} operand: ${text}`);
+    statics.push(/** @type {Record<string, string>} */ (CALC_CODE)[t.k]);
   }
   // ** computes in f (the static rule)
   if (hasPow(node)) statics.push("F");
@@ -3598,7 +3598,7 @@ function localInterfaceConstant(id, attr, local, reg) {
       return {e: "table_map", from, row, value: {e: "struct", fields, type: to.row}, type: to};
     }
     if (from.type.k !== "struct" || to.k !== "struct") throw new Unsupported(`CORRESPONDING from a ${from.type.k} to a ${to.k}`);
-    /** @param {import("./frontend-types.ts").ValueExpr} x @returns {boolean} */ const plain = (x) => ["var", "attr", "static", "fs"].includes(x.e) || (x.e === "field" && plain(x.base));
+    /** @param {import("./frontend-types.ts").ValueExpr} x @returns {boolean} */ const plain = (x) => ["var", "attr", "static", "fs"].includes(x.e) || (x.e === "field" && plain(/** @type {import("./frontend-types.ts").ValueExpr} */ (x.base)));
     if (!plain(from)) throw new Unsupported(`CORRESPONDING of something other than a variable or its component: ${c.text}`);
     const src = structOf(ctx, from.type);
     const dst = structOf(ctx, to);
