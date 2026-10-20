@@ -156,7 +156,7 @@ const GO_RESERVED = new Set(("break default func interface select case defer go 
 /** @param {import("./emit-go-types.ts").Type} t @returns {string} */ function cloneName(t) {
   const key = goType(t);
   if (!CLONES.has(key)) CLONES.set(key, {name: `clone_${CLONES.size}`, type: /** @type {import("./emit-go-types.ts").TableType | import("./emit-go-types.ts").StructType} */ (t)});
-  return (/** @type {{readonly name: string}} */ (CLONES.get(key))).name;
+  return (/** @type {string} */ ((/** @type {{readonly name?: unknown}} */ (CLONES.get(key))).name));
 }
 const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key", "refattr", "dref_field"]);
 /** a value moved out of a place: a table (or a structure holding one) is copied */
@@ -188,7 +188,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
     const base = desc({...t, qname: undefined, ddic: undefined});
     const key = `${base}|${t.qname ?? ""}|${t.ddic ?? ""}`;
     if (!NAMED.has(key)) NAMED.set(key, {name: `tn_${NAMED.size}`, text: `abap.Named(${base}, ${JSON.stringify(t.qname ?? "")}, ${JSON.stringify(t.ddic ?? "")})`});
-    return (/** @type {{readonly name: string}} */ (NAMED.get(key))).name;
+    return (/** @type {string} */ ((/** @type {{readonly name?: unknown}} */ (NAMED.get(key))).name));
   }
   switch (t.k) {
     case "i": return "abap.TI";
@@ -212,7 +212,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
       // has no Append
       const key = descKey(t);
       if (!DESCS.has(key)) DESCS.set(key, {name: `td_${DESCS.size}`, type: t});
-      return (/** @type {{readonly name: string}} */ (DESCS.get(key))).name;
+      return (/** @type {string} */ ((/** @type {{readonly name?: unknown}} */ (DESCS.get(key))).name));
     }
     default: throw new Error(`no descriptor for ${t.k}`);
   }
@@ -764,7 +764,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
       if (p.suppliedOf) { lines.push(`\t\t${v} := ""`, `\t\tif _, ok := a[${JSON.stringify(p.suppliedOf)}]; ok {`, `\t\t\t${v} = "X"`, `\t\t}`); return v; }
       /** @param {string} d @returns {string} */ const read = (d) => (["i", "string", "c", "d", "t"].includes(p.type.k) ? unwrapTo(p.type, d)
         : p.type.k === "ref" ? `abap.DynamicRef[${goType(p.type)}](${d})` : p.type.k === "data" ? d : byRef(p) ? `${d}.P.(*${goType(p.type)})` : `*${d}.P.(*${goType(p.type)})`);
-      let absent = p.default !== undefined ? expr((/** @type {{readonly name: string; readonly value: import("./emit-go-types.ts").Expr}} */ (defaults.find(d => d.name === p.name))).value, {cls, method: m, loop: 0}) : p.optional ? zero(p.type)
+      let absent = p.default !== undefined ? expr((/** @type {import("./emit-go-types.ts").Expr} */ ((/** @type {{readonly value?: unknown}} */ (defaults.find(d => d.name === p.name))).value)), {cls, method: m, loop: 0}) : p.optional ? zero(p.type)
         : `func() ${byRef(p) ? "*" : ""}${goType(p.type)} { abap.DynCallError("CX_SY_DYN_CALL_PARAM_MISSING", ${JSON.stringify(`${cls.name}=>${m.name} ${p.name}`)}); return ${byRef(p) ? "nil" : zero(p.type)} }()`;
       if (byRef(p) && p.default !== undefined) absent = `func() *${goType(p.type)} { v := ${absent}; return &v }()`;
       lines.push(`\t\tvar ${v} ${byRef(p) ? "*" : ""}${goType(p.type)}`, `\t\tif d, ok := a[${JSON.stringify(p.name)}]; ok {`, `\t\t\t${v} = ${read("d")}`, `\t\t} else {`,
@@ -1220,7 +1220,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
   const tb = expr(st.table, ctx);
   const i = `ord${n}[k${n}]`;
   const bind = st.fs ? `${ident(st.fs)} = ${boundRow((/** @type {import("./emit-go-types.ts").TableType} */ (st.table.type)), tb, i)}` : `${place((/** @type {import("./emit-go-types.ts").Expr} */ (st.into)), ctx)} = ${copied(rowValue(st.table.type, `${tb}[${i}]`), (/** @type {import("./emit-go-types.ts").Expr} */ (st.into)).type)}`;
-  const skip = st.where ? `${t}\t\tif !(${st.where.map((w) => `${tb}[${i}].${ident((/** @type {string} */ (w.name)))} ${w.op === "=" ? "==" : w.op === "<>" ? "!=" : w.op} ${expr((/** @type {{readonly value: import("./emit-go-types.ts").Expr}} */ (w)).value, ctx)}`).join(" && ")}) { continue }` : null;
+  const skip = st.where ? `${t}\t\tif !(${st.where.map((w) => `${tb}[${i}].${ident((/** @type {string} */ (w.name)))} ${w.op === "=" ? "==" : w.op === "<>" ? "!=" : w.op} ${expr((/** @type {import("./emit-go-types.ts").Expr} */ ((/** @type {{readonly value?: unknown}} */ (w)).value)), ctx)}`).join(" && ")}) { continue }` : null;
   return [
     `${t}{`, `${t}\tsave${n} := s.Sy.Tabix`, `${t}\ts.Sy.Subrc = 4`,
     `${t}\tord${n} := abap.KeyOrder(len(${tb}), ${keyCmp((/** @type {import("./emit-go-types.ts").ResolvedKey} */ (st.key)), tb).replace(/\n/g, `\n${t}\t`)}, ${(/** @type {import("./emit-go-types.ts").ResolvedKey} */ (st.key)).unique ? JSON.stringify((/** @type {import("./emit-go-types.ts").ResolvedKey} */ (st.key)).name) : `""`})`,
@@ -1312,13 +1312,12 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
 
 // the arguments of a statement lowered at build time: the logon client, a
 // host value (a c right-trimmed, as the column binds it), a literal
-/** @typedef {import("./emit-go-types.ts").SqlArgument & {readonly host?: import("./emit-go-types.ts").Expr; readonly fit?: number; readonly xstring?: boolean; readonly xhex?: number; readonly xexact?: number; readonly mandt?: boolean; readonly value?: string | number | null}} SqlArgProbe */
 /** @param {readonly import("./emit-go-types.ts").SqlArgument[]} args @param {import("./emit-go-types.ts").Context} ctx @returns {string} */ function sqlArgs(args, ctx) {
-  return `[]any{${args.map((/** @type {(a: SqlArgProbe) => string} */ ((a) => (a.fit !== undefined ? `abap.DBCFit(${expr((/** @type {import("./emit-go-types.ts").Expr} */ (a.host)), ctx)}, ${a.fit})`
-    : a.xstring ? `abap.DBXString(${expr((/** @type {import("./emit-go-types.ts").Expr} */ (a.host)), ctx)})`
-    : a.xhex !== undefined ? `abap.DBXHex(${expr((/** @type {import("./emit-go-types.ts").Expr} */ (a.host)), ctx)}, ${a.xhex})` : a.xexact !== undefined ? `abap.DBXSHex(${expr((/** @type {import("./emit-go-types.ts").Expr} */ (a.host)), ctx)}, ${a.xexact})`
-    : a.host ? (a.host.type.k === "c" ? `abap.DBC(${expr(a.host, ctx)})` : expr(a.host, ctx))
-    : a.mandt ? "abap.Mandt" : typeof a.value === "number" ? String(a.value) : JSON.stringify(String(a.value)))))).join(", ")}}`;
+  return `[]any{${args.map((a) => ((/** @type {{readonly fit?: unknown}} */ (a)).fit !== undefined ? `abap.DBCFit(${expr((/** @type {import("./emit-go-types.ts").Expr} */ ((/** @type {{readonly host?: unknown}} */ (a)).host)), ctx)}, ${(/** @type {number} */ ((/** @type {{readonly fit?: unknown}} */ (a)).fit))})`
+    : (/** @type {{readonly xstring?: unknown}} */ (a)).xstring ? `abap.DBXString(${expr((/** @type {import("./emit-go-types.ts").Expr} */ ((/** @type {{readonly host?: unknown}} */ (a)).host)), ctx)})`
+    : (/** @type {{readonly xhex?: unknown}} */ (a)).xhex !== undefined ? `abap.DBXHex(${expr((/** @type {import("./emit-go-types.ts").Expr} */ ((/** @type {{readonly host?: unknown}} */ (a)).host)), ctx)}, ${(/** @type {number} */ ((/** @type {{readonly xhex?: unknown}} */ (a)).xhex))})` : (/** @type {{readonly xexact?: unknown}} */ (a)).xexact !== undefined ? `abap.DBXSHex(${expr((/** @type {import("./emit-go-types.ts").Expr} */ ((/** @type {{readonly host?: unknown}} */ (a)).host)), ctx)}, ${(/** @type {number} */ ((/** @type {{readonly xexact?: unknown}} */ (a)).xexact))})`
+    : (/** @type {{readonly host?: unknown}} */ (a)).host ? ((/** @type {import("./emit-go-types.ts").Expr} */ ((/** @type {{readonly host?: unknown}} */ (a)).host)).type.k === "c" ? `abap.DBC(${expr((/** @type {import("./emit-go-types.ts").Expr} */ ((/** @type {{readonly host?: unknown}} */ (a)).host)), ctx)})` : expr((/** @type {import("./emit-go-types.ts").Expr} */ ((/** @type {{readonly host?: unknown}} */ (a)).host)), ctx))
+    : (/** @type {{readonly mandt?: unknown}} */ (a)).mandt ? "abap.Mandt" : typeof (/** @type {{readonly value?: unknown}} */ (a)).value === "number" ? String((/** @type {number} */ ((/** @type {{readonly value?: unknown}} */ (a)).value))) : JSON.stringify(String((/** @type {{readonly value?: unknown}} */ (a)).value)))).join(", ")}}`;
 }
 
 /** @param {import("./emit-go-types.ts").WriteType} t @returns {string} */ const irTypeGo = (t) => `&abap.IRType{Abap: ${JSON.stringify(t.abap)}${(/** @type {{readonly len?: unknown}} */ (t)).len !== undefined ? `, Len: ${(/** @type {number} */ ((/** @type {{readonly len?: unknown}} */ (t)).len))}` : ""}${(/** @type {{readonly dec?: unknown}} */ (t)).dec ? `, Dec: ${(/** @type {number} */ ((/** @type {{readonly dec?: unknown}} */ (t)).dec))}` : ""}}`;
@@ -1915,7 +1914,7 @@ ${t}	}`));
       if (!st.receiving) return [`${t}${call}`];
       return [`${t}{`, `${t}\tdynKey, dynValue := ${call}`, `${t}\t_ = dynValue`, `${t}\tswitch dynKey {`,
         ...moves.flatMap((m) => [`${t}\tcase ${JSON.stringify(m.key)}:`,
-          ...stmt({s: (/** @type {{readonly name: string; readonly target: import("./emit-go-types.ts").Expr}} */ (st.receiving)).target.type.k === "data" ? "set_data" : "assign", target: (/** @type {{readonly name: string; readonly target: import("./emit-go-types.ts").Expr}} */ (st.receiving)).target, value: m.value}, ctx, d + 2)]), `${t}\t}`, `${t}}`];
+          ...stmt({s: (/** @type {import("./emit-go-types.ts").Expr} */ ((/** @type {{readonly target?: unknown}} */ (st.receiving)).target)).type.k === "data" ? "set_data" : "assign", target: (/** @type {import("./emit-go-types.ts").Expr} */ ((/** @type {{readonly target?: unknown}} */ (st.receiving)).target)), value: m.value}, ctx, d + 2)]), `${t}\t}`, `${t}}`];
     }
     case "select_table": {
       // INTO TABLE replaces the table; each row is scanned column by column
@@ -2264,7 +2263,7 @@ ${t}	}`));
     case "float": return Number.isInteger(e.value) ? `float64(${e.value})` : String(e.value);
     case "chars": case "str": return JSON.stringify(e.value);
     case "template": {
-      const parts = e.parts.map((p) => ((/** @type {{readonly text?: string}} */ (p)).text !== undefined ? JSON.stringify((/** @type {{readonly text?: string}} */ (p)).text) : templatePart((/** @type {{readonly value: import("./emit-go-types.ts").Expr; readonly opts?: import("./emit-go-types.ts").TemplateOptions}} */ (p)).value, ctx, (/** @type {{readonly value: import("./emit-go-types.ts").Expr; readonly opts?: import("./emit-go-types.ts").TemplateOptions}} */ (p)).opts ?? {})));
+      const parts = e.parts.map((p) => ((/** @type {{readonly text?: unknown}} */ (p)).text !== undefined ? JSON.stringify((/** @type {string} */ ((/** @type {{readonly text?: unknown}} */ (p)).text))) : templatePart((/** @type {import("./emit-go-types.ts").Expr} */ ((/** @type {{readonly value?: unknown}} */ (p)).value)), ctx, (/** @type {import("./emit-go-types.ts").TemplateOptions} */ ((/** @type {{readonly opts?: unknown}} */ (p)).opts)) ?? {})));
       return parts.length === 0 ? `""` : parts.reduce((a, b) => `abap.Concat(${a}, ${b})`);
     }
     case "concat": return `abap.Concat(${e.l.e === "conv" && ["i2s", "i82s"].includes(e.l.kind) ? `strings.TrimRight(${expr(e.l, ctx)}, " ")` : expr(e.l, ctx)}, ${e.r.e === "conv" && ["i2s", "i82s"].includes(e.r.kind) ? `strings.TrimRight(${expr(e.r, ctx)}, " ")` : expr(e.r, ctx)})`;
