@@ -52,6 +52,7 @@
     "tools/gogen/frontend-query-contract.mjs",
     "tools/gogen/frontend-expressions-calls.mjs",
     "tools/gogen/frontend-static.mjs",
-    "tools/gogen/frontend-classes-native.mjs"
+    "tools/gogen/frontend-classes-native.mjs",
+    "tools/gogen/frontend-types-signatures.mjs"
   ]
 }

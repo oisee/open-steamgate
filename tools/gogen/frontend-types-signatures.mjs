@@ -1,3 +1,4 @@
+// @ts-check
 import {abaplint, BasicTypes, Unsupported, I, F, INT8, S, C, X, XS, upper, goName} from "./frontend-base.mjs";
 import {ddicOutputLength, REG, clasDef} from "./frontend.mjs";
 import {P_GENERIC} from "./frontend-classes-native.mjs";
@@ -134,7 +135,7 @@ import {P_GENERIC} from "./frontend-classes-native.mjs";
       else program.anonStructs.set(t, go);
     }
     const shape = comps.map((c) => upper(c.name)).join(",");
-    for (let n = 2; program.structs.has(go) && program.structs.get(go).shape !== undefined && program.structs.get(go).shape !== shape; n += 1) {
+    for (let n = 2; program.structs.has(go) && /** @type {import("./frontend-types.ts").StructType} */ (program.structs.get(go)).shape !== undefined && /** @type {import("./frontend-types.ts").StructType} */ (program.structs.get(go)).shape !== shape; n += 1) {
       go = `${go.replace(/_V\d+$/, "")}_V${n}`;
     }
     if (program.badStructs?.has(go)) throw new Unsupported(program.badStructs.get(go));
@@ -147,7 +148,7 @@ import {P_GENERIC} from "./frontend-classes-native.mjs";
         // a field outside the subset: the structure is not in the program,
         // and every later use of it is refused with the same reason
         program.structs.delete(go);
-        program.badStructs.set(go, e.message);
+        program.badStructs.set(go, /** @type {{message: string}} */ (e).message);
         throw e;
       }
     }
@@ -188,7 +189,7 @@ import {P_GENERIC} from "./frontend-classes-native.mjs";
 /** @param {import("./frontend-types.ts").CompilationContext} ctx @param {Extract<import("./ir.ts").Type, {k: "struct"}>} t @returns {import("./frontend-types.ts").StructType | undefined} */ const structOf = (ctx, t) => ctx.program.structs.get(t.go);
 /** @param {import("./frontend-types.ts").CompilationContext} ctx @param {import("./ir.ts").Type} t @param {string} name @param {string} where @returns {import("./ir.ts").Field} */ const fieldOf = (ctx, t, name, where) => {
   if (t.k !== "struct") throw new Unsupported(`${where}: component ${name} of a non-structure`);
-  const f = structOf(ctx, t).fields.find((x) => x.name === upper(name));
+  const f = /** @type {readonly import("./ir.ts").Field[]} */ (/** @type {import("./frontend-types.ts").StructType} */ (structOf(ctx, t)).fields).find((x) => x.name === upper(name));
   if (f === undefined) throw new Unsupported(`${where}: no component ${name}`);
   return f;
 };
@@ -201,21 +202,21 @@ import {P_GENERIC} from "./frontend-classes-native.mjs";
     return inferred;
   }
   const t = upper(text);
-  const builtin = {
+  const builtin = /** @type {Record<string, import("./ir.ts").Type>} */ ({
     I, F, STRING: S, XSTRING: XS, INT8, D: {k: "d", len: 8}, T: {k: "t", len: 6},
     OBJECT: {k: "ref", name: "OBJECT", intf: true},
     P: {k: "p", len: 8, dec: 0}, C: C(1), N: {k: "n", len: 1}, X: X(1), ABAP_BOOL: C(1),
-  }[t];
+  })[t];
   if (builtin) return builtin;
   const pool = t.includes("_") ? ctx.reg.getObject("TYPE", t.split("_")[0]) : undefined;
-  const poolType = pool ? new abaplint.SyntaxLogic(ctx.reg, pool).run().spaghetti.getFirstChild()?.getFirstChild()?.findType(t) : undefined;
-  const local = ctx.scope.findType?.(t) ?? poolType
+  const poolType = pool ? new abaplint.SyntaxLogic(ctx.reg, /** @type {import("@abaplint/core").ABAPObject} */ (pool)).run().spaghetti.getFirstChild()?.getFirstChild()?.findType(t) : undefined;
+  const local = /** @type {import("./frontend-types.ts").Scope} */ (ctx.scope).findType?.(t) ?? poolType
     ?? clasDef(ctx.reg, ctx.className)?.getTypeDefinitions().getByName(t);
   if (local !== undefined) return typeOf(local.getType(), text, ctx.program);
   if (ctx.reg.getObject("CLAS", t) || ctx.reg.getObject("INTF", t)) return {k: "ref", name: t, intf: ctx.reg.getObject("INTF", t) !== undefined};
   const m = /^(\w+)=>(\w+)$/.exec(t);
   if (m) {
-    /** @type {import("@abaplint/core").IInterfaceDefinition | undefined} */ const owner = ctx.reg.getObject("INTF", m[1])?.getDefinition() ?? clasDef(ctx.reg, m[1]);
+    /** @type {import("@abaplint/core").IInterfaceDefinition | undefined} */ const owner = /** @type {import("@abaplint/core").Objects.Interface | undefined} */ (ctx.reg.getObject("INTF", m[1]))?.getDefinition() ?? clasDef(ctx.reg, m[1]);
     const td = owner?.getTypeDefinitions().getByName(m[2]);
     if (td === undefined) throw new Unsupported(`type ${text}`);
     return typeOf(td.getType(), text, ctx.program);
