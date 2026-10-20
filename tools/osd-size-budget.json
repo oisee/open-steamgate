@@ -223,8 +223,8 @@
       "reason": "baseline 2026-10-01 abapiti 042: READ and DELETE TABLE by a hashed secondary key. Generic loop fix round: retain concrete caller storage for untyped TABLES and adjust loop tokens after DELETE INDEX at or before the cursor."
     },
     "tools/gogen/frontend-base.mjs": {
-      "lines": 66,
-      "reason": "Frontend split step 1 B: shared abaplint binding, error class and primitive helpers moved from frontend.mjs."
+      "lines": 67,
+      "reason": "tscheck 2026-10-20: the file is under // @ts-check; the added lines are JSDoc parameter/return types and type casts, executable text unchanged (execdiff clean). Frontend split step 1 B: shared abaplint binding, error class and primitive helpers moved from frontend.mjs."
     },
     "tools/gogen/frontend.mjs": {
       "lines": 6103,
@@ -611,20 +611,20 @@
       "reason": "gx3 critic fix: PCRE2 non-UCP generic sets and character-class union/complement normalization before RE2 compilation; isolated from abap binding glue and tested through both public FIND/REPLACE adapters. gx3 round 2: model ordered class tokens and range endpoints, preserving escaped backslash parity, initial brackets and literal caret/hyphen; refuse unmodeled class syntax by name. gx3 round 3: shared named-syntax and class scans for every walker; PCRE2 octal/NUL class escapes. This is the initial budget of the new leaf package in this commit; abap binding glue shrinks. Absolute-anchor compatibility: 17 lines recognize the twelve exact complementary-class assertion tokens at parsed syntax positions; no general lookaround implementation."
     },
     "tools/gogen/frontend-classes-native.mjs": {
-      "lines": 367,
-      "reason": "Chain T1 on K4a: types core moved byte-identically; imports target their current homes; exact physical line count. Frontend split K4a: move native/kernel tables and helpers byte for byte from frontend.mjs; exact initial ceiling."
+      "lines": 370,
+      "reason": "tscheck 2026-10-20: the file is under // @ts-check; the added lines are JSDoc parameter/return types and type casts, executable text unchanged (execdiff clean). Chain T1 on K4a: types core moved byte-identically; imports target their current homes; exact physical line count. Frontend split K4a: move native/kernel tables and helpers byte for byte from frontend.mjs; exact initial ceiling."
     },
     "tools/gogen/frontend-types-signatures.mjs": {
-      "lines": 226,
-      "reason": "Chain T1 on K4a: types core moved byte-identically; imports target their current homes; exact physical line count. T1: byte-identical typeKindOf, typeOf, rttiNamed, structOf, fieldOf and namedType moved from frontend.mjs; exact initial physical-line ceiling."
+      "lines": 227,
+      "reason": "tscheck 2026-10-20: the file is under // @ts-check; the added lines are JSDoc parameter/return types and type casts, executable text unchanged (execdiff clean). Chain T1 on K4a: types core moved byte-identically; imports target their current homes; exact physical line count. T1: byte-identical typeKindOf, typeOf, rttiNamed, structOf, fieldOf and namedType moved from frontend.mjs; exact initial physical-line ceiling."
     },
     "tools/gogen/frontend-sql.mjs": {
-      "lines": 142,
-      "reason": "Chain E6a on Q1/T1/K4a: source/call helpers moved byte-identically; fieldOf comes from T1, SQL source helpers come from E6a; exact physical line count. Frontend split Q1 on T1/K4a: byte-identical SQL helpers with fieldOf imported from its T1 home; exact physical line count."
+      "lines": 159,
+      "reason": "tscheck 2026-10-20: the file is under // @ts-check; the added lines are JSDoc parameter/return types and type casts, executable text unchanged (execdiff clean). Chain E6a on Q1/T1/K4a: source/call helpers moved byte-identically; fieldOf comes from T1, SQL source helpers come from E6a; exact physical line count. Frontend split Q1 on T1/K4a: byte-identical SQL helpers with fieldOf imported from its T1 home; exact physical line count."
     },
     "tools/gogen/frontend-expressions-calls.mjs": {
-      "lines": 226,
-      "reason": "Chain E6a on Q1/T1/K4a: source/call helpers moved byte-identically; fieldOf comes from T1, SQL source helpers come from E6a; exact physical line count."
+      "lines": 227,
+      "reason": "tscheck 2026-10-20: the file is under // @ts-check; the added lines are JSDoc parameter/return types and type casts, executable text unchanged (execdiff clean). Chain E6a on Q1/T1/K4a: source/call helpers moved byte-identically; fieldOf comes from T1, SQL source helpers come from E6a; exact physical line count."
     }
   },
   "readmeMissing": [
