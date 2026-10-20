@@ -1,6 +1,6 @@
 import {Expressions, Unsupported, upper, I, F, P31, S, XS, numeric} from "./frontend-base.mjs";
 // Overloaded numeric built-ins, with explicit result types for both emitters.
-/** @param {string} name @param {import("@abaplint/core").Nodes.ExpressionNode | undefined} direct @param {import("@abaplint/core").Nodes.ExpressionNode | undefined} named @param {import("./frontend-types.ts").MethodContext} ctx @param {{FUNCTIONS: Record<string, string>, source: Function, convert: Function}} api @param {import("./ir.ts").Type | undefined} [calc] @returns {import("./frontend-types.ts").ValueExpr} */ export function builtin(name, direct, named, ctx, api, calc) {
+export function builtin(name, direct, named, ctx, api, calc) {
   const {FUNCTIONS, source, convert} = api;
   const kind = FUNCTIONS[name];
   if (name === "BOOLX") {

@@ -5211,12 +5211,12 @@ const FUNCTIONS = {
   const direct = param?.findDirectExpression(Expressions.Source);
   const named = param?.findDirectExpression(Expressions.ParameterListS);
   const full = param?.findDirectExpression(Expressions.MethodParameters);
-  // ultra/events (fix round): CL_ABAP_RANDOM->INT is a host function that
-  // ignores a seed (as open-abap-core's @KERNEL line does), so a seeded
+  // ultra/events (fix round): CL_ABAP_RANDOM->INT is a host function that ignores a seed (as open-abap-core's @KERNEL line does), so a seeded
   // generator, whose sequence would be the contract, is refused
   if (owner === "CL_ABAP_RANDOM" && name === "CREATE" && (direct || named || full)) throw new Unsupported(`CL_ABAP_RANDOM=>CREATE with a SEED: the host generator ignores it`);
 
-  if (receiver === null && owner === null && /** @type {Record<string, unknown>} */ (FUNCTIONS)[name] !== undefined && !ctx.signatures.has(name)) return builtin(name, direct, named, ctx, {FUNCTIONS, source, convert}, name === "IPOW" && ["i", "int8", "p", "f"].includes(/** @type {string} */ (hint?.k)) ? hint : undefined);
+  // @ts-expect-error -- abapiti form pending
+  if (receiver === null && owner === null && FUNCTIONS[name] !== undefined && !ctx.signatures.has(name)) return builtin(name, direct, named, ctx, {FUNCTIONS, source, convert}, name === "IPOW" && ["i", "int8", "p", "f"].includes(hint?.k) ? hint : undefined);
   if (receiver === null && name === "LINES" && !ctx.signatures.has(name)) {
     const t = source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (direct), ctx);
     if (t.type.k === "data") return {e: "lines_data", x: t, type: I};
