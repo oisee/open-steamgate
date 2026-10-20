@@ -103,7 +103,9 @@ export interface LoopCursor { idxVar?: string }
 export type TableType = Extract<IR.Type, {k: 'table'}>;
 export type StructType = Extract<IR.Type, {k: 'struct'}>;
 export type PackedType = Extract<IR.Type, {k: 'p'}>;
-export type Conversion = Extract<Expr, {e: 'conv'}>;
+// The conversion kind implies its operand kinds; the emitter reads their
+// lengths and decimals without narrowing, through the inspection view.
+export type Conversion = Extract<Expr, {e: 'conv'}> & {readonly from: TypeProbe; readonly to: TypeProbe};
 export type Builtin = Extract<Expr, {e: 'fn'}>;
 export interface DynamicLoopBranch { readonly name: string; readonly key: IR.ResolvedKey | null }
 export type KeyLoop = Extract<Stmt, {s: 'loop'}> & {readonly key: IR.ResolvedKey};
