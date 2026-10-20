@@ -800,7 +800,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
   for (const intf of implementedInterfaces(program, cls)) out.push(`\t${interfaceMarker(intf)}()`);
   out.push(`\tAs_${T}() *${T}`);
   // the accessors of the interfaces the class implements, so the reference converts to them
-  for (const a of (cls.attributes ?? []).filter((x) => x.fromIntf && !x.unsupported)) out.push(`\t${accessorName(a.name)}() *${goType(a.type)}`);
+  for (const a of (cls.attributes ?? []).filter((x) => x.fromIntf && !x.unsupported)) out.push(`\t${accessorName(a.name)}() *${goType((/** @type {import("./emit-go-types.ts").Type} */ (a.type)))}`);
   // Refused signatures carry a nonempty unsupported reason; survivors have params.
   for (const m of cls.signatures?.values() ?? []) {
     if (m.unsupported || m.static || m.private || m.name === "CONSTRUCTOR" || !definable(program, /** @type {import("./emit-go-types.ts").Method} */ (m))) continue;
@@ -834,8 +834,10 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
   return out;
 }
 
+// An INTF object answers getDefinition; IRegistry returns the IObject base.
+/** @typedef {{getDefinition: () => {getImplementing: () => {name: string}[]}}} IntfObjectShape */
 /** @param {import("./ir.ts").Program["reg"] | undefined} reg @param {string} intf @param {Set<string>} [seen] @returns {string[]} */ function componentInterfaces(reg, intf, seen = new Set()) {
-  for (const c of reg?.getObject("INTF", intf)?.getDefinition()?.getImplementing?.() ?? []) {
+  for (const c of (/** @type {IntfObjectShape} */ (/** @type {unknown} */ (reg?.getObject("INTF", intf))))?.getDefinition()?.getImplementing?.() ?? []) {
     const name = String(c.name).toUpperCase();
     if (!seen.has(name)) { seen.add(name); componentInterfaces(reg, name, seen); }
   }
@@ -844,11 +846,11 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
 
 /** @param {import("./emit-go-types.ts").ProgramInput} program @param {string} intf @returns {string[]} */ function intfAccessors(program, intf) {
   return (program.interfaceAttrs?.get(intf) ?? []).filter((a) => !a.static && !a.unsupported && definable(program, {params: [{type: a.type}]}))
-    .map((a) => `\t${accessorName(a.name)}() *${goType(a.type)}`);
+    .map((a) => `\t${accessorName(a.name)}() *${goType((/** @type {import("./emit-go-types.ts").Type} */ (a.type)))}`);
 }
 
 /** @param {import("./emit-go-types.ts").Class} cls @param {readonly import("./emit-go-types.ts").Attribute[]} inst @returns {string[]} */ function attrAccessors(cls, inst) {
-  const out = inst.filter((a) => a.fromIntf).map((a) => `func (me *${typeName(cls.name)}) ${accessorName(a.name)}() *${goType(a.type)} { return &${(/** @type {import("./emit-go-types.ts").ExceptionClass} */ (exceptionClass))(cls, CLASSES) ? `abap.ExceptionRead(me, ${JSON.stringify(a.name)})` : "me"}.${ident(a.name)} }`);
+  const out = inst.filter((a) => a.fromIntf).map((a) => `func (me *${typeName(cls.name)}) ${accessorName(a.name)}() *${goType((/** @type {import("./emit-go-types.ts").Type} */ (a.type)))} { return &${(/** @type {import("./emit-go-types.ts").ExceptionClass} */ (exceptionClass))(cls, CLASSES) ? `abap.ExceptionRead(me, ${JSON.stringify(a.name)})` : "me"}.${ident(a.name)} }`);
   return out.length ? [...out, ""] : [];
 }
 
@@ -856,7 +858,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
 /** @param {import("./emit-go-types.ts").ProgramInput} program @param {import("./emit-go-types.ts").Signature} m @returns {boolean | undefined} */ export function definable(program, m) {
   /** @param {import("./emit-go-types.ts").Type | undefined} t @returns {boolean | undefined} */ const ok = (t) => {
     if (!t) return true;
-    if (t.k === "struct") return program.structs.has(t.go);
+    if (t.k === "struct") return (/** @type {import("./emit-go-types.ts").Program} */ (program)).structs.has(t.go);
     if (t.k === "table") return ok(t.row);
     if (t.k === "ref") return t.name === "OBJECT" || (t.intf ? program.interfaceMethods?.has(t.name) : true);
     return true;
@@ -902,8 +904,8 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
   if (c.type.k === "int8") return String(BigInt(String(c.value).trim()));
   if (c.type.k === "f") return String(Number(c.value));
   if (c.type.k === "n") return JSON.stringify(String(c.value));
-  if (c.type.k === "string" || c.type.k === "c") return JSON.stringify(c.type.k === "c" ? c.value.replace(/ +$/, "") : c.value);
-  if (c.type.k === "x" || c.type.k === "xstring") return `"${hexBytes(c.value, c.type.len).map((b) => `\\x${b.toString(16).padStart(2, "0")}`).join("")}"`;
+  if (c.type.k === "string" || c.type.k === "c") return JSON.stringify(c.type.k === "c" ? (/** @type {string} */ (c.value)).replace(/ +$/, "") : c.value);
+  if (c.type.k === "x" || c.type.k === "xstring") return `"${hexBytes((/** @type {string} */ (c.value)), (/** @type {import("./emit-go-types.ts").TypeProbe} */ (c.type)).len).map((b) => `\\x${b.toString(16).padStart(2, "0")}`).join("")}"`;
   throw new Error(`constant of type ${c.type.k}`);
 }
 
@@ -937,10 +939,10 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
     // RECEIVE is read off a class that implements it
     const m = program.interfaceMethods?.get(intf)?.find((x) => x.name === "RECEIVE")
       ?? [...CLASSES.values()].map((c) => c.signatures?.get(`${intf}~RECEIVE`)).find((x) => x && !x.unsupported);
-    if (!m || !definable(program, m) || !CLASSES.has("ZCL_AMC_MESSAGE_CONTEXT")) continue;
-    const msgType = goType(m.params.find((p) => p.name === "I_MESSAGE").type);
+    if (!m || !definable(program, (/** @type {import("./emit-go-types.ts").Signature} */ (m))) || !CLASSES.has("ZCL_AMC_MESSAGE_CONTEXT")) continue;
+    const msgType = goType((/** @type {import("./emit-go-types.ts").Param} */ ((/** @type {import("./emit-go-types.ts").Method} */ (m)).params.find((p) => p.name === "I_MESSAGE"))).type);
     cases.push(`\t\tcase ${JSON.stringify(type)}:`,
-      `\t\t\tr, ok := receiver.(interface{ ${signature({}, {...m, name: `${intf}~RECEIVE`}, true)} })`,
+      `\t\t\tr, ok := receiver.(interface{ ${signature({}, (/** @type {import("./emit-go-types.ts").Method} */ ({...m, name: `${intf}~RECEIVE`})), true)} })`,
       `\t\t\tmsg, okMsg := m.Payload.(${msgType})`,
       // a receiver or a message of another shape is a host error, never a
       // message that quietly does not arrive
