@@ -14,7 +14,7 @@ import {source, sourceOperand} from "./frontend-expressions-calls.mjs";
     : T.char(t.len ?? 1));
 /** the IR type a written value binds as (tools/ir-writes.mjs bindValue): a
  * d, t or n is its characters, as the column stores them */
-function writeIrType(t, where) {
+/** @param {import("./ir.ts").Type} t @param {string} where @returns {import("./ir.ts").WriteType} */ function writeIrType(t, where) {
   if (t.k === "i") return T.int;
   if (t.k === "int8") return T.int8;
   if (t.k === "string") return T.str;
@@ -88,7 +88,7 @@ const andIr = (a, b) => (a === null ? b : b === null ? a : bin("AND", a, b, T.bo
 /** a value compared with or written into a column: a literal of the
  * column's own kind is an IR literal, anything else a host value converted
  * to the column's type and bound at run time */
-function sqlValue(v, ct, ir, acc, set = false) {
+/** @param {import("./frontend-types.ts").ValueExpr} v @param {import("./ir.ts").Type} ct @param {import("./ir.ts").WriteType} ir @param {Record<string, unknown>} acc @param {boolean} [set] @returns {import("./sqlscript-types.ts").SqlExpr} */ function sqlValue(v, ct, ir, acc, set = false) {
   if (ct.k === "x") return rawValue(v, ct, ir, acc, set);
   if (ct.k === "xstring" && set) {
     if (v.type.k !== "xstring" && v.type.k !== "x") throw new Unsupported(`UPDATE of an xstring column from a ${v.type.k}`);
