@@ -789,7 +789,7 @@ export function deriveProgramWanted(reg, options, session, capture) {
       const k = kids[i];
       if (isExpr(k, Expressions.FunctionExporting)) {
         for (const p of k.findDirectExpressions(Expressions.FunctionExportingParameter)) {
-          given.set(upper(/** @type {import("./frontend-types.ts").TokenText} */ (p.findDirectExpression(Expressions.ParameterName)).concatTokens()), p.findDirectExpression(Expressions.Source));
+          given.set(upper(/** @type {import("./frontend-types.ts").TokenText} */ (/** @type {unknown} */ (p.findDirectExpression(Expressions.ParameterName))).concatTokens()), p.findDirectExpression(Expressions.Source));
         }
       } else if (isExpr(k, Expressions.ParameterListT)) {
         const kw = upper(/** @type {import("./frontend-types.ts").TokenText} */ (kids[i - 1])?.concatTokens() ?? "");
@@ -3650,7 +3650,7 @@ const CALC_CODE = {i: "I", int8: "8", f: "F", p: "P", c: "C", string: "g", n: "N
         given.set(imp.find((p) => p.default === undefined)?.name ?? imp[0]?.name, body);
       } else {
         for (const p of body.findAllExpressions(Expressions.ParameterS)) {
-          given.set(upper(/** @type {import("./frontend-types.ts").TokenText} */ (p.findDirectExpression(Expressions.ParameterName)).concatTokens()), p.findDirectExpression(Expressions.Source));
+          given.set(upper(/** @type {import("./frontend-types.ts").TokenText} */ (/** @type {unknown} */ (p.findDirectExpression(Expressions.ParameterName))).concatTokens()), p.findDirectExpression(Expressions.Source));
         }
       }
     }
@@ -4642,10 +4642,10 @@ function dbWriteStatement(kind, node, ctx, text) {
   if (/\b(CASTING|INCREMENT|RANGE)\b/i.test(text)) throw new Unsupported(`ASSIGN form: ${text}`);
   /** @type {import("./ir.ts").Expr} */ const fs = {e: "fs", name: fsName, type: fsType};
   const src = node.findDirectExpression(Expressions.AssignSource);
-  const parts = src.getChildren().filter((c) => !isTok(c));
+  const parts = /** @type {import("@abaplint/core").Nodes.ExpressionNode} */ (src).getChildren().filter((c) => !isTok(c));
   if (/^ASSIGN\s+COMPONENT\b/i.test(text)) {
     if (parts.length !== 2) throw new Unsupported(`ASSIGN COMPONENT form: ${text}`);
-    const name = sourceOperand(parts[0].getFirstChild(), ctx);
+    const name = sourceOperand(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {import("@abaplint/core").Nodes.ExpressionNode} */ (/** @type {import("@abaplint/core").Nodes.ExpressionNode} */ (parts[0]).getFirstChild())), ctx);
     if (!["string", "c", "i"].includes(name.type.k)) throw new Unsupported(`ASSIGN COMPONENT by a ${name.type.k}`);
     return {s: "assign_comp", fs, name: convert(name, name.type.k === "i" ? I : S), from: convert(source(parts[1], ctx), {k: "data"})};
   }
@@ -4694,7 +4694,7 @@ function dbWriteStatement(kind, node, ctx, text) {
   if (bare) {
     const target = lvalue(/** @type {import("./frontend-types.ts").SyntaxNode} */ (node.findDirectExpression(Expressions.Target)), ctx);
     if (target.type.k !== "dref") throw new Unsupported(`CREATE DATA into a ${target.type.k}`);
-    const declared = ctx.scope.findVariable?.(bare[1])?.getType();
+    const declared = /** @type {import("./frontend-types.ts").Scope} */ (ctx.scope).findVariable?.(bare[1])?.getType();
     const inner = declared instanceof BasicTypes.DataReference ? declared.getType() : undefined;
     if (inner === undefined || inner instanceof BasicTypes.AnyType || inner instanceof BasicTypes.DataType) throw new Unsupported(`CREATE DATA ${bare[1]}: a reference without a complete type`);
     const t = typeOf(inner, `CREATE DATA ${bare[1]}`, ctx.program);
@@ -4724,11 +4724,11 @@ function dbWriteStatement(kind, node, ctx, text) {
   const name = upper(m[2]);
   /** @type {import("./ir.ts").Type} */ let t;
   const ddic = ctx.reg.getObject("TABL", name) ?? ctx.reg.getObject("VIEW", name) ?? ctx.reg.getObject("TTYP", name) ?? ctx.reg.getObject("DTEL", name);
-  if (!/=>/.test(name) && !(ctx.scope.findType?.(name)) && ddic) {
+  if (!/=>/.test(name) && !(/** @type {import("./frontend-types.ts").Scope} */ (ctx.scope).findType?.(name)) && ddic) {
     let at;
     try { at = /** @type {import("./frontend-types.ts").DataTypeObject} */ (ddic).parseType(ctx.reg); } catch { throw new Unsupported(`CREATE DATA TYPE ${name}: its type does not resolve`); }
     t = typeOf(at, name, ctx.program);
-  } else t = namedType(node.findDirectExpression(Expressions.TypeName) ?? {concatTokens: () => m[2]}, ctx);
+  } else t = namedType(node.findDirectExpression(Expressions.TypeName) ?? /** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {unknown} */ ({concatTokens: () => m[2]})), ctx);
   if (["ref", "exc", "data", "dref"].includes(t.k)) throw new Unsupported(`CREATE DATA TYPE ${name}: a ${t.k}`);
   return {s: "create_data", target, type: m[1] ? {k: "table", row: t} : t};
 }
@@ -4762,7 +4762,7 @@ function dbWriteStatement(kind, node, ctx, text) {
   const sig = constructorSignature(ctx, cls);
   /** @type {Map<string, import("@abaplint/core").Nodes.ExpressionNode | undefined>} */ const given = new Map();
   for (const p of params?.findAllExpressions(Expressions.ParameterS) ?? []) {
-    given.set(upper(p.findDirectExpression(Expressions.ParameterName).concatTokens()), p.findDirectExpression(Expressions.Source));
+    given.set(upper(/** @type {import("./frontend-types.ts").TokenText} */ (/** @type {unknown} */ (p.findDirectExpression(Expressions.ParameterName))).concatTokens()), p.findDirectExpression(Expressions.Source));
   }
   const args = sig.map(/** @returns {import("./ir.ts").Argument} */ (p) => {
     if (p.suppliedOf) return {dir: "importing", byValue: true, type: p.type, value: {e: "chars", value: given.has(p.suppliedOf) ? "X" : "", type: p.type}};
@@ -4796,9 +4796,9 @@ function dbWriteStatement(kind, node, ctx, text) {
     /** @type {Map<string, import("@abaplint/core").Nodes.ExpressionNode>} */ const given = new Map();
     /** @type {string[]} */ const givenNames = [];
     for (const p of params?.findAllExpressions(Expressions.ParameterS) ?? []) {
-      const name = upper(p.findDirectExpression(Expressions.ParameterName).concatTokens());
+      const name = upper(/** @type {import("./frontend-types.ts").TokenText} */ (/** @type {unknown} */ (p.findDirectExpression(Expressions.ParameterName))).concatTokens());
       if (!given.has(name)) givenNames.push(name);
-      given.set(name, /** @type {import("./frontend-types.ts").SyntaxNode} */ (p.findDirectExpression(Expressions.Source)));
+      given.set(name, /** @type {import("@abaplint/core").Nodes.ExpressionNode} */ (/** @type {unknown} */ (p.findDirectExpression(Expressions.Source))));
     }
     const sig = constructorSignature(ctx, cls);
     for (const n of givenNames) if (!sig.some((p) => p.name === n)) throw new Unsupported(`RAISE EXCEPTION TYPE ${cls}: no constructor parameter ${n}`);
@@ -4830,41 +4830,41 @@ function dbWriteStatement(kind, node, ctx, text) {
  * the declaring class's event. program.events collects the events used,
  * for the backends' parameter types.
  */
-function eventInfo(ctx, owner, evName) {
+/** @param {import("./frontend-types.ts").MethodContext} ctx @param {string} owner @param {string} evName @returns {{key: string, decl: string | null, name: string, static: boolean, params: {name: string, type: import("./ir.ts").Type}[]}} */ function eventInfo(ctx, owner, evName) {
   let decl = null;
   let def = null;
   let name = upper(evName);
   if (name.includes("~")) {
     const [intf, ev] = name.split("~");
-    const idef = ctx.reg.getObject("INTF", intf)?.getDefinition();
-    const found = idef?.getEvents?.().find((e) => upper(e.getName()) === ev);
+    const idef = /** @type {import("@abaplint/core").Objects.Interface | undefined} */ (ctx.reg.getObject("INTF", intf))?.getDefinition();
+    const found = idef?.getEvents?.().find(/** @param {{getName: () => string}} e */ (e) => upper(e.getName()) === ev);
     if (found) { decl = intf; def = found; name = ev; }
   } else if (ctx.reg.getObject("INTF", owner)) {
-    const found = ctx.reg.getObject("INTF", owner).getDefinition()?.getEvents?.().find((e) => upper(e.getName()) === name);
+    const found = /** @type {import("@abaplint/core").Objects.Interface} */ (ctx.reg.getObject("INTF", owner)).getDefinition()?.getEvents?.().find(/** @param {{getName: () => string}} e */ (e) => upper(e.getName()) === name);
     if (found) { decl = owner; def = found; }
   } else {
     for (const c of [owner, ...ancestors(ctx.reg, owner)]) {
-      const found = ctx.reg.getObject("CLAS", c)?.getDefinition()?.getEvents?.().find((e) => upper(e.getName()) === name);
+      const found = /** @type {import("@abaplint/core").Objects.Class | undefined} */ (ctx.reg.getObject("CLAS", c))?.getDefinition()?.getEvents?.().find(/** @param {{getName: () => string}} e */ (e) => upper(e.getName()) === name);
       if (found) { decl = c; def = found; break; }
     }
   }
   if (!def) throw new Unsupported(`event ${evName} of ${owner} is not in the program`);
   const key = `${decl}~${name}`;
-  if (ctx.program.events.has(key)) return ctx.program.events.get(key);
+  if (ctx.program.events.has(key)) return /** @type {{key: string, decl: string, name: string, static: boolean, params: {name: string, type: import("./ir.ts").Type}[]}} */ (/** @type {unknown} */ (ctx.program.events.get(key)));
   // DEFAULT of an event parameter is not read off the definition (abaplint
   // keeps no default for it): an event that has one is refused
-  const obj = ctx.reg.getObject("INTF", decl) ?? ctx.reg.getObject("CLAS", decl);
-  for (const f of obj.getABAPFiles()) {
+  const obj = /** @type {import("@abaplint/core").Objects.Interface | undefined} */ (ctx.reg.getObject("INTF", /** @type {string} */ (decl))) ?? /** @type {import("@abaplint/core").Objects.Class | undefined} */ (ctx.reg.getObject("CLAS", /** @type {string} */ (decl)));
+  for (const f of /** @type {import("@abaplint/core").ABAPObject} */ (obj).getABAPFiles()) {
     for (const st of f.getStatements()) {
       if (!(st.get() instanceof Statements.Events)) continue;
       if (upper(st.findDirectExpression(Expressions.EventName)?.concatTokens() ?? "") !== name) continue;
       if (/\bDEFAULT\b/i.test(st.concatTokens())) throw new Unsupported(`event ${key}: a parameter with DEFAULT`);
     }
   }
-  const params = def.getParameters().map((p) => ({name: upper(p.getName()), type: typeOf(p.getType(), `event ${key}`, ctx.program)}));
-  const info = {key, decl, name, static: def.isStatic(), params};
-  ctx.program.events.set(key, info);
-  return info;
+  const params = def.getParameters().map(/** @param {import("@abaplint/core").TypedIdentifier} p */ (p) => ({name: upper(p.getName()), type: typeOf(p.getType(), `event ${key}`, ctx.program)}));
+  /** @type {{key: string, decl: string | null, name: string, static: boolean, params: {name: string, type: import("./ir.ts").Type}[]}} */ const info = {key, decl, name, static: def.isStatic(), params};
+  /** @type {NonNullable<import("./frontend-types.ts").FrontendProgram["events"]>} */ (ctx.program.events).set(key, /** @type {import("./ir.ts").Event} */ (/** @type {unknown} */ (info)));
+  return /** @type {{key: string, decl: string | null, name: string, static: boolean, params: {name: string, type: import("./ir.ts").Type}[]}} */ (/** @type {unknown} */ (info));
 }
 
 /*
@@ -4901,7 +4901,7 @@ function eventInfo(ctx, owner, evName) {
       owner = ctx.className;
       mname = upper(mk[2].concatTokens());
     } else if (mk.length === 3 && isTok(mk[1], "->")) {
-      obj = fieldChain(mk[0], ctx);
+      obj = fieldChain(/** @type {import("@abaplint/core").Nodes.ExpressionNode} */ (/** @type {unknown} */ (mk[0])), ctx);
       if (obj.type.k !== "ref" || obj.type.intf) throw new Unsupported(`SET HANDLER through ${mk[0].concatTokens()}: not a class reference`);
       owner = obj.type.name;
       mname = upper(mk[2].concatTokens());
@@ -4914,15 +4914,15 @@ function eventInfo(ctx, owner, evName) {
     if (!ctx.program.wanted.has(at)) throw notInProgram(ctx, at, `SET HANDLER: ${at} is not compiled in this program`);
     const mdef = declaredMethod(ctx.reg, at, mname);
     if (!mdef?.isEventHandler?.()) throw new Unsupported(`SET HANDLER: ${at}=>${mname} is not an event handler`);
-    const ev = eventInfo(ctx, upper(mdef.getEventClass()), mdef.getEventName());
+    const ev = eventInfo(ctx, upper(/** @type {string} */ (mdef.getEventClass())), /** @type {string} */ (mdef.getEventName()));
     const sig = methodSignature(ctx, at, mname);
     if (sig.unsupported) throw new Unsupported(`SET HANDLER: ${at}=>${mname} was skipped: ${sig.unsupported}`);
-    if (sig.static && obj) throw new Unsupported(`SET HANDLER of a static method through a reference: ${ms.concatTokens()}`);
-    if (!sig.static && (staticRef || ctx.sig.static) && !obj) throw new Unsupported(`SET HANDLER of an instance method without an object: ${ms.concatTokens()}`);
+    if (/** @type {import("./frontend-types.ts").Signature} */ (sig).static && obj) throw new Unsupported(`SET HANDLER of a static method through a reference: ${ms.concatTokens()}`);
+    if (!/** @type {import("./frontend-types.ts").Signature} */ (sig).static && (staticRef || ctx.sig.static) && !obj) throw new Unsupported(`SET HANDLER of an instance method without an object: ${ms.concatTokens()}`);
     if (ev.static && (forObj || forAll)) throw new Unsupported(`SET HANDLER ... FOR of a static event: ${text}`);
     if (!ev.static && !forObj && !forAll) throw new Unsupported(`SET HANDLER of an instance event without FOR: ${text}`);
     const byName = new Map(ev.params.map((p) => [p.name, p]));
-    const args = sig.params.map((p) => {
+    const args = /** @type {import("./frontend-types.ts").Signature} */ (sig).params.map(/** @returns {import("./ir.ts").Argument} */ (p) => {
       if (p.dir !== "importing") throw new Unsupported(`handler ${at}=>${mname}: ${p.dir} parameter ${p.name}`);
       if (p.name === "SENDER") {
         if (ev.static) throw new Unsupported(`handler ${at}=>${mname}: SENDER of a static event`);
@@ -4933,7 +4933,7 @@ function eventInfo(ctx, owner, evName) {
       if (!sameType(ep.type, p.type)) throw new Unsupported(`handler ${at}=>${mname}: ${p.name} typed unlike the event`);
       return {dir: "importing", byValue: p.byValue, type: p.type, value: {e: "ev_arg", name: p.name, type: p.type}};
     });
-    const call = {e: "call", method: mname, static: sig.static, owner: sig.static ? at : null,
+    /** @type {import("./ir.ts").Expr} */ const call = {e: "call", method: mname, static: /** @type {import("./frontend-types.ts").Signature} */ (sig).static, owner: /** @type {import("./frontend-types.ts").Signature} */ (sig).static ? at : null,
       receiver: obj ? {e: "ev_handler", type: obj.type} : null, sup: null, args, type: {k: "void"}, exceptions: null, receiving: null, callee: mname};
     // FOR EVENT e OF a subclass of the declaring class: FOR ALL INSTANCES
     // only takes senders of that class
@@ -4943,9 +4943,9 @@ function eventInfo(ctx, owner, evName) {
       if (!ctx.program.wanted.has(of)) throw notInProgram(ctx, of, `SET HANDLER ... FOR ALL INSTANCES: ${of} is not compiled in this program`);
       filter = of;
     }
-    handlers.push({call, obj, me: !obj && !sig.static, key: sig.static ? `${at}=>${mname}` : mname, event: ev.key, filter});
+    handlers.push(/** @type {import("./ir.ts").EventHandler} */ (/** @type {unknown} */ ({call, obj, me: !obj && !/** @type {import("./frontend-types.ts").Signature} */ (sig).static, key: /** @type {import("./frontend-types.ts").Signature} */ (sig).static ? `${at}=>${mname}` : mname, event: ev.key, filter})));
   }
-  return {s: "set_handler", handlers, forObj, all: forAll, static: handlers.length > 0 && ctx.program.events.get(handlers[0].event).static, activation};
+  return {s: "set_handler", handlers, forObj, all: forAll, static: handlers.length > 0 && /** @type {{static: boolean}} */ (/** @type {unknown} */ (ctx.program.events.get(handlers[0].event))).static, activation};
 }
 
 /*
@@ -4954,15 +4954,15 @@ function eventInfo(ctx, owner, evName) {
  * A4H does (val: in ZCL_GOGEN_T_EVENTS).
  */
 /** @param {import("@abaplint/core").Nodes.StatementNode} node @param {import("./frontend-types.ts").MethodContext} ctx @param {string} text @returns {import("./frontend-types.ts").FrontendStmt} */ function raiseEvent(node, ctx, text) {
-  const ev = eventInfo(ctx, ctx.className, node.findDirectExpression(Expressions.EventName).concatTokens());
+  const ev = eventInfo(ctx, ctx.className, /** @type {import("./frontend-types.ts").TokenText} */ (/** @type {unknown} */ (node.findDirectExpression(Expressions.EventName))).concatTokens());
   if (!ev.static && ctx.sig.static) throw new Unsupported(`RAISE EVENT of an instance event in a static method: ${text}`);
   const given = new Map();
   for (const p of node.findDirectExpression(Expressions.ParameterListS)?.findDirectExpressions(Expressions.ParameterS) ?? []) {
-    given.set(upper(p.findDirectExpression(Expressions.ParameterName).concatTokens()), p.findDirectExpression(Expressions.Source));
+    given.set(upper(/** @type {import("./frontend-types.ts").TokenText} */ (/** @type {unknown} */ (p.findDirectExpression(Expressions.ParameterName))).concatTokens()), p.findDirectExpression(Expressions.Source));
   }
   for (const n of given.keys()) if (!ev.params.some((p) => p.name === n)) throw new Unsupported(`RAISE EVENT ${ev.key}: no parameter ${n}`);
-  const args = ev.params.map((p) => ({name: p.name, type: p.type,
-    value: given.has(p.name) ? convert(source(given.get(p.name), ctx, p.type), p.type) : {e: "zero", type: p.type}}));
+  const args = ev.params.map(/** @returns {import("./ir.ts").Argument} */ (p) => ({name: p.name, type: p.type,
+    value: given.has(p.name) ? convert(source(/** @type {import("./frontend-types.ts").SyntaxNode} */ (/** @type {unknown} */ (given.get(p.name))), ctx, p.type), p.type) : {e: "zero", type: p.type}}));
   return {s: "raise_event", event: ev.key, static: ev.static, sender: ev.static ? null : {e: "me", type: {k: "ref", name: ctx.className}}, args};
 }
 
@@ -4971,7 +4971,7 @@ function eventInfo(ctx, owner, evName) {
  * compiled or not), for a CATCH to walk at run time: the object raised is
  * told by its class, which a RAISE EXCEPTION obj only knows then.
  */
-/** @param {import("@abaplint/core").IRegistry} reg @param {import("./frontend-types.ts").FrontendProgram} program @returns {Record<string, string>} */ function exceptionSupers(reg, program) {
+/** @param {import("./frontend-session-types.ts").Registry} reg @param {import("./frontend-types.ts").FrontendProgram} program @returns {Record<string, string>} */ function exceptionSupers(reg, program) {
   /** @type {Record<string, string>} */ const out = {};
   for (const c of program.classes) {
     const chain = [c.name, ...ancestors(reg, c.name)];
@@ -4986,14 +4986,14 @@ function eventInfo(ctx, owner, evName) {
   // a class without a constructor of its own is created through the
   // nearest superclass's
   // a local class (LOCAL_CLASSES) has its definition by its compiled name
-  /** @type {import("@abaplint/core").IClassDefinition | undefined} */ const def = (PERSIST_LOWERING ? ctx.program.localDefs : LOCAL_DEFS).get(clsName) ?? ctx.reg.getObject("CLAS", declaringClass(ctx.reg, clsName, "CONSTRUCTOR", "method") ?? clsName)?.getDefinition();
+  const def = /** @type {import("@abaplint/core").IClassDefinition | undefined} */ (/** @type {Map<string, import("@abaplint/core").IClassDefinition>} */ (PERSIST_LOWERING ? ctx.program.localDefs : LOCAL_DEFS).get(clsName)) ?? /** @type {import("@abaplint/core").Objects.Class | undefined} */ (ctx.reg.getObject("CLAS", declaringClass(ctx.reg, clsName, "CONSTRUCTOR", "method") ?? clsName))?.getDefinition();
   const m = def?.getMethodDefinitions().getByName("CONSTRUCTOR");
   if (m === undefined) return [];
   const p = m.getParameters();
   if (p.getExporting().length + p.getChanging().length > 0) throw new Unsupported(`${clsName} constructor with EXPORTING/CHANGING`);
   const optional = new Set((p.getOptional?.() ?? []).map(upper));
   const defOwner = declaringClass(ctx.reg, clsName, "CONSTRUCTOR", "method") ?? clsName;
-  /** @type {import("./frontend-types.ts").FrontendParam[]} */ const own = p.getImporting().map((x) => ({name: upper(x.getName()), dir: "importing", byValue: x.getMeta().includes("pass_by_value"),
+  /** @type {import("./frontend-types.ts").FrontendParam[]} */ const own = p.getImporting().map((x) => ({name: upper(x.getName()), dir: "importing", byValue: /** @type {string[]} */ (x.getMeta()).includes("pass_by_value"),
     type: typeOf(x.getType(), `${clsName}=>CONSTRUCTOR`, ctx.program), default: defaultOf(p, x), defaultOwner: defOwner, defOwner,
     optional: optional.has(upper(x.getName()))}));
   return withSupplied(ctx.program, `${declaringClass(ctx.reg, clsName, "CONSTRUCTOR", "method") ?? clsName}=>CONSTRUCTOR`, own);
@@ -5027,7 +5027,7 @@ function eventInfo(ctx, owner, evName) {
   for (const c of body?.getChildren() ?? []) {
     if (isTok(c)) continue;
     if (!isExpr(c, Expressions.FieldAssignment)) throw new Unsupported(`VALUE body: ${text}`);
-    const name = upper(c.findDirectExpression(Expressions.FieldSub).concatTokens());
+    const name = upper(/** @type {import("./frontend-types.ts").TokenText} */ (/** @type {unknown} */ (c.findDirectExpression(Expressions.FieldSub))).concatTokens());
     if (name.includes("-")) throw new Unsupported(`VALUE with a nested component path: ${name}`);
     const f = fieldOf(ctx, to, name, text);
     const src = c.findDirectExpression(Expressions.Source);
@@ -5056,10 +5056,10 @@ function eventInfo(ctx, owner, evName) {
   if (v.fromP) return v.fromP.dec ?? 0;
   if (v.type.k === "i" || v.type.k === "int8") return 0;
   if (v.e === "conv" && ["i2pc"].includes(v.kind)) return 0;
-  if (v.e === "neg") return templateDecimals(v.x);
+  if (v.e === "neg") return templateDecimals(/** @type {import("./frontend-types.ts").ValueExpr} */ (/** @type {unknown} */ (v.x)));
   if (v.e === "bin" && (v.op === "+" || v.op === "-")) {
-    const l = templateDecimals(v.l);
-    const r = templateDecimals(v.r);
+    const l = templateDecimals(/** @type {import("./frontend-types.ts").ValueExpr} */ (/** @type {unknown} */ (v.l)));
+    const r = templateDecimals(/** @type {import("./frontend-types.ts").ValueExpr} */ (/** @type {unknown} */ (v.r)));
     return l === null || r === null ? null : Math.max(l, r);
   }
   if (v.e === "str" && /^-?\d+$/.test(v.value)) return 0;
@@ -5110,7 +5110,7 @@ function eventInfo(ctx, owner, evName) {
       }
       parts.push({value: v, opts});
     } else {
-      throw new Unsupported(`template part ${c.get().constructor.name}`);
+      throw new Unsupported(`template part ${/** @type {{get: () => object}} */ (c).get().constructor.name}`);
     }
   }
   return {e: "template", parts, type: S};
@@ -5351,7 +5351,7 @@ const FUNCTIONS = {
     given.set(importing.filter((p) => p.default === undefined)[0]?.name ?? importing[0].name, direct);
   } else if (named !== undefined) {
     for (const p of named.findDirectExpressions(Expressions.ParameterS)) {
-      given.set(upper(p.findDirectExpression(Expressions.ParameterName).concatTokens()), p.findDirectExpression(Expressions.Source));
+      given.set(upper(/** @type {import("./frontend-types.ts").TokenText} */ (/** @type {unknown} */ (p.findDirectExpression(Expressions.ParameterName))).concatTokens()), p.findDirectExpression(Expressions.Source));
     }
   } else if (full !== undefined) {
     const kidsP = full.getChildren();
@@ -5374,7 +5374,7 @@ const FUNCTIONS = {
     const exp = full.findDirectExpression(Expressions.MethodParameters) ?? full;
     for (const list of full.findAllExpressions(Expressions.ParameterListS)) {
       for (const p of list.findDirectExpressions(Expressions.ParameterS)) {
-        given.set(upper(p.findDirectExpression(Expressions.ParameterName).concatTokens()), p.findDirectExpression(Expressions.Source));
+        given.set(upper(/** @type {import("./frontend-types.ts").TokenText} */ (/** @type {unknown} */ (p.findDirectExpression(Expressions.ParameterName))).concatTokens()), p.findDirectExpression(Expressions.Source));
       }
     }
     for (const list of full.findAllExpressions(Expressions.ParameterListT)) {
