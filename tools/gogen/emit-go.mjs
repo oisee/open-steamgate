@@ -1000,10 +1000,10 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
     lines.push("\tfunc() {");
     for (const p of valueOutputs) lines.push(`\t\tvar ${ident(p.name)} ${goType(p.type)} = ${p.dir === "changing" ? copied(`*${ident(p.name)}`, p.type) : zero(p.type)}`, `\t\t_ = ${ident(p.name)}`,
       `\t\tdefer func() { ${ident(p.name)}_value = ${ident(p.name)} }()`);
-    append(lines, stmtList(m.body, ctx, 2));
+    append(lines, stmtList((/** @type {readonly import("./emit-go-types.ts").Stmt[]} */ (m.body)), ctx, 2));
     lines.push("\t}()");
     for (const p of valueOutputs) lines.push(`\t*${ident(p.name)} = ${copied(`${ident(p.name)}_value`, p.type)}`);
-  } else append(lines, stmtList(m.body, ctx, 1));
+  } else append(lines, stmtList((/** @type {readonly import("./emit-go-types.ts").Stmt[]} */ (m.body)), ctx, 1));
   lines.push("\treturn", "}");
   // Inspect actual generated Go before adding any ABAP local declarations.
   // Method-wide bindings deliberately include descendants and enclosing
@@ -1015,7 +1015,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
     for (const l of site.locals) sunk.add(l);
   }
   const bodyLines = lines.splice(localIndex);
-  append(lines, m.locals.filter(l => !sunk.has(l)).flatMap(l => localDeclaration(l, 1)), bodyLines);
+  append(lines, (/** @type {readonly import("./emit-go-types.ts").Local[]} */ (m.locals)).filter(l => !sunk.has(l)).flatMap(l => localDeclaration(l, 1)), bodyLines);
   const rendered = lines.flatMap(line => {
     if (!line.startsWith("\u0000sink:")) return [line];
     const site = ctx.sinkSites[Number(line.slice(6))];
@@ -1051,7 +1051,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
     for (const method of cls.methods) {
       if (!(program.exceptionSupers ?? {})[cls.name] || !method.static || method.returning?.type.k !== "ref"
         || !method.params.every((p) => p.suppliedOf || p.optional || p.default !== undefined)) continue;
-      cases.push([`${cls.name}=>${method.name}`, expr(((omittedFactoryCall))(program, cls, method), {cls})]);
+      cases.push([`${cls.name}=>${method.name}`, expr((/** @type {import("./emit-go-types.ts").Expr} */ (((omittedFactoryCall))(program, cls, method))), {cls})]);
     }
   }
   const lines = ["// hostRaise turns a host's factory request into an ABAP exception.",
@@ -1125,7 +1125,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
       const field = `${ctx.staticStores?.get(owner) ?? `St_${typeName(owner)}(s)`}.${ident(p.name)}`;
       const decl = CLASSES.get(owner)?.attributes?.find((a) => a.name === p.name);
       const type = decl ? ownedType(/** @type {import("./emit-go-types.ts").SupportedAttribute} */ (decl)) : goType(p.type);
-      return owner !== ctx.cls.name && CLASSES.has(owner) && chainCctor(CLASSES.get(owner))
+      return owner !== ctx.cls.name && CLASSES.has(owner) && chainCctor((/** @type {import("./emit-go-types.ts").Class} */ (CLASSES.get(owner))))
         ? `(*func() *${type} { Ensure_${typeName(owner)}(s); return &${field} }())` : field;
     }
     case "const": return p.go;
@@ -1183,7 +1183,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
   /** @param {unknown} n @returns {void} */ const seen = (n) => {
     if (Array.isArray(n)) { n.forEach(seen); return; }
     if (!n || typeof n !== "object") return;
-    if ((/** @type {import("./emit-go-types.ts").WalkNode} */ (n)).e === "var") read.add((/** @type {import("./emit-go-types.ts").WalkNode} */ (n)).name);
+    if ((/** @type {import("./emit-go-types.ts").WalkNode} */ (n)).e === "var") read.add((/** @type {string} */ ((/** @type {import("./emit-go-types.ts").WalkNode} */ (n)).name)));
     for (const k of Object.keys(n)) if (k !== "type") seen((/** @type {import("./emit-go-types.ts").WalkNode} */ (n))[k]);
   };
   seen(outside);
@@ -1220,11 +1220,11 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
   const n = ctx.loop++;
   const tb = expr(st.table, ctx);
   const i = `ord${n}[k${n}]`;
-  const bind = st.fs ? `${ident(st.fs)} = ${boundRow((/** @type {import("./emit-go-types.ts").TableType} */ (st.table.type)), tb, i)}` : `${place((/** @type {import("./emit-go-types.ts").Expr} */ (st.into)), ctx)} = ${copied(rowValue(st.table.type, `${tb}[${i}]`), st.into.type)}`;
-  const skip = st.where ? `${t}\t\tif !(${st.where.map((w) => `${tb}[${i}].${ident(w.name)} ${w.op === "=" ? "==" : w.op === "<>" ? "!=" : w.op} ${expr(w.value, ctx)}`).join(" && ")}) { continue }` : null;
+  const bind = st.fs ? `${ident(st.fs)} = ${boundRow((/** @type {import("./emit-go-types.ts").TableType} */ (st.table.type)), tb, i)}` : `${place((/** @type {import("./emit-go-types.ts").Expr} */ (st.into)), ctx)} = ${copied(rowValue(st.table.type, `${tb}[${i}]`), (/** @type {import("./emit-go-types.ts").Expr} */ (st.into)).type)}`;
+  const skip = st.where ? `${t}\t\tif !(${st.where.map((w) => `${tb}[${i}].${ident((/** @type {string} */ (w.name)))} ${w.op === "=" ? "==" : w.op === "<>" ? "!=" : w.op} ${expr((/** @type {{readonly value: import("./emit-go-types.ts").Expr}} */ (w)).value, ctx)}`).join(" && ")}) { continue }` : null;
   return [
     `${t}{`, `${t}\tsave${n} := s.Sy.Tabix`, `${t}\ts.Sy.Subrc = 4`,
-    `${t}\tord${n} := abap.KeyOrder(len(${tb}), ${keyCmp(st.key, tb).replace(/\n/g, `\n${t}\t`)}, ${st.key.unique ? JSON.stringify(st.key.name) : `""`})`,
+    `${t}\tord${n} := abap.KeyOrder(len(${tb}), ${keyCmp((/** @type {import("./emit-go-types.ts").ResolvedKey} */ (st.key)), tb).replace(/\n/g, `\n${t}\t`)}, ${(/** @type {import("./emit-go-types.ts").ResolvedKey} */ (st.key)).unique ? JSON.stringify((/** @type {import("./emit-go-types.ts").ResolvedKey} */ (st.key)).name) : `""`})`,
     `${t}\tfor k${n} := range ord${n} {`,
     ...(skip ? [skip] : []),
     `${t}\t\ts.Sy.Tabix = int32(k${n} + 1)`, `${t}\t\ts.Sy.Subrc = 0`,
@@ -1257,7 +1257,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
  * position; not found, sy-tabix is where it would go and sy-subrc 4, or 8
  * past the last row, and the target is left alone (A4H 2026-09-24).
  */
-/** @param {import("./emit-go-types.ts").KeyRead} st @param {import("./emit-go-types.ts").Context} ctx @param {string} t @returns {string[]} */ function readSecKey(st, ctx, t) {
+/** @param {import("./emit-go-types.ts").KeyRead} st @param {import("./emit-go-types.ts").MethodContext} ctx @param {string} t @returns {string[]} */ function readSecKey(st, ctx, t) {
   const n = ctx.loop++;
   const tb = expr(st.table, ctx);
   const vals = st.values.map((v, j) => `${t}\tv${n}_${j} := ${expr(v, ctx)}`);
@@ -1330,7 +1330,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
   if (!preds || preds.length === 0) return "nil";
   return `[]abap.HostPred{${preds.map((p) => {
     const fields = new Map((STRUCTDEFS.get((/** @type {{readonly row: {readonly go: string}}} */ (p.range.type)).row.go)?.fields ?? []).map((f) => [String(f.name).toUpperCase(), f]));
-    /** @param {string} nm @returns {string} */ const v = (nm) => ((/** @type {import("./ir.ts").Field} */ (fields.get(nm))).type.k === "i" ? `int64(r.${ident(fields.get(nm).name)})` : `r.${ident(fields.get(nm).name)}`);
+    /** @param {string} nm @returns {string} */ const v = (nm) => ((/** @type {import("./ir.ts").Field} */ (fields.get(nm))).type.k === "i" ? `int64(r.${ident((/** @type {import("./ir.ts").Field} */ (fields.get(nm))).name)})` : `r.${ident((/** @type {import("./ir.ts").Field} */ (fields.get(nm))).name)}`);
     const rows = `func() []abap.RangeRow { out := []abap.RangeRow{}; for _, r := range ${expr(p.range, ctx)} { out = append(out, abap.RangeRow{Sign: r.${ident((/** @type {import("./ir.ts").Field} */ (fields.get("SIGN"))).name)}, Option: r.${ident((/** @type {import("./ir.ts").Field} */ (fields.get("OPTION"))).name)}, Low: ${v("LOW")}, High: ${v("HIGH")}}) }; return out }()`;
     return `{ID: ${JSON.stringify(p.id)}, After: ${p.after}, Column: ${JSON.stringify(p.column)}, Type: ${irTypeGo(p.type)}, Kind: ${JSON.stringify(p.kind ?? "")}, LowLen: ${p.lowLen}, Rows: ${rows}}`;
   }).join(", ")}}`;
@@ -1341,7 +1341,7 @@ const RESET = "\u0000reset-position";
 const LINES = !env("GOGEN_NOLINE");
 
 /** @param {import("./emit-go-types.ts").Local} l @param {number} d @returns {string[]} */ function localDeclaration(l, d) {
-  const z = OWNERSHIP.declarations.has(l) && l.type.k === "x" ? `${ownedType(l)}{}` : zero(l.type);
+  const z = (/** @type {import("./emit-go-types.ts").Ownership} */ (OWNERSHIP)).declarations.has(l) && l.type.k === "x" ? `${ownedType(l)}{}` : zero(l.type);
   return [isGoZero(z) ? `${tab(d)}var ${ident(l.name)} ${ownedType(l)}` : `${tab(d)}var ${ident(l.name)} ${ownedType(l)} = ${z}`, `${tab(d)}_ = ${ident(l.name)}`];
 }
 
@@ -1354,10 +1354,10 @@ const LINES = !env("GOGEN_NOLINE");
   }
   for (let i = 0; i < body.length; i++) {
     const st = body[i], next = i + 1 < body.length ? body[i + 1] : undefined; // Bounds explicit: no read past either end.
-    if (movePair(st, next, ctx, i > 0 ? body[i - 1] : undefined)) {
+    if ((/** @type {import("./emit-go-types.ts").MovePair} */ (movePair))(st, next, ctx, i > 0 ? body[i - 1] : undefined)) {
       // BumpTable keys on the address of the slice HEADER, not its backing
       // array. Preserve both bumps; clearing the source cannot invalidate a.
-      /** @type {Extract<import("./emit-go-types.ts").Stmt, {s: "assign" | "set_data"}>} */ const assign = /** @type {Extract<import("./emit-go-types.ts").Stmt, {s: "assign" | "set_data"}>} */ (st); append(lines, stmt({...assign, moveTable: true}, ctx, d), stmt(next, ctx, d));
+      /** @type {Extract<import("./emit-go-types.ts").Stmt, {s: "assign" | "set_data"}>} */ const assign = /** @type {Extract<import("./emit-go-types.ts").Stmt, {s: "assign" | "set_data"}>} */ (st); append(lines, stmt({...assign, moveTable: true}, ctx, d), stmt((/** @type {import("./emit-go-types.ts").Stmt} */ (next)), ctx, d));
       i++;
     } else append(lines, stmt(st, ctx, d));
   }
@@ -1368,7 +1368,7 @@ const LINES = !env("GOGEN_NOLINE");
   const loop = st.s === "loop" || st.s === "loop_data";
   if (loop) (ctx.loopStack ??= []).push(st);
   /** @type {string[]} */ let lines;
-  try { lines = stmtLines(st, ctx, d); } finally { if (loop) ctx.loopStack.pop(); }
+  try { lines = stmtLines(st, ctx, d); } finally { if (loop) (/** @type {import("./emit-go-types.ts").Loop[]} */ (ctx.loopStack)).pop(); }
   // Instrument the actual routing decisions. These values belong to the
   // router table / registered model, never the parsed request's segments.
   if (st.s === "assign" && ((ctx.cls.name === "ZCL_OSD_ADT_ROUTER" && ctx.method.name === "DISPATCH") || (ctx.cls.name === "ZCL_STG_DISPATCHER" && ctx.method.name === "RUN"))) {
@@ -1413,7 +1413,7 @@ const LINES = !env("GOGEN_NOLINE");
       return [...(st.target.type.k === "table" ? [`${t}abap.BumpTable(&${place(st.target, ctx)})`] : []), `${t}${place(st.target, ctx)} = ${zero(st.target.type)}`];
     case "append": {
       const tb = place(st.table, ctx);
-      /** @type {readonly import("./ir.ts").SecondaryKey[]} */ const unique = (st.table.type.secondary ?? []).filter(/** @param {import("./ir.ts").SecondaryKey} k */ (k) => k.unique);
+      /** @type {readonly import("./ir.ts").SecondaryKey[]} */ const unique = ((/** @type {import("./emit-go-types.ts").TableType} */ (st.table.type)).secondary ?? []).filter(/** @param {import("./ir.ts").SecondaryKey} k */ (k) => k.unique);
       if (unique.length) {
         // a unique secondary key (ultra/json): a row that would repeat a key
         // value is refused, not added -- A4H raises the catchable
@@ -1437,7 +1437,7 @@ const LINES = !env("GOGEN_NOLINE");
       const sep = st.sep ? expr(st.sep, ctx) : `""`;
       const joined = st.table
         ? `func() string { var b []string; for _, ConcatRowStored := range ${expr(st.table, ctx)} { ConcatRow := ${rowValue(st.table.type, "ConcatRowStored")}; b = append(b, ${expr((/** @type {import("./emit-go-types.ts").Expr} */ (st.row)), ctx)}) }; return strings.Join(b, ${sep}) }()`
-        : `strings.Join([]string{${st.parts.map((x) => expr(x, ctx)).join(", ")}}, ${sep})`;
+        : `strings.Join([]string{${(/** @type {readonly import("./emit-go-types.ts").Expr[]} */ (st.parts)).map((x) => expr(x, ctx)).join(", ")}}, ${sep})`;
       const limit = st.target.type.k === "c" || st.target.type.k === "n" ? st.target.type.len : st.target.type.k === "d" ? 8 : -1;
       const value = st.target.type.k === "n" ? `abap.CToN(v${n}, ${limit})` : st.target.type.k === "d" ? `abap.S2D(v${n})` : `v${n}`;
       return [`${t}{`, `${t}	v${n}, rc${n} := abap.ConcatFit(${joined}, ${limit})`,
@@ -1472,7 +1472,7 @@ const LINES = !env("GOGEN_NOLINE");
     }
     case "call": {
       if (st.call.e === "nop_call") return [];
-      /** @type {import("./emit-go-types.ts").CallExpr} */ const c = st.call;
+      /** @type {import("./emit-go-types.ts").CallExpr} */ const c = /** @type {import("./emit-go-types.ts").CallExpr} */ (st.call);
       const run = c.receiving ? `${place(c.receiving, ctx)} = ${expr(c, ctx)}` : expr(c, ctx);
       const quit = c.owner === "CL_ABAP_UNIT_ASSERT" ? c.args.find((a) => a.name === "QUIT" && a.supplied) : null;
       const marked = quit ? `abap.WithAssertQuit(${expr((/** @type {import("./emit-go-types.ts").Expr} */ (quit.value)), ctx)}, func() { ${run} })` : run;
@@ -1554,7 +1554,7 @@ const LINES = !env("GOGEN_NOLINE");
         const obj = h.obj ? "any(EvH)" : h.me ? `any(${self(ctx, null)})` : "nil";
         lines.push(`${t}\t{`);
         if (h.obj) lines.push(`${t}\t\tEvH := abap.BoundHandler(${expr(h.obj, ctx)})`);
-        lines.push(`${t}\t\tabap.SetHandler(s, ${JSON.stringify(h.event)}, EvFor, ${st.all}, ${ev.static}, ${obj}, ${JSON.stringify(h.key)}, ${filter}, func(s *abap.Session, EvSender any, EvArgs any) {`,
+        lines.push(`${t}\t\tabap.SetHandler(s, ${JSON.stringify(h.event)}, EvFor, ${st.all}, ${(/** @type {import("./ir.ts").Event} */ (ev)).static}, ${obj}, ${JSON.stringify(h.key)}, ${filter}, func(s *abap.Session, EvSender any, EvArgs any) {`,
           `${t}\t\t\tEvA := EvArgs.(${evType(h.event)})`, `${t}\t\t\t_, _ = EvA, EvSender`,
           `${t}\t\t\t${expr(h.call, ctx)}`, `${t}\t\t}, EvOn)`, `${t}\t}`);
       }
@@ -1564,7 +1564,7 @@ const LINES = !env("GOGEN_NOLINE");
     case "raise_event": {
       const ev = EVENTS.get(st.event);
       const fields = st.args.map(/** @param {import("./emit-go-types.ts").EventArgument} a */ (a) => `${ident(a.name)}: ${copied(expr(a.value, ctx), a.value.type, a.value)}`).join(", ");
-      return [`${t}abap.RaiseEvent(s, ${JSON.stringify(st.event)}, ${st.sender ? `any(${expr(st.sender, ctx)})` : "nil"}, ${ev.static}, func() any { return ${evType(st.event)}{${fields}} })`];
+      return [`${t}abap.RaiseEvent(s, ${JSON.stringify(st.event)}, ${st.sender ? `any(${expr(st.sender, ctx)})` : "nil"}, ${(/** @type {import("./ir.ts").Event} */ (ev)).static}, func() any { return ${evType(st.event)}{${fields}} })`];
     }
     case "raise_runtime": return [`${t}panic(abap.ArithmeticError{Class: ${JSON.stringify(st.cls)}, Op: ${JSON.stringify(st.op)}})`];
     case "call_fm": {
@@ -1677,12 +1677,12 @@ const LINES = !env("GOGEN_NOLINE");
       // index-based on purpose: a row APPENDed inside the loop is visited,
       // as in ABAP; a range over the slice would not see it
       const n = ctx.loop++;
-      st.token.idxVar = `i${n}`; // ultra/itab: DELETE itab of the current row
+      (/** @type {import("./emit-go-types.ts").LoopCursor} */ (st.token)).idxVar = `i${n}`; // ultra/itab: DELETE itab of the current row
       const tb = expr(st.table, ctx);
       const start = st.from ? `int(${expr(st.from, ctx)}) - 1` : "0";
       const limit = st.to ? ` && i${n} < int(${expr(st.to, ctx)})` : "";
-      const bind = st.fs ? `${ident(st.fs)} = ${boundRow((/** @type {import("./emit-go-types.ts").TableType} */ (st.table.type)), tb, `i${n}`)}` : `${place((/** @type {import("./emit-go-types.ts").Expr} */ (st.into)), ctx)} = ${copied(rowValue(st.table.type, `${tb}[i${n}]`), st.into.type)}`;
-      const skip = st.where ? `${t}\t\tif !(${st.where.map((w) => whereItem(w, `${tb}[i${n}]`, ctx)).join(" && ")}) { continue }` : null;
+      const bind = st.fs ? `${ident(st.fs)} = ${boundRow((/** @type {import("./emit-go-types.ts").TableType} */ (st.table.type)), tb, `i${n}`)}` : `${place((/** @type {import("./emit-go-types.ts").Expr} */ (st.into)), ctx)} = ${copied(rowValue(st.table.type, `${tb}[i${n}]`), (/** @type {import("./emit-go-types.ts").Expr} */ (st.into)).type)}`;
+      const skip = st.where ? `${t}\t\tif !(${st.where.map((w) => whereItem((/** @type {import("./emit-go-types.ts").Where} */ (w)), `${tb}[i${n}]`, ctx)).join(" && ")}) { continue }` : null;
       return [
         `${t}{`, `${t}\tsave${n} := s.Sy.Tabix`, `${t}\ts.Sy.Subrc = 4`,
         `${t}\tfor i${n} := max(${start}, 0); i${n} < len(${tb})${limit}; i${n}++ {`,
@@ -1837,7 +1837,7 @@ ${t}	}`));
     // ultra/events: APPEND INITIAL LINE TO <generic table> ASSIGNING <generic>
     case "append_initial_data": {
       const n = ctx.loop++;
-      return [`${t}{`, `${t}\tr${n}, i${n} := abap.AppendInitialData(${expr(st.table, ctx)})`, `${t}\t${ident(st.fs)} = r${n}`, `${t}\ts.Sy.Tabix = int32(i${n})`, `${t}}`];
+      return [`${t}{`, `${t}\tr${n}, i${n} := abap.AppendInitialData(${expr(st.table, ctx)})`, `${t}\t${ident((/** @type {string} */ (st.fs)))} = r${n}`, `${t}\ts.Sy.Tabix = int32(i${n})`, `${t}}`];
     }
     case "append_data":
       return [`${t}s.Sy.Tabix = int32(abap.AppendData(${expr(st.table, ctx)}, ${expr(st.value, ctx)}))`];
@@ -1897,26 +1897,26 @@ ${t}	}`));
     case "read_index_data": {
       const n = `idx${ctx.loop++}`;
       return [`${t}if ${n}, tb${n} := ${expr(st.index, ctx)}, ${expr(st.table, ctx)}; ${n} >= 1 && int(${n}) <= abap.Lines(tb${n}) {`,
-        `${t}\t${ident(st.fs)} = abap.Row(tb${n}, int(${n}-1))`, `${t}\ts.Sy.Subrc = 0`, `${t}\ts.Sy.Tabix = ${n}`, `${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`];
+        `${t}\t${ident((/** @type {string} */ (st.fs)))} = abap.Row(tb${n}, int(${n}-1))`, `${t}\ts.Sy.Subrc = 0`, `${t}\ts.Sy.Tabix = ${n}`, `${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`];
     }
     case "loop_data": return withBuilders(st.body, ctx, t, () => {
       const n = ctx.loop++;
       const tb = `tab${n}`;
-      st.token.idxVar = `i${n}`;
+      (/** @type {import("./emit-go-types.ts").LoopCursor} */ (st.token)).idxVar = `i${n}`;
       return [`${t}{`, `${t}\t${tb} := ${expr(st.table, ctx)}`, `${t}\tsave${n} := s.Sy.Tabix`, `${t}\ts.Sy.Subrc = 4`,
         `${t}\tfor i${n} := 0; i${n} < abap.Lines(${tb}); i${n}++ {`,
         `${t}\t\ts.Sy.Tabix = int32(i${n} + 1)`, `${t}\t\ts.Sy.Subrc = 0`,
         // a typed field symbol (ultra/json): the row must be that structure
-        st.fsType ? `${t}\t\t${ident(st.fs)} = abap.DerefAs[${goType(st.fsType)}](abap.Row(${tb}, i${n}), ${JSON.stringify(st.text)})` : `${t}\t\t${ident(st.fs)} = abap.Row(${tb}, i${n})`,
+        st.fsType ? `${t}\t\t${ident((/** @type {string} */ (st.fs)))} = abap.DerefAs[${goType(st.fsType)}](abap.Row(${tb}, i${n}), ${JSON.stringify(st.text)})` : `${t}\t\t${ident((/** @type {string} */ (st.fs)))} = abap.Row(${tb}, i${n})`,
         ...stmtList(st.body, ctx, d + 2), `${t}\t}`, `${t}\ts.Sy.Tabix = save${n}`, `${t}}`];
     });
     case "call_dyn_static": {
       const moves = st.receiving ? dynamicResultMoves({classes: [...CLASSES.values()], dynamicDispatch: DYNAMIC_DISPATCH}, st.method, st.receiving.target.type) : [];
-      const call = `abap.CallStatic(s, ${expr(st.cls, ctx)}, ${JSON.stringify(st.method)}, map[string]abap.Data{${st.args.map((a) => `${JSON.stringify(a.name)}: ${expr(a.value, ctx)}`).join(", ")}}, ${JSON.stringify(st.receiving?.name ?? "")}, ${goStrings(moves.map((m) => m.key))})`;
+      const call = `abap.CallStatic(s, ${expr((/** @type {import("./emit-go-types.ts").Expr} */ (st.cls)), ctx)}, ${JSON.stringify(st.method)}, map[string]abap.Data{${st.args.map((a) => `${JSON.stringify(a.name)}: ${expr(a.value, ctx)}`).join(", ")}}, ${JSON.stringify(st.receiving?.name ?? "")}, ${goStrings(moves.map((m) => m.key))})`;
       if (!st.receiving) return [`${t}${call}`];
       return [`${t}{`, `${t}\tdynKey, dynValue := ${call}`, `${t}\t_ = dynValue`, `${t}\tswitch dynKey {`,
         ...moves.flatMap((m) => [`${t}\tcase ${JSON.stringify(m.key)}:`,
-          ...stmt({s: st.receiving.target.type.k === "data" ? "set_data" : "assign", target: st.receiving.target, value: m.value}, ctx, d + 2)]), `${t}\t}`, `${t}}`];
+          ...stmt({s: (/** @type {{readonly name: string; readonly target: import("./emit-go-types.ts").Expr}} */ (st.receiving)).target.type.k === "data" ? "set_data" : "assign", target: (/** @type {{readonly name: string; readonly target: import("./emit-go-types.ts").Expr}} */ (st.receiving)).target, value: m.value}, ctx, d + 2)]), `${t}\t}`, `${t}}`];
     }
     case "select_table": {
       // INTO TABLE replaces the table; each row is scanned column by column
@@ -1928,7 +1928,7 @@ ${t}	}`));
       const moves = st.assign.map((a, i) => (a === null ? null
         : `${a.line ? "r" : `r.${ident((/** @type {string} */ (a.field)))}`} = ${dbColumn(st.cols[i], `c${i}_${n}`, a.type)}`)).filter(Boolean);
       const keyedRow = () => {
-        /** @type {import("./emit-go-types.ts").TableType} */ const ty = st.target.type;
+        /** @type {import("./emit-go-types.ts").TableType} */ const ty = /** @type {import("./emit-go-types.ts").TableType} */ (st.target.type);
         const saved = ctx.lrow;
         ctx.lrow = "r";
         /** @type {import("./emit-go-types.ts").Expr} */ const value = {e: "lrow", type: ty.row};
@@ -1979,7 +1979,7 @@ ${t}	}`));
       const v = `agg${n}`;
       return [`${t}{`, `${t}\tvar ${v} ${col.type.k === "i" ? "abap.DBInt" : "abap.DBString"}`,
         `${t}\tabap.Select(s, ${JSON.stringify(st.sql)}, ${sqlArgs(st.args, ctx)}, ${hostPreds(st.preds, ctx)}, func(scan func(dest ...any) error) { abap.Must(scan(&${v})) })`,
-        `${t}\t${place((/** @type {import("./emit-go-types.ts").Expr} */ (st.target)), ctx)} = ${dbColumn(col, v, st.assign[0].type)}`,
+        `${t}\t${place((/** @type {import("./emit-go-types.ts").Expr} */ (st.target)), ctx)} = ${dbColumn(col, v, (/** @type {import("./emit-go-types.ts").SqlAssignment} */ (st.assign[0])).type)}`,
         `${t}\ts.Sy.Subrc, s.Sy.Dbcnt = 0, 1`, `${t}}`];
     }
     case "unassign":
@@ -2070,7 +2070,7 @@ ${t}	}`));
     }
     case "create_dyn":
       return [`${t}${place(st.target, ctx)} = abap.CreateAs[${goType(st.target.type)}](s, ${expr(st.name, ctx)})`];
-    case "read_seckey": return readSecKey(st, ctx, t);
+    case "read_seckey": return readSecKey(st, (/** @type {import("./emit-go-types.ts").MethodContext} */ (ctx)), t);
     case "read_key": {
       const tb = expr(st.table, ctx);
       const n = ctx.loop++;
@@ -2150,7 +2150,7 @@ ${t}	}`));
       // sy-subrc 0 when a row went, 4 when none did
       const tb = place(st.table, ctx);
       const n = ctx.loop++;
-      const keep = st.where.map((w) => whereItem(w, `r${n}`, ctx)).join(" && ");
+      const keep = st.where.map((w) => whereItem((/** @type {import("./emit-go-types.ts").Where} */ (w)), `r${n}`, ctx)).join(" && ");
       return [`${t}{`, `${t}\tkept${n} := ${tb}[:0]`, `${t}\tfor _, r${n} := range ${tb} {`, `${t}\t\tif !(${keep}) {`,
         `${t}\t\t\tkept${n} = append(kept${n}, r${n})`, `${t}\t\t}`, `${t}\t}`,
         `${t}\ts.Sy.Subrc = 4`, `${t}\tif len(kept${n}) < len(${tb}) {`, `${t}\t\ts.Sy.Subrc = 0`, `${t}\t\tclear(${tb}[len(kept${n}):])`, `${t}\t\tabap.BumpTable(&${tb})`, `${t}\t}`, `${t}\t${tb} = kept${n}`, `${t}}`];
@@ -2226,7 +2226,7 @@ ${t}	}`));
     // 750 KB value a character at a time and returned from inside the loop,
     // which kept it off the builder and made the append quadratic)
     case "return": return [...[...(ctx.builders ?? new Map())].map(([n, sb]) => `${t}${ident(n)} = abap.Canon(${sb}.String())`), `${t}${leave(ctx, 1)}`];
-    default: throw new Error(`no Go for statement ${st.s}`);
+    default: throw new Error(`no Go for statement ${(/** @type {import("./emit-go-types.ts").WalkNode} */ (st)).s}`);
   }
 }
 
@@ -2265,14 +2265,14 @@ ${t}	}`));
     case "float": return Number.isInteger(e.value) ? `float64(${e.value})` : String(e.value);
     case "chars": case "str": return JSON.stringify(e.value);
     case "template": {
-      const parts = e.parts.map((p) => (p.text !== undefined ? JSON.stringify(p.text) : templatePart(p.value, ctx, p.opts ?? {})));
+      const parts = e.parts.map((p) => ((/** @type {{readonly text?: string}} */ (p)).text !== undefined ? JSON.stringify((/** @type {{readonly text?: string}} */ (p)).text) : templatePart((/** @type {{readonly value: import("./emit-go-types.ts").Expr; readonly opts?: import("./emit-go-types.ts").TemplateOptions}} */ (p)).value, ctx, (/** @type {{readonly value: import("./emit-go-types.ts").Expr; readonly opts?: import("./emit-go-types.ts").TemplateOptions}} */ (p)).opts ?? {})));
       return parts.length === 0 ? `""` : parts.reduce((a, b) => `abap.Concat(${a}, ${b})`);
     }
     case "concat": return `abap.Concat(${e.l.e === "conv" && ["i2s", "i82s"].includes(e.l.kind) ? `strings.TrimRight(${expr(e.l, ctx)}, " ")` : expr(e.l, ctx)}, ${e.r.e === "conv" && ["i2s", "i82s"].includes(e.r.kind) ? `strings.TrimRight(${expr(e.r, ctx)}, " ")` : expr(e.r, ctx)})`;
     // CORRESPONDING type( itab ): a new table, one mapped row per source row
     case "table_map": {
       const n = Number(ctx.loop); ctx.loop = n + 1;
-      return `func() ${goType(e.type)} { out := ${goType(e.type)}{}; for _, MapRow${n} := range ${expr((/** @type {import("./emit-go-types.ts").Expr} */ (e.from)), ctx)} { ${place(e.row, ctx)} = ${rowValue(e.from.type, `MapRow${n}`)}; out = append(out, ${rowStored(e.type, expr(e.value, ctx))}) }; return out }()`;
+      return `func() ${goType(e.type)} { out := ${goType(e.type)}{}; for _, MapRow${n} := range ${expr((/** @type {import("./emit-go-types.ts").Expr} */ (e.from)), ctx)} { ${place(e.row, ctx)} = ${rowValue((/** @type {import("./emit-go-types.ts").Expr} */ (e.from)).type, `MapRow${n}`)}; out = append(out, ${rowStored(e.type, expr(e.value, ctx))}) }; return out }()`;
     }
     case "struct": {
       // VALUE #( ... ): a component it does not name is initial (critic finding 1)
@@ -2315,7 +2315,7 @@ ${t}	}`));
     case "substr": {
       const off = e.off ? expr(e.off, ctx) : "0";
       const len = e.len ? expr(e.len, ctx) : "-1";
-      /** @type {import("./emit-go-types.ts").Type} */ const base = e.base;
+      /** @type {import("./emit-go-types.ts").Type} */ const base = /** @type {import("./emit-go-types.ts").Type} */ (e.base);
       if (base.k === "x" || base.k === "xstring") return `abap.SubX(${expr(e.x, ctx)}, ${off}, ${len})`;
       if (base.k === "c") return `abap.SubC(${expr(e.x, ctx)}, ${base.len}, ${off}, ${len})`;
       return `abap.SubS(${expr(e.x, ctx)}, ${off}, ${len})`;
@@ -2326,7 +2326,7 @@ ${t}	}`));
       for (const a of e.args) {
         if (a.dir === "importing") args.push(importingArg(a, ctx));
         else if (a.wrap) args.push(`&${expr(a.wrap, ctx)}`);
-        else if (a.place === null) args.push(`new(${goType(a.type)})`);
+        else if (a.place === null) args.push(`new(${goType((/** @type {import("./emit-go-types.ts").Type} */ (a.type)))})`);
         else if (a.place === undefined) throw new TypeError("call argument has no place");
         else args.push(`&${place(a.place, ctx)}`);
       }
@@ -2362,7 +2362,7 @@ ${t}	}`));
     }
     case "cast": return `abap.Cast[${goType(e.type)}](${expr(e.x, ctx)})`;
     // a typed slot seen as generic data: its address and its descriptor
-    case "lrow": return ctx.lrow;
+    case "lrow": return (/** @type {string} */ (ctx.lrow));
     // ultra/itab: generic arithmetic (frontend.mjs genericArith)
     case "unwrap_calc": {
       const d = expr(e.x, ctx);
@@ -2374,7 +2374,7 @@ ${t}	}`));
         /** @type {import("./emit-go-types.ts").ArithmeticBranchProbe} */ const branch = b;
         return branch.reason !== undefined
           ? `case '${code}': panic(abap.NotCompiled("arithmetic", ${JSON.stringify(branch.reason)}))`
-          : `case '${code}': return ${expr(b, ctx)}`;
+          : `case '${code}': return ${expr((/** @type {import("./emit-go-types.ts").Expr} */ (b)), ctx)}`;
       });
       return `func() ${goType(e.type)} { switch ${sel} { ${arms.join("; ")} }; panic(abap.NotCompiled("arithmetic", ${JSON.stringify(`calculation type of ${e.text} with these operands: not measured`)})) }()`;
     }
@@ -2551,7 +2551,7 @@ ${t}	}`));
       return `(${c.op === "=" ? "" : "!"}func() bool { l, r := ${expr(c.l, ctx)}, ${expr(c.r, ctx)}; if len(l) != len(r) { return false }; for i := range l { ${place(c.a, ctx)}, ${place(c.b, ctx)} = l[i], r[i]; if !(${cond(c.rowEq, ctx)}) { return false } }; return true }())`;
     case "or": return `(${cond(c.l, ctx)} || ${cond(c.r, ctx)})`;
     case "not": return `!(${cond(c.x, ctx)})`;
-    default: throw new Error(`no Go for condition ${c.c}`);
+    default: throw new Error(`no Go for condition ${(/** @type {import("./emit-go-types.ts").WalkNode} */ (c)).c}`);
   }
 }
 
@@ -2561,7 +2561,7 @@ ${t}	}`));
     "func Call(name string, s *abap.Session, args []float64) float64 {", "\tswitch name {"];
   for (const cls of classes) {
     for (const m of cls.methods) {
-      if (!m.static || m.returning === null || !["i", "f"].includes(m.returning.type.k)) continue;
+      if (!m.static || m.returning === null || !["i", "f"].includes((/** @type {import("./emit-go-types.ts").Field} */ (m.returning)).type.k)) continue;
       if (m.params.some((p) => p.dir !== "importing" || !["i", "f"].includes(p.type.k))) continue;
       const args = m.params.map((p, i) => (p.type.k === "i" ? `int32(args[${i}])` : `args[${i}]`));
       lines.push(`\tcase "${cls.name}=>${m.name}":`, `\t\treturn float64(${funcName(cls.name, m.name)}(${["s", ...args].join(", ")}))`);

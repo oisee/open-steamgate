@@ -32,7 +32,7 @@ export interface UntypedFlagExpr { readonly e: 'flag'; readonly value: boolean; 
 type StrFnExpr = RuntimeFields<Omit<Extract<IR.Expr, {e: 'str_fn'}>, 'args'>> & {readonly args: readonly (Expr | UntypedFlagExpr)[]};
 export type Expr = RuntimeFields<Exclude<IR.Expr, {e: 'call' | 'int' | 'flag' | 'strlist' | 'str_fn' | 'struct' | 'upcast' | 'substr'}>> | CallExpr | SubstringExpr | StrFnExpr
   | (RuntimeFields<Omit<Extract<IR.Expr, {e: 'struct'}>, 'type'>> & {readonly type: Extract<IR.Type, {k: 'struct'}>}) | (RuntimeFields<Omit<Extract<IR.Expr, {e: 'upcast'}>, 'type'>> & {readonly type: Extract<IR.Type, {k: 'ref'}>})
-  | {readonly e: 'int' | 'float'; readonly value: number; readonly type: IR.Type}
+  | {readonly e: 'int' | 'float'; readonly value: number; readonly type: IR.Type; readonly conv?: boolean; readonly fromP?: Extract<IR.Type, {k: 'p'}>}
   | TypedFlagExpr;
 export interface LockField extends Pick<IR.TableColumn, 'name' | 'kind'> { readonly length: number }
 export interface NativeArgument { readonly value: Expr; readonly ref?: boolean }
