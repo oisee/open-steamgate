@@ -369,8 +369,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
     append(out, intfAccessors(program, name));
     out.push("}", "");
   }
-  // ultra/events: the parameters of each event used, as one struct a
-  // RAISE EVENT builds per handler call
+  // ultra/events: the parameters of each event used, as one struct a RAISE EVENT builds per handler call
   for (const ev of (layers?.events ?? EVENTS).values()) {
     out.push(`type ${evType(ev.key)} struct {`);
     for (const p of ev.params) out.push(`\t${ident(p.name)} ${goType(p.type)}`);
@@ -382,21 +381,16 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
     const inst = (cls.attributes ?? []).filter(/** @returns {a is import("./emit-go-types.ts").SupportedAttribute} */ (a) => !a.static && a.unsupported === undefined);
     const statics = (cls.attributes ?? []).filter(/** @returns {a is import("./emit-go-types.ts").SupportedAttribute} */ (a) => !!a.static && a.unsupported === undefined);
     out.push(`type ${typeName(cls.name)} struct {`);
-    // the superclass's part of the object, embedded: its attributes and
-    // methods are promoted, and a redefinition shadows the method
+    // the superclass's part of the object, embedded: its attributes and methods are promoted, and a redefinition shadows the method
     if (cls.super) out.push(`\t${typeName(cls.super)}`);
     // the most-derived object, for the calls a method makes on me
     if (POLY.has(cls.name)) out.push(`\t${selfField(cls.name)} I_${typeName(cls.name)}`);
-    // ultra/events: an object that raises instance events carries the
-    // handlers registered FOR it (go/abap/events.go); once per chain, the
-    // subclasses get it through the embedding
+    // ultra/events: an object that raises instance events carries the handlers registered FOR it (go/abap/events.go); once per chain, the subclasses get it through the embedding
     if (cls.instanceEvents && !(cls.super && CLASSES.get(cls.super)?.instanceEvents)) out.push("\tabap.Events");
     if (cls.name === "CX_ROOT") out.push("\tKernelException *abap.Exception");
     if (cls.name === "CL_ABAP_OBJECTDESCR") out.push("\tKernelRtti bool");
     for (const a of inst) out.push(`\t${ident(a.name)} ${ownedType(a)}`);
-    // ultra/events: an object of a class without fields would be zero-sized,
-    // and Go may give two of them one address: ref <> ref and the handler
-    // registry need each object to be itself
+    // ultra/events: an object of a class without fields would be zero-sized, and Go may give two of them one address: ref <> ref and the handler registry need each object to be itself
     if (out.at(-1) === `type ${typeName(cls.name)} struct {`) out.push("\t_ byte");
     out.push("}", "");
     if (cls.name === "CX_ROOT") out.push(`func (me *CX_ROOT) ExceptionPrevious() any { return abap.ExceptionRead(me, "PREVIOUS").${ident("PREVIOUS")} }`, `func (me *CX_ROOT) SetKernelException(e *abap.Exception) { me.KernelException = e }`, `func (me *CX_ROOT) GetKernelException() *abap.Exception { return me.KernelException }`, "");
@@ -457,19 +451,27 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
     out.push(`func init() {`, `\tabap.RegisterClass(${JSON.stringify(cls.name)}, (*${typeName(cls.name)})(nil), func(s *abap.Session) any { ${make} })`, "}", "");
   }
   append(out, exceptionSupers(program));
-  if (classes.some(c => c.methods.some(m => (/** @type {{fn?: unknown} | undefined} */ (m.body?.[0]))?.fn === "Native_GET_SUPER_CLASS_TYPE"))) append(out, superClassGo((/** @type {import("./emit-go-types.ts").ProgramWithRtti} */ (program)), {goType, ident}));
-  if (classes.some(c => c.methods.some(m => (/** @type {{fn?: unknown} | undefined} */ (m.body?.[0]))?.fn === "Native_DESCRIBE_BY_OBJECT_REF" || (/** @type {{fn?: unknown} | undefined} */ (m.body?.[0]))?.fn === "Native_GET_SUPER_CLASS_TYPE"))) append(out, (/** @type {import("./emit-go-types.ts").ObjectRttiGo} */ (objectRttiGo))(program, {goType, ident}));
+  // @ts-expect-error -- abapiti form pending
+  if (classes.some(c => c.methods.some(m => m.body?.[0]?.fn === "Native_GET_SUPER_CLASS_TYPE"))) append(out, superClassGo((/** @type {import("./emit-go-types.ts").ProgramWithRtti} */ (program)), {goType, ident}));
+  // @ts-expect-error -- abapiti form pending
+  if (classes.some(c => c.methods.some(m => m.body?.[0]?.fn === "Native_DESCRIBE_BY_OBJECT_REF" || m.body?.[0]?.fn === "Native_GET_SUPER_CLASS_TYPE"))) append(out, (/** @type {import("./emit-go-types.ts").ObjectRttiGo} */ (objectRttiGo))(program, {goType, ident}));
   append(out, hostRaiseGlue(program, classes, layers));
   if (!layers) append(out, dispatcher(classes));
   append(out, staticRegistry(program, classes));
-  if (classes.some((c) => c.methods.some((m) => (/** @type {{fn?: unknown} | undefined} */ (m.body?.[0]))?.fn === "Native_DESCRIBE_BY_NAME"))) append(out, nativeRtti(program));
-  if (classes.some((c) => c.methods.some((m) => (/** @type {{fn?: unknown} | undefined} */ (m.body?.[0]))?.fn === "Native_GET_TEXT_FOR_MESSAGE"))) append(out, (/** @type {import("./emit-go-types.ts").NativeMessageText} */ (nativeMessageText))(program, {goType, ident, classes: CLASSES, poly: POLY, ancestorsOf}));
-  if (classes.some((c) => c.methods.some((m) => (/** @type {{fn?: unknown} | undefined} */ (m.body?.[0]))?.fn === "Native_DESCRIBE_BY_DATA"))) append(out, nativeRttiData(program));
-  if (classes.some((c) => c.methods.some((m) => (/** @type {{fn?: unknown} | undefined} */ (m.body?.[0]))?.fn === "Native_JSON_PARSE"))) append(out, nativeJsonParse());
-  if (classes.some((c) => c.methods.some((m) => (/** @type {{fn?: unknown} | undefined} */ (m.body?.[0]))?.fn === "Native_AJSON_ENCODE"))) {
+  // @ts-expect-error -- abapiti form pending
+  if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_DESCRIBE_BY_NAME"))) append(out, nativeRtti(program));
+  // @ts-expect-error -- abapiti form pending
+  if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_GET_TEXT_FOR_MESSAGE"))) append(out, (/** @type {import("./emit-go-types.ts").NativeMessageText} */ (nativeMessageText))(program, {goType, ident, classes: CLASSES, poly: POLY, ancestorsOf}));
+  // @ts-expect-error -- abapiti form pending
+  if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_DESCRIBE_BY_DATA"))) append(out, nativeRttiData(program));
+  // @ts-expect-error -- abapiti form pending
+  if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_JSON_PARSE"))) append(out, nativeJsonParse());
+  // @ts-expect-error -- abapiti form pending
+  if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_AJSON_ENCODE"))) {
     out.push("func Native_AJSON_ENCODE(s *abap.Session, input string) string { return abap.EncodeText(\"utf8\", input) }", "");
   }
-  if (classes.some((c) => c.methods.some((m) => (/** @type {{fn?: unknown} | undefined} */ (m.body?.[0]))?.fn === "Native_AJSON_DECODE"))) {
+  // @ts-expect-error -- abapiti form pending
+  if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_AJSON_DECODE"))) {
     out.push("func Native_AJSON_DECODE(s *abap.Session, input string) string { return abap.DecodeText(\"utf8\", false, input) }", "");
   }
   append(out, nativeCodepage(classes));
@@ -484,8 +486,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
   out[out.indexOf("\u0000helper-imports")] = [...HELPER_IMPORTS].sort()
     .map((name) => `\t${helperAlias(name)} "osg/gogen/${name}"`).join("\n");
   const generated = out.join("\n") + "\n";
-  // ident() is also used by the JS emitter in this process. A layered Go
-  // emission must not change its spelling for the next consumer.
+  // ident() is also used by the JS emitter in this process. A layered Go emission must not change its spelling for the next consumer.
   exportedFields = false;
   return generated;
 }
@@ -498,7 +499,8 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
  */
 /** @param {readonly import("./emit-go-types.ts").Class[]} classes @returns {string[]} */ function nativeCodepage(classes) {
   /** @type {string[]} */ const out = [];
-  /** @param {string} fn @returns {boolean} */ const has = (fn) => classes.some((c) => c.methods.some((m) => (/** @type {{fn?: unknown} | undefined} */ (m.body?.[0]))?.fn === fn));
+  // @ts-expect-error -- abapiti form pending
+  /** @param {string} fn @returns {boolean} */ const has = (fn) => classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === fn));
   /** @param {string} cls @param {string} meth @param {string} p @returns {boolean | undefined} */ const sup = (cls, meth, p) => classes.find((c) => c.name === cls)?.methods.find((m) => m.name === meth)?.params.some((x) => x.suppliedOf === p);
   if (has("Native_CONV_OUT_CONVERT")) {
     const withSup = sup("CL_ABAP_CONV_OUT_CE", "CONVERT", "N");
