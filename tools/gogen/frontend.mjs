@@ -403,9 +403,9 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
 /** ALIASES a FOR i~m of a class or interface (or a superclass): i~m */
 /** @param {import("./frontend-session-types.ts").Registry} reg @param {string} owner @param {string} name @returns {string | undefined} */ function aliasTarget(reg, owner, name) {
   for (const o of [owner, ...ancestors(reg, owner)]) {
-    const def = /** @type {import("@abaplint/core").Objects.Interface | undefined} */ (reg.getObject("INTF", o))?.getDefinition() ?? clasDef(reg, o);
-    const all = def?.getAliases?.();
     // @ts-expect-error -- abapiti form pending
+    const def = reg.getObject("INTF", o)?.getDefinition() ?? clasDef(reg, o);
+    const all = def?.getAliases?.();
     /** @type {ReturnType<import("@abaplint/core").IInterfaceDefinition["getAliases"]>} */ const list = Array.isArray(all) ? all : all?.getAll?.() ?? [];
     const hit = list.find((x) => upper(x.getName()) === name);
     if (hit) return upper(hit.getComponent());
