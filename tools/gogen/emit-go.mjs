@@ -1218,7 +1218,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
   const n = ctx.loop++;
   const tb = expr(st.table, ctx);
   const i = `ord${n}[k${n}]`;
-  const bind = st.fs ? `${ident(st.fs)} = ${boundRow((/** @type {import("./emit-go-types.ts").TableType} */ (st.table.type)), tb, i)}` : `${place(st.into, ctx)} = ${copied(rowValue(st.table.type, `${tb}[${i}]`), st.into.type)}`;
+  const bind = st.fs ? `${ident(st.fs)} = ${boundRow((/** @type {import("./emit-go-types.ts").TableType} */ (st.table.type)), tb, i)}` : `${place((/** @type {import("./emit-go-types.ts").Expr} */ (st.into)), ctx)} = ${copied(rowValue(st.table.type, `${tb}[${i}]`), st.into.type)}`;
   const skip = st.where ? `${t}\t\tif !(${st.where.map((w) => `${tb}[${i}].${ident(w.name)} ${w.op === "=" ? "==" : w.op === "<>" ? "!=" : w.op} ${expr(w.value, ctx)}`).join(" && ")}) { continue }` : null;
   return [
     `${t}{`, `${t}\tsave${n} := s.Sy.Tabix`, `${t}\ts.Sy.Subrc = 4`,
@@ -1261,14 +1261,14 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
   const vals = st.values.map((v, j) => `${t}\tv${n}_${j} := ${expr(v, ctx)}`);
   if (st.key.hashed) {
     const at = `kI${n}`;
-    const bindH = st.fs ? `${ident(st.fs)} = ${boundRow((/** @type {import("./emit-go-types.ts").TableType} */ (st.table.type)), tb, at)}` : st.refInto ? `${place(st.into, ctx)} = ${rowRef((/** @type {import("./emit-go-types.ts").TableType} */ (st.table.type)), tb, `${tb}[${at}]`)}` : st.into ? `${place(st.into, ctx)} = ${copied(rowValue(st.table.type, `${tb}[${at}]`), st.into.type)}` : null;
+    const bindH = st.fs ? `${ident(st.fs)} = ${boundRow((/** @type {import("./emit-go-types.ts").TableType} */ (st.table.type)), tb, at)}` : st.refInto ? `${place((/** @type {import("./emit-go-types.ts").Expr} */ (st.into)), ctx)} = ${rowRef((/** @type {import("./emit-go-types.ts").TableType} */ (st.table.type)), tb, `${tb}[${at}]`)}` : st.into ? `${place((/** @type {import("./emit-go-types.ts").Expr} */ (st.into)), ctx)} = ${copied(rowValue(st.table.type, `${tb}[${at}]`), st.into.type)}` : null;
     return [`${t}{`, ...keyValues(st, ctx, t, n),
       `${t}\t${at} := abap.KeyFind(len(${tb}), ${keyEq(st.key, tb, n)}, ${JSON.stringify(st.key.name)})`,
       `${t}\ts.Sy.Subrc, s.Sy.Tabix = 4, 0`,
       `${t}\tif ${at} >= 0 {`, ...(bindH ? [`${t}\t\t${bindH}`] : []), `${t}\t\ts.Sy.Subrc = 0`, `${t}\t}`, `${t}}`];
   }
   const cmp = st.key.comps.map((c, j) => `if c := abap.${c.num ? "CmpNum" : "CmpS"}(${tb}[i].${ident(c.name)}, v${n}_${j}); c != 0 {\n${t}\t\treturn c\n${t}\t}`);
-  const bind = st.fs ? `${ident(st.fs)} = ${boundRow((/** @type {import("./emit-go-types.ts").TableType} */ (st.table.type)), tb, `i${n}`)}` : st.refInto ? `${place(st.into, ctx)} = ${rowRef((/** @type {import("./emit-go-types.ts").TableType} */ (st.table.type)), tb, `${tb}[i${n}]`)}` : st.into ? `${place(st.into, ctx)} = ${copied(rowValue(st.table.type, `${tb}[i${n}]`), st.into.type)}` : null;
+  const bind = st.fs ? `${ident(st.fs)} = ${boundRow((/** @type {import("./emit-go-types.ts").TableType} */ (st.table.type)), tb, `i${n}`)}` : st.refInto ? `${place((/** @type {import("./emit-go-types.ts").Expr} */ (st.into)), ctx)} = ${rowRef((/** @type {import("./emit-go-types.ts").TableType} */ (st.table.type)), tb, `${tb}[i${n}]`)}` : st.into ? `${place((/** @type {import("./emit-go-types.ts").Expr} */ (st.into)), ctx)} = ${copied(rowValue(st.table.type, `${tb}[i${n}]`), st.into.type)}` : null;
   return [`${t}{`, ...vals,
     `${t}\ti${n}, pos${n}, sub${n} := abap.KeyRead(len(${tb}), func(i int) int {\n${t}\t${cmp.join(`\n${t}\t`)}\n${t}\treturn 0\n${t}\t}, ${st.key.unique ? JSON.stringify(st.key.name) : `""`})`,
     `${t}\tif sub${n} == 0 {`, ...(bind ? [`${t}\t\t${bind}`] : []), `${t}\t}`, `${t}\t_ = i${n}`,
@@ -1399,7 +1399,7 @@ const LINES = !env("GOGEN_NOLINE");
           return [`${t}${place(st.target.base, ctx)} = hSubwrite.Char(${expr(st.target.base, ctx)}, ${st.target.off ? expr(st.target.off, ctx) : "0"}, ${st.target.len ? expr(st.target.len, ctx) : "-1"}, ${expr(st.value, ctx)}, ${limit})`];
         }
 
-        return [`${t}${place(st.target.base, ctx)} = hSubwrite.X(${expr(st.target.base, ctx)}, ${st.target.off ? expr(st.target.off, ctx) : "0"}, ${expr(st.target.len, ctx)}, ${expr(st.value, ctx)})`];
+        return [`${t}${place(st.target.base, ctx)} = hSubwrite.X(${expr(st.target.base, ctx)}, ${st.target.off ? expr(st.target.off, ctx) : "0"}, ${expr((/** @type {import("./emit-go-types.ts").Expr} */ (st.target.len)), ctx)}, ${expr(st.value, ctx)})`];
       }
       if (ctx.builders?.has((/** @type {Extract<import("./emit-go-types.ts").Expr, {e: "var"}>} */ (st.target)).name) && isAppend(/** @type {import("./emit-go-types.ts").WalkNode} */ (/** @type {unknown} */ (st)), (/** @type {Extract<import("./emit-go-types.ts").Expr, {e: "var"}>} */ (st.target)).name)) {
         /** @type {import("./emit-go-types.ts").Expr[]} */ const parts = [];
@@ -1434,7 +1434,7 @@ const LINES = !env("GOGEN_NOLINE");
       const n = ctx.loop++;
       const sep = st.sep ? expr(st.sep, ctx) : `""`;
       const joined = st.table
-        ? `func() string { var b []string; for _, ConcatRowStored := range ${expr(st.table, ctx)} { ConcatRow := ${rowValue(st.table.type, "ConcatRowStored")}; b = append(b, ${expr(st.row, ctx)}) }; return strings.Join(b, ${sep}) }()`
+        ? `func() string { var b []string; for _, ConcatRowStored := range ${expr(st.table, ctx)} { ConcatRow := ${rowValue(st.table.type, "ConcatRowStored")}; b = append(b, ${expr((/** @type {import("./emit-go-types.ts").Expr} */ (st.row)), ctx)}) }; return strings.Join(b, ${sep}) }()`
         : `strings.Join([]string{${st.parts.map((x) => expr(x, ctx)).join(", ")}}, ${sep})`;
       const limit = st.target.type.k === "c" || st.target.type.k === "n" ? st.target.type.len : st.target.type.k === "d" ? 8 : -1;
       const value = st.target.type.k === "n" ? `abap.CToN(v${n}, ${limit})` : st.target.type.k === "d" ? `abap.S2D(v${n})` : `v${n}`;
@@ -1456,7 +1456,7 @@ const LINES = !env("GOGEN_NOLINE");
       }
       return [
         `${t}if ${n} := ${expr(st.index, ctx)}; ${n} >= 1 && int(${n}) <= len(${tb}) {`,
-        `${t}\t${place(st.into, ctx)} = ${copied(rowValue(st.table.type, `${tb}[${n}-1]`), (/** @type {Exclude<import("./emit-go-types.ts").Expr, {e: "strlist"}>} */ (st.into)).type)}`,
+        `${t}\t${place((/** @type {import("./emit-go-types.ts").Expr} */ (st.into)), ctx)} = ${copied(rowValue(st.table.type, `${tb}[${n}-1]`), (/** @type {Exclude<import("./emit-go-types.ts").Expr, {e: "strlist"}>} */ (st.into)).type)}`,
         `${t}\ts.Sy.Subrc = 0`,
         `${t}\ts.Sy.Tabix = ${n}`,
         `${t}} else {`,
@@ -1473,9 +1473,9 @@ const LINES = !env("GOGEN_NOLINE");
       /** @type {import("./emit-go-types.ts").CallExpr} */ const c = st.call;
       const run = c.receiving ? `${place(c.receiving, ctx)} = ${expr(c, ctx)}` : expr(c, ctx);
       const quit = c.owner === "CL_ABAP_UNIT_ASSERT" ? c.args.find((a) => a.name === "QUIT" && a.supplied) : null;
-      const marked = quit ? `abap.WithAssertQuit(${expr(quit.value, ctx)}, func() { ${run} })` : run;
+      const marked = quit ? `abap.WithAssertQuit(${expr((/** @type {import("./emit-go-types.ts").Expr} */ (quit.value)), ctx)}, func() { ${run} })` : run;
       // ultra/events: a c field passed to a generic TYPE c keeps its length
-      const fits = c.args.filter((a) => a.fitc).map((a) => `${t}${place(a.place, ctx)} = abap.CFit(${place(a.place, ctx)}, ${a.fitc})`);
+      const fits = c.args.filter((a) => a.fitc).map((a) => `${t}${place((/** @type {import("./emit-go-types.ts").Expr} */ (a.place)), ctx)} = abap.CFit(${place((/** @type {import("./emit-go-types.ts").Expr} */ (a.place)), ctx)}, ${a.fitc})`);
       if (fits.length) {
         if (!c.exceptions) return [`${t}${marked}`, ...fits];
         const m = exceptionCodes(c.exceptions);
@@ -1679,7 +1679,7 @@ const LINES = !env("GOGEN_NOLINE");
       const tb = expr(st.table, ctx);
       const start = st.from ? `int(${expr(st.from, ctx)}) - 1` : "0";
       const limit = st.to ? ` && i${n} < int(${expr(st.to, ctx)})` : "";
-      const bind = st.fs ? `${ident(st.fs)} = ${boundRow((/** @type {import("./emit-go-types.ts").TableType} */ (st.table.type)), tb, `i${n}`)}` : `${place(st.into, ctx)} = ${copied(rowValue(st.table.type, `${tb}[i${n}]`), st.into.type)}`;
+      const bind = st.fs ? `${ident(st.fs)} = ${boundRow((/** @type {import("./emit-go-types.ts").TableType} */ (st.table.type)), tb, `i${n}`)}` : `${place((/** @type {import("./emit-go-types.ts").Expr} */ (st.into)), ctx)} = ${copied(rowValue(st.table.type, `${tb}[i${n}]`), st.into.type)}`;
       const skip = st.where ? `${t}\t\tif !(${st.where.map((w) => whereItem(w, `${tb}[i${n}]`, ctx)).join(" && ")}) { continue }` : null;
       return [
         `${t}{`, `${t}\tsave${n} := s.Sy.Tabix`, `${t}\ts.Sy.Subrc = 4`,
@@ -1857,7 +1857,7 @@ ${t}	}`));
     case "describe_kind":
       return [`${t}${place(st.target, ctx)} = string(${expr(st.x, ctx)}.T.Kind)`];
     case "move_corr_data":
-      return [`${t}abap.MoveCorrespondingData(${expr(st.to, ctx)}, ${expr(st.from, ctx)})`];
+      return [`${t}abap.MoveCorrespondingData(${expr(st.to, ctx)}, ${expr((/** @type {import("./emit-go-types.ts").Expr} */ (st.from)), ctx)})`];
     case "shift_places": {
       const p = place(st.target, ctx);
       const limit = st.target.type.k === "c" ? st.target.type.len : -1;
@@ -1977,7 +1977,7 @@ ${t}	}`));
       const v = `agg${n}`;
       return [`${t}{`, `${t}\tvar ${v} ${col.type.k === "i" ? "abap.DBInt" : "abap.DBString"}`,
         `${t}\tabap.Select(s, ${JSON.stringify(st.sql)}, ${sqlArgs(st.args, ctx)}, ${hostPreds(st.preds, ctx)}, func(scan func(dest ...any) error) { abap.Must(scan(&${v})) })`,
-        `${t}\t${place(st.target, ctx)} = ${dbColumn(col, v, st.assign[0].type)}`,
+        `${t}\t${place((/** @type {import("./emit-go-types.ts").Expr} */ (st.target)), ctx)} = ${dbColumn(col, v, st.assign[0].type)}`,
         `${t}\ts.Sy.Subrc, s.Sy.Dbcnt = 0, 1`, `${t}}`];
     }
     case "unassign":
@@ -2074,7 +2074,7 @@ ${t}	}`));
       const n = ctx.loop++;
       const cond = st.keys.map((k) => (k.line ? `${rowValue(st.table.type, `r${n}`)} == ${expr(k.value, ctx)}` : `r${n}.${ident((/** @type {string} */ (k.name)))} == ${expr(k.value, ctx)}`)).join(" && ");
       if (st.into?.conv) throw new Error("READ TABLE INTO a work area of another type");
-      const bind = st.fs ? `${ident(st.fs)} = ${boundRow((/** @type {import("./emit-go-types.ts").TableType} */ (st.table.type)), tb, `i${n}`)}` : st.refInto ? `${place(st.into, ctx)} = ${rowRef((/** @type {import("./emit-go-types.ts").TableType} */ (st.table.type)), tb, `${tb}[i${n}]`)}` : st.into ? `${place(st.into, ctx)} = ${copied(rowValue(st.table.type, `r${n}`), st.into.type)}` : null;
+      const bind = st.fs ? `${ident(st.fs)} = ${boundRow((/** @type {import("./emit-go-types.ts").TableType} */ (st.table.type)), tb, `i${n}`)}` : st.refInto ? `${place((/** @type {import("./emit-go-types.ts").Expr} */ (st.into)), ctx)} = ${rowRef((/** @type {import("./emit-go-types.ts").TableType} */ (st.table.type)), tb, `${tb}[i${n}]`)}` : st.into ? `${place((/** @type {import("./emit-go-types.ts").Expr} */ (st.into)), ctx)} = ${copied(rowValue(st.table.type, `r${n}`), st.into.type)}` : null;
       // ultra/events (fix round): a SORTED table, see read_key in frontend.mjs
       if (st.sorted) {
         /** @param {number} j @returns {string} */ const kv = (j) => `k${n}_${j}`;
@@ -2110,8 +2110,8 @@ ${t}	}`));
     case "find": {
       // IN TABLE and IN SECTION (ultra/sadl): see abap.FindTable / abap.FindSection
       const call = st.table ? `fok, fline, foff, flen, fsub := abap.FindTable(${expr(st.table, ctx)}, ${expr(st.pattern, ctx)}, ${st.regex}, ${st.icase}, ${st.subs.length}${st.pcre ? ", true" : ""})`
-        : "secOff" in st ? `fok, foff, flen, fsub := abap.FindSection(${expr(st.subject, ctx)}, ${expr(st.pattern, ctx)}, ${st.icase}, ${st.secOff ? expr(st.secOff, ctx) : "0"}, ${st.secLen ? expr(st.secLen, ctx) : "-1"}, ${st.subs.length})`
-          : `fok, foff, flen, fsub := abap.FindStmt(${expr(st.subject, ctx)}, ${expr(st.pattern, ctx)}, ${st.regex}, ${st.icase}, ${st.subs.length}${st.pcre ? ", true" : ""})`;
+        : "secOff" in st ? `fok, foff, flen, fsub := abap.FindSection(${expr((/** @type {import("./emit-go-types.ts").Expr} */ (st.subject)), ctx)}, ${expr(st.pattern, ctx)}, ${st.icase}, ${st.secOff ? expr(st.secOff, ctx) : "0"}, ${st.secLen ? expr(st.secLen, ctx) : "-1"}, ${st.subs.length})`
+          : `fok, foff, flen, fsub := abap.FindStmt(${expr((/** @type {import("./emit-go-types.ts").Expr} */ (st.subject)), ctx)}, ${expr(st.pattern, ctx)}, ${st.regex}, ${st.icase}, ${st.subs.length}${st.pcre ? ", true" : ""})`;
       const lines = [`${t}{`, `${t}\t${call}`,
         `${t}\t_, _, _ = foff, flen, fsub`, ...(st.table ? [`${t}\t_ = fline`] : []), `${t}\tif fok {`, `${t}\t\ts.Sy.Subrc = 0`];
       if (st.line) lines.push(`${t}\t\t${place(st.line, ctx)} = fline`);
@@ -2197,7 +2197,7 @@ ${t}	}`));
     case "delete_range": {
       const n = ctx.loop++;
       const tb = place(st.table, ctx);
-      return [`${t}{`, `${t}\tfrom${n} := ${expr(st.from, ctx)}`, `${t}\tto${n} := ${st.to ? expr(st.to, ctx) : `int32(len(${tb}))`}`,
+      return [`${t}{`, `${t}\tfrom${n} := ${expr((/** @type {import("./emit-go-types.ts").Expr} */ (st.from)), ctx)}`, `${t}\tto${n} := ${st.to ? expr(st.to, ctx) : `int32(len(${tb}))`}`,
         `${t}\tif from${n} < 1 || to${n} < 1 { panic(abap.NotCompiled("DELETE range", "index below 1 was not measured")) }`,
         `${t}\tif to${n} > int32(len(${tb})) { to${n} = int32(len(${tb})) }`,
         `${t}\ts.Sy.Subrc = 4`, `${t}\tif from${n} <= to${n} {`,
@@ -2270,7 +2270,7 @@ ${t}	}`));
     // CORRESPONDING type( itab ): a new table, one mapped row per source row
     case "table_map": {
       const n = Number(ctx.loop); ctx.loop = n + 1;
-      return `func() ${goType(e.type)} { out := ${goType(e.type)}{}; for _, MapRow${n} := range ${expr(e.from, ctx)} { ${place(e.row, ctx)} = ${rowValue(e.from.type, `MapRow${n}`)}; out = append(out, ${rowStored(e.type, expr(e.value, ctx))}) }; return out }()`;
+      return `func() ${goType(e.type)} { out := ${goType(e.type)}{}; for _, MapRow${n} := range ${expr((/** @type {import("./emit-go-types.ts").Expr} */ (e.from)), ctx)} { ${place(e.row, ctx)} = ${rowValue(e.from.type, `MapRow${n}`)}; out = append(out, ${rowStored(e.type, expr(e.value, ctx))}) }; return out }()`;
     }
     case "struct": {
       // VALUE #( ... ): a component it does not name is initial (critic finding 1)
@@ -2303,7 +2303,7 @@ ${t}	}`));
     case "exc_previous": return `abap.ExceptionPrevious(${expr(e.x, ctx)})`;
     case "exc_text": return `${expr(e.x, ctx)}.TextOf(s)`;
     case "exc_class": return `abap.ExceptionClass(${expr(e.x, ctx)})`;
-    case "random": return `abap.RandomInt(${expr(e.min, ctx)}, ${expr(e.max, ctx)})`;
+    case "random": return `abap.RandomInt(${expr(e.min, ctx)}, ${expr((/** @type {import("./emit-go-types.ts").Expr} */ (e.max)), ctx)})`;
     case "find": return `abap.Find(${expr(e.val, ctx)}, ${expr(e.sub, ctx)}, ${e.off ? expr(e.off, ctx) : "0"})`;
     case "find_occ": HELPER_IMPORTS.add("charsearch"); return `hCharsearch.FindOcc(${expr(e.val, ctx)}, ${expr(e.sub, ctx)}, ${expr(e.occ, ctx)})`;
     case "reverse": HELPER_IMPORTS.add("charsearch"); return `hCharsearch.Reverse(${expr(e.x, ctx)})`;
