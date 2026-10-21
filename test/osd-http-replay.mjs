@@ -652,6 +652,9 @@ describe("tools/osd-http-replay: a foreign service answered from fixtures", () =
       const odd = {destination: "REF; touch x", request: {service: SRV, path: "OrderSet", query: "$filter=N eq '%PATH%'"}};
       expect(promoteCommand(odd, {env: {}, platform: "linux"})).to.contain("--destination 'REF; touch x'");
       expect(promoteCommand(odd, {env: {}, platform: "win32"})).to.contain("--destination 'REF; touch x'").and.contain("N eq ''%PATH%''");
+      // a backslash is an escape to a POSIX shell, a separator to Windows
+      expect(promoteCommand(miss, {env: {OSD_SELF: JSON.stringify(["/tmp/a\\b"])}, platform: "linux"})).to.match(/^'\/tmp\/a\\b' replay-promote /);
+      expect(promoteCommand(miss, {env: {OSD_SELF: JSON.stringify(["C:\\osd.exe"])}, platform: "win32"})).to.match(/^C:\\osd\.exe replay-promote /);
     });
 
     it("$top cut drops a recorded next link; a $top that is not a count gets no relaxed answer", async () => {
@@ -664,8 +667,8 @@ describe("tools/osd-http-replay: a foreign service answered from fixtures", () =
       expect([v2.d.results.length, v2.d.__next]).to.deep.equal([20, undefined]);
       const v4 = JSON.parse((await replay.answer({method: "GET", service: SRV, path: "B", query: "$top=20"})).body);
       expect([v4.value.length, v4["@odata.nextLink"]]).to.deep.equal([20, undefined]);
-      for (const top of ["-1", "1.5", ""]) {
-        expect((await replay.answer({method: "GET", service: SRV, path: "A", query: `$top=${top}`})).outcome, `$top=${top}`).to.equal("miss");
+      for (const query of ["$top=-1", "$top=1.5", "$top=", "$top=20&$top=1.5", "$top=20&$top=30"]) {
+        expect((await replay.answer({method: "GET", service: SRV, path: "A", query})).outcome, query).to.equal("miss");
       }
     });
 
@@ -706,6 +709,22 @@ describe("tools/osd-http-replay: a foreign service answered from fixtures", () =
         execFileSync("git", ["-C", repo, "add", "-f", file]);
         rmSync(file);
         expect(() => promote({fixtures, url, out, say})).to.throw("could be published");
+      });
+
+      it("a dangling link at the file is refused, never written through", () => {
+        const out = join(repo, ".local");
+        mkdirSync(out);
+        const {file} = promote({fixtures, url, out: join(dir, "elsewhere"), say});
+        const name = file.slice(file.lastIndexOf("/") + 1);
+        symlinkSync(join(repo, "tracked.json"), join(out, name));
+        expect(() => promote({fixtures, url, out, say})).to.throw("leads nowhere");
+        expect(existsSync(join(repo, "tracked.json"))).to.equal(false);
+      });
+
+      it("an index git cannot read counts as publishing", () => {
+        execFileSync("git", ["-C", repo, "add", ".gitignore"]);
+        writeFileSync(join(repo, ".git", "index"), "not an index");
+        expect(() => promote({fixtures, url, out: join(repo, ".local", "promoted"), say})).to.throw("could be published");
       });
 
       it("a repository git will not answer about counts as one that publishes", () => {

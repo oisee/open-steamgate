@@ -8,7 +8,7 @@
 // person's decision, because a recording carries a system's data and where
 // it lands decides whether it is published.
 import {spawnSync} from "node:child_process";
-import {existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync} from "node:fs";
+import {existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync} from "node:fs";
 import {createHash} from "node:crypto";
 import {basename, dirname, join, relative, resolve} from "node:path";
 import {ODATA_ROOT, pathKey, replayer, replayKey, splitUrl} from "./osd-http-replay.mjs";
@@ -23,7 +23,9 @@ const missUrl = ({service, path, query}) => `${ODATA_ROOT}${service}${path === "
  *  PowerShell, the default there, whose single quotes expand nothing --
  *  cmd.exe expands %VAR% even inside double quotes, so it gets no command. */
 export function promoteCommand(miss, {env = process.env, platform = process.platform} = {}) {
-  const safe = (w) => w !== "" && [...w].every((c) => (c >= "a" && c <= "z") || (c >= "A" && c <= "Z") || (c >= "0" && c <= "9") || "_-./:=@\\".includes(c));
+  // a backslash is a path separator on Windows and an escape in a POSIX shell
+  const plain = platform === "win32" ? "_-./:=@\\" : "_-./:=@";
+  const safe = (w) => w !== "" && [...w].every((c) => (c >= "a" && c <= "z") || (c >= "A" && c <= "Z") || (c >= "0" && c <= "9") || plain.includes(c));
   const quote = (w) => (safe(w) ? w : platform === "win32" ? `'${w.replaceAll("'", "''")}'` : `'${w.replaceAll("'", "'\\''")}'`);
   const self = env.OSD_SELF === undefined || env.OSD_SELF === "" ? undefined : JSON.parse(env.OSD_SELF);
   const words = [...(self === undefined ? ["node", "tools/osd-replay-promote.mjs"] : [...self, "replay-promote"]),
@@ -62,11 +64,21 @@ ${rows}</table>`);
 }
 
 /** `path` with every existing part resolved to where it physically is: a
- *  symlinked `.local/` must be judged where the file would land */
+ *  symlinked `.local/` must be judged where the file would land. A part
+ *  that exists only as a dangling link (lstat sees it, stat does not) is
+ *  refused: where it would land is not knowable before writing. */
 function physical(path) {
   const rest = [];
   let at = resolve(path);
-  while (!existsSync(at)) {
+  const present = (p) => {
+    try {
+      lstatSync(p);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  while (!present(at)) {
     const up = dirname(at);
     if (up === at) {
       break;
@@ -74,7 +86,13 @@ function physical(path) {
     rest.unshift(basename(at));
     at = up;
   }
-  return join(realpathSync(at), ...rest);
+  let real;
+  try {
+    real = realpathSync(at);
+  } catch (error) {
+    throw new Error(`${at} is a link that leads nowhere (${error.code}); a promoted fixture is not written through it`);
+  }
+  return join(real, ...rest);
 }
 
 /** Whether git could publish `file`: it is in a repository's work tree and
@@ -92,10 +110,12 @@ function publishable(file) {
   }
   const rel = relative(root, file);
   const git = (...args) => spawnSync("git", ["-C", root, ...args, "--", rel], {stdio: "ignore"}).status;
-  if (git("ls-files", "--error-unmatch") === 0) {
+  // each answers 0 or 1; anything else (an error, a signal, no git) is git
+  // unable to say, which counts as publishing
+  const tracked = git("ls-files", "--error-unmatch");
+  if (tracked !== 1) {
     return true;
   }
-  // 0 ignored, 1 not ignored, anything else git could not say
   return git("check-ignore", "-q") !== 0;
 }
 
@@ -128,10 +148,16 @@ export function promote({fixtures, url, from, out, say = console.error}) {
   if (publishable(file)) {
     throw new Error(`${file} could be published: it is in a git work tree and tracked or not ignored there; a promoted fixture carries a system's data -- write it under .local/ or a private pack's ignored folder`);
   }
-  if (existsSync(file)) {
-    throw new Error(`${file} exists; a promoted fixture is never overwritten`);
-  }
   mkdirSync(dirname(file), {recursive: true});
-  writeFileSync(file, `${JSON.stringify({key, response: source.response, promotedFrom: relative(folder, resolve(String(from)))}, null, 2)}\n`);
+  try {
+    // "wx": created here or not at all -- an existing file, or a link put
+    // there since the check, is never written through or over
+    writeFileSync(file, `${JSON.stringify({key, response: source.response, promotedFrom: relative(folder, resolve(String(from)))}, null, 2)}\n`, {flag: "wx"});
+  } catch (error) {
+    if (error.code === "EEXIST") {
+      throw new Error(`${file} exists; a promoted fixture is never overwritten`);
+    }
+    throw error;
+  }
   return {file, from};
 }

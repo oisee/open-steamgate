@@ -384,10 +384,11 @@ function ignoreOf(match, where, say) {
 
 const signatureOf = (ignore) => [...ignore].sort().join(",");
 
-/** `$top` of a query as a number, or undefined when there is none or it is
- *  not a count */
+/** `$top` of a query as a number, or undefined when there is none, it is
+ *  not a count, or the query names it more than once */
 function topOf(entries) {
-  const v = entries.find(([k]) => k.toLowerCase() === "$top")?.[1]?.trim();
+  const all = entries.filter(([k]) => k.toLowerCase() === "$top");
+  const v = all.length === 1 ? all[0][1].trim() : undefined;
   return v !== undefined && v !== "" && [...v].every((c) => c >= "0" && c <= "9") ? Number(v) : undefined;
 }
 
