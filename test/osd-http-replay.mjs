@@ -7,11 +7,13 @@
 import {expect} from "chai";
 import express from "express";
 import http from "node:http";
-import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from "node:fs";
+import {execFileSync} from "node:child_process";
+import {existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {answerBatch, contentTypeOf, loadFixtures, parseBatch, partsOf, queryKey, queryPairs, replayer, replayKey, replayService, serviceKey} from "../tools/osd-http-replay.mjs";
 import {describeRemoteServices, mountRemoteServices} from "../tools/osd-remote-service.mjs";
+import {promote, promoteCommand} from "../tools/osd-replay-misses.mjs";
 import {resetSequences} from "../tools/rfc-replay.mjs";
 
 const FIXTURES = join(import.meta.dirname, "fixtures", "http-replay", "demo");
@@ -487,6 +489,150 @@ describe("tools/osd-http-replay: a foreign service answered from fixtures", () =
       writeFileSync(file, JSON.stringify({destinations: {REF: {type: "http", mode: "replay", fixtures: "packs/p/replay"}}, services: {[SRV]: "REF"}}));
       mountRemoteServices(express(), () => false, {file, root: dir, tree: dir, say});
       expect(said.join(" ")).to.contain("not under .local/");
+    });
+  });
+
+  describe("matching a Fiori list: options a destination may ignore", () => {
+    let dir;
+    // rows of a synthetic list, as many as a recording holds
+    const rows = (n) => Array.from({length: n}, (_, i) => ({OrderId: String(i + 1)}));
+    const fixture = (query, n, extra = {}) => ({key: {method: "GET", service: SRV, path: "OrderSet", query},
+      response: {status: 200, headers: {"content-type": "application/json"}, body: {d: {__count: "500", results: rows(n)}}}, ...extra});
+    const ask = async (replay, query, context) => replay.answer({method: "GET", service: SRV, path: "OrderSet", query}, context);
+    const count = (a) => JSON.parse(a.body).d.results.length;
+    const folder = (name, files) => {
+      const f = join(dir, name);
+      mkdirSync(f, {recursive: true});
+      for (const [file, content] of Object.entries(files)) {
+        writeFileSync(join(f, file), JSON.stringify(content));
+      }
+      return f;
+    };
+    before(() => { dir = mkdtempSync(join(tmpdir(), "osd-http-replay-match-")); });
+    after(() => rmSync(dir, {recursive: true, force: true}));
+
+    it("$top, $select and $orderby ignored: one recording answers every window height, cut to the $top asked", async () => {
+      const f = folder("list", {"a.json": fixture("$top=200&$select=OrderId&$orderby=OrderId&$inlinecount=allpages", 120)});
+      const replay = replayer(loadFixtures(f, {say}), {say, name: "REF", match: {ignore: ["$top", "$select", "$orderby"]}});
+      const a = await ask(replay, "$skip=0&$top=35&$select=OrderId,Status&$orderby=Status desc&$inlinecount=allpages");
+      expect(a.outcome).to.equal("hit");
+      expect(count(a)).to.equal(35);
+      expect(JSON.parse(a.body).d.__count, "the total stays the recorded one").to.equal("500");
+      // the fixture's own body is not cut: a taller window gets more rows
+      expect(count(await ask(replay, "$top=90&$inlinecount=allpages"))).to.equal(90);
+      // an option that is not ignored still has to match
+      expect((await ask(replay, "$top=35&$filter=Status eq 'A'&$inlinecount=allpages")).outcome).to.equal("miss");
+    });
+
+    it("$skip and $skiptoken are never ignored, and $skip=0 is no $skip", async () => {
+      const f = folder("pages", {"a.json": fixture("$top=20", 20), "b.json": fixture("$top=20&$skip=20", 20)});
+      const replay = replayer(loadFixtures(f, {say}), {say, name: "REF", match: {ignore: ["$top", "$skip", "$skiptoken"]}});
+      expect(said.join(" ")).to.contain("$skip, which is never ignored").and.contain("$skiptoken, which is never ignored");
+      expect(queryKey("$skip=0&$top=20")).to.equal("$top=20");
+      expect((await ask(replay, "$skip=0&$top=20")).file).to.match(/a\.json$/);
+      expect((await ask(replay, "$skip=20&$top=30")).file, "page two is page two").to.match(/b\.json$/);
+      expect((await ask(replay, "$skip=40&$top=20")).outcome, "page three was not recorded").to.equal("miss");
+    });
+
+    it("an exact recording wins; among the rest the smallest that holds the rows asked for, else the largest", async () => {
+      const f = folder("sizes", {"a20.json": fixture("$top=20", 20), "b100.json": fixture("$top=100", 100), "c35.json": fixture("$top=35", 7)});
+      const replay = replayer(loadFixtures(f, {say}), {say, match: {ignore: ["$top"]}});
+      expect((await ask(replay, "$top=35")).file, "exact").to.match(/c35\.json$/);
+      const ten = await ask(replay, "$top=10");
+      expect([ten.file.endsWith("a20.json"), count(ten)]).to.deep.equal([true, 10]);
+      const fifty = await ask(replay, "$top=50");
+      expect([fifty.file.endsWith("b100.json"), count(fifty)]).to.deep.equal([true, 50]);
+      const more = await ask(replay, "$top=500");
+      expect([more.file.endsWith("b100.json"), count(more)]).to.deep.equal([true, 100]);
+    });
+
+    it("a fixture's own match overrides the destination's; without either matching is exact", async () => {
+      const f = folder("own", {"a.json": fixture("$top=50", 50, {match: {ignore: ["$top"]}}), "b.json": {...fixture("$top=5", 5), key: {method: "GET", service: SRV, path: "ItemSet", query: "$top=5"}}});
+      const replay = replayer(loadFixtures(f, {say}), {say});
+      expect(count(await ask(replay, "$top=12"))).to.equal(12);
+      expect((await replay.answer({method: "GET", service: SRV, path: "ItemSet", query: "$top=6"})).outcome).to.equal("miss");
+    });
+
+    it("rows are cut in a string body and in V4's value, and only when $top was the option ignored", async () => {
+      const f = folder("shapes", {
+        "v2.json": {key: {method: "GET", service: SRV, path: "A", query: "$top=9"}, response: {status: 200, body: JSON.stringify({d: {results: rows(9)}})}},
+        "v4.json": {key: {method: "GET", service: SRV, path: "B", query: "$top=9"}, response: {status: 200, body: {value: rows(9)}}},
+        "sel.json": {key: {method: "GET", service: SRV, path: "C", query: "$top=9&$select=X"}, response: {status: 200, body: {d: {results: rows(9)}}}},
+      });
+      const replay = replayer(loadFixtures(f, {say}), {say, match: {ignore: ["$top"]}});
+      expect(JSON.parse((await replay.answer({method: "GET", service: SRV, path: "A", query: "$top=4"})).body).d.results).to.have.length(4);
+      expect(JSON.parse((await replay.answer({method: "GET", service: SRV, path: "B", query: "$top=4"})).body).value).to.have.length(4);
+      const select = replayer(loadFixtures(f, {say}), {say, match: {ignore: ["$select"]}});
+      expect(JSON.parse((await select.answer({method: "GET", service: SRV, path: "C", query: "$top=9&$select=Y"})).body).d.results).to.have.length(9);
+    });
+
+    it("a miss names the nearest recording and how it differs, and inside a $batch its part and request line", async () => {
+      const f = folder("near", {"near.json": fixture("$top=20&$select=OrderId", 20), "far.json": fixture("$top=1&$select=A&$orderby=B&$filter=C eq 1", 1)});
+      const replay = replayer(loadFixtures(f, {say}), {say, name: "REF"});
+      await ask(replay, "$top=35&$select=OrderId");
+      const line = said.find((l) => l.includes("MISS REF"));
+      expect(line).to.contain("closest").and.contain("near.json").and.contain("$top asked 35, recorded 20").and.not.contain("far.json");
+      said = [];
+      await replay.answer({method: "GET", service: SRV, path: "NoSuchSet", query: ""});
+      expect(said.join(" ")).to.contain("nothing recorded at this path");
+      said = [];
+      const batch = await answerBatch(replay, SRV, batchBody([
+        "--b", "Content-Type: application/http", "", "GET OrderSet?$top=20&$select=OrderId HTTP/1.1", "", "",
+        "--b", "Content-Type: application/http", "", "GET OrderSet?$top=35&$select=OrderId HTTP/1.1", "", "",
+        "--b--", ""]), "multipart/mixed; boundary=b");
+      expect(batch.outcomes).to.deep.equal(["hit", "miss"]);
+      expect(said.join(" ")).to.contain("(batch part 2: GET OrderSet?$top=35&$select=OrderId)");
+      const misses = replay.misses();
+      expect(misses).to.have.length(2);
+      const listed = misses.find((m) => m.key.includes("OrderSet"));
+      expect(listed.count).to.equal(2);
+      expect(listed.parts).to.deep.equal([{part: 2, line: "GET OrderSet?$top=35&$select=OrderId"}]);
+      expect(listed.closest.differences).to.deep.equal([{option: "$top", asked: "35", recorded: "20"}]);
+    });
+
+    it("the misses page lists them as JSON and as a table, each with its promote command", async () => {
+      const f = folder("page", {"a.json": fixture("$top=20", 20)});
+      const file = join(dir, "page.json");
+      writeFileSync(file, JSON.stringify({destinations: {REF: {type: "http", mode: "replay", fixtures: f}}, services: {[SRV]: "REF"}}));
+      const stand = await serve((app) => mountRemoteServices(app, () => false, {file, root: dir, say}));
+      try {
+        await fetch(`${stand.url}${BASE}/OrderSet?$top=21&sap-client=001`);
+        const json = await (await fetch(`${stand.url}/sap/bc/osd/replay/misses`)).json();
+        expect(json.misses).to.have.length(1);
+        expect(json.misses[0].promote).to.contain("osd-replay-promote.mjs --destination REF").and.contain("OrderSet?$top=21&sap-client=001");
+        const html = await (await fetch(`${stand.url}/sap/bc/osd/replay/misses?format=html`)).text();
+        expect(html).to.contain("<table>").and.contain("a.json").and.contain("asked <code>21</code>");
+      } finally {
+        stand.close();
+      }
+    });
+
+    it("the promote command is the binary's own from a stand, and quoted for cmd.exe on Windows", () => {
+      const miss = {destination: "REF", request: {service: SRV, path: "OrderSet", query: "$filter=Name eq 'A'&$top=3"}};
+      expect(promoteCommand(miss, {env: {}, platform: "linux"})).to.equal(
+        `node tools/osd-replay-promote.mjs --destination REF --url '${BASE}/OrderSet?$filter=Name eq '\\''A'\\''&$top=3' --out .local/replay/promoted`);
+      expect(promoteCommand(miss, {env: {OSD_SELF: JSON.stringify(["C:\\My Stand\\osd.exe"])}, platform: "win32"})).to.equal(
+        `"C:\\My Stand\\osd.exe" replay-promote --destination REF --url "${BASE}/OrderSet?$filter=Name eq 'A'&$top=3" --out .local/replay/promoted`);
+    });
+
+    it("promote writes the miss as a fixture from its nearest recording, only where git would not publish it", async () => {
+      const f = folder("promote", {"a.json": fixture("$top=20", 20)});
+      const fixtures = loadFixtures(f, {say});
+      const repo = join(dir, "repo");
+      mkdirSync(repo);
+      execFileSync("git", ["init", "-q", repo]);
+      writeFileSync(join(repo, ".gitignore"), ".local/\n");
+      const url = `${BASE}/OrderSet?$top=21`;
+      expect(() => promote({fixtures, url, out: join(repo, "fixtures"), tree: repo, say})).to.throw("not ignored by git");
+      const out = join(repo, ".local", "promoted");
+      const {file} = promote({fixtures, url, out, tree: repo, say});
+      const written = JSON.parse(readFileSync(file, "utf8"));
+      expect(written.key).to.deep.equal({method: "GET", service: SRV, path: "OrderSet", query: "$top=21"});
+      expect(written.promotedFrom).to.match(/a\.json$/);
+      expect(() => promote({fixtures, url, out, tree: repo, say})).to.throw("never overwritten");
+      const replay = replayer(loadFixtures([out, f], {say}), {say});
+      expect((await ask(replay, "$top=21")).outcome).to.equal("hit");
+      expect(existsSync(join(repo, "fixtures"))).to.equal(false);
     });
   });
 });
