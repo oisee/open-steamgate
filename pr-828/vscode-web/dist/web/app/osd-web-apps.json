@@ -1,0 +1,16 @@
+{
+  "components": {
+    "stg.analytics": "analytics/",
+    "stg.booking": "booking/",
+    "stg.icf": "icf/",
+    "stg.travel": "",
+    "stg.segw": "segw/",
+    "stg.status": "status/",
+    "stg.taxi": "taxi/",
+    "stg.workbench": "workbench/",
+    "l3.fleet2": "zosd_fleet2/",
+    "l3.fleet2.set": "zosd_fleet2_s/"
+  },
+  "sandboxConfigPath": "/appconfig/fioriSandboxConfig.json",
+  "sandboxConfigBody": "{}\n"
+}
