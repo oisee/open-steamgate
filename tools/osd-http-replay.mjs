@@ -70,7 +70,8 @@
 // that differs from a recording only in those options be answered by it.
 // An exact key always wins. `$skip` and `$skiptoken` are never ignored --
 // page two answered with page one is the wrong answer that looks right --
-// and `$skip=0` is the same request as no `$skip`. When `$top` was ignored,
+// and `$skip=0` is the same request as no `$skip`; parentheses around a
+// whole `$filter` are dropped from every key. When `$top` was ignored,
 // the recorded rows are cut to the `$top` asked for, so a page never gets
 // more rows than it asked for; among several recordings that differ only in
 // `$top`, the smallest one that holds enough rows answers.
@@ -211,7 +212,40 @@ export function queryEntries(query, ignore = NOTHING) {
       const name = k.toLowerCase();
       return !name.startsWith("sap-") && !ignore.has(name) && !(name === "$skip" && v.trim() === "0");
     })
-    .map(([k, v]) => [k, guids(v)]);
+    .map(([k, v]) => [k, k.toLowerCase() === "$filter" ? outerParens(guids(v)) : guids(v)]);
+}
+
+/** `(A or B)` -> `A or B`: parentheses around the whole of a `$filter` say
+ *  nothing, and pages differ in whether they send them. Scanned, quotes
+ *  respected (a `'` inside a literal is two); a pair is dropped only when
+ *  the first `(` closes at the very end -- `(A) or (B)` keeps both. */
+function outerParens(text) {
+  let t = text.trim();
+  for (;;) {
+    if (!t.startsWith("(") || !t.endsWith(")")) {
+      return t;
+    }
+    let depth = 0;
+    let quoted = false;
+    let closes = -1;
+    for (let i = 0; i < t.length && closes < 0; i += 1) {
+      const c = t[i];
+      if (c === "'") {
+        quoted = !quoted;
+      } else if (!quoted && c === "(") {
+        depth += 1;
+      } else if (!quoted && c === ")") {
+        depth -= 1;
+        if (depth === 0) {
+          closes = i;
+        }
+      }
+    }
+    if (closes !== t.length - 1) {
+      return t;
+    }
+    t = t.slice(1, -1).trim();
+  }
 }
 
 /** `/a/b/` -> `a/b` */

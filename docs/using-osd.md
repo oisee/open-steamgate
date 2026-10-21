@@ -649,6 +649,8 @@ a request that differs from a recording only in those options is answered by
 it:
 
 - an exact recording always wins;
+- parentheses around the whole of a `$filter` are dropped from every key
+  (`(A or B)` is `A or B`); around a part they stay;
 - `$skip` and `$skiptoken` are never ignored, and asking for it is refused
   out loud; `$skip=0` is the same as no `$skip`;
 - when `$top` was ignored, the recorded rows are cut to the `$top` asked

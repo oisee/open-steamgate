@@ -590,6 +590,41 @@ describe("tools/osd-http-replay: a foreign service answered from fixtures", () =
       expect(listed.closest.differences).to.deep.equal([{option: "$top", asked: "35", recorded: "20"}]);
     });
 
+    it("parentheses around a whole $filter say nothing; around a part they stay", () => {
+      expect(queryKey("$filter=(Solution%20eq%20%2701%27%20or%20Solution%20eq%20%2703%27)")).to.equal(queryKey("$filter=Solution eq '01' or Solution eq '03'"));
+      expect(queryKey("$filter=((A eq 1))")).to.equal("$filter=A eq 1");
+      expect(queryKey("$filter=(A eq 1) or (B eq 2)")).to.equal("$filter=(A eq 1) or (B eq 2)");
+      expect(queryKey("$filter=(N eq ')(')")).to.equal("$filter=N eq ')('");
+      expect(queryKey("$filter=N eq '(x)'")).to.equal("$filter=N eq '(x)'");
+    });
+
+    it("a list report's $batch, in the shape a stand sent it: $count and a page of 70 from a recording of 84", async () => {
+      // synthetic service and rows in the shape of a Fiori Elements list;
+      // the request lines are as Edge sent them at 1500x1000
+      const set = "ZOSD_DEMO_ALERT";
+      const recorded = "$skip=0&$top=84&$orderby=AlertID desc,RiskValue desc,DBKey desc&$filter=(Solution eq '01' or Solution eq '03')" +
+        "&$select=AlertID,RiskRating,DBKey,Currency,LifecycleStatus&$inlinecount=allpages";
+      const f = folder("alerts", {
+        "count.json": {key: {method: "GET", service: "ZOSD_DEMO_ALERTS_SRV", path: `${set}/$count`, query: "$filter=(Solution eq '01' or Solution eq '03')"},
+          response: {status: 200, headers: {"content-type": "text/plain"}, body: "84"}},
+        "list.json": {key: {method: "GET", service: "ZOSD_DEMO_ALERTS_SRV", path: set, query: recorded},
+          response: {status: 200, headers: {"content-type": "application/json"}, body: {d: {__count: "84", results: rows(84)}}}},
+      });
+      const replay = replayer(loadFixtures(f, {say}), {say, name: "REF", match: {ignore: ["$top", "$select", "$orderby"]}});
+      const batch = await answerBatch(replay, "ZOSD_DEMO_ALERTS_SRV", batchBody([
+        "--batch_8a2c-efd2-1bdf", "Content-Type: application/http", "Content-Transfer-Encoding: binary", "",
+        `GET ${set}/$count?$filter=Solution%20eq%20%2701%27%20or%20Solution%20eq%20%2703%27 HTTP/1.1`, "Accept: text/plain, */*;q=0.5", "DataServiceVersion: 2.0", "", "",
+        "--batch_8a2c-efd2-1bdf", "Content-Type: application/http", "Content-Transfer-Encoding: binary", "",
+        `GET ${set}?$skip=0&$top=70&$orderby=RiskValue%20desc,DBKey%20desc&$filter=Solution%20eq%20%2701%27%20or%20Solution%20eq%20%2703%27` +
+          "&$select=AlertID%2cAlertID%2cDBKey%2cCurrency&$inlinecount=allpages HTTP/1.1", "Accept: application/json", "DataServiceVersion: 2.0", "", "",
+        "--batch_8a2c-efd2-1bdf--", ""]), "multipart/mixed;boundary=batch_8a2c-efd2-1bdf");
+      expect(batch.outcomes).to.deep.equal(["hit", "hit"]);
+      const parts = batch.body.split(/--batchresponse_stg_replay_\d+/).slice(1, -1);
+      expect(parts[0]).to.match(/\r\n\r\n84\r\n$/);
+      const json = JSON.parse(parts[1].slice(parts[1].indexOf("{"), parts[1].lastIndexOf("}") + 1));
+      expect([json.d.results.length, json.d.__count]).to.deep.equal([70, "84"]);
+    });
+
     it("the misses page lists them as JSON and as a table, each with its promote command", async () => {
       const f = folder("page", {"a.json": fixture("$top=20", 20)});
       const file = join(dir, "page.json");
