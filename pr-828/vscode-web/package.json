@@ -1,0 +1,1307 @@
+{
+  "name": "open-steamgate",
+  "displayName": "open-steamgate: local ABAP server",
+  "icon": "resources/icon.png",
+  "description": "A local ABAP application server in VS Code with OData, Fiori, ABAP Unit and debugging",
+  "version": "0.7.0",
+  "private": true,
+  "license": "MIT",
+  "keywords": [
+    "abap",
+    "sap",
+    "odata",
+    "fiori",
+    "gateway",
+    "abapgit",
+    "amdp",
+    "sqlscript",
+    "eamdp",
+    "pamdp",
+    "hana",
+    "abap unit"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/oisee/open-steamgate.git"
+  },
+  "bugs": {
+    "url": "https://github.com/oisee/open-steamgate/issues"
+  },
+  "homepage": "https://github.com/oisee/open-steamgate#readme",
+  "galleryBanner": {
+    "color": "#15233b",
+    "theme": "dark"
+  },
+  "files": [
+    "extension.js",
+    "launcher.js",
+    "lib.js",
+    "system-sources.js",
+    "abapgit-zip.js",
+    "abapgit-zip-command.js",
+    "http-lens.js",
+    "system-overview.js",
+    "osd/**",
+    "resources/**",
+    "examples/**",
+    "walkthrough/**",
+    "media/**",
+    "web/**",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "THIRD-PARTY-NOTICES.md"
+  ],
+  "publisher": "oisee",
+  "engines": {
+    "vscode": "^1.101.0"
+  },
+  "extensionKind": [
+    "workspace",
+    "ui"
+  ],
+  "capabilities": {
+    "virtualWorkspaces": {
+      "supported": "limited",
+      "description": "The web gateway probe works in virtual workspaces; desktop filesystem commands need a local folder."
+    }
+  },
+  "categories": [
+    "Programming Languages",
+    "Testing",
+    "Other"
+  ],
+  "browser": "./dist/web/extension.js",
+  "activationEvents": [
+    "workspaceContains:**/*.http",
+    "onLanguage:http",
+    "workspaceContains:**/*.abap",
+    "onLanguage:abap",
+    "workspaceContains:**/.abapgit.xml",
+    "onNotebook:osd-sql-notebook",
+    "onCommand:osd.newSqlNotebook",
+    "onCommand:osd.start",
+    "onCommand:osd.prepareAbapgitZip",
+    "onCommand:osd.quickStart",
+    "onCommand:osd.gettingStarted",
+    "onCommand:osd.webProbe",
+    "onCommand:osd.webReadProbe",
+    "onCommand:osd.webVerifyLastTravel",
+    "onCommand:osd.webProbeView",
+    "onView:osdTree",
+    "onView:osdJobs"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "abap",
+        "aliases": [
+          "ABAP"
+        ],
+        "extensions": [
+          ".abap"
+        ]
+      }
+    ],
+    "breakpoints": [
+      {
+        "language": "abap"
+      }
+    ],
+    "configuration": {
+      "title": "osd",
+      "properties": {
+        "osg.kernelStrict": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warning",
+            "off",
+            "refuse"
+          ],
+          "default": "error",
+          "description": "Report SAP kernel rejections while typing. Error and warning allow execution; refuse also stops object runs and tests."
+        },
+        "osd.url": {
+          "type": "string",
+          "default": "http://localhost:3030",
+          "description": "The listener of a running osd (npm start, build/osd up). Set automatically to the launched instance's own address while B0 (osd.start) is running one."
+        },
+        "osd.home": {
+          "type": "string",
+          "default": "",
+          "description": "The open-steamgate checkout osd.start builds and runs. On a packaged install, Start asks when the only workspace folder is an open-steamgate checkout; otherwise an empty value uses the bundled copy."
+        },
+        "osd.startSource": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "bundled"
+          ],
+          "enumDescriptions": [
+            "When the open workspace folder is an open-steamgate checkout and osd.home is empty, Start asks which system to run.",
+            "Always run the bundled copy, even when the open folder is an open-steamgate checkout (unless osd.home is set)."
+          ],
+          "default": "ask",
+          "description": "What Start runs when osd.home is empty. Change it with \"osd: Choose which system Start runs\"."
+        },
+        "osd.keymap": {
+          "type": "string",
+          "enum": [
+            "abap",
+            "vscode"
+          ],
+          "default": "abap",
+          "description": "What an ABAP developer's fingers expect (SAP GUI / ADT: Ctrl+F2 Check, Ctrl+F3 Activate, F8 Run, the debug keys) over an .abap editor, or VS Code's own bindings unchanged (\"vscode\")."
+        },
+        "osd.warm": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "on",
+            "off"
+          ],
+          "default": "auto",
+          "description": "OSD_WARM for a system osd.start launches (docs/warm-compile.md, docs/vscode-extension.md \"Warm\"): a save reaches the running system in well under a second instead of the cold build's several. \"auto\" turns it on when this machine has at least 4 GB of RAM (the prime costs about 0.7 GB); \"on\"/\"off\" always do or never do. Whether it actually primes is still the server's own business -- with the pinned transpiler it stays cold and says why, shown as the status bar's own \"cold: <reason>\"."
+        },
+        "osd.notebook.rowLimit": {
+          "type": "number",
+          "default": 100,
+          "description": "The row limit (rowNumber) a *.osdnb cell's SELECT is run with, against /sap/bc/adt/datapreview/freestyle."
+        },
+        "osd.dataPreview.rowLimit": {
+          "type": "number",
+          "default": 100,
+          "description": "The row limit (rowNumber) F8's Data Preview on a TABL or a DDLS is run with, against /sap/bc/adt/datapreview/ddic or /cds."
+        },
+        "osd.hotspots.refreshSeconds": {
+          "type": "number",
+          "default": 30,
+          "description": "How often the ZOSD_DUMP heat (line decorations, explorer badges) is re-read. 0 turns the timer off; osd.run, osd.activate and \"osd: Refresh hotspots\" still refresh it."
+        },
+        "osd.tests.showSystem": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether the Test Explorer's System group (the libraries abap_transpile.json's own \"libs\" pull in -- open-abap-core, abapgit, ... -- shown collapsed) is built at all. Off hides it and skips scanning those folders."
+        },
+        "osd.openIn": {
+          "type": "string",
+          "enum": [
+            "browser",
+            "vscode"
+          ],
+          "default": "vscode",
+          "description": "Where a page of the running system opens from the OSD tree (the Fiori Launchpad, an App, ICF or OData row, $metadata, the /osd/* endpoints): a tab inside VS Code (the default; one tab per page, reused) or the system browser. Every such node also has an inline link-external action and an \"Open in External Browser\" context item that always use the system browser. A single click on an expandable row shows service details; APC has no page to open."
+        },
+        "osd.jobs.worker": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "off",
+            "on"
+          ],
+          "default": "auto",
+          "description": "Start and supervise the background job worker with the local system. auto enables it only for durable file SQLite; off disables it. Background jobs need the file SQLite database for now."
+        },
+        "osd.database.system": {
+          "type": "string",
+          "enum": [
+            "sqlite",
+            "postgres",
+            "hana",
+            "duckdb"
+          ],
+          "default": "sqlite",
+          "description": "What osd.start runs the system on (test/setup.mjs's own STG_DB). A password never lives here -- \"osd: Set database password (HANA)\" / \"(PostgreSQL)\" store it in VS Code's own secret storage. duckdb needs the native module (@duckdb/node-api): not available in a packaged install."
+        },
+        "osd.database.tests": {
+          "type": "string",
+          "enum": [
+            "same",
+            "sqlite",
+            "postgres",
+            "hana",
+            "duckdb"
+          ],
+          "default": "same",
+          "description": "What a Test Explorer run uses, when it should be a DIFFERENT database than osd.database.system -- e.g. the live system on sqlite while tests run on a real hana. \"same\" (the default) sends no override at all."
+        },
+        "osd.database.postgres.host": {
+          "type": "string",
+          "default": "",
+          "description": "PostgreSQL host for osd.database.system/tests = postgres. Empty uses the client's own default (PGHOST, else \"postgres\")."
+        },
+        "osd.database.postgres.port": {
+          "type": "number",
+          "default": 0,
+          "description": "PostgreSQL port. 0 uses the client's own default (PGPORT, else 5432)."
+        },
+        "osd.database.postgres.user": {
+          "type": "string",
+          "default": "",
+          "description": "PostgreSQL user. Empty uses the client's own default (PGUSER, else \"osd\")."
+        },
+        "osd.database.postgres.database": {
+          "type": "string",
+          "default": "",
+          "description": "PostgreSQL database -- the isolation boundary (tools/postgres-client.mjs never drops or rewrites a pre-existing schema). Empty defaults to a dedicated osd_<hash> derived from osd.home, so this window never writes into somebody else's database by accident."
+        },
+        "osd.database.hana.host": {
+          "type": "string",
+          "default": "",
+          "description": "HANA host for osd.database.system/tests = hana. Empty uses the client's own default (HANA_HOST/HXE_HOST, else \"localhost\")."
+        },
+        "osd.database.hana.port": {
+          "type": "number",
+          "default": 0,
+          "description": "HANA port. 0 uses the client's own default (HANA_PORT/HXE_PORT, else 39041, the HANA Express tenant)."
+        },
+        "osd.database.hana.user": {
+          "type": "string",
+          "default": "",
+          "description": "HANA user. Empty uses the client's own default (HANA_USER/HXE_USER, else \"SYSTEM\")."
+        },
+        "osd.database.hana.schema": {
+          "type": "string",
+          "default": "",
+          "description": "HANA schema -- the isolation boundary. Empty defaults to a dedicated OSD_<HASH> derived from osd.home, so this window never writes into an existing schema by accident."
+        },
+        "osd.database.hana.fresh": {
+          "type": "boolean",
+          "default": false,
+          "description": "STG_DB_FRESH=1: drop and rebuild osd.database.hana.schema on the next start instead of refusing a schema this build did not stamp. osd.start turns this on itself (and asks first) when a start fails with that refusal."
+        }
+      }
+    },
+    "notebooks": [
+      {
+        "type": "osd-sql-notebook",
+        "displayName": "osd Notebook",
+        "selector": [
+          {
+            "filenamePattern": "*.osdnb"
+          }
+        ]
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "osd",
+          "title": "OSD",
+          "icon": "resources/osd.svg"
+        }
+      ]
+    },
+    "views": {
+      "osd": [
+        {
+          "id": "osdTree",
+          "name": "System",
+          "contextualTitle": "OSD"
+        },
+        {
+          "id": "osdJobs",
+          "name": "OSD Jobs",
+          "when": "!isWeb"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "osd.openJobsPanel",
+        "title": "Open jobs panel",
+        "category": "OSD"
+      },
+      {
+        "command": "osd.refreshJobs",
+        "title": "Refresh jobs",
+        "category": "OSD",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "osd.filterJobs",
+        "title": "Filter jobs",
+        "category": "OSD",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "osd.openJobLog",
+        "title": "Open job log",
+        "category": "OSD"
+      },
+      {
+        "command": "osd.openJobOutput",
+        "title": "Open output",
+        "category": "OSD"
+      },
+      {
+        "command": "osd.copyJobKey",
+        "title": "Copy job key",
+        "category": "OSD"
+      },
+      {
+        "command": "osd.prepareAbapgitZip",
+        "title": "osd: Prepare abapGit zip…"
+      },
+      {
+        "command": "osd.webProbe",
+        "title": "osd: Web probe"
+      },
+      {
+        "command": "osd.webReadProbe",
+        "title": "osd: Web read probe"
+      },
+      {
+        "command": "osd.webVerifyLastTravel",
+        "title": "osd: Web verify last Travel"
+      },
+      {
+        "command": "osd.webProbeView",
+        "title": "osd: Web probe view"
+      },
+      {
+        "command": "osd.showDumps",
+        "title": "osd: Show short dumps"
+      },
+      {
+        "command": "osd.setHanaPassword",
+        "title": "osd: Set database password (HANA)"
+      },
+      {
+        "command": "osd.setPostgresPassword",
+        "title": "osd: Set database password (PostgreSQL)"
+      },
+      {
+        "command": "osd.refreshHotspots",
+        "title": "osd: Refresh hotspots"
+      },
+      {
+        "command": "osd.check",
+        "title": "osd: Check (Ctrl+F2)",
+        "icon": {
+          "light": "resources/icons/check-light.svg",
+          "dark": "resources/icons/check-dark.svg"
+        }
+      },
+      {
+        "command": "osd.activate",
+        "title": "osd: Activate (Ctrl+F3)",
+        "icon": {
+          "light": "resources/icons/activate-light.svg",
+          "dark": "resources/icons/activate-dark.svg"
+        }
+      },
+      {
+        "command": "osd.runTitle",
+        "title": "osd: Run object (F8 dispatch)",
+        "icon": {
+          "light": "resources/icons/run-console-light.svg",
+          "dark": "resources/icons/run-console-dark.svg"
+        }
+      },
+      {
+        "command": "osd.runUnit",
+        "title": "osd: Run ABAP Unit (Ctrl+Shift+F10)",
+        "icon": {
+          "light": "resources/icons/beaker-light.svg",
+          "dark": "resources/icons/beaker-dark.svg"
+        }
+      },
+      {
+        "command": "osd.run",
+        "title": "osd: Run",
+        "icon": {
+          "light": "resources/icons/run-console-light.svg",
+          "dark": "resources/icons/run-console-dark.svg"
+        }
+      },
+      {
+        "command": "osd.runWithDebugger",
+        "title": "osd: Run with debugger",
+        "icon": "$(debug)"
+      },
+      {
+        "command": "osd.classrun",
+        "title": "osd: Run classrun (F9)",
+        "icon": {
+          "light": "resources/icons/run-console-light.svg",
+          "dark": "resources/icons/run-console-dark.svg"
+        }
+      },
+      {
+        "command": "osd.generateTaxiData",
+        "title": "osd: Generate taxi data..."
+      },
+      {
+        "command": "osd.resetTaxiData",
+        "title": "osd: Reset taxi data to minimal"
+      },
+      {
+        "command": "osd.classrunWithDebugger",
+        "title": "osd: Run as ABAP Application with debugger"
+      },
+      {
+        "command": "osd.callEntitySetWithDebugger",
+        "title": "osd: Attach debugger and call EntitySet"
+      },
+      {
+        "command": "osd.toggleBreakpoints",
+        "title": "osd: Toggle ABAP breakpoints"
+      },
+      {
+        "command": "osd.showRawJobLog",
+        "title": "OSD: Show raw job log"
+      },
+      {
+        "command": "osd.openSample",
+        "title": "OSD: Open sample"
+      },
+      {
+        "command": "osd.newSqlNotebook",
+        "title": "osd: New SQL notebook"
+      },
+      {
+        "command": "osd.gettingStarted",
+        "title": "osd: Getting started"
+      },
+      {
+        "command": "osd.quickStart",
+        "title": "osd: Quick start (defaults)",
+        "icon": "$(rocket)"
+      },
+      {
+        "command": "osd.openSystemOverview",
+        "title": "osd: Open System overview"
+      },
+      {
+        "command": "osd.start",
+        "title": "osd: Start (build + run this system)",
+        "icon": "$(play)"
+      },
+      {
+        "command": "osd.stop",
+        "title": "osd: Stop",
+        "icon": "$(primitive-square)"
+      },
+      {
+        "command": "osd.removeOldWorkingCopies",
+        "title": "osd: Remove old working copies"
+      },
+      {
+        "command": "osd.chooseStartSystem",
+        "title": "osd: Choose which system Start runs",
+        "icon": "$(server-environment)"
+      },
+      {
+        "command": "osd.rebuildWarm",
+        "title": "osd: Rebuild (warm)",
+        "icon": "$(tools)"
+      },
+      {
+        "command": "osd.rebuild",
+        "title": "osd: Full rebuild (stop, build, start)"
+      },
+      {
+        "command": "osd.fullRebuild",
+        "title": "osd: Full rebuild (force build)",
+        "icon": "$(tools)"
+      },
+      {
+        "command": "osd.openSystemLog",
+        "title": "osd: Open system log"
+      },
+      {
+        "command": "osd.openLaunchpad",
+        "title": "osd: Open launchpad",
+        "icon": "$(rocket)"
+      },
+      {
+        "command": "osd.openLaunchpadInVsCode",
+        "title": "osd: Open launchpad inside VS Code"
+      },
+      {
+        "command": "osd.openLaunchpadExternal",
+        "title": "Open launchpad in External Browser",
+        "category": "osd",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "osd.openHostDoorExternal",
+        "title": "Open in External Browser",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "osd.openServiceMetadataExternal",
+        "title": "Open $metadata in External Browser",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "osd.refreshTree",
+        "title": "osd: Refresh the view (no rebuild)",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "osd.toggleServiceLabel",
+        "title": "osd: Toggle service label (name / description)",
+        "icon": "$(symbol-text)"
+      },
+      {
+        "command": "osd.cycleServiceSort",
+        "title": "osd: Sort services (name / path / description)",
+        "icon": "$(list-ordered)"
+      },
+      {
+        "command": "osd.toggleServiceGrouping",
+        "title": "osd: Group services (kind / layer)",
+        "icon": "$(layers)"
+      },
+      {
+        "command": "osd.toggleServiceBase",
+        "title": "osd: Show or hide base services",
+        "icon": "$(eye-closed)"
+      },
+      {
+        "command": "osd.openHostDoor",
+        "title": "osd: Open system endpoint"
+      },
+      {
+        "command": "osd.showServiceDetails",
+        "title": "osd: Show service details"
+      },
+      {
+        "command": "osd.clickTransaction",
+        "title": "osd: Transaction details"
+      },
+      {
+        "command": "osd.clickTreeNode",
+        "title": "osd: Tree details"
+      },
+      {
+        "command": "osd.runTransaction",
+        "title": "Run",
+        "icon": "$(play)"
+      },
+      {
+        "command": "osd.openServiceRow",
+        "title": "Open",
+        "icon": "$(play)"
+      },
+      {
+        "command": "osd.openServiceRowExternal",
+        "title": "Open in External Browser",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "osd.testServiceClosure",
+        "title": "Test"
+      },
+      {
+        "command": "osd.openServiceSourceDpc",
+        "title": "Open DPC source"
+      },
+      {
+        "command": "osd.openServiceSourceMpc",
+        "title": "Open MPC source"
+      },
+      {
+        "command": "osd.openServiceSourceHandler",
+        "title": "Open handler source"
+      },
+      {
+        "command": "osd.openServiceSourceApp",
+        "title": "Open app folder"
+      },
+      {
+        "command": "osd.openServiceSourceDeclaration",
+        "title": "Open SICF/SAPC source"
+      },
+      {
+        "command": "osd.copyServiceUrl",
+        "title": "Copy URL"
+      },
+      {
+        "command": "osd.copyServiceWsUrl",
+        "title": "Copy WebSocket URL"
+      },
+      {
+        "command": "osd.openServiceMetadata",
+        "title": "Open $metadata"
+      },
+      {
+        "command": "osd.copyServiceMetadata",
+        "title": "Copy $metadata URL"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "osd.openJobsPanel",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.refreshJobs",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.filterJobs",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.openJobLog",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.openJobOutput",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.copyJobKey",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.runTitle",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.runUnit",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.webProbe",
+          "when": "isWeb"
+        },
+        {
+          "command": "osd.webReadProbe",
+          "when": "isWeb"
+        },
+        {
+          "command": "osd.webVerifyLastTravel",
+          "when": "isWeb"
+        },
+        {
+          "command": "osd.webProbeView",
+          "when": "isWeb"
+        },
+        {
+          "command": "osd.refreshTree",
+          "when": "!isWeb || osd.web"
+        },
+        {
+          "command": "osd.showDumps",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.setHanaPassword",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.setPostgresPassword",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.refreshHotspots",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.check",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.activate",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.run",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.runWithDebugger",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.classrun",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.generateTaxiData",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.resetTaxiData",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.classrunWithDebugger",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.callEntitySetWithDebugger",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.toggleBreakpoints",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.newSqlNotebook",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.openSample",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.showRawJobLog",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.gettingStarted",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.quickStart",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.openSystemOverview",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.start",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.stop",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.removeOldWorkingCopies",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.chooseStartSystem",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.rebuildWarm",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.rebuild",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.fullRebuild",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.openSystemLog",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.openLaunchpad",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.openLaunchpadInVsCode",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.openLaunchpadExternal",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.toggleServiceLabel",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.cycleServiceSort",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.toggleServiceGrouping",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.toggleServiceBase",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.openHostDoor",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.showServiceDetails",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.clickTransaction",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.clickTreeNode",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.runTransaction",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.openServiceRow",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.testServiceClosure",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.openServiceSourceDpc",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.openServiceSourceMpc",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.openServiceSourceHandler",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.openServiceSourceApp",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.openServiceSourceDeclaration",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.copyServiceUrl",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.copyServiceWsUrl",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.openServiceMetadata",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.copyServiceMetadata",
+          "when": "!isWeb && !osd.web"
+        },
+        {
+          "command": "osd.openHostDoorExternal",
+          "when": "false"
+        },
+        {
+          "command": "osd.openServiceRowExternal",
+          "when": "false"
+        },
+        {
+          "command": "osd.openServiceMetadataExternal",
+          "when": "false"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "osd.check",
+          "when": "!isWeb && !osd.web && resourceFilename =~ /\\.(clas|prog|intf)(\\.(locals_def|locals_imp|macros|testclasses))?\\.abap$/i",
+          "group": "navigation@0"
+        },
+        {
+          "command": "osd.activate",
+          "when": "!isWeb && !osd.web && resourceFilename =~ /\\.(clas|prog|intf)(\\.(locals_def|locals_imp|macros|testclasses))?\\.abap$/i",
+          "group": "navigation@0.5"
+        },
+        {
+          "command": "osd.classrun",
+          "when": "!isWeb && !osd.web && resourceFilename =~ /\\.(abap|tabl\\.xml|ddls\\.asddls|ddls\\.xml)$/ && osd.editorClassrun",
+          "group": "navigation@1"
+        },
+        {
+          "command": "osd.runTitle",
+          "when": "!isWeb && !osd.web && resourceFilename =~ /\\.(abap|tabl\\.xml|ddls\\.asddls|ddls\\.xml)$/ && !osd.editorClassrun",
+          "group": "navigation@1"
+        },
+        {
+          "command": "osd.runUnit",
+          "when": "!isWeb && !osd.web && resourceFilename =~ /\\.(abap|tabl\\.xml|ddls\\.asddls|ddls\\.xml)$/ && osd.editorTests",
+          "group": "navigation@1.5"
+        },
+        {
+          "command": "osd.runWithDebugger",
+          "when": "!isWeb && !osd.web && resourceFilename =~ /\\.(abap|tabl\\.xml|ddls\\.asddls|ddls\\.xml)$/",
+          "group": "navigation@2"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "osd.refreshJobs",
+          "when": "view == osdJobs",
+          "group": "navigation@1"
+        },
+        {
+          "command": "osd.filterJobs",
+          "when": "view == osdJobs",
+          "group": "navigation@2"
+        },
+        {
+          "command": "osd.prepareAbapgitZip",
+          "when": "!isWeb && !osd.web && view == osdTree",
+          "group": "9_osd@4"
+        },
+        {
+          "command": "osd.start",
+          "when": "!isWeb && !osd.web && view == osdTree",
+          "group": "navigation@1"
+        },
+        {
+          "command": "osd.stop",
+          "when": "!isWeb && !osd.web && view == osdTree",
+          "group": "navigation@2"
+        },
+        {
+          "command": "osd.rebuildWarm",
+          "when": "!isWeb && !osd.web && view == osdTree",
+          "group": "navigation@3"
+        },
+        {
+          "command": "osd.fullRebuild",
+          "when": "!isWeb && !osd.web && view == osdTree",
+          "group": "navigation@4"
+        },
+        {
+          "command": "osd.refreshTree",
+          "when": "view == osdTree && (!isWeb || osd.web)",
+          "group": "navigation@5"
+        },
+        {
+          "command": "osd.toggleServiceLabel",
+          "when": "!isWeb && !osd.web && view == osdTree",
+          "group": "navigation@6"
+        },
+        {
+          "command": "osd.cycleServiceSort",
+          "when": "!isWeb && !osd.web && view == osdTree",
+          "group": "navigation@7"
+        },
+        {
+          "command": "osd.toggleServiceGrouping",
+          "when": "!isWeb && !osd.web && view == osdTree",
+          "group": "navigation@8"
+        },
+        {
+          "command": "osd.toggleServiceBase",
+          "when": "!isWeb && !osd.web && view == osdTree",
+          "group": "navigation@9"
+        },
+        {
+          "command": "osd.openLaunchpad",
+          "when": "!isWeb && !osd.web && view == osdTree",
+          "group": "9_osd@1"
+        },
+        {
+          "command": "osd.rebuild",
+          "when": "!isWeb && !osd.web && view == osdTree",
+          "group": "9_osd@2"
+        },
+        {
+          "command": "osd.chooseStartSystem",
+          "when": "!isWeb && !osd.web && view == osdTree",
+          "group": "9_osd@3"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "osd.openJobLog",
+          "when": "view == osdJobs && viewItem == osd-job",
+          "group": "jobs@1"
+        },
+        {
+          "command": "osd.openJobOutput",
+          "when": "view == osdJobs && viewItem == osd-job",
+          "group": "jobs@2"
+        },
+        {
+          "command": "osd.copyJobKey",
+          "when": "view == osdJobs && viewItem == osd-job",
+          "group": "jobs@3"
+        },
+        {
+          "command": "osd.start",
+          "when": "view == osdJobs && viewItem == osd-jobs-empty",
+          "group": "jobs@1"
+        },
+        {
+          "command": "osd.start",
+          "when": "!isWeb && !osd.web && view == osdTree && viewItem == osd-state-stopped",
+          "group": "state@1"
+        },
+        {
+          "command": "osd.generateTaxiData",
+          "when": "!isWeb && !osd.web && view == osdTree && viewItem =~ /(^|;)taxi-data(;|$)/",
+          "group": "taxi@1"
+        },
+        {
+          "command": "osd.resetTaxiData",
+          "when": "!isWeb && !osd.web && view == osdTree && viewItem =~ /(^|;)taxi-data(;|$)/",
+          "group": "taxi@2"
+        },
+        {
+          "command": "osd.fullRebuild",
+          "when": "!isWeb && !osd.web && view == osdTree && viewItem == osd-state-stopped",
+          "group": "state@2"
+        },
+        {
+          "command": "osd.chooseStartSystem",
+          "when": "!isWeb && !osd.web && view == osdTree && viewItem =~ /^osd-state-/",
+          "group": "state@9"
+        },
+        {
+          "command": "osd.stop",
+          "when": "!isWeb && !osd.web && view == osdTree && viewItem == osd-state-running",
+          "group": "state@1"
+        },
+        {
+          "command": "osd.rebuildWarm",
+          "when": "!isWeb && !osd.web && view == osdTree && viewItem == osd-state-running",
+          "group": "state@2"
+        },
+        {
+          "command": "osd.fullRebuild",
+          "when": "!isWeb && !osd.web && view == osdTree && viewItem == osd-state-running",
+          "group": "state@3"
+        },
+        {
+          "command": "osd.openLaunchpad",
+          "when": "!isWeb && !osd.web && view == osdTree && viewItem == osd-state-running",
+          "group": "state@4"
+        },
+        {
+          "command": "osd.openSystemLog",
+          "when": "!isWeb && !osd.web && view == osdTree && (viewItem == osd-state-running || viewItem == osd-state-building)",
+          "group": "state@5"
+        },
+        {
+          "command": "osd.stop",
+          "when": "!isWeb && !osd.web && view == osdTree && viewItem == osd-state-building",
+          "group": "state@6"
+        },
+        {
+          "command": "osd.openLaunchpadExternal",
+          "when": "!isWeb && !osd.web && view == osdTree && viewItem == osd-launchpad",
+          "group": "inline"
+        },
+        {
+          "command": "osd.openLaunchpadExternal",
+          "when": "!isWeb && !osd.web && view == osdTree && viewItem == osd-launchpad",
+          "group": "1_open@1"
+        },
+        {
+          "command": "osd.openHostDoorExternal",
+          "when": "!isWeb && !osd.web && view == osdTree && viewItem == osd-host-open",
+          "group": "inline"
+        },
+        {
+          "command": "osd.openHostDoorExternal",
+          "when": "!isWeb && !osd.web && view == osdTree && viewItem == osd-host-open",
+          "group": "1_open@1"
+        },
+        {
+          "command": "osd.runTransaction",
+          "when": "!isWeb && !osd.web && view == osdTree && viewItem == osd-transaction-runnable",
+          "group": "inline"
+        },
+        {
+          "command": "osd.runTransaction",
+          "when": "!isWeb && !osd.web && view == osdTree && viewItem == osd-transaction-runnable",
+          "group": "1_run@1"
+        },
+        {
+          "command": "osd.openServiceRow",
+          "when": "!isWeb && !osd.web && view == osdTree && (viewItem =~ /^osd-service-app(;|$)/ || viewItem =~ /^osd-service-icf(;|$)/ || viewItem =~ /^osd-service-odata(;|$)/) && viewItem =~ /(^|;)url(;|$)/",
+          "group": "inline@1"
+        },
+        {
+          "command": "osd.openServiceRowExternal",
+          "when": "!isWeb && !osd.web && view == osdTree && (viewItem =~ /^osd-service-app(;|$)/ || viewItem =~ /^osd-service-icf(;|$)/ || viewItem =~ /^osd-service-odata(;|$)/) && viewItem =~ /(^|;)url(;|$)/",
+          "group": "inline@2"
+        },
+        {
+          "command": "osd.openServiceRowExternal",
+          "when": "!isWeb && !osd.web && view == osdTree && (viewItem =~ /^osd-service-app(;|$)/ || viewItem =~ /^osd-service-icf(;|$)/ || viewItem =~ /^osd-service-odata(;|$)/) && viewItem =~ /(^|;)url(;|$)/",
+          "group": "1_open@1"
+        },
+        {
+          "command": "osd.openServiceMetadata",
+          "when": "!isWeb && !osd.web && view == osdTree && viewItem =~ /^osd-service-odata(;|$)/ && viewItem =~ /(^|;)metadata(;|$)/",
+          "group": "1_open@2"
+        },
+        {
+          "command": "osd.openServiceMetadataExternal",
+          "when": "!isWeb && !osd.web && view == osdTree && viewItem =~ /^osd-service-odata(;|$)/ && viewItem =~ /(^|;)metadata(;|$)/",
+          "group": "1_open@3"
+        },
+        {
+          "command": "osd.testServiceClosure",
+          "when": "!isWeb && !osd.web && view == osdTree && (viewItem =~ /^osd-service-odata(;|$)/ || viewItem =~ /^osd-service-icf(;|$)/ || viewItem =~ /^osd-service-apc(;|$)/) && viewItem =~ /(^|;)test(;|$)/",
+          "group": "2_test@1"
+        },
+        {
+          "command": "osd.openServiceSourceDpc",
+          "when": "!isWeb && !osd.web && view == osdTree && viewItem =~ /^osd-service-odata(;|$)/ && viewItem =~ /(^|;)source-dpc(;|$)/",
+          "group": "3_source@1"
+        },
+        {
+          "command": "osd.openServiceSourceMpc",
+          "when": "!isWeb && !osd.web && view == osdTree && viewItem =~ /^osd-service-odata(;|$)/ && viewItem =~ /(^|;)source-mpc(;|$)/",
+          "group": "3_source@2"
+        },
+        {
+          "command": "osd.openServiceSourceHandler",
+          "when": "!isWeb && !osd.web && view == osdTree && (viewItem =~ /^osd-service-icf(;|$)/ || viewItem =~ /^osd-service-apc(;|$)/) && viewItem =~ /(^|;)source-handler(;|$)/",
+          "group": "3_source@1"
+        },
+        {
+          "command": "osd.openServiceSourceApp",
+          "when": "!isWeb && !osd.web && view == osdTree && viewItem =~ /^osd-service-app(;|$)/ && viewItem =~ /(^|;)source-app(;|$)/",
+          "group": "3_source@1"
+        },
+        {
+          "command": "osd.openServiceSourceDeclaration",
+          "when": "!isWeb && !osd.web && view == osdTree && (viewItem =~ /^osd-service-icf(;|$)/ || viewItem =~ /^osd-service-apc(;|$)/) && viewItem =~ /(^|;)source-service(;|$)/",
+          "group": "3_source@2"
+        },
+        {
+          "command": "osd.copyServiceUrl",
+          "when": "!isWeb && !osd.web && view == osdTree && (viewItem =~ /^osd-service-app(;|$)/ || viewItem =~ /^osd-service-icf(;|$)/ || viewItem =~ /^osd-service-odata(;|$)/) && viewItem =~ /(^|;)url(;|$)/",
+          "group": "4_copy@1"
+        },
+        {
+          "command": "osd.copyServiceWsUrl",
+          "when": "!isWeb && !osd.web && view == osdTree && viewItem =~ /^osd-service-apc(;|$)/ && viewItem =~ /(^|;)ws(;|$)/",
+          "group": "4_copy@2"
+        },
+        {
+          "command": "osd.copyServiceMetadata",
+          "when": "!isWeb && !osd.web && view == osdTree && viewItem =~ /^osd-service-odata(;|$)/ && viewItem =~ /(^|;)metadata(;|$)/",
+          "group": "4_copy@3"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "key": "ctrl+f2",
+        "command": "osd.check",
+        "when": "!isWeb && !osd.web && resourceExtname == .abap && config.osd.keymap == abap"
+      },
+      {
+        "key": "ctrl+f3",
+        "command": "osd.activate",
+        "when": "!isWeb && !osd.web && resourceExtname == .abap && config.osd.keymap == abap"
+      },
+      {
+        "key": "f8",
+        "command": "osd.run",
+        "when": "!isWeb && !osd.web && resourceFilename =~ /\\.(abap|tabl\\.xml|ddls\\.asddls|ddls\\.xml)$/ && config.osd.keymap == abap && debugState != 'stopped'"
+      },
+      {
+        "key": "f9",
+        "command": "osd.classrun",
+        "when": "!isWeb && !osd.web && resourceExtname == .abap && config.osd.keymap == abap && debugState != 'stopped'"
+      },
+      {
+        "key": "ctrl+shift+f10",
+        "command": "testing.runCurrentFile",
+        "when": "!isWeb && !osd.web && resourceExtname == .abap && config.osd.keymap == abap"
+      },
+      {
+        "key": "ctrl+shift+b",
+        "command": "editor.debug.action.toggleBreakpoint",
+        "when": "!isWeb && !osd.web && resourceExtname == .abap && config.osd.keymap == abap"
+      },
+      {
+        "key": "f5",
+        "command": "workbench.action.debug.stepInto",
+        "when": "!isWeb && !osd.web && resourceExtname == .abap && config.osd.keymap == abap && debugState == 'stopped'"
+      },
+      {
+        "key": "f6",
+        "command": "workbench.action.debug.stepOver",
+        "when": "!isWeb && !osd.web && resourceExtname == .abap && config.osd.keymap == abap && debugState == 'stopped'"
+      },
+      {
+        "key": "f7",
+        "command": "workbench.action.debug.stepOut",
+        "when": "!isWeb && !osd.web && resourceExtname == .abap && config.osd.keymap == abap && debugState == 'stopped'"
+      },
+      {
+        "key": "f8",
+        "command": "workbench.action.debug.continue",
+        "when": "!isWeb && !osd.web && resourceExtname == .abap && config.osd.keymap == abap && debugState == 'stopped'"
+      }
+    ],
+    "walkthroughs": [
+      {
+        "id": "gettingStarted",
+        "title": "Getting started with osd",
+        "description": "Start a local ABAP system, see what runs, and try the editor tools.",
+        "steps": [
+          {
+            "id": "quickStart",
+            "title": "TL;DR — I trust you, use the defaults",
+            "description": "One click starts the bundled copy (or the open-steamgate checkout), SQLite, and warm activation when the host has enough memory. It opens System overview when ready.\n\n[Start with the defaults](command:osd.quickStart)",
+            "media": {
+              "markdown": "./walkthrough/quick-start.md"
+            },
+            "completionEvents": [
+              "onCommand:osd.quickStart"
+            ]
+          },
+          {
+            "id": "startSystem",
+            "title": "Start the system",
+            "description": "The OSD view owns the build, listener, and stop controls.\n\n[Start the system](command:osd.start)",
+            "media": {
+              "markdown": "./walkthrough/start-system.md"
+            }
+          },
+          {
+            "id": "whereThingsLive",
+            "title": "Where things live",
+            "description": "The base system and your workspace layers are separate places.",
+            "media": {
+              "markdown": "./walkthrough/where-things-live.md"
+            }
+          },
+          {
+            "id": "keys",
+            "title": "Keys",
+            "description": "The default ABAP keymap follows familiar ADT actions.",
+            "media": {
+              "markdown": "./walkthrough/keys.md"
+            }
+          },
+          {
+            "id": "tryIt",
+            "title": "Try the tools",
+            "description": "Open a sample, run tests, use a lens, preview data, and open the launchpad.\n\n[Open sample](command:osd.openSample) · [New SQL notebook](command:osd.newSqlNotebook)",
+            "media": {
+              "markdown": "./walkthrough/try-it.md"
+            }
+          },
+          {
+            "id": "reinstall",
+            "title": "Reinstall the extension",
+            "description": "Build and install a fresh VSIX when the extension changes.",
+            "media": {
+              "markdown": "./walkthrough/reinstall.md"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}
