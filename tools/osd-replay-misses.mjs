@@ -8,7 +8,7 @@
 // person's decision, because a recording carries a system's data and where
 // it lands decides whether it is published.
 import {spawnSync} from "node:child_process";
-import {existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync} from "node:fs";
+import {existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync} from "node:fs";
 import {createHash} from "node:crypto";
 import {basename, dirname, join, relative, resolve} from "node:path";
 import {ODATA_ROOT, pathKey, replayer, replayKey, splitUrl} from "./osd-http-replay.mjs";
@@ -123,7 +123,7 @@ function publishable(file) {
  *  (a fixture file) or, without one, of the nearest recording at the same
  *  path. Written into `out` only when git would not publish it there, and
  *  never over a file. Returns {file, from}. */
-export function promote({fixtures, url, from, out, say = console.error}) {
+export function promote({fixtures, url, from, out, say = console.error, mkdir = mkdirSync}) {
   const request = splitUrl(url);
   if (request === undefined) {
     throw new Error(`not an OData URL: ${url}`);
@@ -148,7 +148,7 @@ export function promote({fixtures, url, from, out, say = console.error}) {
   if (publishable(file)) {
     throw new Error(`${file} could be published: it is in a git work tree and tracked or not ignored there; a promoted fixture carries a system's data -- write it under .local/ or a private pack's ignored folder`);
   }
-  mkdirSync(dirname(file), {recursive: true});
+  mkdir(dirname(file), {recursive: true});
   try {
     // "wx": created here or not at all -- an existing file, or a link put
     // there since the check, is never written through or over
@@ -158,6 +158,16 @@ export function promote({fixtures, url, from, out, say = console.error}) {
       throw new Error(`${file} exists; a promoted fixture is never overwritten`);
     }
     throw error;
+  }
+  // judged again where it actually landed: a folder swapped for a link
+  // between the check and the write (Node has no openat to pin it) moves the
+  // file, and a moved file is taken back rather than left publishable.
+  // What this guards is a mistake, not a process racing us on purpose --
+  // one that can write into the folder can publish anything anyway.
+  const landed = realpathSync(file);
+  if (landed !== file || publishable(landed)) {
+    rmSync(landed, {force: true});
+    throw new Error(`${file} landed at ${landed}, which git could publish; removed`);
   }
   return {file, from};
 }

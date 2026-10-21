@@ -721,6 +721,24 @@ describe("tools/osd-http-replay: a foreign service answered from fixtures", () =
         expect(existsSync(join(repo, "tracked.json"))).to.equal(false);
       });
 
+      it("a folder swapped for a link into the tree after the check: the file is taken back", () => {
+        // the swap is made from inside mkdirSync's first call, i.e. after the
+        // check and before the write, which is the window a race would use
+        const priv = mkdtempSync(join(dir, "priv-"));
+        const out = join(priv, ".local");
+        const fs = {mkdirSync};
+        let swapped = false;
+        const hook = (path, options) => {
+          if (!swapped) {
+            swapped = true;
+            symlinkSync(repo, out);
+          }
+          return fs.mkdirSync(path, options);
+        };
+        expect(() => promote({fixtures, url, out, say, mkdir: hook})).to.throw("which git could publish; removed");
+        expect(readdirSync(repo).filter((n) => n.startsWith("promoted-"))).to.deep.equal([]);
+      });
+
       it("an index git cannot read counts as publishing", () => {
         execFileSync("git", ["-C", repo, "add", ".gitignore"]);
         writeFileSync(join(repo, ".git", "index"), "not an index");
