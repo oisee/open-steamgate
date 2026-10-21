@@ -8,7 +8,7 @@ import {expect} from "chai";
 import express from "express";
 import http from "node:http";
 import {execFileSync} from "node:child_process";
-import {existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
+import {existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {answerBatch, contentTypeOf, loadFixtures, parseBatch, partsOf, queryKey, queryPairs, replayer, replayKey, replayService, serviceKey} from "../tools/osd-http-replay.mjs";
@@ -642,32 +642,77 @@ describe("tools/osd-http-replay: a foreign service answered from fixtures", () =
       }
     });
 
-    it("the promote command is the binary's own from a stand, and quoted for cmd.exe on Windows", () => {
+    it("the promote command quotes every word that needs it: POSIX, and PowerShell on Windows", () => {
       const miss = {destination: "REF", request: {service: SRV, path: "OrderSet", query: "$filter=Name eq 'A'&$top=3"}};
       expect(promoteCommand(miss, {env: {}, platform: "linux"})).to.equal(
         `node tools/osd-replay-promote.mjs --destination REF --url '${BASE}/OrderSet?$filter=Name eq '\\''A'\\''&$top=3' --out .local/replay/promoted`);
       expect(promoteCommand(miss, {env: {OSD_SELF: JSON.stringify(["C:\\My Stand\\osd.exe"])}, platform: "win32"})).to.equal(
-        `"C:\\My Stand\\osd.exe" replay-promote --destination REF --url "${BASE}/OrderSet?$filter=Name eq 'A'&$top=3" --out .local/replay/promoted`);
+        `& 'C:\\My Stand\\osd.exe' replay-promote --destination REF --url '${BASE}/OrderSet?$filter=Name eq ''A''&$top=3' --out .local/replay/promoted`);
+      // a destination name is a word of the command too, and %VAR% is not cmd's to expand
+      const odd = {destination: "REF; touch x", request: {service: SRV, path: "OrderSet", query: "$filter=N eq '%PATH%'"}};
+      expect(promoteCommand(odd, {env: {}, platform: "linux"})).to.contain("--destination 'REF; touch x'");
+      expect(promoteCommand(odd, {env: {}, platform: "win32"})).to.contain("--destination 'REF; touch x'").and.contain("N eq ''%PATH%''");
     });
 
-    it("promote writes the miss as a fixture from its nearest recording, only where git would not publish it", async () => {
-      const f = folder("promote", {"a.json": fixture("$top=20", 20)});
-      const fixtures = loadFixtures(f, {say});
-      const repo = join(dir, "repo");
-      mkdirSync(repo);
-      execFileSync("git", ["init", "-q", repo]);
-      writeFileSync(join(repo, ".gitignore"), ".local/\n");
+    it("$top cut drops a recorded next link; a $top that is not a count gets no relaxed answer", async () => {
+      const f = folder("next", {
+        "v2.json": {key: {method: "GET", service: SRV, path: "A", query: "$top=100"}, response: {status: 200, body: {d: {results: rows(100), __next: "A?$skiptoken=100"}}}},
+        "v4.json": {key: {method: "GET", service: SRV, path: "B", query: "$top=100"}, response: {status: 200, body: {value: rows(100), "@odata.nextLink": "B?$skiptoken=100"}}},
+      });
+      const replay = replayer(loadFixtures(f, {say}), {say, match: {ignore: ["$top"]}});
+      const v2 = JSON.parse((await replay.answer({method: "GET", service: SRV, path: "A", query: "$top=20"})).body);
+      expect([v2.d.results.length, v2.d.__next]).to.deep.equal([20, undefined]);
+      const v4 = JSON.parse((await replay.answer({method: "GET", service: SRV, path: "B", query: "$top=20"})).body);
+      expect([v4.value.length, v4["@odata.nextLink"]]).to.deep.equal([20, undefined]);
+      for (const top of ["-1", "1.5", ""]) {
+        expect((await replay.answer({method: "GET", service: SRV, path: "A", query: `$top=${top}`})).outcome, `$top=${top}`).to.equal("miss");
+      }
+    });
+
+    describe("promote: a miss made a fixture, never where git could publish it", () => {
+      let fixtures;
+      let repo;
       const url = `${BASE}/OrderSet?$top=21`;
-      expect(() => promote({fixtures, url, out: join(repo, "fixtures"), tree: repo, say})).to.throw("not ignored by git");
-      const out = join(repo, ".local", "promoted");
-      const {file} = promote({fixtures, url, out, tree: repo, say});
-      const written = JSON.parse(readFileSync(file, "utf8"));
-      expect(written.key).to.deep.equal({method: "GET", service: SRV, path: "OrderSet", query: "$top=21"});
-      expect(written.promotedFrom).to.match(/a\.json$/);
-      expect(() => promote({fixtures, url, out, tree: repo, say})).to.throw("never overwritten");
-      const replay = replayer(loadFixtures([out, f], {say}), {say});
-      expect((await ask(replay, "$top=21")).outcome).to.equal("hit");
-      expect(existsSync(join(repo, "fixtures"))).to.equal(false);
+      beforeEach(() => {
+        fixtures = loadFixtures(folder("promote", {"a.json": fixture("$top=20", 20)}), {say});
+        repo = mkdtempSync(join(dir, "repo-"));
+        execFileSync("git", ["init", "-q", repo]);
+        writeFileSync(join(repo, ".gitignore"), ".local/\n");
+      });
+
+      it("writes the miss's key with the nearest recording's answer under an ignored folder, once", async () => {
+        expect(() => promote({fixtures, url, out: join(repo, "fixtures"), say})).to.throw("could be published");
+        const out = join(repo, ".local", "promoted");
+        const {file} = promote({fixtures, url, out, say});
+        const written = JSON.parse(readFileSync(file, "utf8"));
+        expect(written.key).to.deep.equal({method: "GET", service: SRV, path: "OrderSet", query: "$top=21"});
+        expect(written.promotedFrom).to.match(/a\.json$/);
+        expect(() => promote({fixtures, url, out, say})).to.throw("never overwritten");
+        const replay = replayer(loadFixtures([out, join(dir, "promote")], {say}), {say});
+        expect((await ask(replay, "$top=21")).outcome).to.equal("hit");
+        expect(existsSync(join(repo, "fixtures"))).to.equal(false);
+      });
+
+      it("an ignored folder that is a symlink into a tracked one is judged where the file lands", () => {
+        mkdirSync(join(repo, "tracked"));
+        symlinkSync(join(repo, "tracked"), join(repo, ".local"));
+        expect(() => promote({fixtures, url, out: join(repo, ".local", "promoted"), say})).to.throw("could be published");
+        expect(readdirSync(join(repo, "tracked"))).to.deep.equal([]);
+      });
+
+      it("the exact file is checked: one the index tracks is refused although its folder is ignored", () => {
+        const out = join(repo, ".local", "promoted");
+        const {file} = promote({fixtures, url, out, say});
+        execFileSync("git", ["-C", repo, "add", "-f", file]);
+        rmSync(file);
+        expect(() => promote({fixtures, url, out, say})).to.throw("could be published");
+      });
+
+      it("a repository git will not answer about counts as one that publishes", () => {
+        rmSync(join(repo, ".git"), {recursive: true, force: true});
+        writeFileSync(join(repo, ".git"), "gitdir: /nowhere/at/all\n");
+        expect(() => promote({fixtures, url, out: join(repo, ".local", "promoted"), say})).to.throw("could be published");
+      });
     });
   });
 });

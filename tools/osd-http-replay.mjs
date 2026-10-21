@@ -415,7 +415,9 @@ function choose(candidates, asked) {
 
 /** a collection's rows cut to `top`, in V2 (`d.results`) or V4 (`value`)
  *  shape; anything else is returned as it was. The fixture's own body is
- *  never changed: it answers the next request too. */
+ *  never changed: it answers the next request too. A recorded next link is
+ *  dropped with the rows: it points past the recorded page, and a client
+ *  following it would skip every row between the cut and that page. */
 function cutRows(body, top) {
   let doc = body;
   if (typeof body === "string") {
@@ -431,9 +433,11 @@ function cutRows(body, top) {
   }
   let out;
   if (Array.isArray(doc?.d?.results) && doc.d.results.length > top) {
-    out = {...doc, d: {...doc.d, results: doc.d.results.slice(0, top)}};
+    const {__next, ...d} = doc.d;
+    out = {...doc, d: {...d, results: doc.d.results.slice(0, top)}};
   } else if (Array.isArray(doc?.value) && doc.value.length > top) {
-    out = {...doc, value: doc.value.slice(0, top)};
+    const {"@odata.nextLink": next, ...rest} = doc;
+    out = {...rest, value: doc.value.slice(0, top)};
   } else {
     return body;
   }
@@ -495,7 +499,12 @@ export function replayer(fixtures, {onMiss = "error", say = console.error, name 
   function near(request, entries) {
     const at = pathKey(request);
     const asked = topOf(entries);
+    const malformed = asked === undefined && entries.some(([k]) => k.toLowerCase() === "$top");
     for (const {ignore, keys} of relaxed.values()) {
+      if (malformed && ignore.has("$top")) {
+        // a $top that is not a count cannot be cut to: no relaxed answer
+        continue;
+      }
       const candidates = keys.get(`${at}?${queryKey(request.query, ignore)}`);
       if (candidates !== undefined) {
         return {...choose(candidates, asked), ignore};

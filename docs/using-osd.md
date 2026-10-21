@@ -667,8 +667,14 @@ command that makes it a fixture from its nearest recording:
 node tools/osd-replay-promote.mjs --destination REF --url '<the miss>' --out .local/replay/promoted
 ```
 
-It writes only where git would not publish the file, and never over one;
-list that folder first in the destination's `fixtures` so it wins.
+From a stand's binary the command is `osd replay-promote`, quoted for
+PowerShell on Windows. It writes only where git could not publish the file:
+the exact file, where it physically lands through any symlink, must be
+untracked and ignored, and a repository git cannot answer about counts as
+publishing. It never overwrites a file. List the folder first in the
+destination's `fixtures` so it wins. When rows are cut to the `$top` asked,
+a recorded `__next` / `@odata.nextLink` is dropped with them, and a `$top`
+that is not a count gets no relaxed answer.
 
 `OSD_DESTINATIONS` names another destinations file; its relative
 `fixtures` are read beside it, which is how a compiled binary, running in

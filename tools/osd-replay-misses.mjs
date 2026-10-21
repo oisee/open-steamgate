@@ -7,10 +7,10 @@
 // and `osd replay-promote`). The page only reads: writing a fixture is a
 // person's decision, because a recording carries a system's data and where
 // it lands decides whether it is published.
-import {execFileSync} from "node:child_process";
-import {existsSync, mkdirSync, readFileSync, writeFileSync} from "node:fs";
+import {spawnSync} from "node:child_process";
+import {existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync} from "node:fs";
 import {createHash} from "node:crypto";
-import {isAbsolute, join, relative, resolve} from "node:path";
+import {basename, dirname, join, relative, resolve} from "node:path";
 import {ODATA_ROOT, pathKey, replayer, replayKey, splitUrl} from "./osd-http-replay.mjs";
 
 /** the URL a miss was asked at, from the root, as a page sent it */
@@ -18,14 +18,18 @@ const missUrl = ({service, path, query}) => `${ODATA_ROOT}${service}${path === "
 
 /** the command that turns a miss into a fixture from its nearest
  *  recording, for the host this runs on: `osd replay-promote` from a binary
- *  (OSD_SELF, tools/osd-host.mjs), the tool from a checkout; quoted for
- *  cmd.exe on Windows, where a single quote is not a quote */
+ *  (OSD_SELF, tools/osd-host.mjs), the tool from a checkout. Every word that
+ *  is not plainly safe is quoted: for a POSIX shell, and on Windows for
+ *  PowerShell, the default there, whose single quotes expand nothing --
+ *  cmd.exe expands %VAR% even inside double quotes, so it gets no command. */
 export function promoteCommand(miss, {env = process.env, platform = process.platform} = {}) {
-  const quote = (text) => (platform === "win32" ? `"${text.replaceAll('"', '""')}"` : `'${text.replaceAll("'", "'\\''")}'`);
+  const safe = (w) => w !== "" && [...w].every((c) => (c >= "a" && c <= "z") || (c >= "A" && c <= "Z") || (c >= "0" && c <= "9") || "_-./:=@\\".includes(c));
+  const quote = (w) => (safe(w) ? w : platform === "win32" ? `'${w.replaceAll("'", "''")}'` : `'${w.replaceAll("'", "'\\''")}'`);
   const self = env.OSD_SELF === undefined || env.OSD_SELF === "" ? undefined : JSON.parse(env.OSD_SELF);
-  const word = (w) => (w.includes(" ") ? quote(w) : w);
-  const command = self === undefined ? "node tools/osd-replay-promote.mjs" : [...self.map(word), "replay-promote"].join(" ");
-  return `${command} --destination ${miss.destination} --url ${quote(missUrl(miss.request))} --out .local/replay/promoted`;
+  const words = [...(self === undefined ? ["node", "tools/osd-replay-promote.mjs"] : [...self, "replay-promote"]),
+    "--destination", String(miss.destination), "--url", missUrl(miss.request), "--out", ".local/replay/promoted"].map(quote);
+  // PowerShell runs a quoted program only through the call operator
+  return platform === "win32" && words[0].startsWith("'") ? `& ${words.join(" ")}` : words.join(" ");
 }
 
 const escapeHtml = (text) => String(text).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
@@ -57,39 +61,52 @@ ${rows}</table>`);
   };
 }
 
-/** whether git would publish `path`: inside the work tree of `tree` and not
- *  ignored. Outside a work tree nothing is published. */
-function trackable(path, tree) {
-  let top;
-  try {
-    top = execFileSync("git", ["-C", tree, "rev-parse", "--show-toplevel"], {encoding: "utf8", stdio: ["ignore", "pipe", "ignore"]}).trim();
-  } catch {
-    return false;
+/** `path` with every existing part resolved to where it physically is: a
+ *  symlinked `.local/` must be judged where the file would land */
+function physical(path) {
+  const rest = [];
+  let at = resolve(path);
+  while (!existsSync(at)) {
+    const up = dirname(at);
+    if (up === at) {
+      break;
+    }
+    rest.unshift(basename(at));
+    at = up;
   }
-  const rel = relative(top, path);
-  if (rel.startsWith("..") || isAbsolute(rel)) {
-    return false;
+  return join(realpathSync(at), ...rest);
+}
+
+/** Whether git could publish `file`: it is in a repository's work tree and
+ *  either tracked already or not ignored. Fails closed -- a repository git
+ *  will not answer about (another owner, a broken config) counts as one
+ *  that would publish it. Outside any repository nothing is published. */
+function publishable(file) {
+  let root;
+  for (let at = dirname(file); root === undefined; at = dirname(at)) {
+    if (existsSync(join(at, ".git"))) {
+      root = at;
+    } else if (dirname(at) === at) {
+      return false;
+    }
   }
-  try {
-    execFileSync("git", ["-C", top, "check-ignore", "-q", "--no-index", rel === "" ? "." : rel], {stdio: "ignore"});
-    return false;
-  } catch {
+  const rel = relative(root, file);
+  const git = (...args) => spawnSync("git", ["-C", root, ...args, "--", rel], {stdio: "ignore"}).status;
+  if (git("ls-files", "--error-unmatch") === 0) {
     return true;
   }
+  // 0 ignored, 1 not ignored, anything else git could not say
+  return git("check-ignore", "-q") !== 0;
 }
 
 /** A miss made a fixture: the request's own key, the response of `from`
  *  (a fixture file) or, without one, of the nearest recording at the same
  *  path. Written into `out` only when git would not publish it there, and
  *  never over a file. Returns {file, from}. */
-export function promote({fixtures, url, from, out, tree = process.cwd(), say = console.error}) {
+export function promote({fixtures, url, from, out, say = console.error}) {
   const request = splitUrl(url);
   if (request === undefined) {
     throw new Error(`not an OData URL: ${url}`);
-  }
-  const folder = resolve(out);
-  if (trackable(folder, tree)) {
-    throw new Error(`${out} is inside the tree and not ignored by git; a promoted fixture carries a system's data -- write it under .local/ or a private pack's ignored folder`);
   }
   let source;
   if (from !== undefined) {
@@ -106,11 +123,15 @@ export function promote({fixtures, url, from, out, tree = process.cwd(), say = c
   }
   const key = {method: "GET", service: request.service, path: request.path, query: request.query};
   const name = `promoted-${createHash("sha256").update(replayKey(key)).digest("hex").slice(0, 12)}.json`;
-  const file = join(folder, name);
+  const folder = resolve(out);
+  const file = physical(join(folder, name));
+  if (publishable(file)) {
+    throw new Error(`${file} could be published: it is in a git work tree and tracked or not ignored there; a promoted fixture carries a system's data -- write it under .local/ or a private pack's ignored folder`);
+  }
   if (existsSync(file)) {
     throw new Error(`${file} exists; a promoted fixture is never overwritten`);
   }
-  mkdirSync(folder, {recursive: true});
+  mkdirSync(dirname(file), {recursive: true});
   writeFileSync(file, `${JSON.stringify({key, response: source.response, promotedFrom: relative(folder, resolve(String(from)))}, null, 2)}\n`);
   return {file, from};
 }
