@@ -72,7 +72,7 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
   // Reset counters per compile.
   FAE_N = 0;
   PERSIST_LOWERING = !!cacheDir;
-  /** @type {import("./frontend-session-types.ts").Registry} */ const reg = registry ?? /** @type {import("./frontend-session-types.ts").Registry} */ (new abaplint.Registry(new abaplint.Config(JSON.stringify(config))));
+  /** @type {import("./frontend-session-types.ts").Registry} */ const reg = registry ?? new abaplint.Registry(new abaplint.Config(JSON.stringify(config)));
   // Resolve files; diagnose selection.
   /** @param {string} fn @returns {string} */ const objName = (fn) => fn.split("/").pop().split(".")[0].toLowerCase().replace(/#/g, "/");
   /** @type {import("./frontend-cache-types.ts").CdsSource[]} */ const ddls = discoveryProbe?.cds ?? [];

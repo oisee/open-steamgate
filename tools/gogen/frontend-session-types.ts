@@ -6,13 +6,7 @@ import type {Class} from './emit-go-types.ts';
 import type {FunctionModule as IRFunctionModule} from './ir.ts';
 import type {MethodSignature} from './frontend-types.ts';
 
-// The core's general overload erases the object kind; these two literal
-// lookups are the selection path used by the provenance module.
-export interface Registry extends Core.IRegistry {
-  getObject(type: 'CLAS', name: string): Core.Objects.Class | undefined;
-  getObject(type: 'FUGR', name: string): Core.Objects.FunctionGroup | undefined;
-  getObject(type: string | undefined, name: string | undefined): Core.IObject | undefined;
-}
+export type Registry = Core.Registry;
 export type SourceFile = Core.IFile;
 export type ArtifactIdentity = unknown[];
 export type RegistryObjects = (this: Registry) => Iterable<ArtifactObject>;
