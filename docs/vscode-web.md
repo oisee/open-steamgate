@@ -108,3 +108,7 @@ The pinned libraries and fetched pack assets were bootstrapped into this checkou
 The P1 Chromium baseline was a **44,852,884 byte (42.78 MiB)** bundle, 3,358 ms from activation to `$metadata`, and 7 ms from probe command to `$metadata`. The final S2c0 Chromium run built a **44,863,731 byte (42.79 MiB)** bundle and measured 3,344 ms and 7 ms, respectively. Its worker probe returned `$metadata` 200, POST 201, GET 200 with the row surviving reload. The webview returned metadata 200, CSRF 200, POST 201, filtered GET 200, forbidden path 403, batch 202, and the same webview-created row after reload. These are local measurements, not a download or startup target.
 
 The earlier S2b1 all-pack run produced a **44,854,529 byte (42.78 MiB)** webworker bundle. Activation to the first `$metadata` response was **3,317 ms**, and command to its `$metadata` response was **6 ms**. The probe returned 200/201/200, reload GET returned the same row with 200, and the webview bridge displayed `$metadata` with 200. The tree showed System, OData (12), Apps (10), ICF (16), and APC (4); a single click opened the demo service details panel.
+
+## Parity with desktop
+
+What to bring to parity with the desktop entry, and in what order, is planned in [`vscode-parity.md`](vscode-parity.md).
