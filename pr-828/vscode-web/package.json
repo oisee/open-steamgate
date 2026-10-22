@@ -89,6 +89,7 @@
     "onCommand:osd.webVerifyLastTravel",
     "onCommand:osd.webProbeView",
     "onCommand:osd.webOpenLaunchpad",
+    "onCommand:osd.webDataPreview",
     "onView:osdTree",
     "onView:osdJobs"
   ],
@@ -368,6 +369,14 @@
       {
         "command": "osd.webOpenApp",
         "title": "osd: Open Fiori app"
+      },
+      {
+        "command": "osd.webDataPreview",
+        "title": "osd: Data Preview (F8)",
+        "icon": {
+          "light": "resources/icons/run-console-light.svg",
+          "dark": "resources/icons/run-console-dark.svg"
+        }
       },
       {
         "command": "osd.showDumps",
@@ -701,6 +710,10 @@
           "when": "false"
         },
         {
+          "command": "osd.webDataPreview",
+          "when": "isWeb"
+        },
+        {
           "command": "osd.refreshTree",
           "when": "!isWeb || osd.web"
         },
@@ -762,7 +775,7 @@
         },
         {
           "command": "osd.newSqlNotebook",
-          "when": "!isWeb && !osd.web"
+          "when": "(!isWeb && !osd.web) || (isWeb && osd.web)"
         },
         {
           "command": "osd.openSample",
@@ -951,6 +964,11 @@
           "command": "osd.runWithDebugger",
           "when": "!isWeb && !osd.web && resourceFilename =~ /\\.(abap|tabl\\.xml|ddls\\.asddls|ddls\\.xml)$/",
           "group": "navigation@2"
+        },
+        {
+          "command": "osd.webDataPreview",
+          "when": "isWeb && osd.web && resourceFilename =~ /\\.(tabl\\.xml|ddls\\.asddls|ddls\\.xml)$/",
+          "group": "navigation@1"
         }
       ],
       "view/title": [
@@ -1223,6 +1241,11 @@
         "key": "f8",
         "command": "osd.run",
         "when": "!isWeb && !osd.web && resourceFilename =~ /\\.(abap|tabl\\.xml|ddls\\.asddls|ddls\\.xml)$/ && config.osd.keymap == abap && debugState != 'stopped'"
+      },
+      {
+        "key": "f8",
+        "command": "osd.webDataPreview",
+        "when": "isWeb && osd.web && resourceFilename =~ /\\.(tabl\\.xml|ddls\\.asddls|ddls\\.xml)$/ && config.osd.keymap == abap && debugState != 'stopped'"
       },
       {
         "key": "f9",
