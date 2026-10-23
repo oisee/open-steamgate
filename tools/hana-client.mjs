@@ -36,6 +36,7 @@ import {join} from "node:path";
 const require = createRequire(import.meta.url);
 import {trimLiterals} from "./sql-literals.mjs";
 import {osqlSemanticsError} from "./osql-error.mjs";
+import {requireDatabaseOwnership} from "./osd-db-ownership.mjs";
 
 
 /** Every identifier this client sends goes to HANA quoted in UPPER case.
@@ -344,13 +345,8 @@ export class HanaDatabaseClient {
    *  because that is how hanaSchema creates it; asking for 'zstg_demo' finds
    *  nothing and the setup then tries to create everything a second time. */
   async hasSchema() {
-    const rows = await this.query(
-      `SELECT COUNT(*) AS N FROM SYS.TABLES WHERE SCHEMA_NAME = '${this.schema}' AND TABLE_NAME = 'ZSTG_DEMO'`);
-    // query() folds the keys of a row to lower case, which is the rule the
-    // runtime needs -- so the alias comes back as `n`, not `N`. Reading it as
-    // `N` made this answer false against a schema that was plainly there, and
-    // the setup then tried to create every table a second time.
-    return Number(rows[0]?.n ?? 0) > 0;
+    await this.beginTransaction();
+    return requireDatabaseOwnership({query: (sql) => this.query(sql)}, 'hana', undefined, this.schema);
   }
 
   async missingTables(expected) {

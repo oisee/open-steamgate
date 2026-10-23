@@ -89,10 +89,9 @@ for (const profile of ["file", "sqlite"]) describe(`ADT editing session across c
     const handle = await lock(headers);
     const source = SOURCE.replace("before", next.toLowerCase());
     expect((await put(headers, handle, source)).status).to.equal(200);
-    // The acceptance run's cleanup lists schema-drift databases. An
-    // unchanged file schema masks a dropped carry by retaining its rows.
-    // Add real DDIC input so this cold build must use the carry, as an
-    // in-memory boot always does. No database/session response is mocked.
+    // Add real DDIC input to exercise migration during a cold publication.
+    // File databases preserve sessions while in-memory boots use the carry.
+    // Neither database nor session responses are mocked.
     const table = `zrecycle_${next.toLowerCase()}`;
     writeFileSync(join(root, "src/ddic", table + ".tabl.xml"),
       readFileSync(resolve("src/ddic/zstg_demo.tabl.xml"), "utf8").replaceAll("ZSTG_DEMO", table.toUpperCase()));
@@ -105,7 +104,7 @@ for (const profile of ["file", "sqlite"]) describe(`ADT editing session across c
     expect(activation.body, activation.body).to.contain('generationExecuted="true"');
     expect(activation.headers.get("x-osd-build")).to.match(/^cold/);
     expect(runtime.child.pid, "cold publication replaced the serving child").to.not.equal(pid);
-    if (profile === "file") expect(driftCount(), "the new schema replaced the file database").to.equal(beforeDrift + 1);
+    if (profile === "file") expect(driftCount(), "the new table preserves the file database").to.equal(beforeDrift);
     expect(store.read("PROG", "ZOSD_RECYCLE", "main", "active").source).to.equal(source);
     try {
       const response = next === "UNLOCK" ? await unlock(headers, handle) : await put(headers, handle, source + "* continued\n");

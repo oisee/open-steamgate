@@ -6,6 +6,9 @@ export function databaseDescriptor(client) {
     engine,
     storage: engine === "HDB" || engine === "postgres" ? "server"
       : client?.path && client.path !== ":memory:" ? "file" : "memory",
+    ...(client?.schemaDrift?.length ? {schemaDrift: client.schemaDrift.map(row => ({
+      table: row.table_name, backup: row.backup, reason: row.reason,
+    }))} : {}),
     connected: client?.connected === true ||
       (client?.connected === undefined && engine === "sqlite" && client?.sqlite !== undefined),
   };
