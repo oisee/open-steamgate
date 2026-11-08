@@ -1,0 +1,5 @@
+[
+{"client":"","booking_status":"N","language":"E","text":"New"},
+{"client":"","booking_status":"B","language":"E","text":"Booked"},
+{"client":"","booking_status":"X","language":"E","text":"Canceled"}
+]

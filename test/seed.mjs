@@ -65,6 +65,14 @@ function quote(value, pad, isDate = false, hex = 0) {
   return "'" + s.replaceAll("'", "''") + "'";
 }
 
+/** abapGit's file name for a table and the name the database holds it under.
+ *
+ * A slash cannot be in a file name, so a namespaced table is `#dmo#travel`
+ * in a seed file and `/dmo/travel` in the SQL: the runtime's
+ * `buildDbTableName` lowercases and quotes the ABAP name, it does not rename
+ * it. packs/rap-flight was the first pack with namespaced tables. */
+export const dbTableName = (table) => (table.includes("#") ? table.replaceAll("#", "/") : table);
+
 // A later layer owns the entire table, including when its capture is empty.
 // Resolve owners once so fresh seeding and reseeding choose identical rows.
 function ownedTables(root) {
@@ -96,7 +104,7 @@ export async function reseedPackRows(db) {
   const owners = ownedTables(root);
   const packDirs = new Set(packsOf(root).map((pack) => pack.data).filter(Boolean));
   const ddic = ddicDirsOf(root);
-  const tables = [...owners.keys()].filter((table) => packDirs.has(owners.get(table)));
+  const tables = [...owners.keys()].filter((table) => packDirs.has(owners.get(table))).map(dbTableName);
   let missing = [];
   if (db.missingTables) {
     missing = await db.missingTables(tables);
@@ -107,8 +115,9 @@ export async function reseedPackRows(db) {
   }
   const absent = new Set(missing.map((table) => String(table).toLowerCase()));
   for (const [table, dir] of owners) {
-    if (!/^[a-z0-9_]+$/i.test(table)) throw new Error(`invalid seed table ${table}`);
-    if (packDirs.has(dir) && !absent.has(table)) await db.execute(`DELETE FROM "${table}";`);
+    const dbTable = dbTableName(table);
+    if (!/^[a-z0-9_/]+$/i.test(dbTable)) throw new Error(`invalid seed table ${table}`);
+    if (packDirs.has(dir) && !absent.has(dbTable)) await db.execute(`DELETE FROM "${dbTable}";`);
   }
   for (const dir of dataDirsOf(root)) {
     if (packDirs.has(dir)) await db.execute(seedFrom(dir, ddic, owners, absent));
@@ -123,7 +132,8 @@ function seedFrom(dataDir, ddicDirs, owners, absent = new Set()) {
     }
     const table = file.slice(0, -".tabu.json".length).toLowerCase();
     if (owners && owners.get(table) !== dataDir) continue;
-    if (absent.has(table)) continue;
+    const dbTable = dbTableName(table);
+    if (absent.has(dbTable)) continue;
     const rows = JSON.parse(readFileSync(join(dataDir, file), "utf8"));
     let lengths = new Map();
     for (const dir of ddicDirs) {
@@ -152,7 +162,7 @@ function seedFrom(dataDir, ddicDirs, owners, absent = new Set()) {
     let shape;
     const flush = () => {
       if (batch.length === 0) return;
-      statements.push(`INSERT INTO "${table}" (${shape.map((c) => `"${c}"`).join(", ")}) VALUES ` +
+      statements.push(`INSERT INTO "${dbTable}" (${shape.map((c) => `"${c}"`).join(", ")}) VALUES ` +
         `${batch.map((v) => `(${v.join(", ")})`).join(", ")};`);
       batch = [];
     };

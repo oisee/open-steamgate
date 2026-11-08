@@ -733,7 +733,12 @@ CLASS lcl_connection_data_generator IMPLEMENTATION.
 
     IF out IS BOUND.  out->write( '--> Insert Content.' ) ##NO_TEXT.
     ENDIF.
-    INSERT /dmo/connection FROM TABLE @lt_data.
+*   OSD overlay: the runtime's INSERT ... FROM TABLE writes every component
+*   of the source row as a column, where a system maps the ones the table
+*   has; lt_data carries a weekday beside the columns of /dmo/connection, so
+*   the CORRESPONDING table built two lines up (upstream leaves it unused) is
+*   the one inserted.
+    INSERT /dmo/connection FROM TABLE @lt_data_db.
 
     IF out IS BOUND.  out->write( '--> Done.' ) ##NO_TEXT.
     ENDIF.
@@ -925,7 +930,12 @@ CLASS lcl_flight_data_generator IMPLEMENTATION.
 
     IF lv_is_long_distance = abap_true.
       IF gv_plane_distance_long IS INITIAL.
-        SELECT COUNT(*) FROM @gt_plane_types AS planes WHERE long_distance = @lv_is_long_distance INTO @gv_plane_distance_long.
+*       OSD overlay: SELECT ... FROM @itab (an internal table as the select's
+*       source) is not taken by this runtime -- the @ reaches the SQL it
+*       builds. The count is a LOOP over the same table.
+        LOOP AT gt_plane_types ASSIGNING FIELD-SYMBOL(<ls_plane>) WHERE long_distance = abap_true.
+          gv_plane_distance_long = gv_plane_distance_long + 1.
+        ENDLOOP.
       ENDIF.
       lv_count = gv_plane_distance_long.
 
@@ -936,7 +946,11 @@ CLASS lcl_flight_data_generator IMPLEMENTATION.
 
     ELSE.
       IF gv_plane_distance_short IS INITIAL.
-        SELECT COUNT(*) FROM @gt_plane_types AS planes WHERE long_distance = @lv_is_long_distance INTO @gv_plane_distance_short.
+*       OSD overlay: as above, the internal table as the select's source is
+*       counted by a LOOP here
+        LOOP AT gt_plane_types ASSIGNING FIELD-SYMBOL(<ls_plane_short>) WHERE long_distance = abap_false.
+          gv_plane_distance_short = gv_plane_distance_short + 1.
+        ENDLOOP.
       ENDIF.
       lv_count = gv_plane_distance_short.
 
@@ -946,9 +960,16 @@ CLASS lcl_flight_data_generator IMPLEMENTATION.
       lo_random = go_random_int_distance_short.
     ENDIF.
 
+*   OSD overlay: the number is drawn before the table expression. The
+*   transpiler lowers the bracket's key to a predicate over the rows and
+*   calls what stands inside it once per row it tries, where a system
+*   evaluates it once -- with a fresh random per row, the pick misses and
+*   CX_SY_ITAB_LINE_NOT_FOUND is raised (measured: the first capture run
+*   died here). A variable holds the drawn number, the bracket reads it.
+    DATA(lv_pick) = lo_random->get_next( ).
     DATA(ls_plane_type) = gt_plane_types[
                long_distance = lv_is_long_distance
-               index = lo_random->get_next( )
+               index = lv_pick
             ].
 
     DATA(lv_seats_occupied_percent) = go_random_seats->get_next( ).
@@ -1328,7 +1349,9 @@ CLASS lcl_customer_data_generator IMPLEMENTATION.
                                               ELSE '89'
                                             )
                                      && cv_phone_number_seperator
-                                     && |{ replace( val = lo_random_phone_number->get_next( )  off = 3  len = 1  with = cv_phone_number_seperator ) }|
+*   OSD overlay: the runtime's string functions take no integer argument (a
+*   system converts it), so the digits go through a string template first
+                                     && |{ replace( val = |{ lo_random_phone_number->get_next( ) }|  off = 3  len = 1  with = cv_phone_number_seperator ) }|
                   email_address = to_lower( lt_names[ i ]-first_name && `.` && lt_names[ i ]-last_name && `@` && cv_email_host && `.` && lt_addresses[ j ]-country )
                )
            ).
@@ -1449,15 +1472,21 @@ CLASS lcl_customer_data_generator IMPLEMENTATION.
 
     LOOP AT build_city( ) INTO DATA(ls_city).
       DO lo_random_counter->get_next( ) TIMES.
+*       OSD overlay: open-abap-core's cl_abap_random_int asserts high > low,
+*       where a system takes min = max (a country with one street always
+*       picks it -- AT, BE and CH have one), so the index is drawn only when
+*       there is a choice, and outside the bracket: what stands inside a
+*       table expression's key is called per row tried here, once on a system
+        DATA(lv_street_index) = COND i( WHEN lines( lt_street[ country = ls_city-country ]-streets ) > 1
+                                        THEN lt_random_street[ country = ls_city-country ]-random->get_next( )
+                                        ELSE 1 ).
         APPEND VALUE ty_address(
             country     = ls_city-country
             postal_code = ls_city-postal_code
             city        = ls_city-city
             street      = |{ lt_street[
                                    country = ls_city-country
-                              ]-streets[
-                                   lt_random_street[ country = ls_city-country ]-random->get_next( )
-                              ] }|
+                              ]-streets[ lv_street_index ] }|
 
         ) TO rt_data.
       ENDDO.

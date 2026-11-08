@@ -35,12 +35,20 @@ system and nowhere else (every change is marked `OSD overlay` in the source):
   is absent, so phone numbers get nine digits; `CORRESPONDING ... DISCARDING
   DUPLICATES`, the lookup form `CORRESPONDING #( a FROM b USING ... )` and a
   `SWITCH` over two `REDUCE`s with `LET` are not parsed, so they are spelled
-  out as loops. The non-ASCII city names in its literals are upstream's.
+  out as loops; an inline `CORRESPONDING` in an `INSERT ... FROM TABLE @()`
+  host expression and `KEY primary_key` in a table expression are spelled
+  out too; and four more statements a green build accepted but the first run
+  refused -- `SELECT ... FROM @itab` (the `@` reaches the SQL), a functional
+  call inside a table expression's key (called per row here, once on a
+  system), `cl_abap_random_int` with `min = max` (this library asserts
+  `high > low`), and a string function given an integer. The non-ASCII city
+  names in its literals are upstream's.
 - `/dmo/cl_data_generator_managed`: the two lookup-form `CORRESPONDING`s.
 
 `zcl_osd_rapflight_seed` runs the generator with a console and reports the
 row counts; `tools/rap-flight/seed-capture.mjs` calls it and writes the rows
-into `data/*.tabu.json`.
+into `data/*.tabu.json` -- 22 files, 10.7 MB, the counts in
+[docs/rap-flight-pack.md](../../docs/rap-flight-pack.md)'s seed section.
 
 `zosd_rapflight.stg.yaml` serves the CDS interface views the generator takes
 as read-only entity sets (`/sap/opu/odata/sap/ZOSD_RAPFLIGHT_SRV`), so the

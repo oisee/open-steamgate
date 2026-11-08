@@ -124,14 +124,15 @@ The overlay (`packs/rap-flight/src/`, every change marked `OSD overlay`):
 four DDIC stand-ins (`ABP_LOCINST_LASTCHANGE_USER`, `SDRAFT_UUID`,
 `I_CURRENCY`, `I_COUNTRYTEXT`; released SAP objects, to go to
 open-abap-core and then be dropped here), copies of the two data generators
-with the number-range, BAdI and four-statement changes the pack README
-lists, a seed class, and `zosd_rapflight.stg.yaml`: the generated views as
+with the number-range, BAdI and statement changes the pack README lists
+(six that the build refused, four more that only the first run found), a
+seed class, and `zosd_rapflight.stg.yaml`: the generated views as
 read-only entity sets of `ZOSD_RAPFLIGHT_SRV` over SADL.
 
 ### The transpile
 
 The cold build over the final exclude list is green: `npm run transpile`,
-2652 objects in 40.7 s, 186 of the output modules the pack's (build 5 of
+2652 objects in 40.7 s, 247 of the output modules the pack's (build 5 of
 the job; builds 1-4 were UNFETCHED, the AMDP refusal, the class-name and
 field-less-view refusals, and two transpiler walls in the data generator).
 What the pack hands the transpiler and what came out:
@@ -155,6 +156,65 @@ found: #"; 7 statements) and `KEY primary_key` in a table expression
 that found them in seconds instead of a build each is worth keeping in
 mind: `Transpiler.run` over a registry with the tree as dependencies and
 the few classes under test as main files, syntax check off.
+
+The 247 modules, counted by what wrote them: 174 are upstream's
+`/DMO/` objects (49 tables, 53 data elements, 16 table types, 35 DDIC
+views, 9 classes and their 2 local includes, 6 message classes, 2
+interfaces, the function group, the lock object), 35 the source classes
+`cds2ddic` generated over the views, 28 the table-source classes it
+generated over the tables, 6 the overlay (the seed class, the service's
+four MPC/DPC classes), and 4 the DDIC stand-ins.
+
+A third wall the green build said nothing about, because a build transpiles
+and never loads what it wrote: `UPDATE dbtab FROM wa` lowers to one JS
+property access per component of the row, and six of the generated
+table-source classes had a component an append structure names `/dmo/...`
+(`/dmo/agency`'s slogan field) or a draft table's admin include names
+`%admin` -- not JavaScript, so the modules did not parse, and the runtime's
+init, which imports every module, died without naming a file. Found by the
+first seed capture (a host that loads the output is the test the build is
+not); `cds2ddic` now updates such tables `FROM TABLE @lt_rows`, and
+`test/output-parses.mjs` parses every module the build wrote with acorn,
+which is how the same reading found one more broken module on `main`
+(`zl3_fleet2.prog.mjs`, a top-level `RETURN`), carried there as a dated
+exception.
+
+## The seed: SAP's generator, run once
+
+`node tools/rap-flight/seed-capture.mjs` (after `npm run transpile`) runs
+`ZCL_OSD_RAPFLIGHT_SEED`, which gives `/DMO/CL_FLIGHT_DATA_GENERATOR` the
+console an ADT class run asks for, inside one dialog step; what the generator
+wrote is then read out of the database into `data/*.tabu.json`, abapGit's TABU
+form with ISO dates. The counts it printed (6.3 s for the generator):
+
+| table | rows | | table | rows |
+| --- | ---: | --- | --- | ---: |
+| /dmo/airport | 47 | | /dmo/supplement, /dmo/suppl_text | 48 + 48 |
+| /dmo/carrier | 16 | | /dmo/travel | 3190 |
+| /dmo/connection | 20 | | /dmo/booking | 7726 |
+| /dmo/flight | 40 | | /dmo/book_suppl | 13442 |
+| /dmo/agency | 50 | | /dmo/travel_m | 3190 |
+| /dmo/customer | 668 | | /dmo/booking_m | 7726 |
+| /dmo/supplcat (+ its texts) | 4 + 4 | | /dmo/booksuppl_m | 13442 |
+| the three status pairs | 4+4, 3+3, 3+3 | | **22 files** | **10.7 MB** |
+
+The size is a fact to know before leaning on it: the preview deployment
+inlines every pack's seed statements into its bundle
+(`scripts/build-preview.mjs`), so this pack adds ~11 MB to what a browser
+downloads on a cold start. Nothing reads the three legacy transactional
+tables at boot -- the service serves the managed and reuse views, and the
+managed rows are seeded directly; they are carried because they are what the
+generator made and `readonly/`'s views over them are the natural next
+service.
+
+Getting there took four more overlay answers after the build was green, each
+found by the run and each in ANORMALIES.md: `SELECT ... FROM @itab` is not
+taken (the `@` reaches the SQL), a functional call inside a table
+expression's key is called **per row** here and once on a system (the plane
+pick drew a fresh number per row and missed), `cl_abap_random_int` asserts
+`high > low` where a system takes `min = max` (a country with one street),
+and the runtime's string functions take no integer argument (the phone
+number). A green build said nothing about any of them; the run is the test.
 
 ## The walls, ranked by objects blocked
 

@@ -35,7 +35,7 @@ describe("packs/rap-flight: the scenario's views over SADL", function () {
 
   it("the entity sets answer, and the seeded rows are there when the pack carries data", async () => {
     const seeded = existsSync("packs/rap-flight/data/#dmo#travel_m.tabu.json");
-    for (const [set, key] of [["TravelSet", "TravelId"], ["CarrierSet", "AirlineId"], ["CustomerSet", "CustomerId"], ["AirportSet", "AirportId"]]) {
+    for (const [set, key] of [["TravelSet", "TravelId"], ["CarrierSet", "Airlineid"], ["CustomerSet", "Customerid"], ["AirportSet", "Airportid"]]) {
       const res = await fetch(`${S}/${set}?$top=3&$inlinecount=allpages&$format=json`);
       expect(res.status, set).to.equal(200);
       const d = (await res.json()).d;
