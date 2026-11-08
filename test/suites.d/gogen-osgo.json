@@ -6,6 +6,7 @@
     "test/irjs-progress.mjs",
     "test/generation-diff.mjs",
     "test/generation-hash.mjs",
+    "test/output-parses.mjs",
     "test/osd-abapgit-zip.mjs",
     "test/osd-enq.mjs",
     "test/osd-metrics.mjs",

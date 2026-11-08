@@ -4281,3 +4281,65 @@ Not an anomaly, recorded for porting: on 7.58, `FIND ... REGEX` (POSIX) raises a
   association target (`association to /DMO/I_Agency`) parses as `/`, and a
   view over a stand-in table with no fields yields 0 fields
   (`/DMO/CURRENCY_HELPER`).
+- The transpiler lowers `UPDATE dbtab FROM wa` to one JS property access per
+  component of the row (`ls_row.get().<name>.get()`), which is not JavaScript
+  when a component is named `/dmo/...` (an append structure, `/dmo/agency`'s
+  slogan field) or `%admin` (a draft table's CDS admin include): the module
+  does not parse. Expected: an update of such a table is ordinary ABAP.
+  Measured: six generated `zcl_stg_tab_*` modules of packs/rap-flight were
+  unloadable while the build was green -- the build transpiles and never
+  loads what it wrote; the first failure was the runtime's init importing
+  every module, with an error that named no file (2026-11-08, found by
+  `tools/rap-flight/seed-capture.mjs`). Workaround: `tools/cds2ddic.mjs`
+  updates such tables `FROM TABLE @lt_rows`, which the transpiler hands to
+  the runtime as rows. Upstream: abaplint/transpiler, needs an issue.
+- A `RETURN.` at the top level of a program (legal ABAP: it ends the
+  program) is written by the transpiler as a top-level JS `return`, which
+  ESM forbids, so `output/zl3_fleet2.prog.mjs` cannot be loaded at all.
+  Nothing imports it and nothing runs the program, so no suite had noticed;
+  found by reading every module of the output with acorn
+  (`test/output-parses.mjs`, 2026-11-08), which carries the module as a
+  dated exception until it is fixed. Upstream: abaplint/transpiler, needs an
+  issue.
+- Seed files of a namespaced table (`#dmo#travel.tabu.json`, abapGit's form,
+  because a slash cannot be in a file name) were inserted into a table
+  named `#dmo#travel`, which no statement of the runtime reads, and the
+  reseed refused them outright ("invalid seed table"). Expected: the rows
+  land in `/dmo/travel`, the name the runtime's `buildDbTableName` uses.
+  Fixed: `test/seed.mjs` maps the file form to the ABAP name
+  (`dbTableName`). Found with packs/rap-flight's captured seed, 2026-11-08.
+- `INSERT dbtab FROM TABLE @itab` where the source row is wider than the
+  table (upstream's own connection generator inserts a type carrying a
+  `weekday` beside the columns of `/dmo/connection`): a system maps the
+  components the table has; the runtime writes every component of the row as
+  a column, the statement fails, and the exception's text guesses "duplicate
+  key?" for any failed row (2026-11-08, found by the pack's seed capture).
+  Workaround in the overlay: the `CORRESPONDING` table upstream builds and
+  leaves unused is the one inserted. Upstream: abaplint/runtime, needs an
+  issue.
+- `SELECT ... FROM @itab AS alias` (an internal table as the select's source,
+  7.50): the statement transpiles and the `@` reaches the SQL the runtime
+  builds -- SQLite answers `unrecognized token: "@"` wrapped as
+  CX_SY_DYNAMIC_OSQL_SEMANTICS. Two statements of the flight data generator
+  (`get_flight_info`, the plane-type count). Workaround in the overlay: a
+  LOOP over the same table. Upstream: abaplint/transpiler, needs an issue.
+- A functional method call inside a table expression's key
+  (`gt_plane_types[ long_distance = lv index = lo_random->get_next( ) ]`):
+  a system evaluates the call once; the transpiler lowers the key to a
+  predicate over the rows and calls it **per row tried**, so a side-effecting
+  call (a fresh random each time) misses and CX_SY_ITAB_LINE_NOT_FOUND is
+  raised -- measured, the first seed capture died there. Workaround in the
+  overlay: the number is drawn into a variable before the bracket. Upstream:
+  abaplint/transpiler, needs an issue.
+- `cl_abap_random_int=>create( min = n max = n )` asserts in open-abap-core
+  (`ASSERT high > low` in `intinrange`, reached from every `get_next`): a
+  system takes min = max and returns that value. The address generator of the
+  flight scenario hits it for every country with one street (AT, BE, CH).
+  Workaround in the overlay: the index is drawn only when there is a choice.
+  Upstream: open-abap-core, needs an issue.
+- A string function given an integer (`replace( val =
+  lo_random_phone_number->get_next( ) off = 3 len = 1 ... )`, upstream's own
+  phone-number expression): a system converts the argument; the runtime's
+  `replace` calls `getOffset` on it and dies with a JS TypeError. Workaround
+  in the overlay: the digits go through a string template first. Upstream:
+  abaplint/runtime, needs an issue.
