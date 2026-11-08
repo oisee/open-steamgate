@@ -1608,8 +1608,15 @@ CLASS lcl_supplement_data_generator IMPLEMENTATION.
     gt_supplement_category = get_supplement_category( ).
 
     DATA(lt_type) = get_supplement_category( ).
-    INSERT /dmo/supplcat    FROM TABLE @( CORRESPONDING tt_supplement_category(      lt_type ) ).
-    INSERT /dmo/supplcat_t  FROM TABLE @( CORRESPONDING tt_supplement_category_text( lt_type ) ).
+*   OSD overlay: the transpiler cannot infer the row type of an inline
+*   CORRESPONDING inside a host expression (INSERT ... FROM TABLE @( ... )),
+*   so the tables are typed first.
+    DATA lt_supplcat TYPE tt_supplement_category.
+    DATA lt_supplcat_t TYPE tt_supplement_category_text.
+    lt_supplcat = CORRESPONDING #( lt_type ).
+    lt_supplcat_t = CORRESPONDING #( lt_type ).
+    INSERT /dmo/supplcat    FROM TABLE @lt_supplcat.
+    INSERT /dmo/supplcat_t  FROM TABLE @lt_supplcat_t.
 
 *   The number range has to be set after inserting values into /dmo/supplcat as it reads the data from the table to validate the sub-objects ...
     IF out IS BOUND.  out->write( '--> Set up Number Range Intervals.' ) ##NO_TEXT.
@@ -1622,8 +1629,12 @@ CLASS lcl_supplement_data_generator IMPLEMENTATION.
 
     IF out IS BOUND.  out->write( '--> Insert Content.' ) ##NO_TEXT.
     ENDIF.
-    INSERT /dmo/supplement  FROM TABLE @( CORRESPONDING tt_supplement(               lt_data ) ).
-    INSERT /dmo/suppl_text  FROM TABLE @( CORRESPONDING tt_supplement_text(          lt_data ) ).
+    DATA lt_supplement TYPE tt_supplement.
+    DATA lt_suppl_text TYPE tt_supplement_text.
+    lt_supplement = CORRESPONDING #( lt_data ).
+    lt_suppl_text = CORRESPONDING #( lt_data ).
+    INSERT /dmo/supplement  FROM TABLE @lt_supplement.
+    INSERT /dmo/suppl_text  FROM TABLE @lt_suppl_text.
     IF out IS BOUND.  out->write( '--> Done.' ) ##NO_TEXT.
     ENDIF.
     IF out IS BOUND.  out->write( '--> Done.' ) ##NO_TEXT.
@@ -1791,19 +1802,28 @@ CLASS lcl_status_vh_data_generator IMPLEMENTATION.
     IF out IS BOUND.  out->write( '--> Travel Status' ) ##no_text.
     ENDIF.
     DATA(travel_status) = _travel_status( ).
-    INSERT /dmo/trvl_stat   FROM TABLE @( CORRESPONDING #( travel_status ) ).
+*   OSD overlay: the transpiler cannot infer the row type of an inline
+*   CORRESPONDING inside a host expression (INSERT ... FROM TABLE @( ... )),
+*   so the tables are typed first.
+    DATA lt_trvl_stat TYPE STANDARD TABLE OF /dmo/trvl_stat WITH DEFAULT KEY.
+    lt_trvl_stat = CORRESPONDING #( travel_status ).
+    INSERT /dmo/trvl_stat   FROM TABLE @lt_trvl_stat.
     INSERT /dmo/trvl_stat_t FROM TABLE @travel_status.
 
     IF out IS BOUND.  out->write( '--> Overall Status' ) ##no_text.
     ENDIF.
     DATA(overall_status) = _overall_status( ).
-    INSERT /dmo/oall_stat   FROM TABLE @( CORRESPONDING #( overall_status ) ).
+    DATA lt_oall_stat TYPE STANDARD TABLE OF /dmo/oall_stat WITH DEFAULT KEY.
+    lt_oall_stat = CORRESPONDING #( overall_status ).
+    INSERT /dmo/oall_stat   FROM TABLE @lt_oall_stat.
     INSERT /dmo/oall_stat_t FROM TABLE @overall_status.
 
     IF out IS BOUND.  out->write( '--> Booking Status' ) ##no_text.
     ENDIF.
     DATA(booking_status) = _booking_status( ).
-    INSERT /dmo/book_stat   FROM TABLE @( CORRESPONDING #( booking_status ) ).
+    DATA lt_book_stat TYPE STANDARD TABLE OF /dmo/book_stat WITH DEFAULT KEY.
+    lt_book_stat = CORRESPONDING #( booking_status ).
+    INSERT /dmo/book_stat   FROM TABLE @lt_book_stat.
     INSERT /dmo/book_stat_t FROM TABLE @booking_status.
 
     IF out IS BOUND.  out->write( '--> Done.' ) ##NO_TEXT.
@@ -2206,10 +2226,11 @@ CLASS lcl_travel_data_generator IMPLEMENTATION.
 
       DATA(lv_booking_date) = CONV /dmo/booking-booking_date( <flight>-flight_date - go_ran_booking_date->get_next( ) ).
 
+*     OSD overlay: KEY primary_key dropped from the table expression below;
+*     it is the default, and the transpiler has no KEY in a table expression
       DATA(lv_price) = /dmo/cl_flight_data_generator=>calculate_flight_price(
                                       iv_flight_distance = gt_connections[ carrier_id = <flight>-carrier_id connection_id = <flight>-connection_id ]-distance
-                                      iv_seats_occupied_percent = ( gt_flights_final[ KEY primary_key ##PRIMKEY[KEY_SORTED_DATE]
-                                                                                      carrier_id    = <flight>-carrier_id
+                                      iv_seats_occupied_percent = ( gt_flights_final[ carrier_id    = <flight>-carrier_id
                                                                                       connection_id = <flight>-connection_id
                                                                                       flight_date   = <flight>-flight_date
                                                                                     ]-seats_occupied
