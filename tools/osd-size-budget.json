@@ -207,8 +207,8 @@
       "reason": "2026-10-02, this PR +18 net (+41/-23 against its merge base; the rest of the step from 3102 was already on main): the ABAP sessions adapter awaits Node route calls, handles async failures, and deletes objects with lock release in one dialog step; these routes move to ABAP in later slices"
     },
     "tools/cds2ddic.mjs": {
-      "lines": 1100,
-      "reason": "re-taken after #419 (pins): +3 lines routing library paths through tools/osd-lib-path.mjs"
+      "lines": 1101,
+      "reason": "re-taken after #419 (pins): +3 lines routing library paths through tools/osd-lib-path.mjs; 2026-11-08 +1, the import of tools/cds-names.mjs (namespaced CDS names, packs/rap-flight)"
     },
     "tools/dsl-l2-eval.mjs": {
       "lines": 1164,
