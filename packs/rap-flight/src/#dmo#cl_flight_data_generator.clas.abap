@@ -89,10 +89,11 @@ CLASS /dmo/cl_flight_data_generator IMPLEMENTATION.
 
 
   METHOD calculate_flight_price.
-    rv_price = /dmo/cl_flight_legacy=>calculate_flight_price(
-                 iv_seats_occupied_percent = iv_seats_occupied_percent
-                 iv_flight_distance        = iv_flight_distance
-               ).
+*   OSD overlay: /dmo/cl_flight_legacy is not in the pack (it needs the AMDP
+*   currency conversion); this is its formula, as written there.
+    DATA lv_percentage_of_max_price TYPE i.
+    lv_percentage_of_max_price = ( 3 * iv_seats_occupied_percent ** 2 DIV 400 ) + 25 ##OPERATOR[**].
+    rv_price = lv_percentage_of_max_price * iv_flight_distance DIV 100.
   ENDMETHOD.
 
   METHOD reset_numberrange_interval.

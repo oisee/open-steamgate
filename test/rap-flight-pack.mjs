@@ -2,7 +2,7 @@ import {expect} from "chai";
 import {existsSync, readFileSync} from "node:fs";
 import {join} from "node:path";
 import {packsOf, markerOf, sourceMatches} from "../tools/osd-packs.mjs";
-import {fileOf, wordOf} from "../tools/cds-names.mjs";
+import {fileOf, wordOf, classNameOf} from "../tools/cds-names.mjs";
 
 // packs/rap-flight: SAP's RAP flight reference scenario, fetched from its
 // public repository at a pinned commit (docs/rap-flight-pack.md). What this
@@ -73,5 +73,19 @@ describe("packs/rap-flight: namespaced CDS names in the generator", () => {
     expect(wordOf("/DMO/CURRHLP")).to.equal("DMO_CURRHLP");
     expect(fileOf("ZVTRAVEL"), "an unnamespaced name is untouched").to.equal("zvtravel");
     expect(wordOf("zvtravel")).to.equal("ZVTRAVEL");
+  });
+
+  // a CDS view entity has no SQL view name and up to 30 characters of its own,
+  // which ZCL_STG_CDS_ + word does not fit: fourteen of the pack's generated
+  // classes were "too long" before the name was cut to 30 with a hash tail
+  it("keeps a generated class name at 30 characters, deterministically", () => {
+    expect(classNameOf("ZCL_STG_CDS_", "/DMO/I_TRAVEL_M")).to.equal("ZCL_STG_CDS_DMO_I_TRAVEL_M");
+    const long = classNameOf("ZCL_STG_CDS_", "/DMO/I_TRAVEL_STATUS_VH_TEXT");
+    expect(long.length).to.be.at.most(30);
+    expect(long).to.match(/^ZCL_STG_CDS_DMO_I_TRAVEL_[0-9A-F]{4}$/);
+    expect(classNameOf("ZCL_STG_CDS_", "/DMO/I_TRAVEL_STATUS_VH_TEXT"), "the same name every build").to.equal(long);
+    expect(classNameOf("ZCL_STG_CDS_", "/DMO/I_TRAVEL_STATUS_VH")).to.not.equal(long);
+    expect(classNameOf("ZCL_", "/DMO/C_BOOKSUPPL_PROCESSOR_M", "_MPC_EXT")).to.have.length(30).and.match(/_MPC_EXT$/);
+    expect(classNameOf("zcl_stg_tab_", "ZSTG_DEMO"), "the demo is untouched").to.equal("zcl_stg_tab_ZSTG_DEMO");
   });
 });
