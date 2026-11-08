@@ -4226,3 +4226,58 @@ Not an anomaly, recorded for porting: on 7.58, `FIND ... REGEX` (POSIX) raises a
   `METHODS` statements.
 - Upstream: none filed. It belongs with implicit RAP handler signatures in
   abaplint; explicit signatures are this project's interim form.
+
+## The RAP flight reference scenario as a pack (packs/rap-flight)
+
+- Status: measured; worked around in the pack's overlay only, nothing
+  stubbed silently. The counts and the ranked walls are in
+  docs/rap-flight-pack.md. Discovery 2026-11-08, `@abaplint/core 2.120.73`,
+  `@abaplint/transpiler 2.14.3`.
+- EML: `READ ENTITIES`, `MODIFY ENTITIES`, `COMMIT ENTITIES` parse (abaplint)
+  and transpile to `throw new Error("ReadEntities, not supported, transpiler")`
+  (`@abaplint/transpiler/build/src/statements/read_entities.js`). The single
+  `READ ENTITY` form, `GET PERMISSIONS`, `SET LOCKS` and `RAISE ENTITY EVENT`
+  do not parse. Expected: the statements run against the business object.
+  Workaround: none; the 9 behavior pools and 5 test consumers are excluded
+  by pattern.
+- `bdef-gen.mjs` refuses every BDEF of the scenario (projection `use`,
+  associations / compositions, draft, determine actions, unparsed
+  extensions) and a refusal fails the build. Expected on a system: all 15
+  activate. Workaround: `\.bdef\.` excluded in the manifest; measured per
+  file in the document.
+- abaplint parser (open-abap version) refuses `CLASS x DEFINITION DEFERRED
+  FOR TESTING` (8 objects), `CORRESPONDING #( t DISCARDING DUPLICATES ... )`
+  (7), the lookup form `CORRESPONDING #( a FROM b USING k = k MAPPING ...
+  EXCEPT * )` (1), `MAPPING %fail = DEFAULT VALUE #( ... )` (2), `TYPES ...
+  WITH INDICATORS` and `UPDATE ... INDICATORS SET STRUCTURE` (1), a `SWITCH`
+  whose operands are `REDUCE ... LET ... IN` (1). Expected: all are 7.5x
+  syntax a system accepts. Workaround: the two data generators are copied
+  into the overlay with those statements spelled out as loops; the pools are
+  excluded. Upstream: not filed yet (abaplint issues with one-line
+  reproducers each; see the document's wall 8).
+- open-abap-core number ranges: `cl_numberrange_intervals` has `create`
+  only (a no-op) and no `read` / `update` / `delete`, `nr_nriv_line` has no
+  `nrlevel`, there is no `nr_subobject`; `cl_numberrange_runtime=>number_get`
+  has no `quantity` / `returncode` / `returned_quantity`, and
+  `kernel_numberrange` counts in memory from 1 per session. Expected: NRIV
+  intervals, a block of `quantity` numbers whose last one is returned.
+  Workaround in the overlay generators: the reset is a no-op and a block
+  starts at the interval's lower bound. Upstream: open-abap-core, not filed.
+- `CL_ABAP_RANDOM_INT8` and `CL_ABAP_RANDOM_FLOAT` are absent from
+  open-abap-core. Workaround: nine-digit `cl_abap_random_int` for the phone
+  numbers; the float user is in the excluded extensibility chapter.
+- `GET BADI` / `CALL BADI` are not transpiled and a BAdI definition (ENHS)
+  is not an object the registry types. Workaround: the one implementation is
+  constructed and called directly in the overlay copy.
+- Released DDIC absent from open-abap-core: `ABP_LOCINST_LASTCHANGE_USER`
+  (CHAR 12), `SDRAFT_UUID` (RAW 16), the views `I_Currency`, `I_Country`,
+  `I_CountryText`. Workaround: stand-ins in `packs/rap-flight/src/ddic/`
+  (the two data elements as they are documented, the two views as plain
+  tables with the columns the scenario reads); to send to open-abap-core
+  per the DDIC rule and then drop here.
+- `tools/cds2ddic.mjs` with a namespaced view: wrote `gen/cds/dmo/...`
+  (ENOENT) and would have named a class `zcl_stg_cds_/dmo/...`. Fixed:
+  `tools/cds-names.mjs`. Still open in the generator: a namespaced
+  association target (`association to /DMO/I_Agency`) parses as `/`, and a
+  view over a stand-in table with no fields yields 0 fields
+  (`/DMO/CURRENCY_HELPER`).
