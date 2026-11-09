@@ -70,7 +70,7 @@ describe("tools/osd-persist: a database that outlives its process", function () 
     expect(answer.rows[0].text).to.equal("a row that should survive");
   });
 
-  it("a database made for other tables is not served as if it fitted", async () => {
+  it("an added column preserves the restored database and its rows", async () => {
     const first = await build(SCHEMA);
     await first.db.execute("INSERT INTO ztest ('mandt','id','text') VALUES ('123','0002','made for the old tables');");
     save(first.db);
@@ -78,9 +78,9 @@ describe("tools/osd-persist: a database that outlives its process", function () 
     // the same file, a schema that differs by one column, which is what a
     // branch with its own DDIC looks like from here
     const second = await build(OTHER);
-    expect(second.restored, "a file for another schema has to be rebuilt").to.equal(false);
+    expect(second.restored, "a compatible schema change keeps the file").to.equal(true);
     const answer = await second.db.select({select: "SELECT count(*) as n FROM ztest"});
-    expect(Number(answer.rows[0].n), "the old rows must not come back under the new tables").to.equal(0);
+    expect(Number(answer.rows[0].n), "old rows survive an added column").to.equal(1);
     // and the new database knows what it was made for
     const written = await second.db.select({select: "SELECT fingerprint FROM osd_schema"});
     expect(written.rows[0].fingerprint).to.equal(fingerprintOf(OTHER));
@@ -96,7 +96,7 @@ describe("tools/osd-persist: a database that outlives its process", function () 
       const db = new SQLiteDatabaseClient();
       let refused;
       try {
-        await loadInto(db, OTHER);
+        await loadInto(db, SCHEMA.map(sql => sql.replace("'text' TEXT", "'text' INT")));
       } catch (error) {
         refused = error;
       }

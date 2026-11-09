@@ -336,26 +336,20 @@ describe("DuckDB file migration through test/setup.mjs", function () {
     }
   });
 
-  it("says a table is missing before it touches the views", async () => {
+  it("creates a missing generated table and keeps unrelated views", async () => {
     const path = join(dir, "short.duckdb");
     await oldFile(path, {withTaxi: false});
     let db = await open(path);
     await db.execute(`CREATE VIEW "zv_keep" AS SELECT id FROM "zstg_demo"`);
     db.close();
-    const abap = {context: {databaseConnections: {}, RFCDestinations: {}}, builtin: {}};
+    const runtime = {context: {databaseConnections: {}, RFCDestinations: {}}, builtin: {}};
+    const migrated = await boot(path, runtime);
     try {
-      await boot(path, abap);
-      expect.fail("a missing table should be refused");
-    } catch (error) {
-      expect(error.message).to.contain("missing generated tables: ZOSD_TAXIFACT");
+      expect(await migrated.missingTables(["ZOSD_TAXIFACT"])).to.deep.equal([]);
+      expect(await migrated.query("SELECT view_name FROM duckdb_views() WHERE view_name = 'zv_keep'")).to.have.length(1);
+      expect(await migrated.query("SELECT factid FROM zvosdtaxicube")).to.be.an("array");
     } finally {
-      await abap.context.databaseConnections.DEFAULT?.disconnect();
-    }
-    db = await open(path);
-    try {
-      expect(await db.query("SELECT view_name FROM duckdb_views() WHERE view_name = 'zv_keep'")).to.have.length(1);
-    } finally {
-      db.close();
+      await migrated.disconnect();
     }
   });
   // DSL L3 slice 5d: the outbox's RELEASE_SEQ and the gate's RUN_BIND, added
