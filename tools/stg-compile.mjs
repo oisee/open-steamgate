@@ -844,7 +844,9 @@ const objectFile = (name, ext) => name.toLowerCase().replaceAll("/", "#") + ext;
 const versionedFile = (name, ext) => {
   const width = KEY_WIDTH[ext];
   if (width === undefined) throw new Error(`no key width known for ${ext}`);
-  return name.toLowerCase().padEnd(width, " ") + "0001" + ext;
+  // a namespace is abapGit's `#` here too, for the same reason as above:
+  // a `/` in a file name is a directory
+  return name.toLowerCase().replaceAll("/", "#").padEnd(width, " ") + "0001" + ext;
 };
 
 // everything the folder gets: the tree, the registration objects, the

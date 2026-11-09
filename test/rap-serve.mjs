@@ -9,6 +9,7 @@ import {readFileSync} from "node:fs";
 import {basename} from "node:path";
 import {generate, walk} from "../tools/rap/bdef-gen.mjs";
 import {parseSrvd} from "../tools/rap/srvd-gen.mjs";
+import {compile, KEY_WIDTH} from "../tools/stg-compile.mjs";
 import {startServer} from "./start.mjs";
 
 const origin = `http://localhost:${process.env.STG_PORT ?? 3030}`;
@@ -77,6 +78,31 @@ describe("RAP service definitions (R2c generator)", () => {
     const yaml = generate(files).outputs["zui_rap_note.stg.yaml"];
     assert.ok(yaml.includes("    operations: [R, Q]"));
     assert.ok(!yaml.includes("functions:"));
+  });
+
+  it("reads a service definition behind a namespace (abapGit's #ns# file name)", () => {
+    const files = demo().filter(f => !f.filename.endsWith(".srvd.srvdsrv") && !f.filename.endsWith(".srvd.xml"));
+    files.push({filename: "#dmo#note.srvd.srvdsrv", contents: "define service /DMO/NOTE { expose ZI_RAP_NOTE as Note; }"});
+    files.push({filename: "#dmo#ui_travel_processor_m.srvd.srvdsrv", contents: "define service /DMO/UI_TRAVEL_Processor_M { expose ZI_RAP_NOTE as Note; }"});
+    const {outputs} = generate(files);
+    const yaml = outputs["#dmo#note.stg.yaml"];
+    assert.ok(yaml, Object.keys(outputs).join(", "));
+    assert.ok(yaml.split("\n").includes("service: /DMO/NOTE"));
+    // the namespace moves to the front of the class names, not out of them
+    assert.ok(yaml.split("\n").includes("classes: {mpc: /DMO/CL_NOTE_MPC, mpc_ext: /DMO/CL_NOTE_MPC_EXT, dpc: /DMO/CL_NOTE_DPC, dpc_ext: /DMO/CL_NOTE_DPC_EXT}"));
+    const long = outputs["#dmo#ui_travel_processor_m.stg.yaml"].split("\n").find(l => l.startsWith("classes: "));
+    assert.match(long, /mpc: \/DMO\/CL_UI_TRAVE[A-Z0-9]{6}_MPC/);
+    for (const name of long.match(/\/DMO\/CL_\w+/g)) assert.ok(name.length <= 30, name);
+    // the file must still name the service it defines, decoded or not
+    files.push({filename: "#dmo#other.srvd.srvdsrv", contents: "define service /DMO/NOTE { expose ZI_RAP_NOTE as Note; }"});
+    assert.throws(() => generate(files), /#dmo#other\.srvd\.srvdsrv: defines \/DMO\/NOTE/);
+    // and the yaml compiles: every object file name abapGit-encodes the
+    // namespace, a `/` in a file name being a directory
+    const compiled = compile(yaml, {file: "#dmo#note.stg.yaml", functionModules: {}});
+    const names = Object.keys({...compiled.files, ...compiled.classes, ...compiled.ext});
+    assert.ok(names.includes("#dmo#cl_note_mpc.clas.abap"), names.join(", "));
+    assert.ok(names.includes("#dmo#note".padEnd(KEY_WIDTH[".iwsv.xml"], " ") + "0001.iwsv.xml"), names.join(", "));
+    for (const name of names) assert.ok(!name.includes("/"), name);
   });
 });
 
