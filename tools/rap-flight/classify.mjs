@@ -20,7 +20,9 @@
 // 3. runs tools/rap/bdef-gen.mjs's own generate() once per BDEF and prints
 //    each refusal verbatim (the document's table refines which construct
 //    it was by eye, and its "also in it" column is a reading of each BDEF);
-// 4. runs tools/cds2ddic.mjs's own parseDDLS() per view and keeps the skip
+// 4. the same generate() once per service definition (the srvd half, R3),
+//    which is the service definitions table;
+// 5. runs tools/cds2ddic.mjs's own parseDDLS() per view and keeps the skip
 //    reason, which is the views table.
 //
 // The pinned transpiler's @abaplint/core is imported the way bdef-gen
@@ -162,6 +164,22 @@ async function main() {
       console.log(`| ${bdef.filename.split(".")[0].replace(/#/g, "/").toUpperCase()} | ${kind} | accepted |`);
     } catch (error) {
       console.log(`| ${bdef.filename.split(".")[0].replace(/#/g, "/").toUpperCase()} | ${kind} | ${String(error.message).split("\n")[0]} |`);
+    }
+  }
+
+  // ---- the service definitions: bdef-gen's srvd half per file (R3). A
+  // service definition is served whole, never parsed for types alone, so
+  // the wall is the first exposed entity the view layer cannot give the
+  // generator (a view the pack does not fetch, or one cds2ddic skips)
+  console.log("\n## The service definitions against bdef-gen.mjs (srvd half)");
+  console.log("| SRVD | verdict |");
+  console.log("| --- | --- |");
+  for (const srvd of kept.filter((f) => f.filename.endsWith(".srvd.srvdsrv")).sort((a, b) => a.filename.localeCompare(b.filename))) {
+    try {
+      const {outputs} = generate([...ddic, srvd], libDdic);
+      console.log(`| ${srvd.filename.split(".")[0].replace(/#/g, "/").toUpperCase()} | served (${Object.keys(outputs).filter((n) => n.endsWith(".stg.yaml")).length} service) |`);
+    } catch (error) {
+      console.log(`| ${srvd.filename.split(".")[0].replace(/#/g, "/").toUpperCase()} | ${String(error.message).split("\n")[0]} |`);
     }
   }
 
