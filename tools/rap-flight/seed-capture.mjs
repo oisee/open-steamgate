@@ -20,7 +20,8 @@
 //
 // Boots the runtime of a generation the caller names -- output/ of the live
 // one for a hand run, the one the build just made when the build calls this
-// (its --output, which under --no-switch is not the live one) -- and runs
+// (its --output, which under --no-switch is not the live one) -- on a
+// database of its own (throwawayDatabase below), and runs
 // ZCL_OSD_RAPFLIGHT_SEED=>RUN inside one dialog step -- committed when it
 // returns, rolled back if it dumps (tools/osd-dialog-step.mjs) -- and then
 // selects every table the generator fills. Dates come out as the internal
@@ -176,7 +177,27 @@ export async function ensurePackSeeds(root = process.cwd(), log = console.log, {
   return true;
 }
 
+// The runtime the capture boots is written into and thrown away: what it
+// keeps is the JSON files, nothing in that database outlives the child. So
+// the child never runs on the database configuration it inherited, whatever
+// started it -- the process that asked for a build may itself be serving a
+// persistent DuckDB file, which DuckDB locks for its lifetime and refuses
+// every other process, and an inherited STG_DB_PATH alone would have the
+// capture read somebody's live rows and write them back on its way out
+// (tools/osd-persist.mjs saves on exit). With both gone the runtime's own
+// default is an in-memory SQLite, which is the scratch pad this wants.
+// Cleared here, in the child, and not at the spawn site: three roads lead
+// into this file (the build's child, a compiled binary's `gen`, a hand run)
+// and this is the one place they share -- and the build imports the module
+// in its own process to ask seedsDue(), a process that must not have its
+// environment edited from under it.
+function throwawayDatabase() {
+  delete process.env.STG_DB;
+  delete process.env.STG_DB_PATH;
+}
+
 if (runsAs("seed-capture.mjs")) {
+  throwawayDatabase();
   const value = (name) => {
     const at = process.argv.indexOf(name);
     return at > 0 ? process.argv[at + 1] : undefined;

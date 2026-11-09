@@ -199,7 +199,10 @@ in a generation (the CLI, a first start's `ensureSourceBuild`, a store's
 activation build) and a cache hit included, but only when the pack is one of
 that build's selected inputs, so the core+zork web build is asked for
 nothing. The build starts the capture as a child against the generation it
-just made (`--no-switch` included, not the live pointer), and a capture
+just made (`--no-switch` included, not the live pointer), on a database of
+its own -- the child clears the inherited `STG_DB`/`STG_DB_PATH`, so a build
+that runs inside a process serving a persistent DuckDB file still captures
+where an inherited configuration would be refused the file -- and a capture
 happens whenever the inputs the generator reads changed -- the
 upstream commit, the overlay's generator copies, the seed class and the
 capture itself, their digest in `data/.osd-seed.json` -- so a fresh

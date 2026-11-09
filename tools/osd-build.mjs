@@ -982,6 +982,12 @@ export async function build(options = {}) {
 //     pointer's), and no process that is already serving or fronting a
 //     system has a second runtime installed over it
 //     (tools/adt-abap-kernel.mjs). Synchronous, as the generators above are.
+//   - the child works on a database of its own. The environment it inherits
+//     is the caller's, and the caller may be serving a persistent DuckDB
+//     file that a second process cannot open at all -- seed-capture.mjs
+//     clears STG_DB/STG_DB_PATH before it boots, so a capture is always the
+//     runtime's throwaway in-memory SQLite and never the host's database,
+//     whichever of the three roads started it.
 async function makePackSeeds(root, inputs, hash, log) {
   if (inputs.packFiles.includes(join(root, "packs", "rap-flight", "osd-pack.json")) === false) return;
   const script = join(root, "tools", "rap-flight", "seed-capture.mjs");

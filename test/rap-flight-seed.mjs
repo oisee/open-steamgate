@@ -1,16 +1,19 @@
 import {expect} from "chai";
-import {existsSync, readFileSync, renameSync, rmSync} from "node:fs";
+import {existsSync, mkdtempSync, readFileSync, renameSync, rmSync} from "node:fs";
+import {tmpdir} from "node:os";
 import {join, resolve} from "node:path";
 import {spawnSync} from "node:child_process";
 import {build, liveHash, switchTo} from "../tools/osd-build.mjs";
 
-// The round-two fixes of the pack's seed capture, each as a behaviour that
-// fails without it: the rows reach a build the CLI never sees (a first
-// start's ensureSourceBuild calls the same build(), cache hits included); a
-// selection that leaves the pack out neither needs nor makes them; and a
-// --no-switch build captures from the generation it built rather than from
-// the live pointer. The rows are put back exactly as they were, so a later
-// build of this tree reuses the generation it already has.
+// The round-two and round-three fixes of the pack's seed capture, each as a
+// behaviour that fails without it: the rows reach a build the CLI never sees
+// (a first start's ensureSourceBuild calls the same build(), cache hits
+// included); a selection that leaves the pack out neither needs nor makes
+// them; a --no-switch build captures from the generation it built rather
+// than from the live pointer; and a capture due while the asking process is
+// serving a persistent DuckDB file still runs, on a database of its own. The
+// rows are put back exactly as they were, so a later build of this tree
+// reuses the generation it already has.
 const ROOT = process.cwd();
 const PACK = join(ROOT, "packs", "rap-flight");
 const DATA = join(PACK, "data");
@@ -91,6 +94,45 @@ describe("packs/rap-flight: the build makes the seed rows", function () {
       if (hadOutput) renameSync(outputAside, output);
       rmSync(DATA, {recursive: true, force: true});
       renameSync(dataAside, DATA);
+    }
+  });
+
+  it("a capture due while this process serves a persistent DuckDB still makes the rows", async function () {
+    this.timeout(600000);
+    // The build the capture belongs to runs inside whatever process asked
+    // for a generation, and that process may be serving a persistent DuckDB
+    // file at the time: DuckDB locks such a file for the lifetime of the
+    // process that opened it, so a capture child that inherited the host's
+    // STG_DB/STG_DB_PATH was refused the file and the build failed instead
+    // of making the rows. The lock here is real, not simulated: this
+    // process opens the file and keeps it open across the build.
+    const {DuckDBDatabaseClient} = await import("../tools/duckdb-client.mjs");
+    const scratch = mkdtempSync(join(tmpdir(), "osd-rap-flight-seed-"));
+    const held = new DuckDBDatabaseClient({path: join(scratch, "live.duckdb")});
+    await held.connect();
+    const aside = `${DATA}.aside`;
+    const had = existsSync(DATA);
+    const inherited = {STG_DB: process.env.STG_DB, STG_DB_PATH: process.env.STG_DB_PATH};
+    process.env.STG_DB = "duckdb";
+    process.env.STG_DB_PATH = held.path;
+    if (had) renameSync(DATA, aside);
+    try {
+      const built = await build({root: ROOT, log: () => {}, switch: false});
+      expect(built.ok).to.equal(true);
+      expect(rows("#dmo#carrier.tabu.json").length, "the capture ran on a database of its own").to.be.greaterThan(0);
+      expect((await held.query("SELECT COUNT(*) AS tables FROM information_schema.tables")).length,
+        "and the held file stayed this process's").to.equal(1);
+    } finally {
+      if (had) {
+        rmSync(DATA, {recursive: true, force: true});
+        renameSync(aside, DATA);
+      }
+      for (const name of ["STG_DB", "STG_DB_PATH"]) {
+        if (inherited[name] === undefined) delete process.env[name];
+        else process.env[name] = inherited[name];
+      }
+      await held.disconnect();
+      rmSync(scratch, {recursive: true, force: true});
     }
   });
 });
