@@ -5,7 +5,7 @@
    <VSEOCLASS>
     <CLSNAME>ZCL_OSD_RAPFLIGHT_SEED</CLSNAME>
     <LANGU>E</LANGU>
-    <DESCRIPT>RAP flight pack: run SAP's data generator once, for the seed capture</DESCRIPT>
+    <DESCRIPT>RAP flight pack: run the scenario's own data generator once, for the seed capture</DESCRIPT>
     <STATE>1</STATE>
     <CLSCCINCL>X</CLSCCINCL>
     <FIXPT>X</FIXPT>

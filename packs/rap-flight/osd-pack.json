@@ -1,6 +1,6 @@
 {
   "name": "rap-flight",
-  "description": "SAP's RAP flight reference scenario (Apache-2.0): the managed travel business object with the reuse views, the status tables and the legacy base tables it reads, fetched from SAP-samples at a pinned commit and run as far as the RAP runtime goes. The overlay in src/ is the diff; what the manifest excludes is what the runtime cannot take yet (docs/rap-flight-pack.md).",
+  "description": "The RAP flight reference scenario (abap-platform-refscen-flight, Apache-2.0): the managed travel business object with the reuse views, the status tables and the legacy base tables it reads, fetched from the scenario's public sample repository at a pinned commit and run as far as the RAP runtime goes. The overlay in src/ is the diff; what the manifest excludes is what the runtime cannot take yet (docs/rap-flight-pack.md).",
   "order": 48,
   "abap": [
     "upstream",
