@@ -89,15 +89,61 @@ CLASS zcl_incr_hot IMPLEMENTATION.
     r = |hot:{ travelid }|.
   ENDMETHOD.
 ENDCLASS.`,
+  "app/zcl_incr_witness.clas.abap": `CLASS zcl_incr_witness DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    TYPES: BEGIN OF ty_row, a TYPE i, END OF ty_row.
+    TYPES tt_rows TYPE STANDARD TABLE OF ty_row WITH DEFAULT KEY.
+    METHODS seen RETURNING VALUE(r) TYPE i.
+ENDCLASS.
+CLASS zcl_incr_witness IMPLEMENTATION.
+  METHOD seen.
+    r = 1.
+  ENDMETHOD.
+ENDCLASS.`,
+  // an exception class of the run-time library shape: a parseable
+  // definition under a resolvable superclass, and a body that does not parse,
+  // so it is broken and leaves `wanted` while staying resolvable for the
+  // syntax pass and for the subclass below -- which is wanted but referenced
+  // by nobody the closure walks, so a fast build's registry does not hold it
+  "app/zcl_incr_root.clas.abap": `CLASS zcl_incr_root DEFINITION PUBLIC FINAL CREATE PUBLIC.
+ENDCLASS.
+CLASS zcl_incr_root IMPLEMENTATION.
+ENDCLASS.`,
+  "app/zcx_incr_lib.clas.abap": `CLASS zcx_incr_lib DEFINITION PUBLIC INHERITING FROM zcl_incr_root.
+  PUBLIC SECTION.
+    METHODS mark RETURNING VALUE(r) TYPE i.
+ENDCLASS.
+CLASS zcx_incr_lib IMPLEMENTATION.
+  METHOD mark.
+    FROBNICATE r.
+  ENDMETHOD.
+ENDCLASS.`,
+  "app/zcl_incr_sub.clas.abap": `CLASS zcl_incr_sub DEFINITION PUBLIC INHERITING FROM zcx_incr_lib.
+  PUBLIC SECTION.
+    METHODS own RETURNING VALUE(r) TYPE i.
+ENDCLASS.
+CLASS zcl_incr_sub IMPLEMENTATION.
+  METHOD own.
+    r = 1.
+  ENDMETHOD.
+ENDCLASS.`,
   "app/zcl_incr_top.clas.abap": `CLASS zcl_incr_top DEFINITION PUBLIC FINAL CREATE PUBLIC.
   PUBLIC SECTION.
-    CLASS-METHODS run RETURNING VALUE(rv) TYPE string.
+    CLASS-METHODS run IMPORTING rows TYPE zcl_incr_witness=>tt_rows RETURNING VALUE(rv) TYPE string.
 ENDCLASS.
 CLASS zcl_incr_top IMPLEMENTATION.
   METHOD run.
     DATA hot TYPE REF TO zcl_incr_hot.
+    FIELD-SYMBOLS <row> LIKE LINE OF rows.
     CREATE OBJECT hot.
-    rv = |top:{ hot->key( 'x' ) }|.
+    TRY.
+      rv = |x:{ hot->key( 'x' ) }|.
+    CATCH zcx_incr_lib.
+      rv = |c|.
+    ENDTRY.
+    LOOP AT rows ASSIGNING <row>.
+      rv = |top:{ hot->key( 'x' ) }:{ <row>-a }|.
+    ENDLOOP.
   ENDMETHOD.
 ENDCLASS.`,
 };
@@ -147,6 +193,8 @@ test("objectOf maps a file of an object to its kind", () => {
   assert.deepEqual(objectOf("src/zif_b.intf.abap"), ["INTF", "ZIF_B"]);
   assert.deepEqual(objectOf("src/zstg_t.tabl.xml"), ["DDIC", "ZSTG_T"]);
   assert.deepEqual(objectOf("src/zfg.fugr.xml"), ["FUGR", "ZFG"]);
+  // the ABAP type pool of a library: ABAP the syntax pass resolves
+  assert.deepEqual(objectOf(".local/lars/open-abap-core/src/abap/abap.type.abap"), ["DDIC", "ABAP"]);
   assert.deepEqual(objectOf("src/readme.md"), ["OTHER", "README"]);
 });
 
@@ -185,6 +233,53 @@ for (const [name, change] of [
     } finally { rmSync(root, {recursive: true, force: true}); }
   });
 }
+
+test("a class a re-lowered dependent names only in a signature is in the registry", () => {
+  // The lowering never asks the registry for a class another class's table
+  // type in a signature comes from, so `reads` does not carry it; abaplint's
+  // syntax pass resolves the chain anyway, against whatever the registry
+  // holds, and a LOOP over the parameter needs the type resolved. The real
+  // tree refused exactly here first (ZCL_ZL3C_FLEET2_MPC, the model class
+  // behind a redefined method's signature of ZCL_ZL3C_FLEET2_DPC_EXT, a
+  // dependent two recorded edges from the edit) until the closure walked
+  // `deps` as well, for every object the registry holds.
+  const root = tree();
+  try {
+    writeCache(root);
+    edit(root, "app/zcl_incr_hot.clas.abap", "'Key TravelId missing'", "'Key TravelId missing (edited)'");
+    const reference = fullProgram(root);
+    const attempt = incrAssemble({root, folders: [join(root, "app")], objects: objectNames(root), hidden: new Set(), includeTests: new Set(),
+      proof: {ok: true, base: "live1", changed: changedFiles(root)}});
+    assert.equal(attempt.ok, true, attempt.reason);
+    assert.ok(attempt.lowered.includes("CLAS ZCL_INCR_TOP"));
+    assert.ok(!attempt.lowered.includes("CLAS ZCL_INCR_WITNESS"));
+    assert.equal(emitted(attempt.program), emitted(reference));
+  } finally { rmSync(root, {recursive: true, force: true}); }
+});
+
+test("a CATCH whose chain leaves the partial registry answers from the recorded supers", () => {
+  // caughtPresence decides whether a CATCH also takes the raised objects of
+  // the classes it names (emit-go.mjs catchCond: abap.IsA against "false"),
+  // and the index it reads is built from the superclass chains of everything
+  // in `wanted`. A wanted class the closure registry does not hold (the
+  // subclass of a library exception, referenced by nothing the closure walks)
+  // has no chain there, so a partial-registry walk would drop it from the
+  // index and emit the CATCH as dead. The read side answers over the
+  // recorded `wanted` from the superclass map the write-time build recorded
+  // off the full registry.
+  const root = tree();
+  try {
+    writeCache(root);
+    edit(root, "app/zcl_incr_hot.clas.abap", "'Key TravelId missing'", "'Key TravelId missing (edited)'");
+    const reference = fullProgram(root);
+    const attempt = incrAssemble({root, folders: [join(root, "app")], objects: objectNames(root), hidden: new Set(), includeTests: new Set(),
+      proof: {ok: true, base: "live1", changed: changedFiles(root)}});
+    assert.equal(attempt.ok, true, attempt.reason);
+    assert.ok(!attempt.lowered.includes("CLAS ZCL_INCR_SUB"), "the subclass must stay cached");
+    assert.match(emitted(attempt.program), /abap\.IsA\(xRX\.Class, "ZCX_INCR_LIB"\)/);
+    assert.equal(emitted(attempt.program), emitted(reference));
+  } finally { rmSync(root, {recursive: true, force: true}); }
+});
 
 /** the files this test edited (the cache's proof names root-relative files) */
 function changedFiles(root) {

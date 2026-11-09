@@ -50,23 +50,43 @@ layer folders / object list / Unit owners differ.
    IR names, and the owner of every generated type name it spells (a
    structure a class first used is named after it). Entries whose IR did not
    serialize are always re-lowered.
-2. **The registry**: every non-class object, plus the dependency closure of
-   the classes re-lowered -- their recorded reads, and (an edited source may
-   name new objects) any object whose name its text spells. The parse, the
+2. **The registry**: every non-class object, plus the reference closure of
+   the classes re-lowered -- their recorded reads **and deps** (the syntax
+   pass resolves a type the lowering never asks the registry for: the model
+   class behind a redefined method's signature) and every class whose name
+   any member's text spells (a reference the lowering stubs out is in
+   neither recorded set). Every member's references resolve against the
+   registry, because abaplint's syntax pass checks them all. The parse, the
    syntax pass and the fresh lowering all shrink with that set.
 3. **The shared state**: every re-used entry's recorded writes are replayed
    in the original lowering order into the collections the lowering reads
    (structures, constants, signatures, events, ...), `supplied` is merged
-   from the per-class contributions, and the caught index is rebuilt from the
-   recorded superclass chains.
+   from the per-class contributions, and the caught index (which CATCH takes
+   the raised objects of which classes) answers from the recorded superclass
+   map over the recorded `wanted`: the partial registry holds neither the
+   chains nor the start set (its own selection drops what it does not
+   know), and a CATCH lowered against a truncated chain would be emitted
+   dead (`catchCond`'s `abap.IsA` against `false` -- the regression test
+   builds exactly that).
 4. **The lowering** runs through `compileProgram` itself (`incr` hooks,
    frontend.mjs), with the closure registry and the pre-seeded state, so the
-   fresh IRs come out of the same code path a full build uses.
-5. **The merge**: classes in the recorded push order, the final analyses
-   recomputed where the registry answers (interface methods, tables, locks,
-   CDS views, ownership of present objects) and merged from the cache where
-   it cannot (rtti typedefs, exception supers, ownership of absent classes,
-   dynamic dispatch).
+   fresh IRs come out of the same code path a full build uses. Its writes to
+   the shared collections are recorded per object (the same op proxy the
+   write side uses).
+5. **The merge**: classes in the recorded push order, every shared
+   collection **in the order the full build's lowering wrote it** -- per
+   object of the recorded sequence, the fresh writes of one that lowered
+   again and the recorded writes of one taken from the cache, the global
+   passes appended, as in a full build -- because the program digest
+   (program-digest.mjs) and the emitted Go read several of them in
+   insertion order; "reused first, fresh after it" names another
+   generation. The rtti table is rebuilt over the recorded registry
+   enumeration order (the dictionary interleaves with the class typedefs,
+   and every registry class gets a superclass entry, null included); the
+   ownership table over the recorded collection order. The final analyses
+   are recomputed where the registry answers (interface methods, tables,
+   locks, CDS views) and merged from the cache where it cannot (exception
+   supers, ownership of absent classes, dynamic dispatch).
 
 ## What refuses (the full front end runs)
 
@@ -104,11 +124,12 @@ its dependents were re-lowered with it.
 
 ## Cost
 
-Write (a full build): ~2 s over the front end -- the write transcript, the
-deps walk, v8-serializing ~7 MB of entries, the database attribution (which
-a mismatch turns off until the next full build). Read (a fast save): see the
-phase table in the doc; the registry and the re-lowered set shrink with the
-edit, the entry deserialization (~7 MB) does not.
+Write (a full build): ~3 s over the front end on this tree -- the write
+transcript, the deps walk, v8-serializing the entries (~19 MB over 1 076
+objects), the database attribution (which a mismatch turns off until the
+next full build). Read (a fast save): see the phase table in the doc; the
+re-lowered set shrinks with the edit, the registry closure and the entry
+deserialization do not.
 
 ## Tests
 

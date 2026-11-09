@@ -49,7 +49,9 @@ export function objectOf(fileName) {
   if (/\.clas\./i.test(name)) return ["CLAS", objectOfFile(name)];
   if (/\.intf\./i.test(name)) return ["INTF", objectOfFile(name)];
   if (/\.fugr\./i.test(name)) return ["FUGR", objectOfFile(name)];
-  const kind = /\.(tabl|ttyp|dtel|doma|view|enqu|msag|prog|w3mi|shlp|tran|webi|xslt|suso|suvo|tobj|iacg|iamu|iext|iobj|sfp|susc)(?:\.[a-z_]+)?\.(abap|xml)$/i.exec(name)?.[1];
+  // `type` is the ABAP type pool (`abap.type.abap` of a library): ABAP the
+  // syntax pass resolves (`abap_component_tab` of the RTTI classes), not XML
+  const kind = /\.(tabl|ttyp|dtel|doma|view|enqu|msag|prog|type|w3mi|shlp|tran|webi|xslt|suso|suvo|tobj|iacg|iamu|iext|iobj|sfp|susc)(?:\.[a-z_]+)?\.(abap|xml)$/i.exec(name)?.[1];
   return [kind ? "DDIC" : "OTHER", objectOfFile(name)];
 }
 
@@ -106,6 +108,26 @@ const RECORDED = ["structs", "consts", "sigs", "events", "missing", "dynStatics"
 // the write side
 // ---------------------------------------------------------------------------
 
+/** a proxy over one of the shared collections that turns every mutating
+ *  call into an op (`["set",k,v]`, `["add",v]`, `["delete",k]`, `["clear"]`,
+ *  `["push",v]`), handed to `onOp` -- the write side records the ops of an
+ *  object's lowering, the read side the ops of the fresh one, and both then
+ *  agree on what a replay of those ops does */
+function opProxy(coll, value, onOp) {
+  return new Proxy(value, {
+    get(target, method) {
+      const member = target[method];
+      if (typeof member !== "function") return member;
+      if (method === "set") return (k, v) => { onOp(["set", k, v]); return target.set(k, v); };
+      if (method === "add") return (v) => { onOp(["add", v]); return target.add(v); };
+      if (method === "delete") return (k) => { onOp(["delete", k]); return target.delete(k); };
+      if (method === "clear") return () => { onOp(["clear"]); return target.clear(); };
+      if (method === "push") return (...vs) => { for (const v of vs) onOp(["push", v]); return target.push(...vs); };
+      return member.bind(target);
+    },
+  });
+}
+
 /**
  * The recorder a full compileOsg installs into compileProgram. Nothing it
  * does changes the compile; `finish` writes the cache of one generation.
@@ -122,18 +144,7 @@ export function incrRecorder({root, folders, hidden, objects, includeTests}) {
     return buckets.get(key);
   };
   const record = (coll, op) => { if (current !== null) bucket(current).writes[coll].push(op); };
-  const proxy = (coll, value) => new Proxy(value, {
-    get(target, method) {
-      const member = target[method];
-      if (typeof member !== "function") return member;
-      if (method === "set") return (k, v) => { record(coll, ["set", k, v]); return target.set(k, v); };
-      if (method === "add") return (v) => { record(coll, ["add", v]); return target.add(v); };
-      if (method === "delete") return (k) => { record(coll, ["delete", k]); return target.delete(k); };
-      if (method === "clear") return () => { record(coll, ["clear"]); return target.clear(); };
-      if (method === "push") return (...vs) => { for (const v of vs) record(coll, ["push", v]); return target.push(...vs); };
-      return member.bind(target);
-    },
-  });
+  const proxy = (coll, value) => opProxy(coll, value, (op) => record(coll, op));
   const ownership = new Map();
   return {
     // the compileProgram hooks (frontend.mjs)
@@ -319,9 +330,10 @@ export function incrAssemble({root, folders, objects, hidden, includeTests, proo
   notes.push(`re-lowering ${relower.size} of ${Object.keys(index.entries).length} objects (edited: ${[...edited].join(", ")})`);
 
   // the registry of the fast build: every non-class object, plus the
-  // dependency closure of the classes it re-lowers -- their recorded reads,
-  // and (for an edited source, which may name new objects) every object
-  // whose name its text spells
+  // reference closure of the classes it re-lowers -- their recorded reads
+  // and deps, and every class whose name any member's text spells (a
+  // reference the lowering stubs out is in neither recorded set, and
+  // abaplint's syntax pass resolves it anyway)
   const allFiles = registryFiles(folders, hidden, includeTests);
   const byKey = new Map(); // object key -> [files]
   for (const [file, key] of allFiles) {
@@ -329,11 +341,12 @@ export function incrAssemble({root, folders, objects, hidden, includeTests, proo
     byKey.get(key).push(file);
   }
   const need = new Set();
-  const queue = [];
+  const queue = []; // every member whose references still walk: the classes
+  // re-lowered plus every non-class object, all of them in the registry
   for (const [key, files] of byKey) {
     if (key.startsWith("CLAS ") && !relower.has(key)) continue;
     for (const f of files) need.add(f);
-    if (key.startsWith("CLAS ")) queue.push(key);
+    queue.push(key);
   }
   const wordCache = new Map();
   const words = (key) => {
@@ -343,11 +356,21 @@ export function incrAssemble({root, folders, objects, hidden, includeTests, proo
     wordCache.set(key, set);
     return set;
   };
-  const enqueued = new Set(queue);
+  const enqueued = new Set(queue.filter((k) => k.startsWith("CLAS ")));
   for (let i = 0; i < queue.length; i += 1) {
     const key = queue[i];
-    const names = new Set(index.entries[key]?.reads ?? []);
-    if (edited.has(key)) for (const w of words(key)) names.add(keyOf("CLAS", w));
+    // `reads` alone is not what the registry must hold: abaplint's syntax
+    // pass resolves a type the lowering never calls getObject for (the class
+    // of a TYPE REF TO in a signature), which `deps` names -- and it must
+    // resolve for every object in the registry, not only the classes this
+    // build re-lowers, because findIssues checks them all against it. A
+    // reference in a statement the lowering stubs out is in neither set, so
+    // every member's words are candidates too (a support object of this
+    // shape, zcl_stg_json_text spelling zcl_stg_json, refused the first
+    // real-tree run)
+    const entry = index.entries[key];
+    const names = new Set([...(entry?.reads ?? []), ...(entry?.deps ?? [])]);
+    for (const w of words(key)) names.add(keyOf("CLAS", w));
     for (const name of names) {
       if (!name.startsWith("CLAS ") || relower.has(name)) continue;
       if (!byKey.has(name) || !index.entries[name] || enqueued.has(name)) continue;
@@ -380,67 +403,95 @@ export function incrAssemble({root, folders, objects, hidden, includeTests, proo
     reusedKeys.push(key);
   }
 
-  // the anonymous structures a fresh lowering may be handed: a shape that
-  // one name covers and more than its creator references was shared through
-  // one abaplint instance; shapes of re-lowered owners are not seeded
-  const creatorOf = new Map(), referencers = new Map();
-  for (const key of reusedKeys) {
+  // the anonymous structures a fresh lowering may be handed: only a shape
+  // the write-time build covered with exactly ONE name -- its owner reused,
+  // so it does not mint it again -- and more than its creator referenced,
+  // so it truly flowed through one shared instance. A shape several names
+  // cover (the RAP message row, constructed per lowering and named after
+  // each first reacher: four names on this tree) is never answered: a
+  // fresh lowering mints its own, as the full build's reachers did
+  const creatorOf = new Map(), referencers = new Map(), namesOfShape = new Map();
+  for (const key of index.order) {
     const payload = load(key);
-    for (const op of payload.writes.structs) if (op[0] === "set") creatorOf.set(op[1], key);
+    if (payload !== undefined) for (const op of payload.writes.structs) {
+      if (op[0] !== "set") continue;
+      creatorOf.set(op[1], key);
+      if (op[2]?.qname !== undefined) continue;
+      if (!namesOfShape.has(op[2].shape)) namesOfShape.set(op[2].shape, new Set());
+      namesOfShape.get(op[2].shape).add(op[1]);
+    }
     for (const name of index.entries[key].anonRefs ?? []) {
       if (!referencers.has(name)) referencers.set(name, new Set());
       referencers.get(name).add(key);
     }
   }
   const seeds = new Map(); // component names -> go name
-  const shapes = new Map();
-  for (const key of reusedKeys) for (const op of load(key).writes.structs) {
-    if (op[0] !== "set" || op[2]?.qname !== undefined) continue;
-    if (!shapes.has(op[2].shape)) shapes.set(op[2].shape, []);
-    shapes.get(op[2].shape).push(op[1]);
-  }
-  for (const [shape, names] of shapes) {
-    const shared = names.filter((n) => {
-      const refs = referencers.get(n) ?? new Set();
-      return refs.size >= 2 || (refs.size === 1 && creatorOf.get(n) !== undefined && !refs.has(creatorOf.get(n)));
-    });
-    if (shared.length === 1) seeds.set(shape, shared[0]);
+  for (const [shape, names] of namesOfShape) {
+    if (names.size !== 1) continue;
+    const name = [...names][0];
+    const creator = creatorOf.get(name);
+    if (creator === undefined || relower.has(creator)) continue;
+    const refs = referencers.get(name) ?? new Set();
+    if (refs.size >= 2 || (refs.size === 1 && !refs.has(creator))) seeds.set(shape, name);
   }
   const seededNames = new Set(seeds.values());
 
   // the fast compileProgram: fresh lowerings over the closure registry,
-  // with the shared state pre-seeded from the cache
-  let program;
-  const freshMarks = [];
+  // with the shared state pre-seeded from the cache. The fresh lowering's
+  // own writes are recorded per object (opProxy), so the merged program can
+  // put every collection back in the order the full build's lowering wrote
+  // it -- the program digest and the emitted Go read several of them in
+  // insertion order, and "reused first, fresh after it" is not that order
   const freshRtti = [];
   const freshOwnership = new Map();
+  const freshOps = new Map(); // key -> {coll: [ops]} (the writes of a fresh lowering)
+  const strayOps = {}; // coll -> [ops], the global passes inside compileProgram
+  let currentKey = null;
+  const opsOf = (key) => {
+    if (!freshOps.has(key)) freshOps.set(key, {});
+    return freshOps.get(key);
+  };
+  const supers = new Map(Object.entries(index.supers));
   const readIncr = {
     // only the re-lowered objects compile; everything else stays in `wanted`
     // (a call of a class outside the program is refused during lowering) and
     // its IR comes from the cache
     compiles: (key) => relower.has(key),
-    enter(key) { freshMarks.push([key, program.skipped.length, program.partial.length]); },
-    exit() {},
+    enter(key) { currentKey = key; },
+    exit() { currentKey = null; },
+    // the partial registry cannot walk the superclass chains of the classes
+    // it does not hold -- and its own `wanted` is partial with them, the
+    // selection drops what the registry does not know -- so both the walk's
+    // start set and its steps come from the write-time build's records
+    // (frontend.mjs asks this hook before it walks)
+    caughtIndex: (reg) => caughtIndex(reg, new Set(index.wanted), (c) => supers.get(c) ?? null),
     prepare(p, reg) {
-      program = p;
       for (const coll of RECORDED) {
-        if (["skipped", "partial", "classes"].includes(coll)) continue;
         const target = p[coll];
-        for (const key of reusedKeys) {
-          for (const [method, ...args] of load(key).writes[coll] ?? []) {
-            if (method === "set") target.set(args[0], args[1]);
-            else if (method === "add") target.add(args[0]);
-            else if (method === "delete") target.delete(args[0]);
-            else if (method === "clear") target.clear();
+        if (!["skipped", "partial", "classes"].includes(coll)) {
+          for (const key of reusedKeys) {
+            for (const [method, ...args] of load(key).writes[coll] ?? []) {
+              if (method === "set") target.set(args[0], args[1]);
+              else if (method === "add") target.add(args[0]);
+              else if (method === "delete") target.delete(args[0]);
+              else if (method === "clear") target.clear();
+            }
           }
         }
+        // the fresh lowering's writes land in the same collections, recorded
+        // per object; one outside any object's mark is a global pass (the
+        // write side does not record those either -- both builds run them
+        // after every object), appended at the end by the rebuild below.
+        // `classes` keeps its own merge off index.classes below.
+        if (coll !== "classes") p[coll] = opProxy(coll, target, (op) => {
+          if (currentKey === null) (strayOps[coll] ??= []).push(op);
+          else (opsOf(currentKey)[coll] ??= []).push(op);
+        });
       }
       const supplied = new Map(p.supplied);
       for (const key of reusedKeys) for (const [k, params] of load(key).supplied ?? []) supplied.set(k, new Set([...(supplied.get(k) ?? []), ...params]));
       p.supplied = supplied;
       p.anonStructs = new AnonShapes(seeds);
-      const supers = new Map(Object.entries(index.supers));
-      p.caught = caughtIndex(reg, p.wanted, (c) => supers.get(c) ?? null);
     },
     rttiOf(owner, defs) { freshRtti.push([owner, defs]); },
     ownershipOf(name, value) { freshOwnership.set(upper(name), value); },
@@ -459,10 +510,41 @@ export function incrAssemble({root, folders, objects, hidden, includeTests, proo
   // and nothing outside the re-lowered set may have turned broken
   const cachedBroken = new Set(index.broken);
   for (const name of mini.broken) if (!reloweredObjects.has(upper(name)) && !cachedBroken.has(upper(name))) {
-    return {ok: false, reason: `${name}: the edit left it with syntax errors the live generation did not have`};
+    const why = mini.diagnostics.find((d) => upper(d.object) === upper(name))?.message ?? "no diagnostic";
+    return {ok: false, reason: `${name}: the edit left it with syntax errors the live generation did not have (${why})`};
   }
 
-  // the merged program: the classes in the recorded push order
+  // the merged program's shared collections, in the order the full build's
+  // lowering wrote them: per object of the recorded sequence, the fresh
+  // writes of one that lowered again and the recorded writes of one taken
+  // from the cache. "Reused first, fresh after it" is not that order, and
+  // the program digest and the emitted Go read several of these collections
+  // in insertion order. Writes outside any object's mark (the global passes
+  // inside compileProgram, which run after every object in a full build
+  // too) append at the end.
+  const apply = (target, op) => {
+    const [method, ...args] = op;
+    if (method === "set") target.set(args[0], args[1]);
+    else if (method === "add") target.add(args[0]);
+    else if (method === "delete") target.delete(args[0]);
+    else if (method === "clear") target.clear();
+    else if (method === "push") target.push(args[0]);
+  };
+  const program2 = mini;
+  for (const coll of RECORDED) {
+    if (coll === "classes") continue; // merged below, off index.classes
+    const like = program2[coll];
+    const out = like instanceof Map ? new Map() : like instanceof Set ? new Set() : [];
+    for (const key of index.order) {
+      if (opsOf(key)[coll] !== undefined) { for (const op of opsOf(key)[coll]) apply(out, op); continue; }
+      if (relower.has(key)) continue;
+      for (const op of load(key).writes[coll] ?? []) apply(out, op);
+    }
+    for (const op of strayOps[coll] ?? []) apply(out, op);
+    program2[coll] = out;
+  }
+
+  // the classes in the recorded push order
   const freshClasses = new Map(mini.classes.map((c) => [c.name, c]));
   const classes = [];
   for (const [key, name] of index.classes) {
@@ -484,28 +566,43 @@ export function incrAssemble({root, folders, objects, hidden, includeTests, proo
       classes.push(ir);
     }
   }
-  const program2 = mini;
   program2.classes = classes;
-  program2.skipped = [...reusedKeys.flatMap((key) => pushes(load(key).writes.skipped)), ...mini.skipped];
-  program2.partial = [...reusedKeys.flatMap((key) => pushes(load(key).writes.partial)), ...mini.partial];
   program2.wanted = new Set(index.wanted);
   const cachedDiag = index.diagnostics.map((d) => d.split("\0")).map(([object, message]) => ({object, message}))
     .filter((d) => !reloweredObjects.has(upper(d.object)));
   program2.diagnostics = [...cachedDiag, ...mini.diagnostics];
   program2.broken = [...new Set([...index.broken.filter((n) => !reloweredObjects.has(upper(n))), ...mini.broken.map(upper)])];
-  // rtti: the fresh registry answered for the dictionary and the re-lowered
-  // classes; the cached class typedefs cover the classes absent from it
+  // rtti: the full build's table interleaves the dictionary and the class
+  // typedefs in registry enumeration order (index.registryOrder recorded
+  // it); rebuild that order, a re-lowered class's typedefs fresh, an absent
+  // class's from the cache
   {
-    const structs = new Map(mini.rtti.structs);
-    const known = new Set(mini.rtti.known);
-    const classSupers = new Map(mini.rtti.classSupers);
-    for (const key of reusedKeys) {
-      for (const [name, comps] of load(key).rttiDefs ?? []) {
-        if (comps) structs.set(name, comps);
-        known.add(name);
+    const freshDefs = new Map(freshRtti);
+    const wanted = new Set([...index.wanted].map((n) => upper(n)));
+    const structs = new Map(), known = new Set(), classSupers = new Map();
+    const typed = new Set(["TABL", "DTEL", "TTYP", "DOMA", "CLAS", "INTF", "VIEW", "DDLS"]);
+    for (const key of index.registryOrder) {
+      const space = key.indexOf(" ");
+      const type = key.slice(0, space), name = key.slice(space + 1);
+      if (!typed.has(type)) continue;
+      known.add(name);
+      if ((type === "TABL" || type === "VIEW") && mini.rtti.structs.has(name)) structs.set(name, mini.rtti.structs.get(name));
+      if (type === "CLAS" && wanted.has(name)) {
+        if (relower.has(key)) {
+          for (const [n, comps] of freshDefs.get(name) ?? []) { if (comps) structs.set(n, comps); known.add(n); }
+        } else if (index.entries[key]) {
+          for (const [n, comps] of load(key).rttiDefs ?? []) { if (comps) structs.set(n, comps); known.add(n); }
+        }
       }
-      if (index.entries[key].super) classSupers.set(key.slice(5), index.entries[key].super);
+      // every class of the registry gets an entry, a null super included
+      // (the digest reads them); an absent class's from the recorded map
+      if (mini.rtti.classSupers.has(name)) classSupers.set(name, mini.rtti.classSupers.get(name));
+      else if (type === "CLAS") classSupers.set(name, index.entries[key]?.super ?? index.supers[name] ?? null);
     }
+    // compiled local classes share the RTTI name space: their supers append
+    // after the inventory, in program.classes order (rttiLocalSupers), which
+    // the merged `classes` array is
+    for (const c of classes) if (c.name.includes(":")) classSupers.set(c.name, c.super ?? null);
     program2.rtti = {structs, known, classSupers};
   }
   // the superclass chain of every merged class, for CATCH at run time
@@ -524,12 +621,15 @@ export function incrAssemble({root, folders, objects, hidden, includeTests, proo
     }
     program2.exceptionSupers = out;
   }
-  // ownership: the fresh registry answered for its objects, the cache for
-  // the classes absent from it
+  // ownership: the recorded collection order, a fresh value where the fresh
+  // registry answered for the name, the cached one where it did not
   {
-    const merged = new Map(mini.ownershipSafety);
-    for (const [name, value] of index.ownership) if (!merged.has(name)) merged.set(name, {names: new Set(value.names), dynamic: value.dynamic});
-    for (const [name, value] of freshOwnership) merged.set(name, value);
+    const merged = new Map();
+    for (const [name, value] of index.ownership) {
+      merged.set(name, freshOwnership.get(name) ?? mini.ownershipSafety.get(name)
+        ?? {names: new Set(value.names), dynamic: value.dynamic});
+    }
+    for (const [name, value] of mini.ownershipSafety) if (!merged.has(name)) merged.set(name, value);
     program2.ownershipSafety = merged;
   }
   // dynamic dispatch over the merged classes; a class with an alias outside
@@ -551,8 +651,6 @@ export function incrAssemble({root, folders, objects, hidden, includeTests, proo
   return {ok: true, program: program2, lowered: [...relower].sort(), reused: reusedKeys.length, notes,
     incrDb: {dir, relower: [...relower], registryOrder: index.registryOrder}};
 }
-
-const pushes = (ops) => ops.filter((op) => op[0] === "push").map((op) => op[1]);
 
 // ---------------------------------------------------------------------------
 // the database statements of the fast path (osg-build.mjs osgiDatabase)
