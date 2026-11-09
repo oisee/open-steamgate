@@ -3,6 +3,15 @@
 The host side of `packs/rap-flight` (the RAP flight reference scenario as a
 fetched pack, [docs/rap-flight-pack.md](../../docs/rap-flight-pack.md)).
 
+`classify.mjs` is the measurement behind the document's tables: it fetches
+the pinned commit with no exclude list into
+`.local/rap-flight-classify/`, counts the four other scenarios, classifies
+every object of the kept folders with abaplint (the build's libraries and
+the pack's `src/` layered over the tree as the build layers it), runs
+`bdef-gen`'s checks per BDEF and `cds2ddic`'s reading per view, and prints
+the tables. A run takes a couple of minutes. The one column it does not
+produce is the BDEF table's "also in it".
+
 `seed-capture.mjs` boots the transpiled runtime, runs the pack's seed class
 (`ZCL_OSD_RAPFLIGHT_SEED`, which runs the scenario's own data generator)
 inside one dialog step and writes every table the generator fills into

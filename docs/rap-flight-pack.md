@@ -18,28 +18,32 @@ type, against the generators and the transpiler as they are on `main`
 each one blocks -- the input for the draft and EML work. Nothing here was
 measured on a system; the oracle for "what SAP does" is the source itself.
 
-How it was measured, so it can be re-measured: `node tools/osd-fetch.mjs
-rap-flight` with only the four scenario folders excluded (569 files), then
-abaplint over `packs/rap-flight/upstream/**` with the build's libraries and
-`src/` as dependencies (the issue list classified per object: a parser error
-first, else a syntax or unknown-type error, else clean), `parseBdef` over
-every BDEF with the checks `bdef-gen.mjs` applies, `node tools/cds2ddic.mjs`
-for the views, and the cold build (`npm run transpile`) over the final
-exclude list. The classification script and the issue lists are not in the
-tree; the numbers below are what they printed.
+How it was measured, so it can be re-measured:
+`node tools/rap-flight/classify.mjs` does all of it -- fetches the pinned
+commit's `src/` with no exclude list into `.local/rap-flight-classify/`,
+counts the four other scenarios off that clone, classifies every object of
+the kept folders with abaplint (the build's libraries and the pack's `src/`
+as dependencies, the issue list taken per object: a parser error first, else
+a syntax or unknown-type issue, else clean), runs `bdef-gen.mjs`'s own
+`generate()` per BDEF for the first wall, and `cds2ddic.mjs`'s own
+`parseDDLS()` per view for the skip reason. The tables below are its output;
+the one column that stays hand-written is the BDEF table's "also in it", a
+reading of each definition. The cold build (`npm run transpile`) over the
+final exclude list is the last column of the story and is re-run by every
+CI build.
 
 ## The scenario, by object type (managed + reuse + readonly + legacy)
 
 | type | objects | lint-clean | refused (parser) | needs a feature or an object | note |
 | --- | ---: | ---: | ---: | ---: | --- |
-| clas | 29 | 11 | 14 | 4 | 9 behavior pools, 5 test consumers, 2 data generators, the legacy BO, the AMDP class, exceptions, messages |
+| clas | 29 | 5 | 12 | 12 | 9 behavior pools, 5 test consumers, 2 data generators, the legacy BO, the AMDP class, exceptions, messages |
 | intf | 2 | 2 | 0 | 0 | the BAdI interface, the legacy interface |
 | fugr | 2 | 2 | 0 | 0 | the legacy API, the managed scenario's update-task modules |
 | bdef | 15 | 15 (abaplint) | 0 | **15 (bdef-gen)** | see the next table |
-| ddls | 64 | 64 (abaplint) | 0 | **24 (cds2ddic)** | 40 generate, see below |
+| ddls | 64 | 64 (abaplint) | 0 | **26 (cds2ddic)** | 38 generate, see below |
 | ddlx | 7 | 7 | 0 | 0 | metadata extensions: parsed, nothing reads them |
 | dcls | 0 | | | | (the access controls are in the excluded scenarios) |
-| tabl | 51 | 42 | 0 | 9 | 7 need `ABP_LOCINST_LASTCHANGE_USER`, 2 need `SDRAFT_UUID`; both stand-ins in the overlay |
+| tabl | 51 | 51 | 0 | 0 | 9 of them name `ABP_LOCINST_LASTCHANGE_USER` (7) or `SDRAFT_UUID` (2), which the overlay's stand-ins resolve -- that is what the stand-ins are for |
 | ttyp | 16 | 16 | 0 | 0 | |
 | dtel | 58 | 58 | 0 | 0 | |
 | doma | 39 | 39 | 0 | 0 | |
@@ -57,8 +61,10 @@ it says only that the file parsed. The next three tables are the generators.
 
 Every one is refused, and the build treats a refused BDEF as a failed build,
 so the manifest excludes `\.bdef\.`; the pools that implement them are
-excluded with them. The first wall each BDEF hits, in the order the
-generator checks:
+excluded with them. `tools/rap-flight/classify.mjs` runs `bdef-gen`'s own
+`generate()` per BDEF and prints each refusal verbatim; the kind and the
+first wall are that reading, refined by eye into which construct it was, and
+the "also in it" column is a reading of each definition:
 
 | BDEF | kind | first wall | also in it |
 | --- | --- | --- | --- |
@@ -81,16 +87,17 @@ blocked by its compositions alone before anything else is asked.
 
 ### The 64 CDS views against `cds2ddic.mjs`
 
-40 generate (a DDIC view, a `zcl_stg_cds_*` source class, a registry
+38 generate (a DDIC view, a `zcl_stg_cds_*` source class, a registry
 entry): every interface view over one `/dmo/` table, the value helps, the
-read-only views, the three managed interface views. 24 are skipped and
-said why:
+read-only views, the three managed interface views. 26 are skipped and
+said why (the classify script prints the histogram):
 
 | skip reason | views | what it is |
 | --- | ---: | --- |
-| "no select" | 22 | `as projection on` (the 5 managed consumption views, the 4 reuse consumption views) and the 13 extension views of the excluded chapter |
+| "no select" | 23 | `as projection on` (the managed and reuse consumption views and the extension views of the excluded chapter) |
 | "joins are not supported yet" | 1 | `/DMO/I_CARRIERSLOCKSINGLETON_S` (the singleton root is a join) |
 | "a cast this generator cannot read" | 1 | an extension view's `avg( )` |
+| "no field of /DMO/AGENCY could be resolved" | 1 | `/DMO/CURRENCY_HELPER`, a view with parameters whose one element is `currency_conversion( )` -- the manifest excludes it for this reason |
 
 The first namespaced view made the generator write `gen/cds/dmo/currhlp.view.xml`
 and fail with ENOENT: a namespaced SQL view name is now written in abapGit's
@@ -109,7 +116,7 @@ out of the kept folders:
 
 | pattern | why | objects |
 | --- | --- | ---: |
-| `^(draft\|colldraft\|hierarchy\|unmanaged)/` | the other scenarios | draft 72, colldraft 32, hierarchy 72, unmanaged 36 files |
+| `^(draft\|colldraft\|hierarchy\|unmanaged)/` | the other scenarios | draft 99, colldraft 48, hierarchy 91, unmanaged 49 files (the classify script's count) |
 | `^reuse/agency/(cntry\|datgn\|rev)/` | the extensibility chapter: BDEF extensions, `RAISE ENTITY EVENT`, `WITH INDICATORS` | 3 folders, 11 BDEF/CLAS objects |
 | `^reuse/agency/slogn/.*\.(clas\|ddls\|devc)\.` | the slogan extension's views and test; its append structure stays because `/dmo/agency` includes it | 6 |
 | `\.bdef\.` | every BDEF is refused by `bdef-gen.mjs`, and a refusal fails the build | 15 |
