@@ -257,13 +257,14 @@ if (layered) {
     const file = join(layersDir, name, "zz_generated.go");
     if (recorded?.input === inputs.get(name) && existsSync(file) && recorded.output === createHash("sha256").update(readFileSync(file)).digest("hex")) skip.add(i);
   }
-  const tierSymbols = new Map();
+  const emittedSymbols = new Map();
   const sources = writeLayers(program, plan, {mainDir: dir, pkgDir: (i) => join(layersDir, plan.names[i]),
     importPath: (i) => `osg/gogen/generated/osgo/${plan.names[i]}`, unitBuild: false, skip,
     symbolsOf: (i) => new Map(Object.entries(pkgRecord?.packages?.[plan.names[i]]?.symbols ?? {})),
-    symbolsSink: (i, entries) => tierSymbols.set(plan.names[i], entries)});
+    symbolsSink: (i, entries) => emittedSymbols.set(plan.names[i], entries)});
   pkgInputs = inputs;
   pkgEmitted = plan.names.filter((_, i) => !skip.has(i) && i + 1 < plan.names.length);
+  tierSymbols = emittedSymbols;
   phase("emit");
   console.log(`layers: ${Object.entries(plan.info.classes).map(([n, c]) => `${n} ${c}`).join(", ")} classes; edited: ${layerInfo.edited.join(", ") || "none"}${plan.info.promoted.length ? `; promoted: ${plan.info.promoted.length}` : ""}${skip.size ? `; emitted: main only (${[...skip].map((i) => plan.names[i]).join(", ")} unchanged)` : ""}`);
 } else {

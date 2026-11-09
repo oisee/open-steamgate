@@ -343,14 +343,16 @@ export function incrAssemble({root, folders, objects, hidden, includeTests, proo
     wordCache.set(key, set);
     return set;
   };
+  const enqueued = new Set(queue);
   for (let i = 0; i < queue.length; i += 1) {
     const key = queue[i];
     const names = new Set(index.entries[key]?.reads ?? []);
     if (edited.has(key)) for (const w of words(key)) names.add(keyOf("CLAS", w));
     for (const name of names) {
       if (!name.startsWith("CLAS ") || relower.has(name)) continue;
-      if (!byKey.has(name) || !index.entries[name]) continue;
+      if (!byKey.has(name) || !index.entries[name] || enqueued.has(name)) continue;
       for (const f of byKey.get(name)) need.add(f);
+      enqueued.add(name);
       queue.push(name);
     }
   }
@@ -413,6 +415,10 @@ export function incrAssemble({root, folders, objects, hidden, includeTests, proo
   const freshRtti = [];
   const freshOwnership = new Map();
   const readIncr = {
+    // only the re-lowered objects compile; everything else stays in `wanted`
+    // (a call of a class outside the program is refused during lowering) and
+    // its IR comes from the cache
+    compiles: (key) => relower.has(key),
     enter(key) { freshMarks.push([key, program.skipped.length, program.partial.length]); },
     exit() {},
     prepare(p, reg) {

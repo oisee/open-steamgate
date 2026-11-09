@@ -153,6 +153,7 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
   LOCAL_DEFS.clear();
   /** @type {import("./frontend-types.ts").LocalClass[]} */ const localDefs = [];
   for (const obj of enumerateObjects(reg, "local-dispatch", [], "scheduling", (o) => o instanceof abaplint.Objects.Class && selectionHas(wanted, o.getName().toLowerCase()) && (includeTests === true || includeTests instanceof Set || LOCAL_CLASSES.has(upper(o.getName()))))) {
+    if (incr?.compiles && !incr.compiles(`CLAS ${upper(obj.getName())}`)) continue;
     incr?.enter?.(`CLAS ${upper(obj.getName())}`);
     localDiscovery(reg, obj, includeTests === true || (includeTests instanceof Set && includeTests.has(upper(obj.getName()))), () => {
     if (LOCAL_CLASSES.has(upper(obj.getName()))) {
@@ -210,6 +211,10 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
   };
   for (const obj of enumerateObjects(reg, "selected-classes", wanted, "scheduling", (o) => o instanceof abaplint.Objects.Class && selectionHas(wanted, o.getName().toLowerCase()) && (!discoveryProbe || discoveryProbe.owners.has(upper(o.getName()))))) {
     if (!(obj instanceof abaplint.Objects.Class)) continue;
+    // the per-object cache lowers only what it must: the rest is in `wanted`
+    // for the checks (a call of a class not in the program is refused), its
+    // IR comes from the cache
+    if (incr?.compiles && !incr.compiles(`CLAS ${upper(obj.getName())}`)) continue;
     // The session layer accepts a class source with own getter functions.
     // Keep the core object beside it for syntax analysis and provenance.
     const source = {obj, getName: /** @returns {string} */ () => obj.getName(),
@@ -230,6 +235,7 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
   }
   // @ts-expect-error -- abapiti form pending
   for (const g of readable.filter(() => !discoveryProbe)) {
+    if (incr?.compiles && !incr.compiles(`FUGR ${upper(g.getName())}`)) continue;
     incr?.enter?.(`FUGR ${upper(g.getName())}`);
     // @ts-expect-error -- abapiti form pending
     program.classes.push(withArtifact(ctx0, g, () => functionGroupIr(ctx0, g)));
