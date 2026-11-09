@@ -38,7 +38,7 @@ import {execFileSync} from "node:child_process";
 import {run} from "./osd-build-command.mjs";
 import {existsSync, lstatSync, mkdirSync, openSync, closeSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync} from "node:fs";
 import {basename, dirname, join, relative, resolve, resolve as resolvePath, sep} from "node:path";
-import {fileURLToPath} from "node:url";
+import {fileURLToPath, pathToFileURL} from "node:url";
 import {buildIdentity, assertToolchain, describeBuild} from "./osd-transpiler.mjs";
 import {describeDuplicates, excludePatterns, layers} from "./osd-inputs.mjs";
 import {transpile, selectedModules} from "./osd-transpile.mjs";
@@ -989,6 +989,13 @@ export async function main(args) {
     const r = await build({root, force: args.includes("--force"), replace: args.includes("--replace"),
       switch: !args.includes("--no-switch"), log: say});
     say(`${r.cached ? "reused" : "built"} ${r.hash} in ${r.ms} ms, ${r.objects} objects${r.live ? ", live" : ""}`);
+    // Packs whose seed rows are generator output make them now, after the
+    // live generation is in place (not tracked; the licence decision of
+    // 2026-11-09). Imported from the root's own tools/ by URL, the way the
+    // binary's gogen-unit is, so a compiled binary reads the checkout's
+    // copy rather than none at all.
+    const {ensurePackSeeds} = await import(pathToFileURL(join(root, "tools", "rap-flight", "seed-capture.mjs")).href);
+    await ensurePackSeeds(root, say);
     return 0;
   } catch (error) {
     if (error.code === "OSD_VERSION_MISMATCH") console.error(error.message);

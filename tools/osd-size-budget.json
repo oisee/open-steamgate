@@ -531,8 +531,8 @@
       "reason": "Profiled owned-memory checksum addition: checked integral fast path with the existing exact packed fallback; no growth in abap or the main emitter."
     },
     "tools/osd-build.mjs": {
-      "lines": 1006,
-      "reason": "#641 zip layers: user source layers (zip cache + overlay) enter the build inputs and the generation hash"
+      "lines": 1013,
+      "reason": "#641 zip layers: user source layers (zip cache + overlay) enter the build inputs and the generation hash; 2026-11-09 +7, the build makes packs/rap-flight's seed rows after the transpile through tools/rap-flight/seed-capture.mjs (generator output, not tracked), the call itself three lines beside the comment that says why it is imported by URL"
     },
     "tools/gogen/go/abap/utf16.go": {
       "lines": 412,

@@ -1,11 +1,20 @@
 #!/usr/bin/env node
-// The seed capture of packs/rap-flight: run SAP's data generator once in the
-// transpiled runtime and write what it made into the pack's data/ folder as
-// abapGit TABU JSON, the format every pack's seed rows have (test/seed.mjs
-// reads them at start).
+// The seed capture of packs/rap-flight: run the scenario's own data generator
+// once in the transpiled runtime and write what it made into the pack's
+// data/ folder as abapGit TABU JSON, the format every pack's seed rows have
+// (test/seed.mjs reads them at start).
 //
 //   npm run transpile                      # the generator and its tables
 //   node tools/rap-flight/seed-capture.mjs [--out packs/rap-flight/data]
+//
+// The rows are generator output and so are NOT tracked (the licence decision
+// of 2026-11-09: derived SAP content stays out of the repository). A build
+// makes them through ensurePackSeeds() below whenever the inputs the
+// generator reads changed; the hand run above is for refreshing them on
+// purpose. The generator is random where the scenario is: the master data
+// (agencies, airports, connections, the status pairs) comes out the same
+// every run, and the transactional counts do not -- a capture's counts are
+// one run's, which is how docs/rap-flight-pack.md labels them.
 //
 // Boots the runtime the way test/start.mjs does (output/init.mjs), runs
 // ZCL_OSD_RAPFLIGHT_SEED=>RUN inside one dialog step -- committed when it
@@ -13,10 +22,12 @@
 // selects every table the generator fills. Dates come out as the internal
 // YYYYMMDD and go into the file as YYYY-MM-DD, which is what abapGit's own
 // serialiser writes and what test/seed.mjs converts back.
+import {createHash} from "node:crypto";
 import {mkdirSync, writeFileSync, readFileSync, existsSync} from "node:fs";
 import {join, resolve} from "node:path";
 import {pathToFileURL} from "node:url";
 import {dialogStep} from "../osd-dialog-step.mjs";
+import {markerOf} from "../osd-packs.mjs";
 
 // the tables the generator writes, in the order a reader expects them
 export const TABLES = [
@@ -92,6 +103,60 @@ function tablXmlOf(root, table) {
     if (existsSync(p)) return readFileSync(p, "utf8");
   }
   return undefined;
+}
+
+// The overlay files the generator reads (its own two classes and the seed
+// class that drives it), the upstream commit and this script: what a capture
+// is a function of. The marker beside the rows names the digest of these, so
+// a checkout that fetched a new commit or edited the overlay rebuilds its
+// seed without being asked and a reviewer can tell rows from their source.
+const SEED_INPUTS = [
+  "src/#dmo#cl_flight_data_generator.clas.abap",
+  "src/#dmo#cl_flight_data_generator.clas.locals_imp.abap",
+  "src/#dmo#cl_data_generator_managed.clas.abap",
+  "src/zcl_osd_rapflight_seed.clas.abap",
+  "src/zcl_osd_rapflight_seed.clas.locals_imp.abap",
+];
+
+export function seedInputsDigest(root) {
+  const pack = join(root, "packs", "rap-flight");
+  const manifest = JSON.parse(readFileSync(join(pack, "osd-pack.json"), "utf8"));
+  const hash = createHash("sha256");
+  // the commit the fetch actually holds, not the ref the manifest names: a
+  // ref that is a branch can bring a new commit under the same name
+  hash.update(markerOf(pack).upstream?.commit ?? manifest.sources?.[0]?.ref ?? "");
+  hash.update(readFileSync(new URL(import.meta.url), "utf8"));
+  for (const file of SEED_INPUTS) {
+    const path = join(pack, file);
+    if (!existsSync(path)) {
+      throw new Error(`packs/rap-flight: the overlay no longer carries ${file}, so the seed cannot be made from it`);
+    }
+    hash.update(readFileSync(path));
+  }
+  return hash.digest("hex");
+}
+
+/** A build calls this after the transpile: make the pack's seed rows when the
+ *  generator inputs changed, in the pack's own data/ folder (not tracked).
+ *  Returns whether it captured. */
+export async function ensurePackSeeds(root = process.cwd(), log = console.log) {
+  const pack = join(root, "packs", "rap-flight");
+  if (existsSync(join(pack, "osd-pack.json")) === false || existsSync(join(pack, "upstream")) === false) {
+    return false; // no pack here, or not fetched: the build itself says so
+  }
+  const markerFile = join(pack, "data", ".osd-seed.json");
+  const digest = seedInputsDigest(root);
+  try {
+    const marker = JSON.parse(readFileSync(markerFile, "utf8"));
+    if (marker.digest === digest && TABLES.every((t) => existsSync(join(pack, "data", fileOf(t))))) {
+      return false;
+    }
+  } catch { /* no marker yet, or rows missing: capture below */ }
+  log("rap-flight seed: the generator's rows are made at build (not tracked), running it");
+  const {counts} = await capture({root, log});
+  mkdirSync(join(pack, "data"), {recursive: true});
+  writeFileSync(markerFile, JSON.stringify({digest, counts, at: new Date().toISOString()}, null, 2) + "\n");
+  return true;
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {

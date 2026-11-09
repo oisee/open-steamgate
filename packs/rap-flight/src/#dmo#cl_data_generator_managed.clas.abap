@@ -1,3 +1,9 @@
+* Overlay copy of src/managed/#dmo#cl_data_generator_managed.clas.abap from
+* SAP-samples/abap-platform-refscen-flight (Apache-2.0), commit
+* 5353cbeb013a3a2fbd7f1ba6be89e54f68cfe22c, modified for this runtime
+* (every change marked OSD overlay in the source); licence and
+* copyright: LICENSE and NOTICE in this folder.
+
 CLASS /dmo/cl_data_generator_managed DEFINITION
   PUBLIC
   FINAL

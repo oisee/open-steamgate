@@ -47,13 +47,23 @@ system and nowhere else (every change is marked `OSD overlay` in the source):
 
 `zcl_osd_rapflight_seed` runs the generator with a console and reports the
 row counts; `tools/rap-flight/seed-capture.mjs` calls it and writes the rows
-into `data/*.tabu.json` -- 22 files, 10.7 MB, the counts in
-[docs/rap-flight-pack.md](../../docs/rap-flight-pack.md)'s seed section.
+into `data/*.tabu.json` -- 22 files, about 11 MB, one run's counts in
+[docs/rap-flight-pack.md](../../docs/rap-flight-pack.md)'s seed section. The
+rows are generator output and are **not tracked**: the build makes them
+(whenever the upstream commit, the overlay's generator copies or the seed
+class changed, `data/.osd-seed.json` names the digest they are a function
+of), so a fresh checkout seeds itself and a diff of this repository carries
+no derived upstream content.
 
 `zosd_rapflight.stg.yaml` serves the CDS interface views the generator takes
 as read-only entity sets (`/sap/opu/odata/sap/ZOSD_RAPFLIGHT_SRV`), so the
 seeded data can be read over the wire. No behavior runs: the business
 objects are what the RAP runtime cannot take yet (see the document).
 
-Upstream's files are Apache-2.0 (the repository's `LICENSES/` and
-`REUSE.toml`); the copies in `src/` keep that licence.
+Licence: upstream's files are Apache-2.0 (the repository's `LICENSES/` and
+`REUSE.toml`), and so are the copies in `src/` -- [LICENSE](LICENSE) says
+what is whose, [NOTICE](NOTICE) carries upstream's copyright line, each
+copied file names its origin and commit in a header, and
+`scripts/third-party-notices.mjs` lists the material beside zork's. The
+overlay's own files (the seed class, the YAML, the stand-ins, the manifest)
+are this repository's, under its MIT licence.

@@ -179,13 +179,23 @@ which is how the same reading found one more broken module on `main`
 (`zl3_fleet2.prog.mjs`, a top-level `RETURN`), carried there as a dated
 exception.
 
-## The seed: SAP's generator, run once
+## The seed: the scenario's own generator, run once per build
 
-`node tools/rap-flight/seed-capture.mjs` (after `npm run transpile`) runs
-`ZCL_OSD_RAPFLIGHT_SEED`, which gives `/DMO/CL_FLIGHT_DATA_GENERATOR` the
-console an ADT class run asks for, inside one dialog step; what the generator
-wrote is then read out of the database into `data/*.tabu.json`, abapGit's TABU
-form with ISO dates. The counts it printed (6.3 s for the generator):
+`tools/rap-flight/seed-capture.mjs` runs `ZCL_OSD_RAPFLIGHT_SEED`, which
+gives `/DMO/CL_FLIGHT_DATA_GENERATOR` the console an ADT class run asks
+for, inside one dialog step; what the generator wrote is then read out of
+the database into `data/*.tabu.json`, abapGit's TABU form with ISO dates.
+The rows are generator output and are **not tracked** (the licence decision
+of 2026-11-09: derived content of the fetched upstream stays out of the
+repository): `tools/osd-build.mjs` calls the capture's `ensurePackSeeds()`
+after every transpile whose inputs the generator reads changed -- the
+upstream commit, the overlay's generator copies, the seed class and the
+capture itself, their digest in `data/.osd-seed.json` -- so a fresh
+checkout seeds itself and a diff carries no derived rows. The generator is
+random where the scenario is: the master data (agencies, airports,
+connections, statuses, supplements) comes out the same every run, and the
+transactional counts do not. The counts of one capture (6.3 s for the
+generator):
 
 | table | rows | | table | rows |
 | --- | ---: | --- | --- | ---: |
@@ -196,7 +206,7 @@ form with ISO dates. The counts it printed (6.3 s for the generator):
 | /dmo/agency | 50 | | /dmo/travel_m | 3190 |
 | /dmo/customer | 668 | | /dmo/booking_m | 7726 |
 | /dmo/supplcat (+ its texts) | 4 + 4 | | /dmo/booksuppl_m | 13442 |
-| the three status pairs | 4+4, 3+3, 3+3 | | **22 files** | **10.7 MB** |
+| the three status pairs | 4+4, 3+3, 3+3 | | **22 files** | **~11 MB** |
 
 The size is a fact to know before leaning on it: the preview deployment
 inlines every pack's seed statements into its bundle
