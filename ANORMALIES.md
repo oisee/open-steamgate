@@ -4398,3 +4398,28 @@ Not an anomaly, recorded for porting: on 7.58, `FIND ... REGEX` (POSIX) raises a
   `replace` calls `getOffset` on it and dies with a JS TypeError. Workaround
   in the overlay: the digits go through a string template first. Upstream:
   abaplint/runtime, needs an issue.
+
+## The transpiler writes view DDL in registry order (DuckDB refuses it)
+
+- Status: worked around where the registry is fed (tools/osd-warm-order.mjs);
+  the workaround is general, not pack-specific. Discovery 2026-11-09,
+  `@abaplint/transpiler 2.14.3`, found by the DuckDB review of
+  packs/rap-flight.
+- `DatabaseSetup` (`build/src/db/index.js`) writes `CREATE VIEW` for every
+  `View` object in registry order and its own comment asks "todo: what if the
+  view is based on another view?" -- and one is: the pack's generated DDIC
+  views include `/dmo/c_connection_r` over `/dmo/i_connection_r` and
+  `/dmo/c_flight_r` over `/dmo/i_flight_r`, and `c_` sorts before `i_`, which
+  is the walk order and so the registry order. SQLite checks a view's bases
+  at first read and starts fine; DuckDB checks at CREATE and refuses
+  ("Catalog Error: Table with name /dmo/i_connection_r does not exist"),
+  which killed every DuckDB start of a tree with the pack: `STG_DB=duckdb`,
+  `unit:duckdb`, consumer-smoke's DuckDB slice, and the DuckDB-Wasm preview
+  (where the C++ exception surfaces as a wasm crash, `_setThrew is not
+  defined`). Expected: the DDL a view-over-a-view tree produces is valid for
+  every backend, as the same tree is on SQLite and PostgreSQL.
+- Workaround: `orderRegistry` feeds the registry, so it now names a view
+  after every base of its own that is a view (the bases read off the view
+  XML, which the pass already holds); checked by `test/warm-update.mjs`
+  against the pinned transpiler's own DDL.
+- Upstream: abaplint/transpiler, needs an issue.
