@@ -4,6 +4,7 @@ import {copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync} 
 import {dirname, join} from "node:path";
 import {compileProgram} from "./frontend.mjs";
 import {assertTableFieldsTyped} from "./frontend-ddic.mjs";
+import {dbCacheRead, dbCacheWrite, dbContributions, dbFlat, incrAssemble, incrRecorder} from "./osgo-incr.mjs";
 import {home} from "./home.mjs";
 import {libraryPath} from "../osd-lib-path.mjs";
 
@@ -95,13 +96,37 @@ export function osgCompileInputs({extraFolders = []} = {}) {
   return {folders, objects, hidden};
 }
 
-/** every class, interface and function group of the layers and libraries, compiled (a statement outside the subset is a stub) */
-export function compileOsg({extraFolders = [], includeTests = new Set()} = {}) {
+/** every class, interface and function group of the layers and libraries, compiled (a statement outside the subset is a stub)
+ *
+ * `incr` is the per-object cache of the fast path (tools/gogen/osgo-incr.mjs):
+ * `{proof}` assembles the program out of the live generation's cache when the
+ * proof holds (and says why it did not when it cannot), `{recordGen}` records
+ * what a full front end lowered into that generation's cache. Without `incr`
+ * nothing of it runs. */
+export function compileOsg({extraFolders = [], includeTests = new Set(), incr} = {}) {
   const {folders, objects} = osgCompileInputs({extraFolders});
   const t0 = performance.now();
-  const program = compileProgram({folders, objects, tolerant: true, skip: (path) => hidden.has(path), ...(includeTests.size ? {includeTests} : {})});
+  let program;
+  let incrInfo;
+  let note = "";
+  if (incr?.proof?.ok) {
+    const attempt = incrAssemble({root: home, folders, objects, hidden, includeTests, proof: incr.proof});
+    if (attempt.ok) {
+      program = attempt.program;
+      incrInfo = {read: attempt, proofBase: incr.proof.base};
+      note = `\nosgo incr: ${attempt.reused} objects from the cache of generation ${incr.proof.base}, ${attempt.lowered.length} lowered fresh; ${attempt.notes.join("; ")}`;
+    } else {
+      incrInfo = {refused: attempt.reason};
+      note = `\nosgo incr: the full front end runs (${attempt.reason})`;
+    }
+  }
+  if (!program) {
+    const recorder = incr?.recordGen ? incrRecorder({root: home, folders, hidden, objects, includeTests}) : undefined;
+    program = compileProgram({folders, objects, tolerant: true, skip: (path) => hidden.has(path), ...(includeTests.size ? {includeTests} : {}), ...(recorder ? {incr: recorder} : {})});
+    if (recorder) incrInfo = {written: recorder.finish({gen: incr.recordGen})};
+  }
   const summary = `front end: ${program.classes.length} classes, ${program.partial.length} statement stubs, ${program.skipped.length} methods not compiled, ${program.broken.length} objects with syntax errors (${Math.round(performance.now() - t0)} ms)`;
-  return {program, summary: `${summary}\nlayers: ${layerFolders.join(", ")}${overridden.length ? `; overridden: ${overridden.map((o) => `${o.object} by ${o.winner}`).join(", ")}` : ""}`};
+  return {program, summary: `${summary}\nlayers: ${layerFolders.join(", ")}${overridden.length ? `; overridden: ${overridden.map((o) => `${o.object} by ${o.winner}`).join(", ")}` : ""}${note}`, incr: incrInfo};
 }
 
 /**
@@ -112,8 +137,31 @@ export function compileOsg({extraFolders = [], includeTests = new Set()} = {}) {
  */
 export async function osgDatabase(program, options = {}) {
   const {DatabaseSetup} = await import(`${home}/node_modules/@abaplint/transpiler/build/src/db/index.js`);
-  assertTableFieldsTyped(program.reg);
-  const setup = new DatabaseSetup(program.reg).run();
+  // options.incr is what compileOsg's cache did: a read assembles the
+  // statements out of the recorded per-object lists with the re-lowered
+  // objects' rows derived again; a write records them after proving the
+  // reconstruction is exactly what the real run produced
+  /** @type {{schemas: {sqlite: string[]}, insert: string[]}} */ let setup;
+  if (options.incr?.read) {
+    const cached = dbCacheRead(options.incr.read.incrDb.dir);
+    if (cached === undefined) throw new Error(`osgo incr: the cache of generation ${options.incr.proofBase} has no database record`);
+    const fresh = dbContributions(program.reg, new Set(options.incr.read.incrDb.relower));
+    const flat = dbFlat(cached, fresh);
+    setup = {schemas: {sqlite: flat.schemas}, insert: flat.insert};
+  } else {
+    assertTableFieldsTyped(program.reg);
+    setup = new DatabaseSetup(program.reg).run();
+    if (options.incr?.written) {
+      const mine = dbContributions(program.reg);
+      const flat = dbFlat(mine);
+      if (flat.schemas.join("\n") === setup.schemas.sqlite.join("\n") && flat.insert.join("\n") === setup.insert.join("\n")) {
+        dbCacheWrite(options.incr.written.dir, mine);
+      } else {
+        options.incr.dbMismatch = true;
+        console.log("osgo incr: the database statements did not attribute per object; the next fast build runs the full front end");
+      }
+    }
+  }
   process.env.OSD_ROOT ??= home;
   const {seedStatements} = await import(`${home}/test/seed.mjs`);
   const seed = seedStatements();

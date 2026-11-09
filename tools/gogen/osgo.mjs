@@ -106,6 +106,11 @@ if (echo) {
     }
   }
   const {compileOsg, osgDatabase, staleGen} = await import("./osg-build.mjs");
+  // the per-object cache of the fast path (osgo-incr.mjs): a full front end
+  // records what it lowered into the live generation's cache, a proven fast
+  // build reads it. Without a live generation there is nothing to record.
+  const {liveHash} = await import(`${home}/tools/osd-build.mjs`);
+  const recordGen = liveHash(home);
   // a stale gen/ is refused (--stale-gen builds it anyway, with the warning)
   const staleCheck = async () => {
     const stale = await staleGen();
@@ -117,7 +122,7 @@ if (echo) {
   };
   if (!fastInfo?.ok) await staleCheck();
   phase("stale check");
-  let built = compileOsg({extraFolders, includeTests: new Set(owners)});
+  let built = compileOsg({extraFolders, includeTests: new Set(owners), ...(recordGen || fastInfo ? {incr: {proof: fastInfo?.ok ? fastInfo : undefined, recordGen}} : {})});
   phase("front end");
   // the fast path skipped the Node build's syntax check: an edited object
   // the front end found errors in is not built here. The full path runs
@@ -132,7 +137,7 @@ if (echo) {
       fastInfo = {ok: false, hash: fastInfo.hash, base: fastInfo.base, reason: refusal};
       nodeBuild();
       await staleCheck();
-      built = compileOsg({extraFolders, includeTests: new Set(owners)});
+      built = compileOsg({extraFolders, includeTests: new Set(owners), ...(recordGen ? {incr: {recordGen}} : {})});
       phase("front end");
     }
   }
@@ -148,7 +153,7 @@ if (echo) {
     xref = await fastXrefRows(home, fastInfo);
     console.log(`osgo fast: cross-reference ${xref ? "from the live generation's rows" : "parsed (no live rows to start from)"}`);
   }
-  const db = await osgDatabase(program, {xref});
+  const db = await osgDatabase(program, {xref, ...(built.incr ? {incr: built.incr} : {})});
   statements = db.statements;
   console.log(db.summary);
   // SMW0: the W3MI objects of the layers (the BSP apps' pages among them)

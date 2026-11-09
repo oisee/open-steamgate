@@ -63,7 +63,7 @@ const HOST_REPLACED = new Set(["ZCL_OSD_ENQ_KERNEL"]);
  */
 // skip(path): a file not to load, for a layered build where a later folder
 // hides an object an earlier one holds (osg-build.mjs; ultra/packs)
-export const compileProgram = withProvenance(/** @param {import("./frontend-session-types.ts").CompileOptions} options */ function compileProgram({folders, objects, tolerant = false, skip = () => false, includeTests = false, registry, session, cacheDir, dependencyCache = false, closureContext, strictRoots, discoveryProbe}) {
+export const compileProgram = withProvenance(/** @param {import("./frontend-session-types.ts").CompileOptions} options */ function compileProgram({folders, objects, tolerant = false, skip = () => false, includeTests = false, registry, session, cacheDir, dependencyCache = false, closureContext, strictRoots, discoveryProbe, incr}) {
   const config = abaplint.Config.getDefault().get();
   // @ts-expect-error -- abapiti form pending
   config.syntax = {...config.syntax, version: "v758", errorNamespace: "."};
@@ -138,7 +138,11 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
     diagnostics, frontendCounts: {lowered: 0, reused: 0, loweredClasses: [], reusedClasses: []}, interfaces: new Set(), reg, sigs: new Map(), broken: [...broken], partial: [], events: new Map()}));
   if (PERSIST_LOWERING) Object.assign(program, {faeN: 0, localDefs: new Map()});
   if (PERSIST_LOWERING) PROGRAM = program;
-  program.supplied = suppliedIndex(reg, program.wanted, abaplint, suppliedMethods, declaringClass);
+  program.supplied = suppliedIndex(reg, program.wanted, abaplint, suppliedMethods, declaringClass, incr?.suppliedOf);
+  // the per-object cache of the osgo fast path (tools/gogen/osgo-incr.mjs): the
+  // write side installs its write transcript around the shared collections, the
+  // read side pre-seeds them from the cache before anything lowers
+  incr?.prepare?.(program, reg);
   PROGRAM = program;
   /** @type {import("./frontend-types.ts").CompilationContext} */ const ctx0 = {reg, program};
   // the local classes of the owners that have them compiled (LOCAL_CLASSES),
@@ -149,6 +153,7 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
   LOCAL_DEFS.clear();
   /** @type {import("./frontend-types.ts").LocalClass[]} */ const localDefs = [];
   for (const obj of enumerateObjects(reg, "local-dispatch", [], "scheduling", (o) => o instanceof abaplint.Objects.Class && selectionHas(wanted, o.getName().toLowerCase()) && (includeTests === true || includeTests instanceof Set || LOCAL_CLASSES.has(upper(o.getName()))))) {
+    incr?.enter?.(`CLAS ${upper(obj.getName())}`);
     localDiscovery(reg, obj, includeTests === true || (includeTests instanceof Set && includeTests.has(upper(obj.getName()))), () => {
     if (LOCAL_CLASSES.has(upper(obj.getName()))) {
       // @ts-expect-error -- abapiti form pending
@@ -172,6 +177,7 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
       localDefs.push(l);
     }
     return {names: [.../** @type {NonNullable<import("./frontend-types.ts").FrontendProgram["localInterfaces"]>} */ (program.localInterfaces).keys(), .../** @type {Map<string, string>} */ (program.locals).values()].filter((k) => k.startsWith(`${upper(obj.getName())}|`) || k.startsWith(`${upper(obj.getName())}:`)), value: undefined}; });
+    incr?.exit?.();
   }
   // parity-wave1: the function groups named are compiled too, one pseudo
   // class FUGR:<group> per group with a static method per module; their
@@ -192,9 +198,10 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
   // lock objects must be known before methods compile: their key order is
   // part of every generated ENQUEUE / DEQUEUE argument
   program.lockObjects = lockObjectRegistry(reg, program);
-  program.caught = caughtIndex(reg, program.wanted,
-    // @ts-expect-error -- abapiti form pending
-    (c) => clasDef(reg, c)?.getSuperClass()?.toUpperCase() ?? RUNTIME_CX_SUPER[c]);
+  // the per-object cache answers this from the superclass map it recorded
+  // (tools/gogen/osgo-incr.mjs): a partial registry cannot walk the chains
+  /** @param {string} c @returns {string | null | undefined} */ const superOf = (c) => clasDef(reg, c)?.getSuperClass()?.toUpperCase() ?? RUNTIME_CX_SUPER[c];
+  program.caught = incr?.caughtIndex?.(reg, program.wanted, superOf) ?? caughtIndex(reg, program.wanted, superOf);
   // @ts-expect-error -- abapiti form pending
   const lowerClass = (ctx, obj) => {
     const saved = PROGRAM;
@@ -210,12 +217,24 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
       getMainABAPFile: /** @returns {import('@abaplint/core').ABAPFile | undefined} */ () => obj.getMainABAPFile(),
       getABAPFiles: /** @returns {readonly import('@abaplint/core').ABAPFile[]} */ () => obj.getABAPFiles()};
     // @ts-expect-error -- abapiti form pending
+    incr?.enter?.(`CLAS ${upper(obj.getName())}`);
     program.classes.push(compile(ctx0, source, lowerClass, session));
+    incr?.exit?.();
   }
   // @ts-expect-error -- abapiti form pending
-  for (const l of localDefs.filter(l => !discoveryProbe || discoveryProbe.owners.has(l.owner))) program.classes.push(compile(ctx0, l, lowerClass, session));
+  for (const l of localDefs.filter(l => !discoveryProbe || discoveryProbe.owners.has(l.owner))) {
+    incr?.enter?.(`CLAS ${upper(l.owner)}`);
+    // @ts-expect-error -- abapiti form pending
+    program.classes.push(compile(ctx0, l, lowerClass, session));
+    incr?.exit?.();
+  }
   // @ts-expect-error -- abapiti form pending
-  for (const g of readable.filter(() => !discoveryProbe)) program.classes.push(withArtifact(ctx0, g, () => functionGroupIr(ctx0, g)));
+  for (const g of readable.filter(() => !discoveryProbe)) {
+    incr?.enter?.(`FUGR ${upper(g.getName())}`);
+    // @ts-expect-error -- abapiti form pending
+    program.classes.push(withArtifact(ctx0, g, () => functionGroupIr(ctx0, g)));
+    incr?.exit?.();
+  }
   if (discoveryProbe) return program;
   // every interface used as a reference type: its methods whose signature
   // types, which is what a class must provide to satisfy it
@@ -242,13 +261,13 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
   }
   });
   // @ts-expect-error -- abapiti form pending
-  finalOutput(reg, "dynamic-statics", () => prepareDynamicStatics(program, {defaultValue, aliasTarget})); program.rtti = finalOutput(reg, "rtti", () => rttiTable(reg, program));
+  finalOutput(reg, "dynamic-statics", () => prepareDynamicStatics(program, {defaultValue, aliasTarget})); program.rtti = finalOutput(reg, "rtti", () => rttiTable(reg, program, incr?.rttiOf));
   program.exceptionSupers = finalOutput(reg, "exception-supers", () => exceptionSupers(reg, program));
   program.cdsViews = cdsViewsByRegistry.get(reg) ?? cdsViewsByRegistry.get(inputOrigin(reg)) ?? {};
   program.tables = finalOutput(reg, "tables", () => tableRegistry(reg, program));
   program.lockObjects = finalOutput(reg, "locks", () => lockObjectRegistry(reg, program, "final-output"));
   auditedBookkeeping("session-finalize", () => finishSession(session, reg)); // File guards, no resolution.
-  Object.assign(program, {amcChannels: samcOf(folders), ownershipSafety: session ? (session.ownershipSafety ??= sourceOwnershipSafety(reg)) : sourceOwnershipSafety(reg)});
+  Object.assign(program, {amcChannels: samcOf(folders), ownershipSafety: session ? (session.ownershipSafety ??= sourceOwnershipSafety(reg)) : sourceOwnershipSafety(reg, incr?.ownershipOf)});
   session?.disk?.finish(program); return program;
 });
 
@@ -413,7 +432,8 @@ export function whereColumns(t) {
  * so a name that exists but is not a structure dumps instead of reading as
  * TYPE_NOT_FOUND.
  */
-/** @param {import("@abaplint/core").IRegistry} reg @param {import("./frontend-types.ts").FrontendProgram} program @returns {import("./frontend-types.ts").RttiTable} */ function rttiTable(reg, program) {
+/** @param {import("@abaplint/core").IRegistry} reg @param {import("./frontend-types.ts").FrontendProgram} program @param {(owner: string, defs: [string, {name: string; kind: string}[] | undefined][] | undefined) => void} [collect]
+ * @returns {import("./frontend-types.ts").RttiTable} */ function rttiTable(reg, program, collect) {
   /** @type {Map<string, {name: string; kind: string}[]>} */ const structs = new Map();
   /** @param {string} name @param {import("@abaplint/core").AbstractType} t @returns {void} */ const add = (name, t) => {
     if (!(t instanceof BasicTypes.StructureType)) return;
@@ -430,10 +450,14 @@ export function whereColumns(t) {
       // is a structure of its fields too (ultra/sadl: the SADL MPC's entity types)
       if (obj instanceof abaplint.Objects.View) add(n, obj.parseType(reg));
       if (obj instanceof abaplint.Objects.Class && program.wanted.has(n)) {
+        /** @type {[string, {name: string; kind: string}[] | undefined][] | undefined} */ let defs;
         for (const td of obj.getDefinition()?.getTypeDefinitions().getAll() ?? []) {
-          known.add(`${n}=>${upper(td.type.getName())}`);
-          add(`${n}=>${upper(td.type.getName())}`, td.type.getType());
+          const key = `${n}=>${upper(td.type.getName())}`;
+          known.add(key);
+          add(key, td.type.getType());
+          (defs ??= []).push([key, structs.get(key)]);
         }
+        collect?.(n, defs);
       }
     } catch { /* a type abaplint cannot resolve is simply not described */ }
     // @ts-expect-error -- abapiti form pending
@@ -444,7 +468,7 @@ export function whereColumns(t) {
 
 
 /** ALIASES a FOR i~m of a class or interface (or a superclass): i~m */
-/** @param {import("@abaplint/core").IRegistry} reg @param {string} owner @param {string} name @returns {string | undefined} */ function aliasTarget(reg, owner, name) {
+/** @param {import("@abaplint/core").IRegistry} reg @param {string} owner @param {string} name @returns {string | undefined} */ export function aliasTarget(reg, owner, name) {
   for (const o of [owner, ...ancestors(reg, owner)]) {
     // @ts-expect-error -- abapiti form pending
     const def = reg.getObject("INTF", o)?.getDefinition() ?? clasDef(reg, o);

@@ -43,11 +43,13 @@ export async function statusFacts({program, services, webapps, generated}) {
   // a row per path, as REFRESH keeps them (its READ ... WITH KEY path)
   const seen = new Set();
   const svc = rows.filter((s) => (seen.has(s.path) ? false : (seen.add(s.path), true)));
-  // the files of the compiled global classes and interfaces, for a pack's count
+  // the files of the compiled global classes and interfaces, for a pack's
+  // count. The incremental front end (osgo-incr.mjs) answers for the classes
+  // its partial registry does not hold out of the cache it assembled from
   const files = [];
   for (const c of program.classes) {
-    const obj = program.reg.getObject("CLAS", c.name) ?? program.reg.getObject("INTF", c.name);
-    const f = obj?.getFiles?.()[0]?.getFilename?.();
+    const f = program.filesOf?.get(c.name) ?? program.reg.getObject("CLAS", c.name)?.getFiles?.()[0]?.getFilename?.()
+      ?? program.reg.getObject("INTF", c.name)?.getFiles?.()[0]?.getFilename?.();
     if (f) files.push(resolve(f));
   }
   const served = new Set(webapps.map((w) => resolve(w.dir)));
