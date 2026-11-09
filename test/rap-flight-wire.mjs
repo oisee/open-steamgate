@@ -33,17 +33,17 @@ describe("packs/rap-flight: the scenario's views over SADL", function () {
     expect(xml).to.match(/Name="TotalPrice"[^>]*Type="Edm.Decimal"/);
   });
 
-  it("the entity sets answer, and the seeded rows are there when the pack carries data", async () => {
-    const seeded = existsSync("packs/rap-flight/data/#dmo#travel_m.tabu.json");
+  it("the entity sets answer, and the seeded rows are there: a fetched pack's build made them", async () => {
+    // unconditional on purpose: the pack being fetched means the build (the
+    // server's own start included) made its rows, and a conditional check
+    // here is what let a start without them pass for a green one
     for (const [set, key] of [["TravelSet", "TravelId"], ["CarrierSet", "Airlineid"], ["CustomerSet", "Customerid"], ["AirportSet", "Airportid"]]) {
       const res = await fetch(`${S}/${set}?$top=3&$inlinecount=allpages&$format=json`);
       expect(res.status, set).to.equal(200);
       const d = (await res.json()).d;
       expect(d.results, set).to.be.an("array");
-      if (seeded) {
-        expect(Number(d.__count), `${set} has rows`).to.be.greaterThan(0);
-        expect(d.results[0], `${set} key`).to.have.property(key);
-      }
+      expect(Number(d.__count), `${set} has rows`).to.be.greaterThan(0);
+      expect(d.results[0], `${set} key`).to.have.property(key);
     }
   });
 

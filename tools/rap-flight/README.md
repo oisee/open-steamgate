@@ -20,14 +20,20 @@ same format the other packs' seed rows have.
 
 The rows are generator output and are **not tracked** (the licence decision
 of 2026-11-09: derived content of the fetched upstream stays out of the
-repository). A build makes them: `tools/osd-build.mjs` calls
-`ensurePackSeeds()` after the transpile whenever the inputs the generator
-reads changed -- the upstream commit, the overlay's generator copies, the
-seed class and this script -- with the digest of what a capture is a
-function of in `data/.osd-seed.json`, beside the rows it explains. The
-generator is random where the scenario is: the master data comes out the
-same every run and the transactional counts do not, so a capture's counts
-are one run's.
+repository). A build makes them: `tools/osd-build.mjs` (its `build()`, so
+every path that ends in a generation -- the CLI, a first start, a store's
+activation -- and a cache hit included) asks `seedsDue()` and, when the
+answer is yes, starts this script as a child (`--ensure --output
+<generation>/output`), but only when the pack is one of that build's
+selected inputs: `OSD_WEB_PACKS` builds a smaller system on purpose, and a
+pack the selection left out neither needs nor could make its rows. The
+child runs against the generation the build just made -- under `--no-switch`
+that is not the live one -- and a capture happens whenever the inputs the
+generator reads changed: the upstream commit, the overlay's generator
+copies, the seed class and this script, their digest in
+`data/.osd-seed.json`, beside the rows it explains. The generator is random
+where the scenario is: the master data comes out the same every run and the
+transactional counts do not, so a capture's counts are one run's.
 
 ```
 npm run transpile                           # captures when the inputs changed

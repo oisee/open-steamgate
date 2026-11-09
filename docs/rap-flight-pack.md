@@ -194,8 +194,13 @@ for, inside one dialog step; what the generator wrote is then read out of
 the database into `data/*.tabu.json`, abapGit's TABU form with ISO dates.
 The rows are generator output and are **not tracked** (the licence decision
 of 2026-11-09: derived content of the fetched upstream stays out of the
-repository): `tools/osd-build.mjs` calls the capture's `ensurePackSeeds()`
-after every transpile whose inputs the generator reads changed -- the
+repository): a build makes them -- `build()` itself, so every path that ends
+in a generation (the CLI, a first start's `ensureSourceBuild`, a store's
+activation build) and a cache hit included, but only when the pack is one of
+that build's selected inputs, so the core+zork web build is asked for
+nothing. The build starts the capture as a child against the generation it
+just made (`--no-switch` included, not the live pointer), and a capture
+happens whenever the inputs the generator reads changed -- the
 upstream commit, the overlay's generator copies, the seed class and the
 capture itself, their digest in `data/.osd-seed.json` -- so a fresh
 checkout seeds itself and a diff carries no derived rows. The generator is

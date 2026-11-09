@@ -9,14 +9,18 @@
 //
 // The rows are generator output and so are NOT tracked (the licence decision
 // of 2026-11-09: derived SAP content stays out of the repository). A build
-// makes them through ensurePackSeeds() below whenever the inputs the
-// generator reads changed; the hand run above is for refreshing them on
-// purpose. The generator is random where the scenario is: the master data
+// makes them whenever the inputs the generator reads changed: it asks
+// seedsDue() in its own process and, when the answer is yes, starts this
+// script as a child with --ensure and the output of the generation it just
+// made (tools/osd-build.mjs makePackSeeds); the hand run above is for
+// refreshing them on purpose. The generator is random where the scenario is: the master data
 // (agencies, airports, connections, the status pairs) comes out the same
 // every run, and the transactional counts do not -- a capture's counts are
 // one run's, which is how docs/rap-flight-pack.md labels them.
 //
-// Boots the runtime the way test/start.mjs does (output/init.mjs), runs
+// Boots the runtime of a generation the caller names -- output/ of the live
+// one for a hand run, the one the build just made when the build calls this
+// (its --output, which under --no-switch is not the live one) -- and runs
 // ZCL_OSD_RAPFLIGHT_SEED=>RUN inside one dialog step -- committed when it
 // returns, rolled back if it dumps (tools/osd-dialog-step.mjs) -- and then
 // selects every table the generator fills. Dates come out as the internal
@@ -27,6 +31,7 @@ import {mkdirSync, writeFileSync, readFileSync, existsSync} from "node:fs";
 import {join, resolve} from "node:path";
 import {pathToFileURL} from "node:url";
 import {dialogStep} from "../osd-dialog-step.mjs";
+import {runsAs} from "../osd-main.mjs";
 import {markerOf} from "../osd-packs.mjs";
 
 // the tables the generator writes, in the order a reader expects them
@@ -70,8 +75,8 @@ export function fileRow(row, dates) {
   return out;
 }
 
-export async function capture({root = process.cwd(), out = join("packs", "rap-flight", "data"), log = console.log} = {}) {
-  const from = (file) => import(pathToFileURL(resolve(root, "output", file)).href);
+export async function capture({root = process.cwd(), out = join("packs", "rap-flight", "data"), output = join(root, "output"), log = console.log} = {}) {
+  const from = (file) => import(pathToFileURL(resolve(root, output, file)).href);
   const {initializeABAP} = await from("init.mjs");
   await initializeABAP();
   const {zcl_osd_rapflight_seed} = await from("zcl_osd_rapflight_seed.clas.mjs");
@@ -136,31 +141,49 @@ export function seedInputsDigest(root) {
   return hash.digest("hex");
 }
 
-/** A build calls this after the transpile: make the pack's seed rows when the
- *  generator inputs changed, in the pack's own data/ folder (not tracked).
- *  Returns whether it captured. */
-export async function ensurePackSeeds(root = process.cwd(), log = console.log) {
+/** A capture is due when the pack is here and fetched, but its rows are
+ *  missing or were made from other inputs. The build asks this in its own
+ *  process (importing this module costs no runtime boot) and starts the
+ *  capture child only when the answer is yes. */
+export function seedsDue(root = process.cwd()) {
   const pack = join(root, "packs", "rap-flight");
   if (existsSync(join(pack, "osd-pack.json")) === false || existsSync(join(pack, "upstream")) === false) {
     return false; // no pack here, or not fetched: the build itself says so
   }
-  const markerFile = join(pack, "data", ".osd-seed.json");
   const digest = seedInputsDigest(root);
   try {
-    const marker = JSON.parse(readFileSync(markerFile, "utf8"));
+    const marker = JSON.parse(readFileSync(join(pack, "data", ".osd-seed.json"), "utf8"));
     if (marker.digest === digest && TABLES.every((t) => existsSync(join(pack, "data", fileOf(t))))) {
       return false;
     }
-  } catch { /* no marker yet, or rows missing: capture below */ }
-  log("rap-flight seed: the generator's rows are made at build (not tracked), running it");
-  const {counts} = await capture({root, log});
-  mkdirSync(join(pack, "data"), {recursive: true});
-  writeFileSync(markerFile, JSON.stringify({digest, counts, at: new Date().toISOString()}, null, 2) + "\n");
+  } catch { /* no marker yet, or rows missing: a capture is due */ }
   return true;
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
-  const outIndex = process.argv.indexOf("--out");
-  const out = outIndex > 0 ? process.argv[outIndex + 1] : undefined;
-  capture(out ? {out} : {}).then(() => process.exit(0), (e) => { console.error(e); process.exit(1); });
+/** The build's path (`--ensure`): make the pack's seed rows when they are
+ *  due, in the pack's own data/ folder (not tracked), from the output of the
+ *  generation it names. Returns whether it captured. */
+export async function ensurePackSeeds(root = process.cwd(), log = console.log, {output} = {}) {
+  if (seedsDue(root) === false) {
+    return false;
+  }
+  const pack = join(root, "packs", "rap-flight");
+  log("rap-flight seed: the generator's rows are made at build (not tracked), running it");
+  const {counts} = await capture({root, log, output});
+  mkdirSync(join(pack, "data"), {recursive: true});
+  writeFileSync(join(pack, "data", ".osd-seed.json"),
+    JSON.stringify({digest: seedInputsDigest(root), counts, at: new Date().toISOString()}, null, 2) + "\n");
+  return true;
+}
+
+if (runsAs("seed-capture.mjs")) {
+  const value = (name) => {
+    const at = process.argv.indexOf(name);
+    return at > 0 ? process.argv[at + 1] : undefined;
+  };
+  const output = value("--output") === undefined ? undefined : resolve(value("--output"));
+  const work = value("--ensure") === undefined
+    ? capture({out: value("--out"), output}) // the hand run: refresh on purpose
+    : ensurePackSeeds(process.cwd(), console.log, {output}); // the build's child
+  work.then(() => process.exit(0), (e) => { console.error(e); process.exit(1); });
 }

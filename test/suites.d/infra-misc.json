@@ -31,6 +31,7 @@
     "test/zosd-test.mjs",
     "test/osd-suites.mjs",
     "test/rap-flight-pack.mjs",
+    "test/rap-flight-seed.mjs",
     "test/osd-test-isolation.mjs",
     "test/ci-wait-tests.mjs",
     "test/ci-lifecycle-gate.mjs",
