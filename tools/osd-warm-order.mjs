@@ -31,9 +31,11 @@ function viewBases(files) {
 // waits until every base of its own that is a view has been named. A base
 // that is a table never makes a view wait -- the DDL creates every table
 // before the first view -- and nothing that is not a view moves at all.
-// A cycle cannot be ordered; the waiting views then keep their rank order,
-// and the DDL fails naming them both, which is the honest result for a tree
-// that reads itself. ANORMALIES, 2026-11-09; upstream needs an issue.
+// A cycle cannot be ordered; the waiting views then keep their rank order.
+// Measured with the pinned toolchain, the failure that follows is not a
+// database's: the type resolver overflows its stack first (RangeError in
+// View.parseType / DDIC.lookupView) before any DDL is emitted, so no error
+// names the cycle's views. ANORMALIES, 2026-11-09; upstream needs an issue.
 function viewsAfterWhatTheyRead(objects, bases) {
   if (bases.size === 0) return objects;
   const isView = o => o.getType() === "VIEW";

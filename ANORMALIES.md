@@ -4421,5 +4421,9 @@ Not an anomaly, recorded for porting: on 7.58, `FIND ... REGEX` (POSIX) raises a
 - Workaround: `orderRegistry` feeds the registry, so it now names a view
   after every base of its own that is a view (the bases read off the view
   XML, which the pass already holds); checked by `test/warm-update.mjs`
-  against the pinned transpiler's own DDL.
+  against the pinned transpiler's own DDL. A cycle cannot be ordered: the
+  waiting views keep their rank order and the pinned type resolver then
+  overflows its stack (`View.parseType` / `DDIC.lookupView`, a `RangeError`)
+  before any DDL reaches a database, so no error names the cycle's views --
+  an upstream type-resolution limitation, measured 2026-11-09.
 - Upstream: abaplint/transpiler, needs an issue.
