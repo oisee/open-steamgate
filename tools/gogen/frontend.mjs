@@ -201,6 +201,7 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
   program.lockObjects = lockObjectRegistry(reg, program);
   // the per-object cache answers this from the superclass map it recorded
   // (tools/gogen/osgo-incr.mjs): a partial registry cannot walk the chains
+  // @ts-expect-error -- abapiti form pending
   /** @param {string} c @returns {string | null | undefined} */ const superOf = (c) => clasDef(reg, c)?.getSuperClass()?.toUpperCase() ?? RUNTIME_CX_SUPER[c];
   program.caught = incr?.caughtIndex?.(reg, program.wanted, superOf) ?? caughtIndex(reg, program.wanted, superOf);
   // @ts-expect-error -- abapiti form pending
@@ -221,19 +222,17 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
       getDefinition: /** @returns {import('@abaplint/core').IClassDefinition | undefined} */ () => obj.getDefinition(),
       getMainABAPFile: /** @returns {import('@abaplint/core').ABAPFile | undefined} */ () => obj.getMainABAPFile(),
       getABAPFiles: /** @returns {readonly import('@abaplint/core').ABAPFile[]} */ () => obj.getABAPFiles()};
-    // @ts-expect-error -- abapiti form pending
     incr?.enter?.(`CLAS ${upper(obj.getName())}`);
+    // @ts-expect-error -- abapiti form pending
     program.classes.push(compile(ctx0, source, lowerClass, session));
     incr?.exit?.();
   }
-  // @ts-expect-error -- abapiti form pending
   for (const l of localDefs.filter(l => !discoveryProbe || discoveryProbe.owners.has(l.owner))) {
     incr?.enter?.(`CLAS ${upper(l.owner)}`);
     // @ts-expect-error -- abapiti form pending
     program.classes.push(compile(ctx0, l, lowerClass, session));
     incr?.exit?.();
   }
-  // @ts-expect-error -- abapiti form pending
   for (const g of readable.filter(() => !discoveryProbe)) {
     if (incr?.compiles && !incr.compiles(`FUGR ${upper(g.getName())}`)) continue;
     incr?.enter?.(`FUGR ${upper(g.getName())}`);
