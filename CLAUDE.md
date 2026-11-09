@@ -123,8 +123,18 @@ this before any architectural commitment. See `AGENDA.md` for the checklist.
   fixed-point** — silently mis-execute any DPC that branches on `sy-mandt` /
   `sy-sysid` / `sy-uzeit`, and there is **no implicit MANDT** (client-dependent
   SELECTs). First-order correctness risk, not an edge.
-- Transpiler input must be **ABAP 7.02 syntax**; newer syntax goes through the
-  abaplint downport rule first — an extra pipeline step.
+- The transpiler's input dialect is abaplint's **`open-abap`** version: a
+  7.02 baseline plus a curated set of newer statements opted in one by one
+  (inline declarations, `VALUE`/`NEW`/`REDUCE`/`FOR`, string templates,
+  table expressions, `CASE TYPE OF`, `FINAL`, the `@`-style Open SQL, EML
+  statement syntax). Measured 2026-11-08: classes with 7.40 constructs,
+  `FINAL(...)` and `cl_abap_context_info` build and run
+  (`docs/coming-from-a4h.md` §6). The earlier note "input must be 7.02,
+  downport first" was wrong. The real walls are elsewhere: RAP forms (EML
+  parses but has no runtime; the managed runtime is handler-direct), Open
+  SQL features the lowering does not cover, and the class library
+  (open-abap-core is a subset) — a 7.5x statement outside the curated set
+  is refused by the build with `FAILED: … <file>:<line>`.
 - `open-abap-core` has `ASSERT 1 = 'todo'` stub methods. Don't assume any
   `CL_*` / `IF_*` is fully implemented — verify per class.
 - fe-mockserver is built *around* mock data files. Checked and not used: the
@@ -458,7 +468,10 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   a bare specifier, so code generated after the build gets
   `@abaplint/runtime` from a runtime plugin's `build.module` (the binary's
   own copy, one runtime object for host and generated code) and
-  `../test/setup.mjs` from `onResolve` by path. Every bundled module shares
+  `../test/setup.mjs` from `onResolve` by path; the gui converter a
+  checkout-mode binary loads from `.local/lars` gets `@abaplint/core` the
+  same way (`HOST_PACKAGES`, checked by `test/osd-binary.mjs` and reported
+  by `osd doctor`, 2026-11-08). Every bundled module shares
   one `import.meta.url` and `process.execPath` is the binary, so a tool
   starts another tool only through `tools/osd-host.mjs`, never by
   `spawn(process.execPath, <script>)` or a path off `import.meta.url`

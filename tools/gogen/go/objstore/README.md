@@ -3,7 +3,7 @@
 What: the object store of the Go host, `CALL FUNCTION 'ZOSD_STORE' DESTINATION 'STORE'` answered over the
 files the Node host answers it over (tools/osd-store.mjs, tools/osd-store-destination.mjs); filesystem reads
 (LIST, READ, OBJECT, PACKAGE, PACKAGES, SEARCH), history from git, and writes. An injected `Compiler`
-supplies CHECK and PARSE kind OUTLINE snapshots; ACTIVATE and TOKENS are still refused. go/abap keeps
+supplies CHECK and PARSE kind OUTLINE snapshots; the ZOSD_STORE commands ACTIVATE and TOKENS are still refused. go/abap keeps
 `SetStore`, `StoreCall`, the `Store*` type aliases and the
 session-first `ZOSD_STORE` adapter (Data in, tables filled).
 
@@ -14,7 +14,11 @@ OUTLINE outside it. A concurrent WRITE, SetStore or SetCompiler rejects the
 answer as STALE_RESULT; saved target bytes are rechecked after the call too.
 `storecompiler.Adapter` supplies snapshots to the lifecycle-owning client.
 CHECKRUN uses Node's shared report builder, including AMDP portability warnings,
-and ignores optional includes for saved-source syntax checks. Standalone CHECK
+and ignores optional includes for saved-source syntax checks. READ of a FUGR
+with an IV_INCLUDE reads the group's part of that program name,
+`<group>.fugr.<part>.abap` beside the XML (the main program SAPL<group>, the
+TOP and other includes, each module), as `osd-store.mjs read` does; an absent
+part is NOT_FOUND. Standalone CHECK
 and PARSE refusals remain unchanged. IV_SOURCE still requires a saved draft on
 the default Go snapshot path; `tools/gogen/storecmp.mjs` ratchets that contract-v1 gap.
 The opt-in ABAP lint provider accepts CHECKRUN SOURCE, including an absent object
@@ -108,3 +112,12 @@ PUT keeps it separate from the inactive working source. Delete removes the
 known source/include/metadata files and invalidates compiler snapshots. These
 APIs require the caller's session/ENQ authorization; they never issue handles.
 Mutation paths reject symbolic links as well as escapes from writable roots.
+
+`ActivateAll` is the ADT activation's publish (go/adtactivate, after a clean
+check), all or nothing: every object is resolved and every file read first.
+Then each changed file becomes its active version in the same in-memory
+overlay as a created class's skeleton, with an immutable content-named copy
+under `build/osgo-published/` that compilerInput gives the compiler for the
+active version. The objects leave the inactive set. Nothing is built. `Live` says whether an object's files still
+hash to the digests of the build this binary carries, which is what
+go/adtunit asks before it runs a class's compiled tests.
