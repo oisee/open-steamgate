@@ -4399,10 +4399,10 @@ Not an anomaly, recorded for porting: on 7.58, `FIND ... REGEX` (POSIX) raises a
   in the overlay: the digits go through a string template first. Upstream:
   abaplint/runtime, needs an issue.
 
-## The transpiler writes view DDL in registry order (DuckDB refuses it)
+### ANOMALY-2026-11-09-view-ddl-registry-order -- the transpiler writes view DDL in registry order, so a view over a view reaches DuckDB before its base
 
-- Status: worked around where the registry is fed (tools/osd-warm-order.mjs);
-  the workaround is general, not pack-specific. Discovery 2026-11-09,
+- Status: worked around where the registry is fed (tools/osd-warm-order.mjs),
+  generally and not only for the pack that found it. Discovery 2026-11-09,
   `@abaplint/transpiler 2.14.3`, found by the DuckDB review of
   packs/rap-flight.
 - `DatabaseSetup` (`build/src/db/index.js`) writes `CREATE VIEW` for every
