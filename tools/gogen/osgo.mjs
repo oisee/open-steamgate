@@ -287,10 +287,15 @@ writeMainGo("zz_unit.go", unitGo(unit.classes));
 writeFileSync(join(dir, "zz_tables.json"), JSON.stringify(columnRegistry(program), null, 1));
 // what the emitted text spelled before the generation stopped reading it: a
 // class by its constructor factory, a method by its function (both through
-// the program, so a build that emits package main only answers the same)
+// the program, so a build that emits package main only answers the same).
+// The function name is matched whole: a method name may contain an
+// underscore (ZCL_OSD_ADT_HANDLER_USE_SESSION is USE_SESSION of
+// ZCL_OSD_ADT_HANDLER, not SESSION of ZCL_OSD_ADT_HANDLER_USE), and
+// splitting at the last underscore wrote the ADT session adapter as its
+// no-op fallback, which serves no login.
 const compiledClass = new Set(program.classes.map((c) => c.name));
-const compiledMethod = new Set(program.classes.flatMap((c) => [...c.methods, ...(c.stubs ?? [])].map((m) => `${c.name}=>${String(m.name).toUpperCase()}`)));
-const has = (fn) => fn.startsWith("New_") ? compiledClass.has(fn.slice(4)) : compiledMethod.has(`${fn.slice(0, fn.lastIndexOf("_"))}=>${fn.slice(fn.lastIndexOf("_") + 1)}`);
+const compiledMethod = new Set(program.classes.flatMap((c) => [...c.methods, ...(c.stubs ?? [])].map((m) => `${c.name}_${String(m.name).toUpperCase()}`)));
+const has = (fn) => fn.startsWith("New_") ? compiledClass.has(fn.slice(4)) : compiledMethod.has(fn);
 if (lintEngine === "abap" && lintLib && (!has("ZCL_OSD_LINT_ENGINE_PRIME") || !has("ZCL_OSD_LINT_ENGINE_CHECK"))) {
   throw new Error("ABAP lint facade methods were not compiled");
 }
