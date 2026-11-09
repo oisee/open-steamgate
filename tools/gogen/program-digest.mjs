@@ -53,7 +53,7 @@ export function valueDigest(value) {
 /**
  * The digest parts of a program: one digest per class (in program order) and
  * one for every program-level fact the emitter reads.
- * @param {object} program the front end's program
+ * @param {import("./frontend-types.ts").FrontendProgram} program the front end's program
  * @param {{componentInterfaces: (reg: object, name: string) => string[]}} io
  *   componentInterfaces as emit-go.mjs spells it (the one registry read)
  */
