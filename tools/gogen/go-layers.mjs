@@ -233,9 +233,12 @@ export function planLayers(program, {names, classTier, interfaceTier, ddicTier, 
 /**
  * Write each tier: tier i < last into `pkgDir(i)` as package names[i],
  * imported as `importPath(i)`; the last tier into mainDir as package main,
- * dot-importing all below. Returns the Go source of each tier, bottom first.
+ * dot-importing all below. Returns the Go source of each tier, bottom first
+ * (undefined for a tier in `skip`, whose emission the caller proved
+ * unchanged: its symbols still enter mainDir/symbols.json, through
+ * `symbolsOf(i)`).
  */
-export function writeLayers(program, plan, {mainDir, pkgDir, importPath, unitBuild = true}) {
+export function writeLayers(program, plan, {mainDir, pkgDir, importPath, unitBuild = true, skip = new Set(), symbolsOf, symbolsSink}) {
   const {names, layer, structLayer, interfaceLayer, typeLayer, ownerTier, layerClasses} = plan;
   const last = names.length - 1;
   const symbols = new Map();
@@ -246,6 +249,12 @@ export function writeLayers(program, plan, {mainDir, pkgDir, importPath, unitBui
   // every tier: computed by the first emission, reused by the others
   const analysis = {};
   for (let i = 0; i <= last; i++) {
+    if (skip.has(i)) {
+      sources.push(undefined);
+      for (const [key, entry] of symbolsOf?.(i) ?? []) symbols.set(key, entry);
+      continue;
+    }
+    const before = symbols.size;
     const dir = i === last ? mainDir : pkgDir(i);
     mkdirSync(dir, {recursive: true});
     const own = new Set(layerClasses[i].map((c) => c.name));
@@ -265,6 +274,7 @@ export function writeLayers(program, plan, {mainDir, pkgDir, importPath, unitBui
       ...(below.length ? {imports: below.map(importPath), importMarkers: below.map(markerOf)} : {}),
       ...(i === last ? {} : {marker: markerOf(i)}), analysis,
     }, unitBuild, symbols, i === last ? "main" : importPath(i)));
+    symbolsSink?.(i, [...symbols].slice(before));
   }
   writeSymbols(mainDir, symbols);
   return sources;

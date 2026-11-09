@@ -14,7 +14,6 @@
 //     the number of its objects in this program (none are, today).
 // The texts and pack names are the ones osd-status.mjs gives the same
 // rows, read from the same functions.
-import {createHash} from "node:crypto";
 import {existsSync, readFileSync} from "node:fs";
 import {resolve} from "node:path";
 import {home} from "./home.mjs";
@@ -33,7 +32,7 @@ export function freshPrefixes(root = home) {
   return [...new Set(found)].sort();
 }
 
-export async function statusFacts({program, services, webapps, generated}) {
+export async function statusFacts({program, services, webapps, generation}) {
   const {servicesOf, packsInfo} = await import(`${home}/tools/osd-status.mjs`);
   const {packsOf} = await import(`${home}/tools/osd-packs.mjs`);
   const compiled = new Set(program.classes.map((c) => c.name));
@@ -62,7 +61,7 @@ export async function statusFacts({program, services, webapps, generated}) {
     return p.objects > 0 || (page !== undefined && served.has(page)) || webapps.some((w) => w.path === `/app/${p.name}`);
   });
   // the generation this process serves: the program itself, by content
-  const generation = "go:" + createHash("sha256").update(generated).digest("hex").slice(0, 16);
+  // (program-digest.mjs, computed by the caller over the whole program)
   return {services: svc, packs, generation, fresh: freshPrefixes(home)};
 }
 

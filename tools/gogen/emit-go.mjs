@@ -859,7 +859,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
   return out;
 }
 
-/** @param {import("./ir.ts").Program["reg"] | undefined} reg @param {string} intf @param {Set<string>} [seen] @returns {string[]} */ function componentInterfaces(reg, intf, seen = new Set()) {
+/** @param {import("./ir.ts").Program["reg"] | undefined} reg @param {string} intf @param {Set<string>} [seen] @returns {string[]} */ export function componentInterfaces(reg, intf, seen = new Set()) {
   // @ts-expect-error -- abapiti form pending
   for (const c of reg?.getObject("INTF", intf)?.getDefinition()?.getImplementing?.() ?? []) {
     const name = String(c.name).toUpperCase();
