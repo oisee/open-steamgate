@@ -993,9 +993,12 @@ export async function main(args) {
     // live generation is in place (not tracked; the licence decision of
     // 2026-11-09). Imported from the root's own tools/ by URL, the way the
     // binary's gogen-unit is, so a compiled binary reads the checkout's
-    // copy rather than none at all.
-    const {ensurePackSeeds} = await import(pathToFileURL(join(root, "tools", "rap-flight", "seed-capture.mjs")).href);
-    await ensurePackSeeds(root, say);
+    // copy -- and a root without the pack (a store, a served system) never
+    // reaches the import at all.
+    if (existsSync(join(root, "packs", "rap-flight", "osd-pack.json"))) {
+      const {ensurePackSeeds} = await import(pathToFileURL(join(root, "tools", "rap-flight", "seed-capture.mjs")).href);
+      await ensurePackSeeds(root, say);
+    }
     return 0;
   } catch (error) {
     if (error.code === "OSD_VERSION_MISMATCH") console.error(error.message);
