@@ -113,11 +113,13 @@ describe("RAP R4 constructs over OData", function () {
 
   it("refuses an operation the instance features disable, with the runtime's message", async () => {
     const id = (await create("features trip")).body.d.trip_id;
-    let res = await call(`${v2}/accept?trip_id='${id}'`, {method: "POST", headers: write});
+    const tagOf = async (key) => (await read(key)).headers.get("etag");
+    const action = async (name, key) => call(`${v2}/${name}?trip_id='${key}'`, {method: "POST", headers: {...write, "if-match": await tagOf(key)}});
+    let res = await action("accept", id);
     assert.equal(res.status, 200, JSON.stringify(res.body));
     assert.equal(res.body.d.status, "A");
     // accepted: no second accept, no delete
-    res = await call(`${v2}/accept?trip_id='${id}'`, {method: "POST", headers: write});
+    res = await action("accept", id);
     assert.equal(res.status, 400);
     assert.equal(res.body.error.message.value, "Action ACCEPT of trip is disabled");
     let etag = (await read(id)).headers.get("etag");
@@ -126,7 +128,7 @@ describe("RAP R4 constructs over OData", function () {
     assert.equal(res.body.error.message.value, "Delete of trip is disabled");
     assert.equal((await read(id)).status, 200);
     // an accepted trip may still be changed and rejected; a rejected one not changed
-    res = await call(`${v2}/reject?trip_id='${id}'`, {method: "POST", headers: write});
+    res = await action("reject", id);
     assert.equal(res.status, 200, JSON.stringify(res.body));
     etag = (await read(id)).headers.get("etag");
     res = await call(`${v2}/Trip('${id}')`, {method: "PATCH", headers: {...write, "if-match": etag}, body: JSON.stringify({description: "frozen"})});
@@ -139,6 +141,32 @@ describe("RAP R4 constructs over OData", function () {
     res = await call(`${v2}/Trip('${open}')`, {method: "DELETE", headers: {...write, "if-match": etag}});
     assert.equal(res.status, 204, JSON.stringify(res.body));
     assert.equal((await read(open)).status, 404);
+  });
+
+  it("wants If-Match on a V2 action of an entity with an ETag, also inside a changeset", async () => {
+    const id = (await create("v2 action trip")).body.d.trip_id;
+    const before = await read(id);
+    let res = await call(`${v2}/accept?trip_id='${id}'`, {method: "POST", headers: write});
+    assert.equal(res.status, 428, JSON.stringify(res.body));
+    res = await call(`${v2}/accept?trip_id='${id}'`, {method: "POST", headers: {...write, "if-match": 'W/"stale"'}});
+    assert.equal(res.status, 412, JSON.stringify(res.body));
+    const unchanged = await read(id);
+    assert.equal(unchanged.body.d.status, "O");
+    assert.equal(unchanged.headers.get("etag"), before.headers.get("etag"));
+    // the same rule for the action as a changeset member
+    const boundary = "batch_r4", changeset = "changeset_r4";
+    const part = (ifMatch) => [
+      `--${boundary}`, `Content-Type: multipart/mixed; boundary=${changeset}`, "",
+      `--${changeset}`, "Content-Type: application/http", "Content-Transfer-Encoding: binary", "",
+      `POST accept?trip_id='${id}' HTTP/1.1`, "Accept: application/json", ...(ifMatch ? [`If-Match: ${ifMatch}`] : []), "", "",
+      `--${changeset}--`, `--${boundary}--`, ""].join("\r\n");
+    const batch = (ifMatch) => fetch(`${v2}/$batch`, {method: "POST",
+      headers: {"content-type": `multipart/mixed; boundary=${boundary}`, "x-csrf-token": "open-steamgate"}, body: part(ifMatch)}).then(r => r.text());
+    assert.match(await batch(), /HTTP\/1\.1 428/);
+    assert.match(await batch('W/"stale"'), /HTTP\/1\.1 412/);
+    assert.equal((await read(id)).body.d.status, "O");
+    assert.match(await batch(before.headers.get("etag")), /HTTP\/1\.1 200/);
+    assert.equal((await read(id)).body.d.status, "A");
   });
 
   it("does the same over V4: numbering, ETag on PATCH and on the bound action, features", async () => {

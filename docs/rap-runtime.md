@@ -384,7 +384,13 @@ demo of [`src/rap_r4`](../src/rap_r4/README.md) (`ZI_RAP_TRIP`, service
 **ETag.** `srvd-gen.mjs` marks the `etag master` element `etag: true`, so
 the generated MPC calls `set_as_etag` and the gateway's existing ETag path
 (V2 dispatcher, V4 facade, the bound-action check of #901) does the rest:
-`W/"<value>"`, 428 without `If-Match`, 412 on a mismatch. A field nobody
+`W/"<value>"`, 428 without `If-Match`, 412 on a mismatch. A RAP action
+served as a V2 function import is guarded the same way, alone or as a
+changeset member: the SADL provider says the import is an action of a
+behavior (`ZIF_STG_ACTION_GUARD`), and the dispatcher checks `If-Match`
+against the instance its key parameters name before the action runs. A
+function import of any other provider is not checked, as before (a V2
+function import is not ETag-checked by the Gateway on a system). A field nobody
 writes would make a constant ETag, so the runtime fills the administrative
 fields itself, as the managed framework does on a system: the element's
 `@Semantics` annotation names the field, the time is `GET TIME STAMP`, and
@@ -392,7 +398,10 @@ a new stamp is always later than the field's current value and the last
 one given in the process, also where the clock has not moved. The stamp
 is set when the instance changes in the buffer (create, update, a change
 an action or determination makes), so the ETag a client reads after an
-action is not the one it sent. `etag dependent` is parsed and ignored (an
+action is not the one it sent. Moving it forward goes by the calendar
+(`cl_abap_tstmp=>add` across a second): `20991231235959` is followed by
+`21000101000000`, never by a 60th second, and a field of seconds takes the
+second its stamp falls in. `etag dependent` is parsed and ignored (an
 entity whose ETag is its master's needs compositions first).
 
 **Instance features.** A BDEF that declares `features : instance` on an
@@ -416,9 +425,13 @@ disabled operation from the 400.
 **Early numbering.** A create of an entity with `early numbering` hands its
 rows (a `TABLE FOR CREATE`) to the `FOR NUMBERING` method first, then takes
 the key of each row from the `MAPPED` line with its `%cid` (a row without a
-`%cid` gets a transient one for the call). A row the method fails is
-dropped with the method's FAILED / REPORTED; a row it neither maps nor fails
-keeps the key it came with. Field control still applies afterwards, so a
+`%cid` gets a transient one for the call, chosen so that no row of the
+call carries it, and only those rows lose it again: a caller's `%cid`,
+whatever it looks like, comes back in MAPPED). A row the method fails is
+dropped with the method's FAILED / REPORTED. A row it neither maps nor fails
+breaks the method's contract (every input `%cid` in MAPPED or FAILED) and is
+failed by the runtime (`Early numbering of trip gave no key and no failure
+for an instance`) rather than created with the key it came with. Field control still applies afterwards, so a
 `readonly` key is drawn by the method and refused from the client.
 
 ### What stays outside, and why each needs a design of its own

@@ -329,6 +329,12 @@ CLASS zcl_osd_rap_runtime DEFINITION PUBLIC CREATE PRIVATE.
         cs_reported TYPE any
       RAISING
         zcx_osd_rap.
+* R4: the 100 ns after a time stamp, valid by the calendar
+    CLASS-METHODS later
+      IMPORTING
+        iv_stamp        TYPE timestampl
+      RETURNING
+        VALUE(rv_stamp) TYPE timestampl.
 * R4: the administrative fields of an instance, on create or on change
     METHODS stamp
       IMPORTING
@@ -1394,15 +1400,20 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
 
   METHOD number.
 * the rows go to the pool's FOR NUMBERING method; each key it maps for a
-* content ID is the key of that create. A row it fails is dropped (its
-* FAILED and REPORTED are the method's); a row it neither maps nor fails
-* keeps the key it came with
+* content ID is the key of that create. A row it fails is dropped with the
+* method's FAILED and REPORTED. A row it neither maps nor fails breaks the
+* method's contract (every input %cid is in MAPPED or FAILED): it is failed
+* here and not created with the key it came with
     DATA lr_mapped TYPE REF TO data.
     DATA lv_cid    TYPE string.
+    DATA lv_temp   TYPE string.
     DATA lv_index  TYPE i.
+    DATA lv_try    TYPE i.
     DATA lv_found  TYPE abap_bool.
     DATA lv_failed TYPE abap_bool.
     DATA lt_drop   TYPE STANDARD TABLE OF i WITH DEFAULT KEY.
+    DATA lt_cids   TYPE string_table.
+    DATA lt_temp   TYPE STANDARD TABLE OF i WITH DEFAULT KEY.
     FIELD-SYMBOLS <lt_rows>   TYPE STANDARD TABLE.
     FIELD-SYMBOLS <ls_row>    TYPE any.
     FIELD-SYMBOLS <ls_mapped> TYPE any.
@@ -1415,13 +1426,28 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
     ASSIGN er_rows->* TO <lt_rows>.
     <lt_rows> = it_rows.
 * a row without a content ID gets one for the call, so its key can be told
-* apart, and loses it again afterwards
+* apart: one no row of the call carries, and only those rows lose it again
+    LOOP AT <lt_rows> ASSIGNING <ls_row>.
+      APPEND text_of( is_row = <ls_row> iv_component = '%CID' ) TO lt_cids.
+    ENDLOOP.
     LOOP AT <lt_rows> ASSIGNING <ls_row>.
       lv_index = sy-tabix.
       ASSIGN COMPONENT '%CID' OF STRUCTURE <ls_row> TO <lv_cid>.
-      IF sy-subrc = 0 AND <lv_cid> IS INITIAL.
-        <lv_cid> = |%OSD-NUMBERING-{ lv_index }|.
+      IF sy-subrc <> 0 OR <lv_cid> IS NOT INITIAL.
+        CONTINUE.
       ENDIF.
+      lv_try = 0.
+      DO.
+        lv_temp = |%OSD-NUMBERING-{ lv_index }-{ lv_try }|.
+        READ TABLE lt_cids TRANSPORTING NO FIELDS WITH KEY table_line = lv_temp.
+        IF sy-subrc <> 0.
+          EXIT.
+        ENDIF.
+        lv_try = lv_try + 1.
+      ENDDO.
+      <lv_cid> = lv_temp.
+      APPEND lv_temp TO lt_cids.
+      APPEND lv_index TO lt_temp.
     ENDLOOP.
     lr_mapped = mo_bo->new_response( 'MAPPED' ).
     ASSIGN lr_mapped->* TO <ls_mapped>.
@@ -1434,12 +1460,14 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
       lv_cid = text_of( is_row = <ls_row> iv_component = '%CID' ).
       lv_found = abap_false.
       lv_failed = abap_false.
-      LOOP AT <lt_mapped> ASSIGNING <ls_line>.
-        IF text_of( is_row = <ls_line> iv_component = '%CID' ) = lv_cid.
-          copy_keys( EXPORTING is_entity = is_entity is_from = <ls_line> CHANGING cs_to = <ls_row> ).
-          lv_found = abap_true.
-        ENDIF.
-      ENDLOOP.
+      IF <lt_mapped> IS ASSIGNED.
+        LOOP AT <lt_mapped> ASSIGNING <ls_line>.
+          IF text_of( is_row = <ls_line> iv_component = '%CID' ) = lv_cid.
+            copy_keys( EXPORTING is_entity = is_entity is_from = <ls_line> CHANGING cs_to = <ls_row> ).
+            lv_found = abap_true.
+          ENDIF.
+        ENDLOOP.
+      ENDIF.
       IF lv_found = abap_false AND <lt_failed> IS ASSIGNED.
         LOOP AT <lt_failed> ASSIGNING <ls_line>.
           IF text_of( is_row = <ls_line> iv_component = '%CID' ) = lv_cid.
@@ -1447,9 +1475,18 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
           ENDIF.
         ENDLOOP.
       ENDIF.
-      IF lv_cid CP '%OSD-NUMBERING-*'.
+      READ TABLE lt_temp TRANSPORTING NO FIELDS WITH KEY table_line = lv_index.
+      IF sy-subrc = 0.
         ASSIGN COMPONENT '%CID' OF STRUCTURE <ls_row> TO <lv_cid>.
         CLEAR <lv_cid>.
+      ENDIF.
+      IF lv_found = abap_false AND lv_failed = abap_false.
+        fail( EXPORTING is_entity = is_entity is_input = <ls_row>
+                        iv_cause = if_abap_behv=>cause-unspecific
+                        iv_text = |Early numbering of { is_entity-alias } gave no key and no failure for an instance|
+                        iv_op = '%CREATE'
+              CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
+        lv_failed = abap_true.
       ENDIF.
       IF lv_failed = abap_true.
         INSERT lv_index INTO lt_drop INDEX 1.
@@ -1464,6 +1501,8 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
     DATA ls_field TYPE zif_osd_rap_bo=>ty_field.
     DATA lv_now   TYPE timestampl.
     DATA lv_old   TYPE timestampl.
+    DATA lv_short TYPE timestamp.
+    DATA lv_decimals TYPE i.
     FIELD-SYMBOLS <ls_inst>  TYPE ty_inst.
     FIELD-SYMBOLS <ls_row>   TYPE any.
     FIELD-SYMBOLS <lv_value> TYPE any.
@@ -1482,20 +1521,43 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
         GET TIME STAMP FIELD lv_now.
         lv_old = <lv_value>.
         IF lv_now <= gv_stamp.
-          lv_now = gv_stamp + '0.0000001'.
+          lv_now = later( gv_stamp ).
         ENDIF.
         IF lv_now <= lv_old.
-          lv_now = lv_old + '0.0000001'.
+          lv_now = later( lv_old ).
         ENDIF.
         gv_stamp = lv_now.
-        <lv_value> = lv_now.
-* a field of less precision than TIMESTAMPL still has to move
-        IF <lv_value> <= lv_old AND iv_create = abap_false.
-          <lv_value> = lv_old + 1.
+        DESCRIBE FIELD <lv_value> DECIMALS lv_decimals.
+        IF lv_decimals = 0.
+* a field of seconds takes the second it falls in, and still has to move:
+* the next second, by the calendar
+          lv_short = floor( lv_now ).
+          IF lv_short <= lv_old AND iv_create = abap_false.
+            lv_short = floor( lv_old ).
+            lv_short = cl_abap_tstmp=>add( tstmp = lv_short secs = 1 ).
+          ENDIF.
+          <lv_value> = lv_short.
+        ELSE.
+          <lv_value> = lv_now.
         ENDIF.
       ENDIF.
       mark( iv_index = iv_index iv_field = ls_field-name ).
     ENDLOOP.
+  ENDMETHOD.
+
+  METHOD later.
+* the next 100 ns after a TIMESTAMPL, carried into the next second by the
+* calendar (cl_abap_tstmp=>add), never to a 60th second
+    DATA lv_second TYPE timestamp.
+    DATA lv_fraction TYPE timestampl.
+
+    lv_second = floor( iv_stamp ).
+    lv_fraction = iv_stamp - lv_second.
+    IF lv_fraction < '0.9999999'.
+      rv_stamp = iv_stamp + '0.0000001'.
+    ELSE.
+      rv_stamp = cl_abap_tstmp=>add( tstmp = lv_second secs = 1 ).
+    ENDIF.
   ENDMETHOD.
 
   METHOD take_back.
