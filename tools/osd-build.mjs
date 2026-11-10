@@ -992,7 +992,10 @@ export async function build(options = {}) {
 //     whichever of the three roads started it.
 async function makePackSeeds(root, inputs, hash, log) {
   if (inputs.packFiles.includes(join(root, "packs", "rap-flight", "osd-pack.json")) === false) return;
-  const script = join(root, "tools", "rap-flight", "seed-capture.mjs");
+  // the tree's copy (its bytes are in the seed digest); a root that is only
+  // sources (a test's scratch tree) has none, and then this checkout's is it
+  const own = join(root, "tools", "rap-flight", "seed-capture.mjs");
+  const script = existsSync(own) ? own : join(TOOLS, "rap-flight", "seed-capture.mjs");
   const {seedsDue} = await import(pathToFileURL(script).href);
   if (seedsDue(root) === false) return;
   const [cmd, ...argv] = toolCommand(script, ["--ensure", "--output", join(layout(root).byInput, hash, "output")]);
