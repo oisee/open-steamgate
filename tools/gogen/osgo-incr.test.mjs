@@ -631,3 +631,68 @@ ENDCLASS.`,
     assert.equal(emitted(attempt.program), emitted(reference));
   } finally { rmSync(root, {recursive: true, force: true}); }
 });
+
+// The emission resolves the constructor DEFAULTs of EVERY class through the
+// registry (emit-constructors.ts: CREATE OBJECT ... TYPE (name) passes no
+// arguments). A cached class nobody references is outside the closure, so
+// its DEFAULT (its own constant) did not resolve and the adapter panicked
+// where the full build constructs (the real tree: CL_GUI_DOCKING_CONTAINER).
+test("a cached class whose constructor has DEFAULTs keeps its CREATE OBJECT by name", () => {
+  const extra = {
+    "app/zcl_incr_ctor.clas.abap": `CLASS zcl_incr_ctor DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    CONSTANTS co_left TYPE i VALUE 1.
+    DATA side TYPE i.
+    METHODS constructor IMPORTING iv_side TYPE i DEFAULT co_left iv_ext TYPE i DEFAULT 50.
+ENDCLASS.
+CLASS zcl_incr_ctor IMPLEMENTATION.
+  METHOD constructor.
+    side = iv_side + iv_ext.
+  ENDMETHOD.
+ENDCLASS.`,
+  };
+  const root = tree(extra);
+  try {
+    writeCache(root);
+    edit(root, "app/zcl_incr_hot.clas.abap", "'Key TravelId missing'", "'Key TravelId missing (edited)'");
+    const reference = fullProgram(root);
+    assert.match(emitted(reference), /return New_ZCL_INCR_CTOR\(s, /);
+    const attempt = incrAssemble({root, folders: [join(root, "app")], objects: objectNames(root), hidden: new Set(), includeTests: new Set(),
+      proof: {ok: true, base: "live1", changed: changedFiles(root, extra)}});
+    assert.equal(attempt.ok, true, attempt.reason);
+    assert.ok(!attempt.lowered.includes("CLAS ZCL_INCR_CTOR"));
+    assert.equal(emitted(attempt.program), emitted(reference));
+  } finally { rmSync(root, {recursive: true, force: true}); }
+});
+
+// abaplint enumerates a registry's objects in the order a NAME first
+// appeared, and the table pass writes its row types in that order. A
+// non-class object the closure dropped (the real tree: the behaviour
+// definition ZI_RAP_NOTE in src/, whose view is in gen/) moved a table's
+// row type behind the others.
+test("every non-class file of the full registry is in the fast one (name order of the table pass)", () => {
+  const xmlOf = (name) => xml(`<DD02V><TABNAME>${name}</TABNAME><TABCLASS>TRANSP</TABCLASS></DD02V><DD03P_TABLE>
+<DD03P><FIELDNAME>K</FIELDNAME><KEYFLAG>X</KEYFLAG><DATATYPE>CHAR</DATATYPE><LENG>000004</LENG></DD03P>
+<DD03P><FIELDNAME>V</FIELDNAME><DATATYPE>CHAR</DATATYPE><LENG>000010</LENG></DD03P></DD03P_TABLE>`);
+  const root = tree({
+    "early/zincr_tz.nrob.xml": xml(`<V_TNRO><OBJECT>ZINCR_TZ</OBJECT></V_TNRO>`),
+    "late/zincr_ta.tabl.xml": xmlOf("ZINCR_TA"),
+    "late/zincr_tz.tabl.xml": xmlOf("ZINCR_TZ"),
+  });
+  const folders = ["early", "app", "late"].map((f) => join(root, f));
+  const names = () => [...registryFiles(folders, new Set(), new Set()).values()].map((k) => k.slice(5).toLowerCase());
+  try {
+    const recorder = incrRecorder({root, folders, hidden: new Set(), objects: names(), includeTests: new Set()});
+    compileProgram({folders, objects: names(), tolerant: true, includeTests: new Set(), incr: recorder});
+    recorder.finish({gen: "live1"});
+    edit(root, "app/zcl_incr_hot.clas.abap", "'Key TravelId missing'", "'Key TravelId missing (edited)'");
+    const reference = compileProgram({folders, objects: names(), tolerant: true, includeTests: new Set()});
+    const rows = [...reference.structs.keys()].filter((k) => /^ZINCR_T[AZ]$/.test(k));
+    assert.deepEqual(rows, ["ZINCR_TZ", "ZINCR_TA"], "the fixture must order the tables by the first appearance of their names");
+    const attempt = incrAssemble({root, folders, objects: names(), hidden: new Set(), includeTests: new Set(),
+      proof: {ok: true, base: "live1", changed: ["app/zcl_incr_hot.clas.abap"]}});
+    assert.equal(attempt.ok, true, attempt.reason);
+    assert.deepEqual([...attempt.program.structs.keys()], [...reference.structs.keys()]);
+    assert.equal(emitted(attempt.program), emitted(reference));
+  } finally { rmSync(root, {recursive: true, force: true}); }
+});

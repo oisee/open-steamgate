@@ -31,6 +31,7 @@ import {callsIn, goSymbol} from "./go-layers.mjs";
 import {objectOfFile} from "./osgo-layers.mjs";
 import {portable, toolIdentity} from "./frontend-object-cache.mjs";
 import {prepareDynamicStatics} from "./frontend-dynamic-call.mjs";
+import {AnonShapes, anonOrigins} from "./osgo-incr-anon.mjs";
 
 export const SCHEMA = "osgo-incr/5";
 const sha = (value) => createHash("sha256").update(value).digest("hex");
@@ -106,10 +107,6 @@ const RECORDED = ["structs", "consts", "sigs", "events", "missing", "dynStatics"
  *  order (a payload holds them per segment: one segment per `enter`) */
 const flatOps = (payload, coll) => (payload?.segs ?? []).flatMap((seg) => seg[coll] ?? []);
 
-/** the component names of an anonymous structure: what both builds can
- *  name it by (abaplint keys it by type instance, which a new registry
- *  does not share) */
-const shapeOf = (t) => { try { return t.getComponents().map((c) => upper(c.name)).join(","); } catch { return undefined; } };
 
 /** one recorded op, applied to a collection */
 function applyOp(target, op) {
@@ -119,43 +116,6 @@ function applyOp(target, op) {
   else if (method === "delete") target.delete(args[0]);
   else if (method === "clear") target.clear();
   else if (method === "push") target.push(args[0]);
-}
-
-/** where each anonymous structure instance of a registry is declared: the
- *  global class or interface member that owns it, as paths
- *  ("CLAS ZCX_A|C|BUSINESS_ERROR", a component or row below it appended).
- *  Both builds' registries parse the same declarations, so a path names the
- *  same instance in both -- which the shape alone does not (every exception
- *  class has its own MSGID/MSGNO/ATTR1..4 textid constant). Built once per
- *  registry, after the syntax pass, at the first anonymous structure the
- *  lowering reaches. An instance no global member owns (a method's own
- *  local type) has no path. */
-function anonOrigins(reg) {
-  const out = new Map(); // instance -> [paths]
-  const visit = (t, path, depth) => {
-    if (!t || typeof t !== "object" || depth > 12) return;
-    try {
-      if (typeof t.getComponents === "function" && typeof t.getQualifiedName === "function") {
-        if (!t.getQualifiedName()) { if (!out.has(t)) out.set(t, []); out.get(t).push(path); }
-        for (const c of t.getComponents()) visit(c.type, `${path}-${upper(c.name)}`, depth + 1);
-      } else if (typeof t.getRowType === "function") visit(t.getRowType(), `${path}[]`, depth + 1);
-    } catch { /* a type abaplint cannot describe owns no path */ }
-  };
-  for (const obj of reg.getObjects()) {
-    const type = obj.getType();
-    if (type !== "CLAS" && type !== "INTF") continue;
-    let def;
-    try { def = obj.getDefinition(); } catch { continue; }
-    if (!def) continue;
-    const base = keyOf(type, upper(obj.getName()));
-    try { for (const a of def.getAttributes().getAll()) visit(a.getType(), `${base}|A|${upper(a.getName())}`, 0); } catch { /* none */ }
-    try { for (const c of def.getAttributes().getConstants()) visit(c.getType(), `${base}|C|${upper(c.getName())}`, 0); } catch { /* none */ }
-    try { for (const td of def.getTypeDefinitions().getAll()) visit(td.type.getType(), `${base}|T|${upper(td.type.getName())}`, 0); } catch { /* none */ }
-    try {
-      for (const m of def.getMethodDefinitions().getAll()) for (const prm of m.getParameters().getAll()) visit(prm.getType(), `${base}|M|${upper(m.getName())}|${upper(prm.getName())}`, 0);
-    } catch { /* none */ }
-  }
-  return out;
 }
 
 /** where a write outside every object's mark (a global pass) sits in the
@@ -365,7 +325,22 @@ export function incrRecorder({root, folders, hidden, objects, includeTests}) {
           else (slots[coll] ??= new Set()).add(slot);
         }
       }
+      // the classes whose constructor the emission calls with every argument
+      // omitted (emit-constructors.ts: the DEFAULTs resolve through the
+      // registry, in the class that declares the constructor), and the
+      // classes that inherit it: a fast build's registry must hold them
+      const byName = new Map(program.classes.map((c) => [c.name, c]));
+      const ctorDefaults = new Set();
+      for (const cls of program.classes) {
+        // the same walk emit-constructors.ts makes, expression for expression
+        let at = cls;
+        while (at && !at.constructor && !at.ctorParams) at = at.super ? byName.get(at.super) : undefined;
+        const params = at?.constructor?.params ?? at?.ctorParams ?? [];
+        if (params.length === 0) continue;
+        for (const c of [cls, at]) { const key = pushedNames.get(c.name); if (key !== undefined) ctorDefaults.add(key); }
+      }
       const index = {schema: SCHEMA, tool: toolIdentity(), folders, objects, order, segments, strayLayoutOk,
+        ctorDefaults: [...ctorDefaults].sort(),
         anonNamed: Object.fromEntries(anonNamed),
         straySlots: Object.fromEntries(Object.entries(slots).map(([c, s]) => [c, [...s].sort()])),
         classes: program.classes.map((c) => [pushedNames.get(c.name), c.name]),
@@ -409,64 +384,6 @@ function pruneGenerations(root, current) {
 // the read side
 // ---------------------------------------------------------------------------
 
-/** abaplint keys anonymous structures by type instance; a new registry has
- *  new instances, so the substitute answers by the component names the
- *  write-time build named, which is the same answer whenever abaplint
- *  shared the instance -- and never invents one (a miss lowers as the full
- *  build would, naming the structure after the class that reached it) */
-class AnonShapes {
-  /** @param {Map<string, string>} seed shape -> the one name the write-time build gave it
-   *  @param {() => string | null} currentKey the object lowering now
-   *  @param {Record<string, string | null>} named declaration path -> the name the full build gave its instance
-   *  @param {(t: any) => string[]} originsOf the declaration paths of an instance in this registry */
-  constructor(seed, currentKey = () => null, named = {}, originsOf = () => []) {
-    Object.assign(this, {seed, currentKey, named, originsOf});
-    this.mine = new Map();
-    this.doubt = undefined;
-  }
-  /** The full build named every instance after the FIRST object of its
-   *  order to reach it; a fresh lowering reaches it in another order (the
-   *  first reacher may be cached), and the shape does not say which
-   *  instance it is (every exception class has its own MSGID/MSGNO/ATTR1..4
-   *  textid constant). The declaration does:
-   *  - an instance a global class or interface member owns takes the name
-   *    the full build gave that declaration. None recorded means no object
-   *    of the full build reached it -- a cached object reaches what it
-   *    reached then, so only re-lowered objects reach it now, in the full
-   *    build's relative order, and the first of them names it, here as
-   *    there.
-   *  - an instance no global member owns comes from the lowering object's
-   *    own syntax run (its own definition, a method's local type): only
-   *    that object reaches it, and it names it after itself, both ways.
-   *  - outside every object's mark (a global pass) the old answer stands:
-   *    the one name the write-time build gave the shape, if it gave one. */
-  get(t) {
-    if (this.mine.has(t)) {
-      const go = this.mine.get(t);
-      for (const p of this.originsOf(t)) {
-        if (Object.hasOwn(this.named, p) && this.named[p] !== go) this.doubt ??= `the anonymous structure of ${p} is ${go} here, ${this.named[p]} in the live generation`;
-      }
-      return go;
-    }
-    const paths = this.originsOf(t);
-    if (paths.length > 0) {
-      const names = new Set(paths.filter((p) => Object.hasOwn(this.named, p)).map((p) => this.named[p]));
-      if (names.has(null) || names.size > 1) {
-        this.doubt ??= `the anonymous structure of ${paths[0]} had several names in the live generation`;
-        return undefined;
-      }
-      const recorded = [...names][0];
-      if (recorded !== undefined) this.mine.set(t, recorded);
-      return recorded;
-    }
-    if (this.currentKey() !== null) return undefined;
-    const shape = shapeOf(t);
-    return shape === undefined ? undefined : this.seed.get(shape);
-  }
-  set(t, go) { this.mine.set(t, go); }
-  has(t) { return this.get(t) !== undefined; }
-  seededNames() { return new Set(this.seed.values()); }
-}
 
 /**
  * The program of a fast build, assembled from the cache of the live
@@ -536,6 +453,19 @@ export function incrAssemble({root, folders, objects, hidden, includeTests, proo
   // and the lowering (a SELECT from a CDS name) and the table registry ask
   // for those; registryFiles leaves them out, they are not registry objects
   for (const folder of folders) for (const f of walk(folder)) if (/\.ddls\.asddls$/i.test(f) && !hidden.has(f)) need.add(f);
+  // and every other file compileProgram loads that registryFiles does not
+  // map (a BDEF, a DDLS's XML, any type it does not name): they are no
+  // class, so the full build's registry holds them all, and abaplint
+  // enumerates its objects in the order a NAME first appeared -- a
+  // behaviour definition in src/ puts ZI_RAP_NOTE before a view of gen/,
+  // and the table pass writes its row types in that order
+  for (const folder of folders) {
+    for (const f of walk(folder)) {
+      const name = f.split("/").at(-1);
+      if (hidden.has(f) || allFiles.has(f) || !/\.(abap|xml)$/i.test(name) || /\.clas\./i.test(name)) continue;
+      need.add(f);
+    }
+  }
   const wordCache = new Map();
   const words = (key) => {
     if (wordCache.has(key)) return wordCache.get(key);
@@ -545,6 +475,15 @@ export function incrAssemble({root, folders, objects, hidden, includeTests, proo
     return set;
   };
   const enqueued = new Set(queue.filter((k) => k.startsWith("CLAS ")));
+  // the classes whose constructor DEFAULTs the emission resolves through
+  // the registry (emit-constructors.ts, CREATE OBJECT ... TYPE (name)), for
+  // every class of the program, cached or not
+  for (const key of index.ctorDefaults ?? []) {
+    if (relower.has(key) || !byKey.has(key) || enqueued.has(key)) continue;
+    for (const f of byKey.get(key)) need.add(f);
+    enqueued.add(key);
+    queue.push(key);
+  }
   for (let i = 0; i < queue.length; i += 1) {
     const key = queue[i];
     // `reads` alone is not what the registry must hold: abaplint's syntax
