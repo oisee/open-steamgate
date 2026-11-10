@@ -46,6 +46,28 @@ INTERFACE zif_osd_rap_bo PUBLIC.
     END OF ty_callable,
     tt_callable TYPE STANDARD TABLE OF ty_callable WITH DEFAULT KEY.
 
+* R5: one association the BDEF declares for an entity. KIND: C composition
+* child, P to parent, A another association inside the business object.
+* CREATE: association _x { create; }, FEAT_CREATE with ( features :
+* instance ). NUMBERING E: the target's keys are drawn by the pool's FOR
+* NUMBERING ... FOR CREATE e\_x method. PAIRS: source field = target field
+  TYPES:
+    BEGIN OF ty_pair,
+      source TYPE string,
+      target TYPE string,
+    END OF ty_pair,
+    tt_pair TYPE STANDARD TABLE OF ty_pair WITH DEFAULT KEY,
+    BEGIN OF ty_assoc,
+      name        TYPE string,
+      target      TYPE string,
+      kind        TYPE ty_flag,
+      create      TYPE abap_bool,
+      feat_create TYPE abap_bool,
+      numbering   TYPE ty_flag,
+      pairs       TYPE tt_pair,
+    END OF ty_assoc,
+    tt_assoc TYPE STANDARD TABLE OF ty_assoc WITH DEFAULT KEY.
+
 * NAME the CDS entity, ALIAS the BDEF alias, RESPONSE the component of the
 * response structures, SOURCE the generated table class
 * (zif_stg_cds_source) of the persistent table, HANDLER the absolute name of
@@ -53,6 +75,9 @@ INTERFACE zif_osd_rap_bo PUBLIC.
 * FEATURES set when the pool has a FOR INSTANCE FEATURES method, FEAT_UPDATE
 * and FEAT_DELETE when update / delete are declared ( features : instance );
 * NUMBERING E for `early numbering` (a FOR NUMBERING method draws the key).
+* R5: ROOT the root entity of the tree, PARENT and PARENT_ASSOC the parent
+* entity and the association to it (initial for the root), LOCK M for lock
+* master and D for lock dependent, ASSOCS the associations.
   TYPES:
     BEGIN OF ty_entity,
       name      TYPE string,
@@ -69,6 +94,11 @@ INTERFACE zif_osd_rap_bo PUBLIC.
       feat_update TYPE abap_bool,
       feat_delete TYPE abap_bool,
       numbering   TYPE ty_flag,
+      root         TYPE string,
+      parent       TYPE string,
+      parent_assoc TYPE string,
+      lock         TYPE ty_flag,
+      assocs       TYPE tt_assoc,
       fields    TYPE tt_field,
       callables TYPE tt_callable,
     END OF ty_entity,
@@ -105,6 +135,7 @@ INTERFACE zif_osd_rap_bo PUBLIC.
 * an empty derived table of the entity, for a caller that only knows the
 * model (the OData bridge of this package): IV_KIND is CREATE, UPDATE,
 * DELETE, ACTION IMPORT or ACTION RESULT, the last two of action IV_ACTION.
+* R5: CREATE BY, READ BY, READ BY RESULT and LINK of association IV_ACTION.
 * Unbound when the BDEF does not declare it.
   METHODS new_table
     IMPORTING
@@ -129,7 +160,9 @@ INTERFACE zif_osd_rap_bo PUBLIC.
 * R4: IV_NAME %FEATURES calls the FOR INSTANCE FEATURES method (IR_ROWS the
 * instances, IR_RESULT a table from NEW_TABLE( kind = 'FEATURES RESULT' ));
 * %NUMBERING the FOR NUMBERING method (IR_ROWS a TABLE FOR CREATE, IR_MAPPED
-* the RESPONSE FOR MAPPED it fills).
+* the RESPONSE FOR MAPPED it fills). R5: %NUMBERING\<assoc> calls the FOR
+* NUMBERING ... FOR CREATE e\_assoc method (IR_ROWS a TABLE FOR CREATE
+* e\_assoc).
   METHODS call
     IMPORTING
       io_handler  TYPE REF TO object

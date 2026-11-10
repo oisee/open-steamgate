@@ -1004,7 +1004,11 @@ describe("OData V4 for Fiori Elements", () => {
     expect(travel.TravelId).to.equal("T0002");
     expect(travel["@odata.context"]).to.match(/\$entity$/);
     expect((await fetch(base + "/TravelSet('T0001')/to_Nothing")).status).to.be.oneOf([400, 404]);
-    expect((await send(base + "/TravelSet('T0001')/to_Bookings", "POST", {BookingId: "B9"})).status).to.equal(501);
+    // a POST to a collection-valued navigation creates below the source (R5,
+    // test/rap-r5.mjs); a POST to a single-valued one and a PATCH through a
+    // navigation are still not served
+    expect((await send(base + "/BookingSet(TravelId='T0002',BookingId='B001')/to_Travel", "POST", {Seats: 1})).status).to.equal(501);
+    expect((await send(base + "/TravelSet('T0001')/to_Bookings", "PATCH", {Customer: "x"})).status).to.equal(501);
   });
 
   it("answers a multipart $batch: reads, a change set with If-Match and ETags, Content-IDs", async () => {
