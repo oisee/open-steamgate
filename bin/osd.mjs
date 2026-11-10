@@ -171,6 +171,10 @@ const GENERATORS = {
     "tools", "rap-flight", "seed-capture.mjs")).href),
 };
 
+// A child of a recorded generator (the seed capture's runtime, say) records
+// in every mode, so it owes its parent the same handshake as `gen` does.
+if (process.env.OSD_GENERATOR_READS) await import("../tools/osd-generator-reads.mjs");
+
 switch (mode) {
   case "compiler": {
     const {main} = await import("../tools/osd-compiler-sidecar.mjs");

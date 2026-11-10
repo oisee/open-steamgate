@@ -36,7 +36,7 @@ import {ensureUrlLibrary, urlLibraryPath} from "./osd-url-lib.mjs";
 import {checkLayerVersions} from "./layer-version/index.mjs";
 import {compareGenerations} from "./osd-generation-diff.mjs";
 import {execFileSync} from "node:child_process";
-import {generatorClosureOf, generatorIdentityOf, recordedRun, runGeneratorsOf} from "./osd-build-generators.mjs";
+import {buildVerified, generatorClosureOf, generatorIdentityOf, recordedRun, runGeneratorsOf} from "./osd-build-generators.mjs";
 import {existsSync, lstatSync, mkdirSync, openSync, closeSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync} from "node:fs";
 import {basename, dirname, join, relative, resolve, sep} from "node:path";
 import {fileURLToPath, pathToFileURL} from "node:url";
@@ -192,7 +192,8 @@ export function inputsOf(root, config = loadConfig(root)) {
   const packFiles = packs.map((pack) => join(pack.dir, "osd-pack.json"));
   const packFolders = packs.flatMap((pack) => [data(pack), pack.ddic].filter(Boolean));
   const sourceLayers = userLayersOf(root);
-  return {folders, libs, bspFolders, packFiles, packFolders, sourceLayers, config: layout(root).config};
+  const rootInputs = ["data", "abaplint.jsonc"].map((name) => join(root, name)).filter(existsSync);
+  return {folders, libs, bspFolders, packFiles, packFolders, sourceLayers, rootInputs, config: layout(root).config};
 }
 
 // What the transpiler and the generators read, and nothing else: a mocha
@@ -303,13 +304,21 @@ export function hashOf(root, inputs = inputsOf(root), options = {}) {
       h.update(relative(root, f)).update("\0").update(digest).update("\0");
     }
   };
-  for (const dir of [...inputs.folders, ...inputs.libs]) {
+  for (const dir of inputs.folders) {
     // **`gen/` is an OUTPUT and is left out.** It is written by this build
     // from the folders above and the generators below, so hashing it made
     // the name a function of the tree AND of how many times the tree had
     // been built. What decides its content is hashed instead.
     if (relative(root, dir) === "gen") continue;
     folder("dir", dir, () => (existsSync(dir) ? walk(dir).filter(sourceInput).sort() : []));
+  }
+  // a locked library is read whole, by the generators too (open-abap-gui's
+  // converter is code that decides gen/); the lock pins every byte of it
+  for (const dir of inputs.libs) folder("dir", dir, () => (existsSync(dir) ? walk(dir).filter((f) => !TRACE_METADATA.test(f) && kept(f)).sort() : []));
+  // tracked root files the generators read: table rows, the lint config
+  for (const path of inputs.rootInputs ?? []) {
+    if (statSync(path).isDirectory()) folder("root", path, () => walk(path).filter((f) => !TRACE_METADATA.test(f)).sort());
+    else { digests?.set(path, digestOf(path)); h.update(`root ${relative(root, path)}\0`).update(digestOf(path)).update("\0"); }
   }
   // the last active versions of the objects whose saved version is kept
   // out: a generation built from them is another generation
@@ -331,6 +340,13 @@ export function hashOf(root, inputs = inputsOf(root), options = {}) {
       const fetchedDigest = digestOf(fetched);
       digests?.set(fetched, fetchedDigest);
       h.update(`fetched ${relative(root, fetched)}\0`).update(fetchedDigest).update("\0");
+      // and the identity each fetched folder carries, read even when it brought no files
+      let names = [];
+      try { names = Object.keys(JSON.parse(readFileSync(fetched, "utf8"))).sort(); } catch { /* digested above; inputsOf refuses it */ }
+      for (const marker of names.map((name) => join(dirname(file), name, ".osd-source.json")).filter(existsSync)) {
+        digests?.set(marker, digestOf(marker));
+        h.update(`identity ${relative(root, marker)}\0`).update(digestOf(marker)).update("\0");
+      }
     }
   }
   // the generators that will actually run -- the files under node, the
@@ -950,7 +966,7 @@ async function makePackSeeds(root, inputs, hash, log, named) {
   const [cmd, ...argv] = toolCommand(script, ["--ensure", "--output", join(layout(root).byInput, hash, "output")]);
   const generation = join(layout(root).byInput, hash);
   const readsLog = join(generation, "seed-reads.jsonl");
-  const env = {...process.env, OSD_ROOT: root, OSD_READ_EXCLUDE_PREFIXES: JSON.stringify([join(root, "packs/rap-flight/data")])};
+  const env = {...process.env, OSD_ROOT: root, OSD_READ_EXCLUDE_PREFIXES: JSON.stringify([join(root, "packs/rap-flight/data")]), OSD_BUILD_VERIFIED: buildVerified(root)};
   if (!hosted()) argv.unshift("--import", join(TOOLS, "osd-generator-reads.mjs"));
   for (const line of recordedRun(cmd, argv, root, env, readsLog, "seed-capture.mjs").split("\n")) {
     if (line.trim() !== "") log(line);

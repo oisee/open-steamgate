@@ -6,6 +6,9 @@ import {dirname, join, relative, resolve, sep} from "node:path";
 import {toolCommand, hosted} from "./osd-host.mjs";
 import {run} from "./osd-build-command.mjs";
 import {readGeneratorLog} from "./osd-read-record.mjs";
+import {readLock} from "./osd-lock.mjs";
+import {libraryPath} from "./osd-lib-path.mjs";
+import {describeBuild} from "./osd-transpiler.mjs";
 
 export function generatorClosureOf(toolsDir, generators) {
   const seen = new Set();
@@ -23,8 +26,20 @@ export function generatorClosureOf(toolsDir, generators) {
   return [...seen].sort();
 }
 
+// What this build has checked already, handed to its recorded children: a
+// child that ran `git status` again would read file content the record
+// cannot see (tools/osd-generator-children.mjs refuses it as incomplete).
+export function buildVerified(root) {
+  const libs = {};
+  let lock = {libraries: []};
+  try { lock = readLock(root); } catch { /* no lock: nothing verified */ }
+  for (const {folder} of lock.libraries) try { libs[folder] = libraryPath(root, folder); } catch { /* the child checks, and fails, itself */ }
+  return JSON.stringify({toolchain: describeBuild(root), libs});
+}
+
 export function runGeneratorsOf(toolsDir, generators, activeOverlay, root, log = () => {}, overlay, readsLog, external = []) {
   let output = "";
+  const verified = readsLog ? buildVerified(root) : undefined;
   for (const [script, ...args] of generators) {
     log(`${script} ${args.join(" ")}`.trim());
     const [cmd, ...argv] = toolCommand(join(toolsDir, script), args);
@@ -32,6 +47,7 @@ export function runGeneratorsOf(toolsDir, generators, activeOverlay, root, log =
     const env = {...process.env, OSD_ROOT: root};
     if (readsLog) {
       env.OSD_READ_EXTERNAL = JSON.stringify(external);
+      env.OSD_BUILD_VERIFIED = verified;
       if (!hosted()) argv.unshift("--import", join(toolsDir, "osd-generator-reads.mjs"));
     }
     delete env.OSD_ACTIVE_BUILD_OVERLAY;

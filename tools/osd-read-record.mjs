@@ -44,17 +44,51 @@ export function readEntry(root, file, bytes) {
   return {path: lexical, real, sha256: sha256(bytes), privacy, identities};
 }
 
+// The privacy of a real path's ancestry, without recording its identities.
+const ancestry = new Map();
+export function privacyOf(real) {
+  if (!ancestry.has(real)) ancestry.set(real, privateValue(real, []));
+  return ancestry.get(real);
+}
+
+// The real path of a file that may not exist: its nearest existing ancestor's
+// real path, and the rest as written.
+export function realOf(file) {
+  const path = resolve(file);
+  if (existsSync(path)) return realpathSync(path);
+  return dirname(path) === path ? path : join(realOf(dirname(path)), basename(path));
+}
+
+// A name seen rather than bytes read: a listing, a stat, an existence test.
+// Nothing hashes it, so it never covers anything; it is written only when the
+// ancestry is private or unknown, and then it only ever refuses.
+export function metaEntry(root, file, seen) {
+  const real = realOf(file);
+  const identities = [];
+  const privacy = privateValue(real, identities);
+  const lexical = inside(root, resolve(file)) ? relative(root, resolve(file)).split(sep).join("/") : `external/${sha256(resolve(file)).slice(0, 16)}/${basename(file)}`;
+  return {kind: "meta", path: lexical || ".", real, sha256: sha256(seen), privacy, identities};
+}
+
 // A generator child's log (tools/osd-generator-reads.mjs): source reads,
 // reads it could not attribute, and the handshakes of recorded children.
 export function readGeneratorLog(file) {
-  const log = {entries: [], incomplete: [], tokens: new Set()};
+  const log = {entries: [], incomplete: [], tokens: new Set(), children: new Set()};
   if (!existsSync(file)) return log;
+  // what a recorded process wrote before it is read again is derived (its
+  // sources are recorded); in log order, so an older file's bytes still count
+  const written = new Set();
   for (const line of readFileSync(file, "utf8").split("\n").filter(Boolean)) {
     const item = JSON.parse(line);
-    if (typeof item.recorder === "string") log.tokens.add(item.recorder);
+    if (typeof item.wrote === "string") written.add(item.wrote);
+    else if (item.kind !== "meta" && typeof item.real === "string" && written.has(item.real)) continue;
+    else if (typeof item.recorder === "string") log.tokens.add(item.recorder);
+    else if (typeof item.child === "string") log.children.add(item.child);
     else if (item.incomplete === true) log.incomplete.push(String(item.path));
     else log.entries.push(item);
   }
+  // a child process announced by a recorder owes its own handshake
+  for (const child of log.children) if (!log.tokens.has(child)) log.incomplete.push(`child process ${child}: no recorder handshake`);
   return log;
 }
 
@@ -83,7 +117,7 @@ export function makeReadRecord(root, hashed, entries) {
   const unique = new Map();
   for (const entry of entries) unique.set(`${entry.path}\0${entry.real}`, entry);
   const reads = [...unique.values()].sort((a, b) => a.path.localeCompare(b.path) || a.real.localeCompare(b.real));
-  const uncovered = reads.filter(entry => byReal.get(entry.real) !== entry.sha256).map(entry => entry.path);
+  const uncovered = reads.filter(entry => entry.kind !== "meta" && byReal.get(entry.real) !== entry.sha256).map(entry => entry.path);
   return {schema: 1, root: resolve(root), reads, uncovered: [...new Set(uncovered)].sort()};
 }
 
@@ -92,6 +126,7 @@ export function verifyReadRecord(root, generation, hashed) {
   const current = new Map();
   for (const [file, digest] of hashed) if (existsSync(file)) current.set(realpathSync(file), digest);
   for (const entry of record.reads) {
+    if (entry.kind === "meta") continue;
     if (current.get(readLocation(root, record.root, entry)) !== entry.sha256)
       fail(`generation read is not in current hash: ${entry.path}`, "UNKNOWN_PRIVACY");
   }
@@ -121,7 +156,8 @@ export function inspectReadRecord(root, generation) {
     if (typeof entry.path !== "string" || entry.path === "" || isAbsolute(entry.path)
       || entry.path.split("/").some(part => part === ".." || part === ".")
       || typeof entry.real !== "string" || !isAbsolute(entry.real) || !/^[0-9a-f]{64}$/.test(entry.sha256)
-      || ![true, false, null].includes(entry.privacy) || !Array.isArray(entry.identities)) fail("generation read record is invalid");
+      || ![true, false, null].includes(entry.privacy) || !Array.isArray(entry.identities)
+      || ![undefined, "meta"].includes(entry.kind)) fail("generation read record is invalid");
     if (entry.privacy === true) fail(`generation read is private: ${entry.path}`, "PRIVATE_LAYER");
     if (entry.privacy === null) fail(`generation read has unknown privacy: ${entry.path}; rerun node tools/osd-fetch.mjs and rebuild before publishing`, "UNKNOWN_PRIVACY");
     const actual = readLocation(root, record.root, entry);

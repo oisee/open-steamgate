@@ -1,5 +1,6 @@
 import {expect} from "chai";
 import {execFileSync, spawnSync} from "node:child_process";
+import {createHash} from "node:crypto";
 import {closeSync, mkdirSync, mkdtempSync, openSync, realpathSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join, resolve} from "node:path";
@@ -9,7 +10,9 @@ import {inspectReadRecord, makeReadRecord, markIncomplete, readGeneratorLog, REA
 // A synthetic generator: one road from node:fs to the bytes of a private
 // tree per run, each copying or reading into gen/ the way a real one would.
 const GENERATOR = `
-import fs, {readFileSync, createReadStream, openSync, readSync, closeSync, copyFileSync, cpSync, linkSync, symlinkSync, renameSync} from "node:fs";
+import fs, {readFileSync, createReadStream, openSync, readSync, closeSync, copyFileSync, cpSync, linkSync, symlinkSync, renameSync, readdirSync, existsSync, statSync, writeFileSync} from "node:fs";
+import {spawn, spawnSync, execFileSync} from "node:child_process";
+import {Worker} from "node:worker_threads";
 import {readFile, open, copyFile, cp} from "node:fs/promises";
 import {resolve} from "node:path";
 import {pathToFileURL} from "node:url";
@@ -33,6 +36,26 @@ const roads = {
   linkSync: () => linkSync(one, out),
   symlinkSync: () => symlinkSync(resolve(one), out),
   renameSync: () => renameSync("vault/zmove.txt", out),
+  // (6) links under excluded prefixes, into a private tree outside and inside the root
+  genLinkOutside: () => readFileSync("gen/zlinked.txt"),
+  toolsLinkInside: () => readFileSync("tools/zlinked.txt"),
+  // (3) names only, never bytes
+  listPrivate: () => writeFileSync(out, readdirSync("vault").join(",")),
+  existsPrivate: () => writeFileSync(out, String(existsSync("vault/zprobe.txt"))),
+  statPrivate: () => writeFileSync(out, String(statSync("vault/zsentinel.txt").size)),
+  listPublic: () => writeFileSync(out, readdirSync("open").join(",")),
+  // (2) child processes
+  nodeChild: () => spawnSync(process.execPath, ["-e", "require('fs').readFileSync('vault/zsentinel.txt')"], {stdio: "inherit"}),
+  nodeChildAsync: () => new Promise(ok => spawn(process.execPath, ["-e", "require('fs').readFileSync('vault/zsentinel.txt')"]).on("exit", ok)),
+  nodeChildOwnEnv: () => spawnSync(process.execPath, ["-e", "require('fs').readFileSync('vault/zsentinel.txt')"], {env: {PATH: process.env.PATH, OSD_ROOT: "/nonexistent"}}),
+  catChild: () => spawnSync("cat", ["vault/zsentinel.txt"]),
+  gitMetadata: () => execFileSync("git", ["rev-parse", "--show-toplevel"], {stdio: "pipe"}),
+  gitListPrivate: () => execFileSync("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "vault"], {stdio: "pipe"}),
+  gitShow: () => spawnSync("git", ["show", "HEAD:open/zpublic.txt"]),
+  worker: () => new Promise(ok => new Worker("1", {eval: true}).on("exit", ok)),
+  // (D) a file written by the generator, then read back, is derived
+  ownCache: () => { writeFileSync("open/zcache.tmp", "derived"); renameSync("open/zcache.tmp", "open/zcache.bin"); readFileSync("open/zcache.bin"); },
+  oldThenOverwrite: () => { readFileSync("open/zpublic.txt"); writeFileSync("open/zpublic.txt", "rewritten"); readFileSync("open/zpublic.txt"); },
 };
 await roads[api]();
 `;
@@ -56,6 +79,20 @@ describe("tools/osd-generator-reads: a generator's reads decide the generation's
     writeFileSync(join(root, "vault/zsentinel.txt"), "SYNTHETIC-PRIVATE-SENTINEL\n");
     writeFileSync(join(root, "vault/zmove.txt"), "SYNTHETIC-PRIVATE-MOVED\n");
     writeFileSync(join(root, "vault/dir/zsentinel2.txt"), "SYNTHETIC-PRIVATE-SENTINEL-2\n");
+    // a private tree outside the root, reached only through a link in gen/;
+    // and one inside, reached through a link in tools/
+    mkdirSync(join(base, "elsewhere"));
+    writeFileSync(join(base, "elsewhere/.osd-layer.json"), JSON.stringify({private: true}));
+    writeFileSync(join(base, "elsewhere/zfar.txt"), "SYNTHETIC-PRIVATE-FAR\n");
+    symlinkSync(join(base, "elsewhere/zfar.txt"), join(root, "gen/zlinked.txt"));
+    mkdirSync(join(root, "tools"));
+    symlinkSync(join(root, "vault/zsentinel.txt"), join(root, "tools/zlinked.txt"));
+    mkdirSync(join(root, "open"));
+    writeFileSync(join(root, "open/zpublic.txt"), "SYNTHETIC-PUBLIC\n");
+    const git = (...args) => execFileSync("git", ["-C", root, ...args], {stdio: "ignore"});
+    git("init", "-q");
+    git("add", "open");
+    git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "fixture");
     symlinkSync(resolve("tools/osd-generator-reads.mjs"), join(tools, "osd-generator-reads.mjs"));
     writeFileSync(join(tools, "zgen.mjs"), GENERATOR);
     // two stand-ins for a hosted binary's `gen` mode: one preloads the
@@ -79,7 +116,8 @@ describe("tools/osd-generator-reads: a generator's reads decide the generation's
   };
   // every read counts as declared, so only attribution decides
   const publish = log => {
-    const record = markIncomplete(makeReadRecord(root, new Map(log.entries.map(entry => [entry.real, entry.sha256])), log.entries), log.incomplete);
+    const bytes = log.entries.filter(entry => entry.kind !== "meta");
+    const record = markIncomplete(makeReadRecord(root, new Map(bytes.map(entry => [entry.real, entry.sha256])), log.entries), log.incomplete);
     const generation = join(root, "build/by-input/0123456789abcdef");
     mkdirSync(generation, {recursive: true});
     writeFileSync(join(generation, READS), JSON.stringify(record));
@@ -116,6 +154,88 @@ describe("tools/osd-generator-reads: a generator's reads decide the generation's
       expect(publish(read)).to.throw().with.property("code", "PRIVATE_LAYER");
     });
   }
+
+  // (6) a skip-listed prefix is skipped by where it really leads, too
+  for (const [api, path, code] of [["genLinkOutside", /^external\/[0-9a-f]{16}\/zlinked.txt$|^gen\/zlinked.txt$/, "PRIVATE_LAYER"],
+    ["toolsLinkInside", /^tools\/zlinked.txt$/, "PRIVATE_LAYER"]]) {
+    it(`records ${api}: a link under an excluded prefix into a private tree`, () => {
+      const log = generate(api);
+      expect(log.incomplete).to.deep.equal([]);
+      expect(log.entries.some(entry => path.test(entry.path) && entry.privacy === true)).to.equal(true);
+      expect(publish(log)).to.throw().with.property("code", code);
+    });
+  }
+
+  // (3) names are content: a listing, existence test or stat under a private tree
+  for (const api of ["listPrivate", "existsPrivate", "statPrivate"]) {
+    it(`records ${api} as a private name read and refuses the generation`, () => {
+      const log = generate(api);
+      expect(log.incomplete).to.deep.equal([]);
+      expect(log.entries.some(entry => entry.kind === "meta" && entry.privacy === true && entry.path.startsWith("vault"))).to.equal(true);
+      expect(publish(log)).to.throw().with.property("code", "PRIVATE_LAYER");
+    });
+  }
+
+  it("leaves a public listing out of the record, which stays publishable", () => {
+    const log = generate("listPublic");
+    expect(log.entries.filter(entry => entry.kind === "meta")).to.deep.equal([]);
+    expect(log.incomplete).to.deep.equal([]);
+    expect(publish(log)).not.to.throw();
+  });
+
+  // (2) children of a generator
+  for (const api of ["nodeChild", "nodeChildAsync", "nodeChildOwnEnv"]) {
+    it(`${api}: a node child carries the recorder and its private read is recorded`, () => {
+      const log = generate(api);
+      expect(log.incomplete).to.deep.equal([]);
+      expect(log.children.size).to.equal(1);
+      expect(log.entries.map(entry => entry.path)).to.include("vault/zsentinel.txt");
+      expect(publish(log)).to.throw().with.property("code", "PRIVATE_LAYER");
+    });
+  }
+
+  for (const [api, what] of [["catChild", "child: cat vault/zsentinel.txt"], ["gitShow", "child: git show HEAD:open/zpublic.txt"],
+    ["worker", "child: worker 1"]]) {
+    it(`${api}: a child the recorder cannot follow makes the record incomplete`, () => {
+      const log = generate(api);
+      expect(log.incomplete).to.include(what);
+      expect(publish(log)).to.throw().with.property("code", "UNKNOWN_PRIVACY");
+    });
+  }
+
+  it("gitMetadata: an allow-listed git command in a public repository leaves the record complete", () => {
+    const log = generate("gitMetadata");
+    expect(log.incomplete).to.deep.equal([]);
+    expect(log.entries).to.deep.equal([]);
+    expect(publish(log)).not.to.throw();
+  });
+
+  it("gitListPrivate: an allow-listed ls-files over a private path is a private name read", () => {
+    const log = generate("gitListPrivate");
+    expect(log.incomplete).to.deep.equal([]);
+    expect(log.entries.some(entry => entry.kind === "meta" && entry.path === "vault/*" && entry.privacy === true)).to.equal(true);
+    expect(publish(log)).to.throw().with.property("code", "PRIVATE_LAYER");
+  });
+
+  it("a file the generator wrote and reads back is derived, not a source", () => {
+    const log = generate("ownCache");
+    expect(log.incomplete).to.deep.equal([]);
+    expect(log.entries.map(entry => entry.path)).not.to.include.members(["open/zcache.bin"]);
+    expect(log.entries.map(entry => entry.path)).not.to.include.members(["open/zcache.tmp"]);
+  });
+
+  it("a file read before the generator overwrote it is still a source", () => {
+    const log = generate("oldThenOverwrite");
+    const reads = log.entries.filter(entry => entry.path === "open/zpublic.txt");
+    expect(reads).to.have.length(1);
+    expect(reads[0].sha256).to.equal(createHash("sha256").update("SYNTHETIC-PUBLIC\n").digest("hex"));
+  });
+
+  it("a child announced by a recorder that never answers makes the record incomplete", () => {
+    const log = join(base, "children.jsonl");
+    writeFileSync(log, `${JSON.stringify({recorder: "parent"})}\n${JSON.stringify({child: "silent"})}\n`);
+    expect(readGeneratorLog(log).incomplete).to.deep.equal(["child process silent: no recorder handshake"]);
+  });
 
   it("G1: a hosted child that never loads the recorder makes the record incomplete", () => {
     const log = generate("readFileSyncBuffer", [process.execPath, join(tools, "host-bare.mjs")]);

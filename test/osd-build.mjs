@@ -87,6 +87,37 @@ describe("tools/osd-build: the layers, refused before a lock is taken", function
     expect(JSON.parse(readFileSync(overlayLog, "utf8").trim()).path).to.equal("build/inactive/active/src/zrecord.prog.abap");
   });
 
+  // FIX7c: what the generators read is hashed whole -- a locked library's
+  // code (open-abap-gui's converter), the root's table rows and lint config
+  it("hashes a library's code, root data and the lint config that generators read", () => {
+    write("abap_transpile.json", JSON.stringify({input_folder: ["src"], output_folder: "output", libs: [{folder: "zlib"}]}));
+    write("src/zhash.prog.abap", "REPORT zhash.\n");
+    write("zlib/src/zcl_zlib.clas.abap", "CLASS zcl_zlib DEFINITION PUBLIC. ENDCLASS. CLASS zcl_zlib IMPLEMENTATION. ENDCLASS.\n");
+    write("zlib/converter/src/zconvert.mjs", "export const synthetic = 1;\n");
+    write("data/zsynthetic.tabu.json", "[]\n");
+    write("abaplint.jsonc", "{}\n");
+    const named = new Map();
+    const before = hashOf(root, inputsOf(root), {digests: named});
+    for (const file of ["zlib/converter/src/zconvert.mjs", "data/zsynthetic.tabu.json", "abaplint.jsonc"]) {
+      expect(named.has(join(root, file)), file).to.equal(true);
+    }
+    write("zlib/converter/src/zconvert.mjs", "export const synthetic = 2;\n");
+    expect(hashOf(root, inputsOf(root))).not.to.equal(before);
+  });
+
+  it("hashes the identity of a fetched folder that brought no files", () => {
+    const oci = `localhost:5000/synthetic/pack@sha256:${"b".repeat(64)}`;
+    write("src/zident.prog.abap", "REPORT zident.\n");
+    write("packs/test/osd-pack.json", JSON.stringify({abap: ["src"], sources: [{folder: "empty", oci}]}));
+    write("packs/test/src/ztest.prog.abap", "REPORT ztest.\n");
+    const identity = {oci, path: "src", exclude: [], files: 0, private: false};
+    write("packs/test/.osd-fetched.json", JSON.stringify({empty: identity}));
+    write("packs/test/empty/.osd-source.json", JSON.stringify(identity));
+    const named = new Map();
+    hashOf(root, inputsOf(root), {digests: named});
+    expect(named.has(join(root, "packs/test/empty/.osd-source.json"))).to.equal(true);
+  });
+
   // P2-4: a checkout fetched before privacy was recorded still builds; only
   // publishing refuses it, and says to rerun osd-fetch
   it("builds over a fetched identity without recorded privacy and refuses to publish it", async () => {

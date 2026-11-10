@@ -7,26 +7,44 @@
 // once the hooks are proven visible to ESM importers, tells the parent this
 // child was recorded at all (tools/osd-build-generators.mjs recordedRun):
 // a Bun binary ignores syncBuiltinESMExports, so its children never write it.
+// Names count as well as bytes: a listing, stat or existence test on a path
+// whose real ancestry is private or unknown is a "meta" entry (registries in
+// gen/ are made from listings). A path is skipped as tooling or output only
+// when its real path is too, so a link in gen/ to a private tree is recorded.
+// Child processes: tools/osd-generator-children.mjs.
 import fs from "node:fs";
 import {syncBuiltinESMExports} from "node:module";
 import {dirname, join, relative, resolve, sep} from "node:path";
 import {fileURLToPath} from "node:url";
-import {readEntry, sha256} from "./osd-read-record.mjs";
+import {installChildHooks} from "./osd-generator-children.mjs";
+import {metaEntry, privacyOf, readEntry, realOf, sha256} from "./osd-read-record.mjs";
 
 const log = process.env.OSD_GENERATOR_READS;
 if (log) {
-  const root = resolve(process.env.OSD_ROOT ?? process.cwd());
-  const external = JSON.parse(process.env.OSD_READ_EXTERNAL ?? "[]").map(resolve);
-  const ignored = JSON.parse(process.env.OSD_READ_EXCLUDE_PREFIXES ?? "[]").map(resolve);
+  // the root of the build, kept for children that are told another OSD_ROOT
+  const root = resolve(process.env.OSD_READ_ROOT ?? process.env.OSD_ROOT ?? process.cwd());
+  process.env.OSD_READ_ROOT = root;
+  const both = paths => [...new Set(paths.flatMap(path => [resolve(path), realOf(path)]))];
+  const roots = both([root]);
+  const external = both(JSON.parse(process.env.OSD_READ_EXTERNAL ?? "[]"));
+  const ignored = both(JSON.parse(process.env.OSD_READ_EXCLUDE_PREFIXES ?? "[]"));
   const promises = fs.promises;
   const o = {...fs};
   const op = {...promises};
   let busy = false;
-  const write = line => fs.appendFileSync(log, `${JSON.stringify(line)}\n`);
+  const write = line => o.appendFileSync(log, `${JSON.stringify(line)}\n`);
   const under = (base, path) => { const rel = relative(base, path); return rel !== ".." && !rel.startsWith(`..${sep}`); };
-  const watched = (path, projected) => (under(root, path) || external.some(base => under(base, path)))
-    && !ignored.some(base => under(base, path))
-    && (projected || !/^(gen|build|output|tools|scripts|test|node_modules|\.git|\.local\/ci-artifact)(\/|$)/.test(relative(root, path).split(sep).join("/")));
+  const TOOLING = /^(gen|build|output|tools|scripts|test|node_modules|\.git|\.local\/ci-artifact)(\/|$)/;
+  const skipped = (path, projected) => !(roots.some(base => under(base, path)) || external.some(base => under(base, path)))
+    || ignored.some(base => under(base, path))
+    || !projected && roots.some(base => under(base, path) && TOOLING.test(relative(base, path).split(sep).join("/")));
+  // skipped only if the path as written AND its real path are; a real path
+  // out of every scope is still recorded when its ancestry is not public
+  const watched = (path, projected) => {
+    if (!skipped(path, projected)) return true;
+    const real = realOf(path);
+    return real !== path && (!skipped(real, projected) || privacyOf(real) !== false);
+  };
   const pathOf = file => typeof file === "string" ? file : file instanceof URL ? fileURLToPath(file)
     : file instanceof Uint8Array ? Buffer.from(file).toString() : undefined;
   // the bytes as the generator got them; for a directory (cp), every file under it
@@ -63,6 +81,39 @@ if (log) {
       }
     } catch { write({incomplete: true, path: String(pathOf(file) ?? file)}); } finally { busy = false; }
   };
+  // a name seen: written only when the real ancestry is private or unknown
+  const meta = (file, seen) => {
+    if (busy) return;
+    const given = pathOf(file);
+    if (given === undefined) return;
+    busy = true;
+    try {
+      const path = resolve(given);
+      if (!watched(path, false) || privacyOf(realOf(path)) === false) return;
+      const entry = metaEntry(root, path, typeof seen === "string" ? seen : JSON.stringify(seen ?? path));
+      const key = `meta\0${path}\0${entry.sha256}`;
+      if (logged.has(key)) return;
+      logged.add(key);
+      write(entry);
+    } catch { write({incomplete: true, path: `meta: ${given}`}); } finally { busy = false; }
+  };
+  // a listing's names belong to the directory: judged as a name inside it
+  const listed = (file, list) => { const given = pathOf(file); if (given !== undefined) meta(join(resolve(given), "*"), names(list)); };
+  // A file this process wrote holds what it read, which is recorded: a later
+  // read of it (a cache it renames into place, say) is derived, not a source.
+  // Links are not writes: reading through one reads its target.
+  const wrote = file => {
+    if (busy) return;
+    const given = pathOf(file);
+    if (given === undefined) return;
+    busy = true;
+    try { if (watched(resolve(given), false)) write({wrote: realOf(given)}); } catch { /* nothing read, nothing claimed */ } finally { busy = false; }
+  };
+  const writable = flags => typeof flags === "string" ? /[wa+]/.test(flags) : typeof flags === "number" && (flags & 3) !== 0;
+  const names = list => Array.isArray(list) ? list.map(entry => typeof entry === "object" && !Buffer.isBuffer(entry) ? entry.name : String(entry)) : list;
+  const metaHooks = (target, original, list, after) => {
+    for (const name of list) if (typeof original[name] === "function") target[name] = after(name);
+  };
   // An fd read is attributed to the file the fd names now; one this process
   // cannot name (no /proc) is incomplete. Pipes and sockets are not files.
   const fdSeen = new Map();
@@ -70,7 +121,7 @@ if (log) {
     if (busy) return;
     if (typeof fd === "object" && fd !== null && typeof fd.fd === "number") fd = fd.fd;
     let path;
-    try { path = fs.readlinkSync(`/proc/self/fd/${fd}`); } catch { return void write({incomplete: true, path: `fd:${fd}`}); }
+    try { path = quiet(() => fs.readlinkSync(`/proc/self/fd/${fd}`)); } catch { return void write({incomplete: true, path: `fd:${fd}`}); }
     if (!path.startsWith("/") || fdSeen.get(fd) === path) return;
     fdSeen.set(fd, path);
     record(path, undefined, {missingOk: true});
@@ -106,11 +157,15 @@ if (log) {
     record(viewed, asBytes(value, args[0]), {projected: given !== undefined && actual !== undefined && resolve(actual) !== resolve(given)});
     return value;
   };
-  const opened = (args, fd) => { if (readable(args[1])) record(args[0]); fdSeen.delete(typeof fd === "number" ? fd : fd?.fd); };
+  const opened = (args, fd) => {
+    if (readable(args[1])) record(args[0]);
+    if (writable(args[1])) wrote(args[0]);
+    fdSeen.delete(typeof fd === "number" ? fd : fd?.fd);
+  };
   fs.openSync = (...args) => { const fd = o.openSync(...args); opened(args, fd); return fd; };
   for (const name of ["readSync", "readvSync"]) fs[name] = (fd, ...args) => { fdRead(fd); return o[name](fd, ...args); };
   for (const name of ["read", "readv"]) fs[name] = (fd, ...args) => { fdRead(fd); return o[name](fd, ...args); };
-  fs.copyFileSync = (src, ...args) => { const value = quiet(() => o.copyFileSync(src, ...args)); record(src); return value; };
+  fs.copyFileSync = (src, dest, ...args) => { const value = quiet(() => o.copyFileSync(src, dest, ...args)); record(src); wrote(dest); return value; };
   fs.cpSync = (src, ...args) => { const value = quiet(() => o.cpSync(src, ...args)); record(src); return value; };
   fs.linkSync = (src, ...args) => { const value = o.linkSync(src, ...args); record(src); return value; };
   fs.symlinkSync = (target, path, ...args) => {
@@ -118,7 +173,9 @@ if (log) {
     record(resolve(dirname(resolve(pathOf(path) ?? ".")), pathOf(target) ?? ""));
     return value;
   };
-  fs.renameSync = (src, ...args) => { record(src, undefined, {missingOk: true}); return o.renameSync(src, ...args); };
+  fs.renameSync = (src, dest, ...args) => { record(src, undefined, {missingOk: true}); const value = o.renameSync(src, dest, ...args); wrote(dest); return value; };
+  for (const name of ["writeFileSync", "appendFileSync"]) fs[name] = (file, ...args) => { const value = o[name](file, ...args); if (typeof file !== "number") wrote(file); return value; };
+  fs.createWriteStream = (file, options) => { const stream = o.createWriteStream(file, options); if (options?.fd === undefined || options.fd === null) wrote(file); return stream; };
   fs.createReadStream = (file, options) => {
     if (options?.fd !== undefined && options.fd !== null) fdRead(options.fd);
     else record(file, undefined, {missingOk: true});
@@ -136,6 +193,8 @@ if (log) {
     return o.readFile(file, ...args);
   };
   viaCallback("open", opened);
+  viaCallback("writeFile", args => { if (typeof args[0] !== "number") wrote(args[0]); });
+  viaCallback("appendFile", args => { if (typeof args[0] !== "number") wrote(args[0]); });
   viaCallback("copyFile", args => record(args[0]));
   viaCallback("cp", args => record(args[0]));
   viaCallback("link", args => record(args[0]));
@@ -148,6 +207,8 @@ if (log) {
     return value;
   };
   viaPromise("open", opened);
+  viaPromise("writeFile", args => { if (typeof args[0] === "string" || args[0] instanceof URL || args[0] instanceof Uint8Array) wrote(args[0]); });
+  viaPromise("appendFile", args => { if (typeof args[0] === "string" || args[0] instanceof URL || args[0] instanceof Uint8Array) wrote(args[0]); });
   viaPromise("copyFile", args => record(args[0]));
   viaPromise("cp", args => record(args[0]));
   viaPromise("link", args => record(args[0]));
@@ -156,13 +217,37 @@ if (log) {
     record(resolve(dirname(resolve(pathOf(path) ?? ".")), pathOf(target) ?? ""));
   };
   promises.rename = async (src, ...args) => { record(src, undefined, {missingOk: true}); return op.rename(src, ...args); };
+  // names: listings by their names, the rest by the path asked about
+  const SYNC = ["statSync", "lstatSync", "existsSync", "realpathSync", "readlinkSync", "accessSync"];
+  metaHooks(fs, o, SYNC, name => {
+    const hook = (file, ...args) => { meta(file); return o[name](file, ...args); };
+    if (o[name].native) hook.native = (file, ...args) => { meta(file); return o[name].native(file, ...args); };
+    return hook;
+  });
+  fs.readdirSync = (file, ...args) => { const list = o.readdirSync(file, ...args); listed(file, list); return list; };
+  fs.opendirSync = (file, ...args) => { listed(file, String(pathOf(file))); return o.opendirSync(file, ...args); };
+  fs.opendir = (file, ...args) => { listed(file, String(pathOf(file))); return o.opendir(file, ...args); };
+  metaHooks(fs, o, ["stat", "lstat", "exists", "realpath", "readlink", "access"], name => {
+    const hook = (file, ...args) => { meta(file); return o[name](file, ...args); };
+    if (o[name].native) hook.native = (file, ...args) => { meta(file); return o[name].native(file, ...args); };
+    return hook;
+  });
+  viaCallback("readdir", (args, list) => listed(args[0], list));
+  metaHooks(promises, op, ["stat", "lstat", "realpath", "readlink", "access"],
+    name => async (file, ...args) => { meta(file); return op[name](file, ...args); });
+  promises.opendir = async (file, ...args) => { listed(file, String(pathOf(file))); return op.opendir(file, ...args); };
+  viaPromise("readdir", (args, list) => listed(args[0], list));
+  // the file itself, never a bundle that carries it (a preload of the whole program)
+  const recorderUrl = /^file:.*\/osd-generator-reads\.mjs$/.test(import.meta.url) && quiet(() => fs.existsSync(fileURLToPath(import.meta.url))) ? import.meta.url : undefined;
+  const modules = [[fs, o, "node:fs"], [promises, op, "node:fs/promises"], ...installChildHooks({write, recorder: recorderUrl, meta, listed})];
   syncBuiltinESMExports();
 
-  // Proven, not assumed: a named import of either module must now see the hooks.
-  const named = await import("node:fs");
-  const namedPromises = await import("node:fs/promises");
-  const visible = Object.keys(fs).every(name => fs[name] === o[name] || named[name] === fs[name])
-    && Object.keys(promises).every(name => promises[name] === op[name] || namedPromises[name] === promises[name]);
+  // Proven, not assumed: a named import of each module must now see the hooks.
+  let visible = true;
+  for (const [module, original, specifier] of modules) {
+    const named = await import(specifier);
+    visible &&= Object.keys(module).every(name => module[name] === original[name] || named[name] === module[name]);
+  }
   if (visible && process.env.OSD_GENERATOR_READS_TOKEN) write({recorder: process.env.OSD_GENERATOR_READS_TOKEN});
   if (!visible) write({incomplete: true, path: "recorder: node:fs hooks are not visible to imports"});
 }
