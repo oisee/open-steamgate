@@ -227,6 +227,16 @@ CLASS zcl_stg_dispatcher DEFINITION PUBLIC CREATE PUBLIC.
         zcx_stg_error
         /iwbep/cx_mgw_base_exception.
 
+* whether the provider (or the SADL provider a generated one delegates to)
+* says the function import is an action that changes its entity
+    CLASS-METHODS guards_action
+      IMPORTING
+        io_dpc           TYPE REF TO /iwbep/if_mgw_appl_srv_runtime
+        iv_entity_set    TYPE string
+        iv_action        TYPE string
+      RETURNING
+        VALUE(rv_guards) TYPE abap_bool.
+
     CLASS-METHODS function_import
       IMPORTING
         iv_method          TYPE string
@@ -234,6 +244,8 @@ CLASS zcl_stg_dispatcher DEFINITION PUBLIC CREATE PUBLIC.
         is_action          TYPE zcl_stg_model_info=>ty_action
         is_request         TYPE zcl_stg_url=>ty_request
         iv_base_url        TYPE string
+        it_headers         TYPE tihttpnvp OPTIONAL
+        io_etag_model      TYPE REF TO zcl_osd_v4_model OPTIONAL
       RETURNING
         VALUE(rs_response) TYPE ty_response
       RAISING
@@ -438,11 +450,13 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
       ls_action = zcl_stg_model_info=>find_action( is_service = ls_service
                                                    iv_name    = ls_request-entity_set ).
       IF ls_action-name IS NOT INITIAL.
-        rs_response = function_import( iv_method   = lv_method
-                                       is_service  = ls_service
-                                       is_action   = ls_action
-                                       is_request  = ls_request
-                                       iv_base_url = lv_base ).
+        rs_response = function_import( iv_method      = lv_method
+                                       is_service     = ls_service
+                                       is_action      = ls_action
+                                       is_request     = ls_request
+                                       iv_base_url    = lv_base
+                                       it_headers     = it_headers
+                                       io_etag_model  = lo_etags ).
         RETURN.
       ENDIF.
     ENDIF.
@@ -879,6 +893,25 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
     ENDTRY.
   ENDMETHOD.
 
+  METHOD guards_action.
+    DATA li_guard TYPE REF TO zif_stg_action_guard.
+    DATA li_util  TYPE REF TO if_sadl_gw_dpc_util.
+    DATA lo_inner TYPE REF TO object.
+
+    TRY.
+        li_guard ?= io_dpc.
+      CATCH cx_sy_move_cast_error.
+        TRY.
+            li_util ?= io_dpc.
+            lo_inner = li_util->get_dpc( ).
+            li_guard ?= lo_inner.
+          CATCH cx_sy_move_cast_error /iwbep/cx_mgw_busi_exception /iwbep/cx_mgw_tech_exception.
+            RETURN.
+        ENDTRY.
+    ENDTRY.
+    rv_guards = li_guard->guards( iv_entity_set = iv_entity_set iv_action = iv_action ).
+  ENDMETHOD.
+
   METHOD function_import.
     DATA lo_dpc       TYPE REF TO /iwbep/if_mgw_appl_srv_runtime.
     DATA lo_context   TYPE REF TO zcl_stg_request_context.
@@ -890,6 +923,12 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
     DATA ls_set       TYPE zcl_stg_model_info=>ty_entity_set.
     DATA lv_kind      TYPE c LENGTH 1.
     DATA lv_value     TYPE string.
+    DATA ls_guarded   TYPE zcl_stg_model_info=>ty_entity_set.
+    DATA lt_key_tab   TYPE /iwbep/t_mgw_name_value_pair.
+    DATA ls_key       TYPE /iwbep/s_mgw_name_value_pair.
+    DATA lt_nav_path  TYPE /iwbep/t_mgw_navigation_path.
+    DATA lo_read      TYPE REF TO zcl_stg_request_context.
+    DATA lr_current   TYPE REF TO data.
     FIELD-SYMBOLS <lt_data> TYPE ANY TABLE.
     FIELD-SYMBOLS <ls_data> TYPE any.
     FIELD-SYMBOLS <lv_data> TYPE any.
@@ -931,6 +970,53 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
         EXIT.
       ENDLOOP.
       CLEAR ls_set.
+    ENDIF.
+
+* an action of a behavior (ZIF_STG_ACTION_GUARD) changes its entity the way
+* a MERGE does:
+* when the type has an ETag, If-Match is checked against the instance the
+* key parameters name -- 428 without it, 412 on a stale one -- as for the
+* V4 bound action. A missing instance stays the provider's to answer
+    IF iv_method = 'POST' AND is_action-action_for IS NOT INITIAL AND io_etag_model IS BOUND.
+      LOOP AT is_service-entity_sets INTO ls_guarded WHERE entity_type = is_action-action_for.
+        EXIT.
+      ENDLOOP.
+      IF ls_guarded-name IS NOT INITIAL AND zcl_stg_model_info=>has_etag( ls_guarded ) = abap_true
+          AND guards_action( io_dpc = lo_dpc iv_entity_set = ls_guarded-name iv_action = is_action-name ) = abap_true.
+        LOOP AT ls_guarded-properties INTO ls_property WHERE is_key = abap_true.
+          CLEAR ls_key.
+          ls_key-name = ls_property-name.
+          LOOP AT lt_parameter INTO ls_parameter.
+            IF to_lower( ls_parameter-name ) = to_lower( ls_property-name ).
+              ls_key-value = ls_parameter-value.
+            ENDIF.
+          ENDLOOP.
+          APPEND ls_key TO lt_key_tab.
+        ENDLOOP.
+        CREATE OBJECT lo_read.
+        lo_read->mv_entity_set  = ls_guarded-name.
+        lo_read->mv_entity_type = ls_guarded-entity_type.
+        lo_read->ms_set         = ls_guarded.
+        lo_read->mt_key_tab     = lt_key_tab.
+        TRY.
+            lo_dpc->get_entity(
+              EXPORTING
+                iv_entity_name          = ls_guarded-entity_type
+                iv_entity_set_name      = ls_guarded-name
+                iv_source_name          = ''
+                it_key_tab              = lt_key_tab
+                it_navigation_path      = lt_nav_path
+                io_tech_request_context = lo_read
+              IMPORTING
+                er_entity               = lr_current ).
+          CATCH /iwbep/cx_mgw_busi_exception.
+            CLEAR lr_current.
+        ENDTRY.
+        check_precondition( is_set        = ls_guarded
+                            io_etag_model = io_etag_model
+                            it_headers    = it_headers
+                            ir_current    = lr_current ).
+      ENDIF.
     ENDIF.
 
     lo_dpc->execute_action(
