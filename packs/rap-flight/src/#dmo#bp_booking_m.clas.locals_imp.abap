@@ -1,5 +1,6 @@
 * OSD overlay of the booking pool of the managed scenario (upstream
-* managed/#dmo#bp_booking_m.clas.locals_imp.abap, Apache-2.0), changed where
+* managed/#dmo#bp_booking_m.clas.locals_imp.abap at commit 5353cbeb,
+* Apache-2.0), changed where
 * this runtime differs; each change is marked "OSD overlay" (the kinds are
 * listed in the travel pool's overlay header and in docs/rap-flight-pack.md).
 * The %path of a message is built from the booking's own key, which carries

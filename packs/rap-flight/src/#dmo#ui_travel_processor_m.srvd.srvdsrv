@@ -1,4 +1,4 @@
-// OSD overlay: upstream's service definition with the value-help views
+// OSD overlay: upstream's service definition (managed/, commit 5353cbeb, Apache-2.0) with the value-help views
 // left out (/DMO/I_*_StdVH, I_CurrencyStdVH, I_CountryVH): the pack does not
 // fetch the released ones and the service generator refuses an unresolved
 // view (docs/rap-flight-pack.md). The business object's three entities are

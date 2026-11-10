@@ -51,7 +51,7 @@ export const SUPPORT = {
   "with draft": ["refused", "rap-runtime-gen: draft is outside R2"],
   "several pools": ["runs", "test/rap-r7.mjs, ZCL_OSD_RAP_R7_TEST: each entity's handlers in its own pool, every pool's saver called"],
   "persistent table": ["runs", "test/rap-serve.mjs"],
-  "with additional save": ["runs", "test/rap-r7.mjs, ZCL_OSD_RAP_R7_TEST: the managed write, then the savers' save_modified"],
+  "with additional save": ["runs", "test/rap-r7.mjs, ZCL_OSD_RAP_R7_TEST, ZCL_OSD_RAPFLIGHT_R7_TEST: the managed write, then the savers' save_modified (the flight travel's change log)"],
   "with unmanaged save": ["runs", "test/rap-r7.mjs, ZCL_OSD_RAP_R7_TEST: no managed write, save_modified writes; read from the mapping table"],
   "etag master": ["runs", "test/rap-r4.mjs: ETag, 428, 412 over V2 and V4"],
   "etag dependent": ["ignored", "checked against the parent association (R5), not served: the child type gets no ETag"],

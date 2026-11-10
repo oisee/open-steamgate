@@ -248,8 +248,22 @@ function lowerMappingEntity(source, filename, bindings) {
   return source;
 }
 
+// R7: the clean-room saver declares save_modified for abaplint's static
+// check only; in the build each pool declares its own, typed by its BDEF, so
+// the base's lines between the LINT-ONLY markers are blanked (rows kept)
+function lowerLintOnly(source, filename) {
+  if (!/^cl_abap_behavior_saver\.clas\.abap$/i.test(filename.split(/[\\/]/).pop())) return source;
+  let blank = false;
+  return source.split("\n").map(line => {
+    if (/^\* LINT-ONLY begin/.test(line)) { blank = true; return ""; }
+    if (/^\* LINT-ONLY end/.test(line)) { blank = false; return ""; }
+    return blank ? "" : line;
+  }).join("\n");
+}
+
 export function lowerDerived(source, filename, bindings) {
   if (!filename.endsWith(".abap")) return source;
+  source = lowerLintOnly(source, filename);
   source = lowerSaver(source, filename, bindings);
   source = lowerMappingEntity(source, filename, bindings);
   if (!/\bFOR\b/i.test(source)) return source;

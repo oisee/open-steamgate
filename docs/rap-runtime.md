@@ -1010,14 +1010,68 @@ Nothing new on the wire: a create, update, delete or action of an entity
 with an additional or unmanaged save is answered as before, after the
 save. What changes is what the save writes.
 
+### Built and proven
+
+On the tour demo of [`src/rap_r7`](../src/rap_r7/README.md) (`ZI_RAP_TOUR`
+with its stops, two pools, served as `ZUI_RAP_TOUR` with the log as a
+read-only set; `test/rap-r7.mjs`, `ZCL_OSD_RAP_R7_TEST`) and on the flight
+travel itself ([rap-flight-pack.md](rap-flight-pack.md), "R7";
+`test/rap-flight-travel.mjs`, `ZCL_OSD_RAPFLIGHT_R7_TEST`).
+
+What the flight needed beyond the three constructs, each small:
+
+- a namespaced BDEF keeps its name (`#dmo#i_travel_m` is `/DMO/I_TRAVEL_M`
+  for the registry, the bindings and EML); `bdef\\entity` (two
+  backslashes, as the pools write it) resolves like `bdef\entity`;
+- the table and CDS classes of a namespaced name use the shared
+  `classNameOf` (`ZCL_STG_TAB_DMO_TRAVEL_M`), in the runtime model and in
+  the service YAML;
+- `%path` in a child's FAILED / REPORTED rows (each ancestor's keys, by
+  alias), and `cl_abap_behv=>flag_changed` / `flag_unchanged`;
+- over V4 a namespaced service comes escaped (`%2FDMO%2FUI_X`) and so does
+  its qualified operation (`%2FDMO%2FUI_X.acceptTravel`), as over V2.
+
+### The measurement: the flight BDEFs before and after
+
+`node tools/rap-flight/constructs.mjs`, first wall per behavior definition:
+
+| BDEF | after R6 | after R7 |
+| --- | --- | --- |
+| `/DMO/I_TRAVEL_M` | `with additional save` (then several pools, `with unmanaged save`) | **accepted**, and served end to end (V2, V4) |
+| `/DMO/C_TRAVEL_PROCESSOR_M`, `/DMO/C_TRAVEL_APPROVER_M` | the base's `with additional save` | **accepted**, served |
+| `/DMO/I_SUPPLEMENT`, `/DMO/C_SUPPLEMENT` | draft (`association { with draft; }`) | unchanged |
+| `/DMO/R_AGENCYTP`, `/DMO/C_AGENCYTP` | draft (`draft action Resume`) | unchanged |
+| `/DMO/I_CARRIERSLOCKSINGLETON_S`, `/DMO/C_CARRIERSLOCKSINGLETON_S` | unparsed singleton grammar | unchanged |
+| `/DMO/I_AGENCYTP` | interface | unchanged |
+
+Constructs whose verdict changed: `with additional save` (1 BDEF),
+`with unmanaged save` (2), `several pools` (1), `saver save_modified` (2):
+refused -> runs. `saver adjust_numbers` stays refused (late numbering,
+`/DMO/R_AGENCYTP`).
+
+### Unmeasured
+
+Nothing of R7 was checked on a system. In particular: whether a system
+passes the entities without an additional or unmanaged save in
+`save_modified`'s request (here their components stay empty); which
+savers it calls when several pools have one, and in which order (here
+every pool's, the header's first); what a create row's `%control` carries
+for keys drawn by early numbering (here on); that `and cleanup` makes a
+managed BO call `cleanup` (here it is always called); the order of the
+managed write and `save_modified` within the save (here the managed write
+first, as the documentation describes); the flight overlay's two
+stand-ins (the travel number after the highest saved one; nothing added
+for an amount in another currency).
+
 ### What R7 does not do
 
 `adjust_numbers` with MAPPED LATE (late numbering), FAILED from a saver
 phase (the phases still take no FAILED; ANORMALIES "RAP saver phases"),
 an unmanaged *BO* (`unmanaged implementation in class`, the `FOR MODIFY`
 of every operation, `FOR READ`), `with unmanaged save` without a mapping
-table, reading an entity through its CDS view in the buffer's place, and
-draft.
+table, reading an entity through its CDS view in the buffer's place,
+secondary keys `id` / `entity` on the other derived tables, V2 `$metadata`
+of a namespaced service (ANORMALIES), and draft.
 
 ## Not in R2
 

@@ -57,8 +57,22 @@ no derived upstream content.
 
 `zosd_rapflight.stg.yaml` serves the CDS interface views the generator takes
 as read-only entity sets (`/sap/opu/odata/sap/ZOSD_RAPFLIGHT_SRV`), so the
-seeded data can be read over the wire. No behavior runs: the business
-objects are what the RAP runtime cannot take yet (see the document).
+seeded data can be read over the wire.
+
+Since RAP R7 the managed travel business object runs (docs/rap-flight-pack.md,
+"R7"): its BDEFs are fetched, and the overlay carries
+
+- the three behavior pools `/dmo/bp_travel_m`, `/dmo/bp_booking_m` and
+  `/dmo/bp_bookingsupplement_m`, whole, their `locals_imp` changed where this
+  runtime differs (every change marked `OSD overlay`, listed in the document);
+- the two service definitions `/DMO/UI_TRAVEL_PROCESSOR_M` and
+  `/DMO/UI_TRAVEL_APPROVER_M` without their value helps;
+- in the seed class, the currencies the generated data uses, written into
+  the `I_CURRENCY` stand-in the travel's validations read;
+- `zcl_osd_rapflight_r7_test`, ABAP Unit over the travel's saver.
+
+The other business objects are what the RAP runtime cannot take yet (draft,
+the singleton grammar; see the document).
 
 Licence: upstream's files are Apache-2.0 (the repository's `LICENSES/` and
 `REUSE.toml`), and so are the copies in `src/` -- [LICENSE](LICENSE) says

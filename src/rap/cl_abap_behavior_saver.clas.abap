@@ -9,10 +9,13 @@ CLASS cl_abap_behavior_saver DEFINITION PUBLIC INHERITING FROM cl_abap_behv CREA
 *   (cleanup_finalize instead of the rest when finalize or
 *   check_before_save failed)
 *
-* R7: save_modified (with additional / unmanaged save) is not declared here:
-* its parameters are typed by the BDEF, so tools/rap/lower-derived.mjs turns
-* a pool's `METHODS save_modified REDEFINITION.` into a declaration of its
-* own and the generated adapter calls it (docs/rap-runtime.md, R7).
+* R7: save_modified (with additional / unmanaged save) has parameters typed
+* by the BDEF. It is declared below for abaplint's static check, which voids
+* them as it voids every parameter here; the build blanks that declaration
+* (the lines between the LINT-ONLY markers, tools/rap/lower-derived.mjs) and
+* turns a pool's `METHODS save_modified REDEFINITION.` into a typed
+* declaration of its own, which the generated adapter calls by name
+* (docs/rap-runtime.md, R7).
 *
 * On a system these phases have implicit FAILED / REPORTED (LATE)
 * parameters. abaplint voids every parameter of this class's methods (its
@@ -28,6 +31,16 @@ CLASS cl_abap_behavior_saver DEFINITION PUBLIC INHERITING FROM cl_abap_behv CREA
     METHODS adjust_numbers.
 
     METHODS save.
+
+* LINT-ONLY begin
+    METHODS save_modified
+      IMPORTING
+        create   TYPE any
+        update   TYPE any
+        delete   TYPE any
+      CHANGING
+        reported TYPE any.
+* LINT-ONLY end
 
     METHODS cleanup.
 
@@ -51,6 +64,12 @@ CLASS cl_abap_behavior_saver IMPLEMENTATION.
   METHOD save.
     RETURN.
   ENDMETHOD.
+
+* LINT-ONLY begin
+  METHOD save_modified.
+    RETURN.
+  ENDMETHOD.
+* LINT-ONLY end
 
   METHOD cleanup.
     RETURN.

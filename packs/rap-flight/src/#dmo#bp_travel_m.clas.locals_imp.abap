@@ -1,5 +1,6 @@
 * OSD overlay of the travel pool of the managed scenario (upstream
-* managed/#dmo#bp_travel_m.clas.locals_imp.abap, Apache-2.0): the same
+* managed/#dmo#bp_travel_m.clas.locals_imp.abap at commit 5353cbeb,
+* Apache-2.0): the same
 * handlers and saver, changed where this runtime differs. Each change is
 * marked "OSD overlay"; docs/rap-flight-pack.md lists them. The recurring ones:
 * - the test classes are not fetched, so the DEFINITION DEFERRED FOR TESTING
