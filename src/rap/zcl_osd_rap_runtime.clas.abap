@@ -3419,8 +3419,12 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
 * the draft that holds it still exists, and every mandatory field)
     IF lv_active > 0.
       mv_activating = abap_true.
-      lock( EXPORTING is_entity = is_entity iv_index = lv_active is_input = is_key
-            IMPORTING ev_ok = lv_ok CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
+      TRY.
+          lock( EXPORTING is_entity = is_entity iv_index = lv_active is_input = is_key
+                IMPORTING ev_ok = lv_ok CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
+        CLEANUP.
+          mv_activating = abap_false.
+      ENDTRY.
       mv_activating = abap_false.
       IF lv_ok = abap_false.
         RETURN.
@@ -3447,10 +3451,6 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
       ASSIGN ls_copy-row->* TO <ls_copy>.
       lv_index = activate_one( EXPORTING is_entity = ls_node is_draft = <ls_copy>
                                CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
-      IF lv_index = 0.
-* a mandatory field the draft left empty: FAILED, and nothing is saved
-        RETURN.
-      ENDIF.
       READ TABLE mt_inst INDEX lv_index INTO ls_inst.
       APPEND |{ ls_copy-entity }\|{ ls_inst-key }| TO lt_keep.
       IF lv_count = 1.

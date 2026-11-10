@@ -426,7 +426,11 @@ CLASS zcl_osd_v4_query IMPLEMENTATION.
             mo_context->mv_draft_latest = abap_true.
             REPLACE ALL OCCURRENCES OF |({ gc_draft_latest })| IN ls_opt-value WITH ``.
             CONDENSE ls_opt-value.
-            IF strlen( ls_opt-value ) >= 4 AND substring( val = ls_opt-value len = 4 ) = `and `.
+* X and (L) and Y leaves X and and Y: one AND of the two goes with it
+            FIND ` and and ` IN ls_opt-value.
+            IF sy-subrc = 0.
+              REPLACE FIRST OCCURRENCE OF ` and and ` IN ls_opt-value WITH ` and `.
+            ELSEIF strlen( ls_opt-value ) >= 4 AND substring( val = ls_opt-value len = 4 ) = `and `.
               ls_opt-value = substring( val = ls_opt-value off = 4 ).
             ELSEIF strlen( ls_opt-value ) >= 4 AND substring( val = ls_opt-value off = strlen( ls_opt-value ) - 4 ) = ` and`.
               ls_opt-value = substring( val = ls_opt-value len = strlen( ls_opt-value ) - 4 ).

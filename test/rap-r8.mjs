@@ -235,6 +235,12 @@ describe("RAP R8 draft over OData V4", function () {
       assert.equal(res.status, 501, `${filter}: ${JSON.stringify(res.body)}`);
     }
     assert.equal((await get(`${v4}/Trip?$filter=${encodeURIComponent(`description ne 'x' and (${latest})`)}`)).status, 200);
+    // in the middle of two others: the AND on one side of it goes with it
+    const id = await newDraft("Middle W2");
+    const res = await get(`${v4}/Trip?$filter=${encodeURIComponent(`description ne 'x' and (${latest}) and description eq 'Middle W2'`)}`);
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.deepEqual(res.body.value.map(t => [t.trip_uuid, t.IsActiveEntity]), [[id, false]]);
+    assert.equal((await call(`${v4}/Trip${key(id, false)}`, {method: "DELETE", headers: {...write, "if-match": "*"}})).status, 204);
   });
 
   it("edits, changes the draft and activates: the active instance takes the change", async () => {

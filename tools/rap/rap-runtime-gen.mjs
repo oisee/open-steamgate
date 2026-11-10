@@ -183,7 +183,8 @@ CLASS ${name} IMPLEMENTATION.
     SELECT * FROM ${draft.toLowerCase()} INTO TABLE lt_draft WHERE (lv_where).
 * HasDraftEntity of an active row does not depend on whether its draft
 * matches the condition: every draft is asked (its key), not the matching ones
-    SELECT * FROM ${draft.toLowerCase()} INTO TABLE lt_known.
+    SELECT ${e.fields.filter(f => f.key).map(f => f.name.toLowerCase()).join(" ")} draftadministrativedatauuid
+      FROM ${draft.toLowerCase()} INTO CORRESPONDING FIELDS OF TABLE lt_known.
 ${keys}    CREATE DATA rr_data TYPE tt_row.
     GET REFERENCE OF lt_active INTO lr_active.
     GET REFERENCE OF lt_draft INTO lr_draft.
