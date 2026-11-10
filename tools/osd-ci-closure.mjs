@@ -34,16 +34,22 @@ function insideRoot(root) {
 export async function ciClosure(root, hash, {requireXref = false} = {}) {
   insideRoot(root);
   const files = {};
-  let inputs = {};
+  let inputs;
   try { inputs = JSON.parse(readFileSync(join(root, "build/by-input", hash, "source-inputs.json"), "utf8")); }
-  catch { /* no source record: nothing shared is reachable */ }
+  catch { fail("live's source-inputs.json is missing or malformed", "CLOSURE_INCOMPLETE"); }
+  if (inputs === null || typeof inputs !== "object" || Array.isArray(inputs))
+    fail("live's source-inputs.json is malformed", "CLOSURE_INCOMPLETE");
   for (const [key, digest] of Object.entries(inputs ?? {}).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) {
     if (typeof digest !== "string" || !/^[0-9a-f]{64}$/.test(digest)) fail(`invalid source digest in live's source-inputs.json: ${digest}`);
     const path = `build/source-by-digest/${digest}`;
     if (Object.hasOwn(files, path)) continue;
     if (!existsSync(join(root, path))) {
       // live's own snapshot under source/ travels with the generation
-      if (existsSync(join(root, "build/by-input", hash, "source", sourceSnapshotPath(key)))) continue;
+      const snapshot = join(root, "build/by-input", hash, "source", sourceSnapshotPath(key));
+      if (existsSync(snapshot)) {
+        if (sha(snapshot) !== digest) fail(`live's snapshot for ${key} differs from its digest`, "CLOSURE_INCOMPLETE");
+        continue;
+      }
       fail(`${key} (${digest}) is in neither build/source-by-digest nor live's snapshot: the fast path would lose it`, "CLOSURE_INCOMPLETE");
     }
     if (sha(join(root, path)) !== digest) fail(`${path} does not hold the bytes it is named by`);

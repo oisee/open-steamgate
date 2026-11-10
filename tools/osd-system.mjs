@@ -1,6 +1,6 @@
 import {layerEnvironment} from './osd-layer-env.mjs';
 // One installed index supplies the complete source closure. No Git or network here.
-import {existsSync, readFileSync, readdirSync} from "node:fs";
+import {existsSync, readFileSync, readdirSync, realpathSync, statSync} from "node:fs";
 import {dirname, isAbsolute, join, relative, resolve} from "node:path";
 import {repositoryConfig, sourceFolder} from "./osd-abapgit-config.mjs";
 
@@ -89,32 +89,66 @@ export function generationSystem(root, inputs = {}) {
   const folders = [...(inputs.folders ?? []), ...(inputs.libs ?? []), ...(inputs.bspFolders ?? []),
     ...(inputs.packFolders ?? []), ...(inputs.packFiles ?? []), ...(inputs.sourceLayers ?? []).map(layer => layer.path)];
   const seen = new Set();
-  const inspect = (path, kind) => {
+  const inspect = (path, kind, onlySensitive = false) => {
     const dir = resolve(root, path);
     if (seen.has(dir) || !existsSync(dir)) return;
     seen.add(dir);
-    let identity, privacy = false;
+    let privacy = false;
     for (let parent = dir; ; parent = dirname(parent)) {
       for (const file of [".osd-source.json", LAYER_ID]) {
         const at = join(parent, file);
         if (existsSync(at)) {
+          let identity;
           try { identity = JSON.parse(readFileSync(at, "utf8")); } catch { fail(`invalid input identity: ${at}`); }
           // A layer identity without the key is public (the old format). A
           // fetched identity without a boolean is unknown: one fetched before
           // the field existed, or a foreign OCI zip with an empty config
           // (null). Development hashes and builds it; publishing refuses it.
-          privacy = file === LAYER_ID ? identity.private === true
+          const value = file === LAYER_ID ? identity.private === true
             : typeof identity.private === "boolean" ? identity.private : null;
-          break;
+          if (value === true) privacy = true;
+          else if (value === null && privacy === false) privacy = null;
         }
       }
-      if (identity || parent === root || dirname(parent) === parent) break;
+      if (parent === root || dirname(parent) === parent) break;
     }
     const logical = relative(root, dir);
-    provenance.push({kind, path: logical === ".." || logical.startsWith("../") ? `external/${dir.split(/[\\/]/).at(-1)}` : logical,
+    if (!onlySensitive || privacy !== false) provenance.push({kind, path: logical === ".." || logical.startsWith("../") ? `external/${dir.split(/[\\/]/).at(-1)}` : logical,
       private: privacy});
   };
   folders.forEach(path => inspect(path, "source"));
+  // A lexical input root is not the complete source closure: the build follows
+  // directory and file links, and identity files below a root are skipped as
+  // source bytes. Both still govern the privacy of the bytes it consumes.
+  const visited = new Set();
+  const scan = (path, mode) => {
+    let real, type;
+    try { real = realpathSync(path); type = statSync(path); } catch { return; }
+    if (type.isDirectory()) {
+      if (visited.has(`${mode}:${real}`)) return;
+      visited.add(`${mode}:${real}`);
+      for (const entry of readdirSync(path, {withFileTypes: true})) {
+        if (entry.name === ".git" || entry.name === "node_modules") continue;
+        scan(join(path, entry.name), mode);
+      }
+    } else if (type.isFile()) {
+      const identity = [".osd-source.json", LAYER_ID].includes(path.split(/[\\/]/).at(-1))
+        || [".osd-source.json", LAYER_ID].includes(real.split(/[\\/]/).at(-1));
+      if (!identity && mode === "abap" && /\.(mjs|cjs|js|ts|py|md|txt|log|lock|snap|trace\.meta\.json)$/i.test(path)) return;
+      if (!identity && mode !== "abap" && /\.trace\.meta\.json$/i.test(path)) return;
+      // Inspect the real ancestry, including a private identity next to a
+      // symlink target. A source identity itself also counts when found.
+      inspect(real, "source-real", true);
+      if ([".osd-source.json", LAYER_ID].includes(real.split(/[\\/]/).at(-1))) inspect(dirname(real), "source-identity", true);
+      if ([".osd-source.json", LAYER_ID].includes(path.split(/[\\/]/).at(-1))) inspect(dirname(path), "source-identity", true);
+    }
+  };
+  for (const folder of [...(inputs.folders ?? []), ...(inputs.libs ?? [])]) {
+    if (relative(root, resolve(root, folder)) !== "gen") scan(folder, "abap");
+  }
+  for (const folder of [...(inputs.bspFolders ?? []), ...(inputs.packFolders ?? [])]) scan(folder, "other");
+  for (const file of inputs.packFiles ?? []) scan(file, "other");
+  for (const layer of inputs.sourceLayers ?? []) scan(resolve(root, layer.path), "other");
   const packDirs = new Set([...(inputs.packFiles ?? []).map(file => dirname(resolve(root, file)))]);
   for (const pack of (existsSync(join(root, "packs")) ? readdirSync(join(root, "packs"), {withFileTypes: true}) : []).filter(entry => entry.isDirectory()))
     packDirs.add(join(root, "packs", pack.name));

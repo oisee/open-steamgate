@@ -1,5 +1,5 @@
 // Archive the output of this run for the suite and browser jobs.
-import {readFileSync, readdirSync, existsSync, readlinkSync, mkdirSync, writeFileSync, mkdtempSync, rmSync} from "node:fs";
+import {readFileSync, readdirSync, existsSync, readlinkSync, realpathSync, lstatSync, mkdirSync, writeFileSync, mkdtempSync, rmSync} from "node:fs";
 import {spawnSync} from "node:child_process";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
@@ -31,6 +31,9 @@ if (!archive) {
 const provenance = publicProvenance(process.cwd());
 const live = readlinkSync("build/live");
 if (!/^by-input\/[0-9a-f]{16}$/.test(live) || live !== `by-input/${provenance.generation}`) throw new Error("invalid live generation link");
+if (!lstatSync("output").isSymbolicLink() || readlinkSync("output") !== "build/live/output"
+    || realpathSync("output") !== realpathSync(`build/${live}/output`))
+  throw new Error("output must link to the verified live generation");
 const generation = JSON.parse(readFileSync(`build/${live}/manifest.json`, "utf8"));
 const {genHash} = await import("./osd-build.mjs");
 if (typeof generation.gen !== "string" || generation.gen !== genHash(process.cwd()))

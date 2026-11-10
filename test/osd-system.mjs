@@ -191,6 +191,29 @@ describe("osd-system: one digest supplies the system", function () {
       expect(generationSystem(scratch, inputs).provenance.every(input => input.private === false)).to.equal(true);
     });
 
+    it("counts private identities reached through directory links, file links and nested source trees", () => {
+      const privateTree = join(scratch, "private-tree");
+      json(join(privateTree, ".osd-source.json"), {private: true});
+      write(join(privateTree, "src/zsynthetic.prog.abap"), "REPORT zsynthetic.\n");
+      const cases = [
+        () => symlinkSync(join(privateTree, "src"), join(scratch, "src"), "dir"),
+        () => { write(join(scratch, "src/.keep"), ""); symlinkSync(join(privateTree, "src/zsynthetic.prog.abap"), join(scratch, "src/zsynthetic.prog.abap")); },
+        () => { write(join(scratch, "src/vendor/zsynthetic.prog.abap"), "REPORT zsynthetic.\n"); json(join(scratch, "src/vendor/.osd-source.json"), {private: true}); },
+      ];
+      for (const setup of cases) {
+        rmSync(join(scratch, "src"), {recursive: true, force: true});
+        setup();
+        const inputs = {folders: [join(scratch, "src")]};
+        expect(generationSystem(scratch, inputs).systemPrivate).to.equal(true);
+        live([]); // simulate the old lexical record that labelled the generation public
+        expect(() => publicProvenance(scratch)).to.throw().with.property("code", "PRIVATE_LAYER");
+        const packed = spawnSync(process.execPath, [new URL("../tools/osd-ci-artifact.mjs", import.meta.url).pathname, "pack", join(scratch, "synthetic.tar")],
+          {cwd: scratch, encoding: "utf8"});
+        expect(packed.status).not.to.equal(0);
+        expect(packed.stderr, packed.stderr).to.include("PRIVATE_LAYER");
+      }
+    });
+
     // P3-5: a record with systemPrivate and no provenance is built again
     it("treats a generation recorded without provenance as unrecorded", () => {
       const dir = join(scratch, "build/by-input/0123456789abcdef");

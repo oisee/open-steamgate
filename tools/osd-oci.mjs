@@ -48,6 +48,9 @@ export function treeDigest(files) {
 
 /** host/repository[:tag][@sha256:hex] as its parts; the host is required */
 export function parseRef(ref) {
+  if (/^[^/]+\/[A-Z]/.test(ref) || /^[^/]+\/[^:@]*[A-Z]/.test(ref))
+    throw new OciError("BAD_REF", `${ref}: repository path must be lowercase`);
+  ref = ref.replace(/^([^/]+)\//, (_, host) => `${host.toLowerCase()}/`);
   const m = /^([a-z0-9.-]+(?::\d+)?)\/([a-z0-9._\/-]+?)(?::([\w][\w.-]{0,127}))?(?:@(sha256:[0-9a-f]{64}))?$/.exec(ref);
   // a host is told from a path by a dot, a port or the name localhost, as docker does
   if (!m || !/[.:]|^localhost$/.test(m[1]) || (!m[3] && !m[4]) || m[2].split("/").some((p) => p === "." || p === "..")) throw new OciError("BAD_REF", `${ref}: expected host/repository@sha256:<64 hex> (or :tag to resolve)`);
@@ -126,7 +129,7 @@ const normalizedRegistry = value => {
 
 /** Refuse public hosts regardless of the private registry allow-list. */
 export function assertPrivateTarget(ref, layers, env = readEnvironment(["OSD_PRIVATE_REGISTRIES"])) {
-  const registry = parseRef(ref.replace(/^([^/]+)\//, (_, host) => `${host.toLowerCase()}/`)).registry;
+  const registry = parseRef(ref).registry;
   const layer = layers.find(item => item.config?.private === true);
   if (!layer) return;
   const target = normalizedRegistry(registry);

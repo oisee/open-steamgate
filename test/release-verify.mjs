@@ -12,6 +12,8 @@ import {checkBinary, checkReleaseBinary, executableOf} from "../scripts/release-
 import {verifyPublicArtefact, writeArtefactProvenance} from "../tools/osd-provenance.mjs";
 import {hashOf, inputsOf} from "../tools/osd-build.mjs";
 import {stageVscodeWeb} from "../scripts/stage-vscode-web.mjs";
+import {assertExtensionSources} from "../tools/osd-extension-sources.mjs";
+import {verifiedWebBundle} from "../scripts/build-vsix.mjs";
 
 const elf = (machine) => {
   const b = Buffer.alloc(64);
@@ -148,6 +150,7 @@ describe("scripts/release-verify: an artefact by its content", () => {
     writeFileSync(join(extension, "package.json"), JSON.stringify({name: "synthetic", version: "1.0.0", main: "desktop.js", browser: "dist/web/extension.js"}));
     const publicSource = {generation: "synthetic-public-web", systemDigest: null, systemPrivate: false, inputs: []};
     writeArtefactProvenance(join(extension, "dist/web"), publicSource);
+    writeArtefactProvenance(extension, publicSource);
     const preview = join(dir, "public-preview");
     mkdirSync(preview);
     writeFileSync(join(preview, "index.html"), "synthetic preview");
@@ -156,6 +159,43 @@ describe("scripts/release-verify: an artefact by its content", () => {
     await stageVscodeWeb(extension, out);
     expect(verifyPublicArtefact(out).generation).to.equal("synthetic-public-web");
     expect(verifyPublicArtefact(preview).files).to.have.property("vscode-web/dist/web/extension.js");
+  });
+
+  it("refuses changed static web extension files outside the verified bundle", async () => {
+    const extension = join(dir, "tampered-extension");
+    for (const part of ["dist/web", "resources", "walkthrough", "media"]) mkdirSync(join(extension, part), {recursive: true});
+    for (const file of ["README.md", "CHANGELOG.md"]) writeFileSync(join(extension, file), "synthetic\n");
+    writeFileSync(join(extension, "package.json"), JSON.stringify({name: "synthetic", version: "1.0.0"}));
+    writeFileSync(join(extension, "dist/web/extension.js"), "synthetic bundle");
+    const source = {generation: "synthetic", systemDigest: null, systemPrivate: false, inputs: []};
+    writeArtefactProvenance(join(extension, "dist/web"), source);
+    writeArtefactProvenance(extension, source);
+    writeFileSync(join(extension, "media/private.txt"), "synthetic private marker");
+    let error;
+    try { await stageVscodeWeb(extension, join(dir, "tampered-stage")); } catch (caught) { error = caught; }
+    expect(error?.code).to.equal("BAD_PROVENANCE");
+  });
+
+  it("accepts only Git tracked static VSIX files when no directory record exists", () => {
+    const extension = join(dir, "tracked-extension");
+    mkdirSync(extension);
+    writeFileSync(join(extension, "package.json"), "{}");
+    execFileSync("git", ["init", "-q", extension]);
+    execFileSync("git", ["-C", extension, "add", "package.json"]);
+    expect(() => assertExtensionSources(extension, ["package.json"])).not.to.throw();
+    writeFileSync(join(extension, "private.txt"), "synthetic private marker");
+    expect(() => assertExtensionSources(extension, ["private.txt"])).to.throw().with.property("code", "BAD_PROVENANCE");
+  });
+
+  it("refuses a prebuilt VSIX web bundle whose bytes lack verified public provenance", () => {
+    const extension = join(dir, "vsix-web-bundle");
+    mkdirSync(join(extension, "dist/web"), {recursive: true});
+    writeFileSync(join(extension, "dist/web/extension.js"), "synthetic bundle");
+    expect(() => verifiedWebBundle(extension)).to.throw().with.property("code", "BAD_PROVENANCE");
+    writeArtefactProvenance(join(extension, "dist/web"), {generation: "synthetic", systemDigest: null, systemPrivate: false, inputs: []});
+    expect(() => verifiedWebBundle(extension)).not.to.throw();
+    writeFileSync(join(extension, "dist/web/extension.js"), "changed synthetic bundle");
+    expect(() => verifiedWebBundle(extension)).to.throw().with.property("code", "BAD_PROVENANCE");
   });
 
   // FIX5: the shared caches travel when the public live generation reaches
@@ -252,6 +292,19 @@ describe("scripts/release-verify: an artefact by its content", () => {
     expect(made.status, made.stderr).to.equal(0);
     const key = await cacheKey(derived.root, {hash: derived.hash});
     expect(execFileSync("tar", ["-tf", made.archive], {encoding: "utf8"})).to.include(`build/xref/${key}.json`);
+    rmSync(join(derived.root, "output"));
+    mkdirSync(join(derived.root, "output"));
+    writeFileSync(join(derived.root, "output/old-private.mjs"), "synthetic private marker");
+    expect(pack(derived.root).status).not.to.equal(0);
+    rmSync(join(derived.root, "output"), {recursive: true});
+    symlinkSync("build/live/output", join(derived.root, "output"));
+    const record = join(derived.root, "build/live/source-inputs.json");
+    const saved = readFileSync(record);
+    rmSync(record);
+    expect(pack(derived.root).status).to.equal(3);
+    writeFileSync(record, "{");
+    expect(pack(derived.root).status).to.equal(3);
+    writeFileSync(record, saved);
     // they cannot be derived: exit 3, nothing stamped
     const underived = tree("fast-underived", {config: false});
     const refused = pack(underived.root);
@@ -267,6 +320,8 @@ describe("scripts/release-verify: an artefact by its content", () => {
     mkdirSync(join(lost.root, "build/live/source/src"), {recursive: true});
     writeFileSync(join(lost.root, "build/live/source/src/zfast.prog.abap"), source);
     expect(pack(lost.root).status).to.equal(0);
+    writeFileSync(join(lost.root, "build/live/source/src/zfast.prog.abap"), "wrong synthetic bytes");
+    expect(pack(lost.root).status).to.equal(3);
     // a shared store linked out of the tree
     const linked = tree("fast-linked");
     const outside = join(dir, "fast-outside-store");

@@ -83,6 +83,8 @@ import {packagedVersion, writeVersionMarker} from "../tools/layer-version/index.
 import {readLock} from "../tools/osd-lock.mjs";
 import {writeThirdPartyNotices} from "./third-party-notices.mjs";
 import {forPublishing, generationTmpProblem} from "../tools/osd-tmp.mjs";
+import {assertExtensionSources} from "../tools/osd-extension-sources.mjs";
+import {verifyPublicArtefact} from "../tools/osd-provenance.mjs";
 import {assertPublicSystem} from "../tools/osd-system.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -701,19 +703,31 @@ export function stageKernelScanner(seedRoot, extensionDir) {
 function webEntry(profile) {
   if (profile !== "marketplace") return true;
   if (process.env.OSD_VSIX_WEB !== "1") return false;
-  const bundle = join(EXT_DIR, "dist", "web", "extension.js");
-  if (!existsSync(bundle)) throw new Error(`build-vsix: OSD_VSIX_WEB=1 but ${bundle} is missing; run npm run web:vscode first`);
+  verifiedWebBundle(EXT_DIR);
   return true;
+}
+
+export function verifiedWebBundle(extension) {
+  const bundle = join(extension, "dist", "web", "extension.js");
+  if (!existsSync(bundle)) throw new Error(`build-vsix: OSD_VSIX_WEB=1 but ${bundle} is missing; run npm run web:vscode first`);
+  return verifyPublicArtefact(join(extension, "dist", "web"));
 }
 
 function copyExtensionFiles(extensionDir, profile) {
   mkdirSync(extensionDir, {recursive: true});
+  const staticParts = readdirSync(EXT_DIR).filter(name => name !== "osd" && name !== "dist" && name !== ".osd-provenance.json");
+  assertExtensionSources(EXT_DIR, staticParts);
   for (const entry of readdirSync(EXT_DIR, {withFileTypes: true})) {
     if (entry.name === "osd") continue; // never present here; guards a stray dev copy
+    if (entry.name === ".osd-provenance.json") continue;
     // The web bundle ships to the Marketplace only when the build asks for
     // it (OSD_VSIX_WEB=1, after a fresh npm run web:vscode): a dist/ left
     // over from a local build must not ride along by accident.
-    if (profile === "marketplace" && entry.name === "dist" && !webEntry(profile)) continue;
+    if (entry.name === "dist") {
+      if (!webEntry(profile)) continue;
+      if (readdirSync(join(EXT_DIR, "dist")).some(name => name !== "web")) throw new Error("build-vsix: unverified dist entry");
+      verifyPublicArtefact(join(EXT_DIR, "dist/web"));
+    }
     copyReal(join(EXT_DIR, entry.name), join(extensionDir, entry.name));
   }
   // LICENSE.txt, as vsce names it: an OPC package gives every part a
