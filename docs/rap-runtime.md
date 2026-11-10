@@ -721,11 +721,17 @@ it does not compile, and the service does not expose it. Here:
   `ZCX_OSD_RAP` (`Action A of e is internal: only the business object's own
   handlers execute it, IN LOCAL MODE`) unless a handler of the same
   runtime is running (`mv_depth > 0`, the R3 rule that makes EML inside a
-  handler local). A handler of another behavior definition is outside: its
-  EML reaches the session's runtime, at depth 0, and is refused. The
+  handler local). A handler of another behavior definition is outside when
+  no handler of this one is running: its EML reaches the session's runtime,
+  at depth 0, and is refused. The
   refusal is an exception, not a FAILED row, because on a system it is a
   syntax error and nothing a caller could correct.
 - **Features** are not asked (IN LOCAL MODE skips them, as R4 already does).
+- **Known limit.** The guard is the runtime's depth, not the caller's
+  identity: while a handler of BO A runs, a handler of BO B that it reached
+  through EML may execute A's internal action (A -> B -> A's internal
+  action), because A's runtime is still active; a system refuses that at
+  compile time.
 - **OData.** `srvd-gen.mjs` exposes no internal action: no V2 function
   import, no V4 bound action, so a call is the service's ordinary 404 for
   an unknown operation. `ZCL_OSD_RAP_SADL->actions( )` does not list it
@@ -756,6 +762,11 @@ grammar is R0's; R6 adds the `( always )` option of a member.
   Determinations first, then validations, each in the order declared --
   the save sequence's order. **That order is this runtime's choice**, not
   read off a system.
+- **Chains wait for the save.** A member determination whose change
+  triggers another determination on save does not run that one now; it
+  runs at the next save, where its triggers are tested again.
+- **Options** (`( features : instance )`, `( authorization : update )`)
+  on a determine action are refused by name: neither is asked.
 - **What it does not consume.** A determination that ran in a determine
   action runs again at the save if its triggers still hold: the action does
   not reset the triggers (determinations are expected to be idempotent, as
@@ -789,7 +800,9 @@ the content ID the new instance is mapped under -- beside `%tky` and
   `execute` pass the statement's MAPPED) and checks the handler's
   contract: an import row whose `%cid` is neither in MAPPED nor in FAILED
   of the entity is failed (`Factory action X of e gave no instance and no
-  failure`), as early numbering does for a key.
+  failure`), as early numbering does for a key. A row without a `%cid` is
+  refused before the handler runs (`Factory action X of e needs a %cid for
+  the new instance`).
 - **OData.** The bridge gives the import row a `%cid` of its own, reads
   the new key from MAPPED, and answers **the new instance** (V2 function
   import, V4 bound action, both 200 as for the other actions; a system's V4
@@ -813,7 +826,11 @@ instance the runtime locks anyway), else the generator refuses it (`lock
 dependent by _x, whose target Y is not the lock master Z`). Nothing in the
 runtime changes: it always locked the root through the parent chain.
 Tested on R5's order with a third level built in the test
-(`test/rap-r6.mjs`, "dependencies on an ancestor").
+(`test/rap-r6.mjs`, "dependencies on an ancestor"). For `etag` and
+`authorization dependent by` the generator only checks that the
+association reaches an ancestor, not that it is the etag or
+authorization master; neither is served yet, and that check belongs with
+serving them.
 
 ### The measurement: the flight BDEFs before and after
 

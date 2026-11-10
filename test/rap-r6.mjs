@@ -102,6 +102,8 @@ describe("RAP R6 actions (generator)", () => {
       [det, "determine action check { validation Other~checkAmount; }", /validation Other~checkAmount of another entity is outside R6/],
       [det, "determine action check { validation ( foo ) checkAmount; }", /options other than always/],
       [det, "draft determine action check { validation checkAmount; }", /draft determine actions are outside R6 \(draft\)/],
+      [det, "determine action ( features : instance ) check { validation checkAmount; }", /determine action options \(features : instance\) are outside R6/],
+      [det, "determine action ( authorization : update ) check { validation checkAmount; }", /determine action options \(authorization : update\) are outside R6/],
       ["factory action copyBill [1];", "static action copyBill;", /static actions are outside R6/],
       ["factory action copyBill [1];", "factory action copyBill [1] result [1] $self;", /a factory action has no result/],
       ["factory action copyBill [1];", "factory action copyBill [0..*];", /cardinality \[1\]/],

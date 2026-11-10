@@ -230,6 +230,7 @@ export function runtimeOutputs(plans, files) {
         // R6: a determine action has no method of its own; the runtime runs
         // its members, determinations on save and validations of the entity
         if (c.kind === "X") {
+          if ((c.options ?? []).length) throw new Error(`${entity.entity}~${c.name}: determine action options are outside R6`);
           model_ += `    CLEAR ls_callable.\n    ls_callable-kind = 'X'.\n    ls_callable-name = ${lit(upper(c.name))}.\n`
             + (c.triggers ?? []).map(t => {
               const name = t.name.includes("~") ? t.name.split("~")[1] : t.name;

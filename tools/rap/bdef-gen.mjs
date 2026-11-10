@@ -174,6 +174,8 @@ function checkAction(entity, action, projection) {
   if (mods.includes("factory") && action.result) throw new Error(`${where}: a factory action has no result (the new instance comes back in MAPPED)`);
   if (mods.includes("factory") && action.cardinality && action.cardinality !== "1") throw new Error(`${where}: a factory action has the cardinality [1]`);
   if (!action.determine || projection) return;
+  // neither feature control nor authorization is asked for a determine action
+  if ((action.options ?? []).length) throw new Error(`${where}: determine action options (${action.options.map(o => o.value ? `${o.name} : ${o.value}` : o.name).join(", ")}) are outside R6`);
   for (const t of action.triggers ?? []) {
     const [owner, name] = t.name.includes("~") ? t.name.split("~") : [undefined, t.name];
     if (owner && ![entity.entity, entity.alias].filter(Boolean).some(n => upper(n) === upper(owner))) throw new Error(`${where}: ${t.kind} ${t.name} of another entity is outside R6`);

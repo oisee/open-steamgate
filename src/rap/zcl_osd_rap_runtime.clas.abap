@@ -1909,6 +1909,15 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
     CREATE DATA lr_keys LIKE it_keys.
     ASSIGN lr_keys->* TO <lt_keys>.
     LOOP AT it_keys ASSIGNING <ls_key>.
+* R6: a factory action maps its new instance under the row's %cid, so a
+* row without one is refused before the handler runs
+      IF ls_callable-factory = abap_true AND text_of( is_row = <ls_key> iv_component = '%CID' ) IS INITIAL.
+        fail( EXPORTING is_entity = ls_entity is_input = <ls_key>
+                        iv_cause = if_abap_behv=>cause-unspecific
+                        iv_text = |Factory action { iv_action } of { ls_entity-alias } needs a %cid for the new instance|
+              CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
+        CONTINUE.
+      ENDIF.
       lv_index = resolve( is_entity = ls_entity is_input = <ls_key> ).
       IF lv_index = 0.
         fail( EXPORTING is_entity = ls_entity is_input = <ls_key>

@@ -88,6 +88,7 @@ CLASS ltcl_actions DEFINITION FOR TESTING DURATION SHORT RISK LEVEL DANGEROUS FI
     METHODS factory_maps_the_copy FOR TESTING RAISING cx_static_check.
     METHODS factory_through_eml FOR TESTING RAISING cx_static_check.
     METHODS factory_without_mapping FOR TESTING RAISING cx_static_check.
+    METHODS factory_needs_a_cid FOR TESTING RAISING cx_static_check.
     METHODS determine_runs_triggered FOR TESTING RAISING cx_static_check.
     METHODS determine_runs_always FOR TESTING RAISING cx_static_check.
 ENDCLASS.
@@ -298,6 +299,33 @@ CLASS ltcl_actions IMPLEMENTATION.
     READ TABLE ls_failed-bill INDEX 1 INTO ls_fail.
     cl_abap_unit_assert=>assert_subrc( exp = 0 ).
     cl_abap_unit_assert=>assert_equals( act = ls_fail-%cid exp = 'LAZY' ).
+  ENDMETHOD.
+
+  METHOD factory_needs_a_cid.
+* a row without %cid is refused up front, by name, and nothing is copied
+    DATA lt_keys     TYPE tt_copy.
+    DATA ls_key      LIKE LINE OF lt_keys.
+    DATA lt_none     TYPE string_table.
+    DATA ls_mapped   TYPE ty_mapped.
+    DATA ls_failed   TYPE ty_failed.
+    DATA ls_reported TYPE ty_reported.
+    DATA ls_msg      LIKE LINE OF ls_reported-bill.
+    DATA lo_msg      TYPE REF TO if_message.
+    DATA lt_trace    TYPE string_table.
+
+    ls_key-bill_id = saved_bill( iv_amount = 3 iv_discount = 1 ).
+    APPEND ls_key TO lt_keys.
+    mo_rap->execute( EXPORTING iv_entity = 'bill' iv_action = 'copyBill' it_keys = lt_keys
+                     CHANGING ct_result = lt_none cs_failed = ls_failed cs_reported = ls_reported
+                              cs_mapped = ls_mapped ).
+    cl_abap_unit_assert=>assert_initial( ls_mapped-bill ).
+    cl_abap_unit_assert=>assert_equals( act = lines( ls_failed-bill ) exp = 1 ).
+    READ TABLE ls_reported-bill INDEX 1 INTO ls_msg.
+    lo_msg ?= ls_msg-%msg.
+    cl_abap_unit_assert=>assert_char_cp( act = lo_msg->get_text( ) exp = '*needs a %cid*' ).
+    lt_trace = mo_rap->trace( ).
+    READ TABLE lt_trace TRANSPORTING NO FIELDS WITH KEY table_line = 'ACTION COPYBILL'.
+    cl_abap_unit_assert=>assert_subrc( exp = 4 ).
   ENDMETHOD.
 
   METHOD determine_runs_triggered.
