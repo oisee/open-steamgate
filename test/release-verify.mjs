@@ -3,9 +3,9 @@
 // refused before a release uploads it. The serve and pages checks run in the
 // release and preview workflows against the real artefacts.
 import {expect} from "chai";
-import {execFileSync} from "node:child_process";
+import {execFileSync, spawnSync} from "node:child_process";
 import {createHash} from "node:crypto";
-import {mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync, unlinkSync} from "node:fs";
+import {existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync, unlinkSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join, resolve} from "node:path";
 import {checkBinary, checkReleaseBinary, executableOf} from "../scripts/release-verify.mjs";
@@ -216,6 +216,70 @@ describe("scripts/release-verify: an artefact by its content", () => {
     writeFileSync(join(consumer, "build/source-by-digest", sha(publicSource)), publicSource);
     writeFileSync(join(consumer, "build/xref/0000000000000000.json"), "{}");
     expect(() => verifyCiClosure(consumer, currentHash)).to.throw(/not in the public closure/);
+  });
+
+  // the fast path's inputs are never silently lost: live's xref rows are
+  // derived when absent and then required (exit 3), so is every live source
+  // in the store or in live's snapshot, and a store reached through a link
+  // out of the tree is refused
+  it("packs live's fast-path inputs or fails with a distinct exit", async () => {
+    const {genHash} = await import("../tools/osd-build.mjs");
+    const {cacheKey} = await import("../tools/osd-xref-seed.mjs");
+    const {verifyCiClosure} = await import("../tools/osd-ci-closure.mjs");
+    const sha = (text) => createHash("sha256").update(text).digest("hex");
+    const source = "REPORT zfast.\n";
+    const tree = (name, {config = true} = {}) => {
+      const root = join(dir, name);
+      for (const path of ["build/source-by-digest", "gen", "packs", ".local/lars", ".local/ci-artifact/transpiler"]) mkdirSync(join(root, path), {recursive: true});
+      writeFileSync(join(root, "abap_transpile.json"), JSON.stringify({input_folder: [], libs: []}));
+      if (config) writeFileSync(join(root, "abaplint.jsonc"), readFileSync(resolve("abaplint.jsonc")));
+      const hash = hashOf(root, inputsOf(root));
+      mkdirSync(join(root, "build/by-input", hash, "output"), {recursive: true});
+      writeFileSync(join(root, "build/by-input", hash, "manifest.json"), JSON.stringify({hash, systemDigest: null, systemPrivate: false, provenance: [], gen: genHash(root)}));
+      writeFileSync(join(root, "build/by-input", hash, "source-inputs.json"), JSON.stringify({"src/zfast.prog.abap": sha(source)}));
+      writeFileSync(join(root, "build/source-by-digest", sha(source)), source);
+      symlinkSync(`by-input/${hash}`, join(root, "build/live"));
+      symlinkSync("build/live/output", join(root, "output"));
+      return {root, hash};
+    };
+    const pack = (root, archive = join(dir, `${root.split("/").at(-1)}.tar`)) =>
+      ({...spawnSync(process.execPath, [resolve("tools/osd-ci-artifact.mjs"), "pack", archive], {cwd: root, encoding: "utf8"}), archive});
+    // no host wrote live's rows: pack derives and carries them
+    const derived = tree("fast-derived");
+    const made = pack(derived.root);
+    expect(made.status, made.stderr).to.equal(0);
+    const key = await cacheKey(derived.root, {hash: derived.hash});
+    expect(execFileSync("tar", ["-tf", made.archive], {encoding: "utf8"})).to.include(`build/xref/${key}.json`);
+    // they cannot be derived: exit 3, nothing stamped
+    const underived = tree("fast-underived", {config: false});
+    const refused = pack(underived.root);
+    expect(refused.status, refused.stderr).to.equal(3);
+    expect(refused.stderr).to.match(/cross-reference rows .* are missing/);
+    expect(existsSync(`${refused.archive}.osd-provenance.json`)).to.equal(false);
+    // a live source in neither the store nor live's snapshot: exit 3; in the snapshot only: carried with live
+    const lost = tree("fast-lost");
+    rmSync(join(lost.root, "build/source-by-digest", sha(source)));
+    const lostPack = pack(lost.root);
+    expect(lostPack.status, lostPack.stderr).to.equal(3);
+    expect(lostPack.stderr).to.match(/src\/zfast\.prog\.abap .* is in neither build\/source-by-digest nor live's snapshot/);
+    mkdirSync(join(lost.root, "build/live/source/src"), {recursive: true});
+    writeFileSync(join(lost.root, "build/live/source/src/zfast.prog.abap"), source);
+    expect(pack(lost.root).status).to.equal(0);
+    // a shared store linked out of the tree
+    const linked = tree("fast-linked");
+    const outside = join(dir, "fast-outside-store");
+    renameSync(join(linked.root, "build/source-by-digest"), outside);
+    symlinkSync(outside, join(linked.root, "build/source-by-digest"));
+    const linkedPack = pack(linked.root);
+    expect(linkedPack.status, linkedPack.stderr).not.to.equal(0);
+    expect(linkedPack.stderr).to.include("build/source-by-digest leaves the tree");
+    const consumer = join(dir, "fast-consumer");
+    mkdirSync(consumer);
+    execFileSync("tar", ["-xf", made.archive, "-C", consumer]);
+    expect(verifyCiClosure(consumer, derived.hash).files).to.have.property(`build/xref/${key}.json`);
+    renameSync(join(consumer, "build/source-by-digest"), join(dir, "fast-consumer-store"));
+    symlinkSync(join(dir, "fast-consumer-store"), join(consumer, "build/source-by-digest"));
+    expect(() => verifyCiClosure(consumer, derived.hash)).to.throw(/build\/source-by-digest leaves the tree/);
   });
 
   it("refuses a binary for another target, a script, and a sidecar that is not its digest", () => {

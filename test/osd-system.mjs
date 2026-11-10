@@ -1,3 +1,4 @@
+import {spawnSync} from "node:child_process";
 import {expect} from "chai";
 import {mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
@@ -91,6 +92,40 @@ describe("osd-system: one digest supplies the system", function () {
       expect(() => assertPublicSystem(scratch)).to.throw(/private input packs\/demo\/upstream/).with.property("code", "PRIVATE_LAYER");
       for (const step of [() => publicProvenance(scratch), () => writePublicArtefact(artefact, scratch), () => verifyTreeArtefact(artefact, scratch)])
         expect(step).to.throw(/private input packs\/demo\/upstream/).with.property("code", "PRIVATE_LAYER");
+    });
+
+    // P1-A: release.yml stamps the OSGo binary through the CLI; it must run,
+    // not hang on an import cycle, and refuse what the functions refuse
+    it("stamps and verifies through the CLI, and refuses a stale or private tree", () => {
+      const cli = (script, ...args) => spawnSync(process.execPath, [new URL(`../tools/${script}`, import.meta.url).pathname, ...args],
+        {cwd: scratch, encoding: "utf8", timeout: 60000});
+      const hash = live();
+      const asset = join(scratch, "osgo-synthetic");
+      write(asset, "synthetic binary");
+      const wrote = cli("osd-public-tree.mjs", "write", asset);
+      expect(wrote.status, wrote.stderr).to.equal(0);
+      expect(JSON.parse(readFileSync(`${asset}.osd-provenance.json`, "utf8")).generation).to.equal(hash);
+      for (const [script, operation] of [["osd-provenance.mjs", "verify"], ["osd-public-tree.mjs", "verify"]]) {
+        const verified = cli(script, operation, asset);
+        expect(verified.status, `${script} ${operation}: ${verified.stderr}`).to.equal(0);
+      }
+      // the byte-only module no longer writes; it says where writing went
+      const old = cli("osd-provenance.mjs", "write", asset);
+      expect(old.status, old.stderr).to.equal(2);
+      expect(old.stderr).to.include("osd-public-tree.mjs write");
+      write(join(scratch, "src/zlate.prog.abap"), "REPORT zlate.\n");
+      for (const operation of ["write", "verify"]) {
+        const stale = cli("osd-public-tree.mjs", operation, asset);
+        expect(stale.status, stale.stderr).to.equal(2);
+        expect(stale.stderr).to.match(/^BAD_PROVENANCE: the working tree/);
+      }
+      rmSync(join(scratch, "src/zlate.prog.abap"));
+      fetched(join(scratch, "packs/demo"), {private: true});
+      for (const operation of ["write", "verify"]) {
+        const secret = cli("osd-public-tree.mjs", operation, asset);
+        expect(secret.status, secret.stderr).to.equal(2);
+        expect(secret.stderr).to.match(/^PRIVATE_LAYER: private input packs\/demo\/upstream/);
+      }
     });
 
     it("recomputes privacy over the current inputs: a private OSD_PACKS folder is refused", () => {

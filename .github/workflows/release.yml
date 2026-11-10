@@ -432,7 +432,7 @@ jobs:
           mkdir -p build/release
           commit="$(git rev-parse HEAD)"
           (cd tools/gogen/go && go build -trimpath -ldflags="-s -w -X main.releaseTag=$RELEASE_TAG -X main.releaseCommit=$commit" -o "../../../build/release/$ASSET" ./cmd/osgo)
-          node tools/osd-provenance.mjs write "build/release/$ASSET"
+          node tools/osd-public-tree.mjs write "build/release/$ASSET"
           for private_path in "$GITHUB_WORKSPACE" "$HOME"; do
             if [[ -n "$private_path" ]] && LC_ALL=C grep -aFq "$private_path" "build/release/$ASSET"; then
               echo "::error::OSGo binary contains a runner path"

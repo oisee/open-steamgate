@@ -86,6 +86,8 @@ describe("tools/osd-build: the layers, refused before a lock is taken", function
     write("packs/test/.osd-fetched.json", marker);
     write("packs/test/upstream/.osd-source.json", JSON.stringify(JSON.parse(marker).upstream));
     for (const path of ["gen", "output", "build", ".local/lars", ".local/ci-artifact/transpiler"]) mkdirSync(join(root, path), {recursive: true});
+    // osd-ci-artifact derives live's cross-reference rows from the tree's own config
+    write("abaplint.jsonc", readFileSync(resolve("abaplint.jsonc")));
     const hash = hashOf(root, inputsOf(root));
     write(`build/by-input/${hash}/manifest.json`, JSON.stringify({hash, systemDigest: null, systemPrivate: false,
       provenance: [{kind: "pack-oci", path: "packs/test/upstream", private: false}], gen: genHash(root)}));
@@ -119,6 +121,7 @@ describe("tools/osd-build: the layers, refused before a lock is taken", function
   // The archive carries only the live generation. Older cache entries stay out.
   it("packs only the live generation beside older private or unrecorded cache entries", () => {
     for (const path of ["gen", "output", "packs", ".local/lars", ".local/ci-artifact/transpiler", "build/by-input/older"]) mkdirSync(join(root, path), {recursive: true});
+    write("abaplint.jsonc", readFileSync(resolve("abaplint.jsonc")));
     const hash = hashOf(root, inputsOf(root));
     write(`build/by-input/${hash}/manifest.json`, JSON.stringify({hash, systemDigest: null, systemPrivate: false, provenance: [], gen: genHash(root)}));
     symlinkSync(`by-input/${hash}`, join(root, "build/live"));

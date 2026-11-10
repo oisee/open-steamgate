@@ -86,7 +86,13 @@ reaches, which is what the swap job's fast path reads: the
 `build/source-by-digest` entries named in live's `source-inputs.json`, and
 live's cross-reference rows `build/xref/<key>.json`. Each is listed with its
 digest in `.local/ci-artifact/closure.json`; `osd-ci-artifact verify` checks
-every listed digest and refuses an unlisted file.
+every listed digest and refuses an unlisted file. `pack` derives live's rows
+when no host wrote them and exits 3 when a fast-path input would still be
+missing; a shared store linked out of the tree is refused.
+
+From a shell, `node tools/osd-public-tree.mjs write|verify <artefact>` stamps or
+verifies against the tree; `node tools/osd-provenance.mjs verify <artefact>`
+checks bytes and record only, with no repository imports.
 
 A layer cannot be built from a build store without `--private`: a folder
 under this checkout's `build/`, under any `build/` holding `by-input` or

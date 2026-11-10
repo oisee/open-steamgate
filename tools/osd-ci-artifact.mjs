@@ -63,7 +63,20 @@ for (const path of paths) {
   }
 }
 // build/source-by-digest and build/xref: what live reaches, listed with digests
-const closure = await ciClosure(process.cwd(), provenance.generation);
+// live's cross-reference rows are the swap job's fast-path input: derived here
+// from the (checked public) tree when no host has written them yet, and then
+// required -- a distinct exit, 3, says the archive would lose that coverage
+const {cacheKey, rows} = await import("./osd-xref-seed.mjs");
+const xrefKey = await cacheKey(process.cwd(), {hash: provenance.generation});
+if (xrefKey !== undefined && !existsSync(`build/xref/${xrefKey}.json`)) {
+  try { await rows(process.cwd()); } catch (error) { console.error(`osd-ci-artifact: cross-reference rows could not be derived: ${error.message}`); }
+}
+let closure;
+try { closure = await ciClosure(process.cwd(), provenance.generation, {requireXref: true}); }
+catch (error) {
+  console.error(`osd-ci-artifact: ${error.message}`);
+  process.exit(error.code === "CLOSURE_INCOMPLETE" ? 3 : 2);
+}
 mkdirSync(".local/ci-artifact", {recursive: true});
 writeFileSync(CLOSURE, `${JSON.stringify(closure, null, 2)}\n`);
 const scratch = mkdtempSync(join(tmpdir(), "osd-ci-closure-"));

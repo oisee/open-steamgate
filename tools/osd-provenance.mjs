@@ -80,12 +80,12 @@ export function verifyPublicArtefact(path) {
 if (process.argv[1] && resolve(process.argv[1]) === import.meta.filename) {
   const [operation, path] = process.argv.slice(2);
   try {
-    if (operation === "write" && path) {
-      const {publicProvenance} = await import("./osd-public-tree.mjs");
-      writeArtefactProvenance(path, publicProvenance(process.cwd()));
-    }
+    // Writing needs the tree check (osd-build), which this module must not
+    // import: the Dockerfile verifies with this file alone, and importing it
+    // from here would be a cycle (osd-public-tree imports this module).
+    if (operation === "write") fail("BAD_PROVENANCE", "write with node tools/osd-public-tree.mjs write <artifact>");
     else if (operation === "verify" && path) verifyPublicArtefact(path);
-    else fail("BAD_PROVENANCE", "usage: osd-provenance.mjs write|verify <artifact>");
+    else fail("BAD_PROVENANCE", "usage: osd-provenance.mjs verify <artifact>");
   } catch (error) {
     console.error(`${error.code ?? "BAD_PROVENANCE"}: ${error.message}`);
     process.exitCode = 2;

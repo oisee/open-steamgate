@@ -349,24 +349,30 @@ describe('OCI release workflow gates', () => {
 const STAMPS = [
   /\bbuild-binary\.mjs\b|\bnpm run binary(?![:\w])/, /\bbuild-sea\.mjs\b|\bnpm run binary:(?:sea|bundle)\b/,
   /\bbuild-vsix\.mjs\b|\bnpm run vsix\b/, /\bbuild-preview\.mjs\b/, /\bmake-release\.mjs\b/,
-  /\bmake-download-bundle\.mjs\b/, /\bosd-ci-artifact\.mjs pack\b/, /\bosd-provenance\.mjs write\b/,
+  /\bmake-download-bundle\.mjs\b/, /\bosd-ci-artifact\.mjs pack\b/, /\bosd-public-tree\.mjs (?:write|verify)\b/,
   /\bcapture-screenshots\.mjs\b/, /\bassemble\.mjs\b/,
 ];
 // what leaves a live generation behind in the job's tree (web:vscode and the
 // image build make their own before they stamp)
 const BUILDS = /\bnpm run (?:transpile|bootstrap|web:preview(?::duckdb)?|web:vscode)\b|\btools\/osd-build\.mjs\b|\bbuild-vscode-web\.mjs\b|\bosd-ci-artifact\.mjs verify\b|\bdocker (?:buildx )?build\b/;
+// A shell command continued with a trailing backslash is one command: every
+// rule below reads commands, not physical lines.
+export const commandsOf = (run) => String(run ?? '').replace(/\\\r?\n[ \t]*/g, ' ').split('\n')
+  .map(text => text.trim()).filter(text => text && !text.startsWith('#'));
 export function stampsWithoutGeneration(name, workflow) {
   const problems = [];
   for (const [jobName, job] of Object.entries(workflow.jobs ?? {})) {
     let built = false;
     for (const [index, step] of (job.steps ?? []).entries()) {
-      for (const line of String(step.run ?? '').split('\n').map(text => text.trim()).filter(text => text && !text.startsWith('#'))) {
+      for (const line of commandsOf(step.run)) {
         const where = `${name} ${jobName} step ${index + 1} (${step.name ?? line})`;
         const unstamped = /\s--unstamped\b/.test(line);
         if (unstamped && (!/\bbuild-binary\.mjs\b|\bnpm run binary(?![:\w])/.test(line) || /\s--seed\b/.test(line) || /\sbun-[a-z0-9-]+/.test(line) || name !== 'tests.yml'))
           problems.push(`${where}: --unstamped outside a test-only checkout binary`);
         if (!built && !unstamped && STAMPS.some(stamp => stamp.test(line)) && !BUILDS.test(line))
           problems.push(`${where}: stamps with no live generation built before it in this job`);
+        // writing moved to osd-public-tree.mjs; osd-provenance.mjs only verifies bytes
+        if (/\bosd-provenance\.mjs write\b/.test(line)) problems.push(`${where}: osd-provenance.mjs write is gone; use osd-public-tree.mjs write`);
         if (BUILDS.test(line)) built = true;
       }
     }
@@ -384,12 +390,12 @@ describe('workflows: a stamping step runs after a live generation exists', () =>
 
   it('builds the pre-transpile test binary unstamped, and every release binary is verified after it is built', () => {
     const build = load(readFileSync(new URL('tests.yml', dir), 'utf8')).jobs.build.steps;
-    const first = build.findIndex(step => /build-binary\.mjs/.test(step.run ?? ''));
-    expect(build[first].run).to.match(/build-binary\.mjs --unstamped /);
-    expect(build.findIndex(step => /npm run transpile/.test(step.run ?? ''))).to.be.greaterThan(first);
+    const first = build.findIndex(step => commandsOf(step.run).some(line => /build-binary\.mjs/.test(line)));
+    expect(commandsOf(build[first].run).join('\n')).to.match(/build-binary\.mjs --unstamped /);
+    expect(build.findIndex(step => commandsOf(step.run).some(line => /npm run transpile/.test(line)))).to.be.greaterThan(first);
     const release = load(readFileSync(new URL('release.yml', dir), 'utf8'));
     for (const [jobName, job] of Object.entries(release.jobs)) {
-      const runs = (job.steps ?? []).map(step => step.run ?? '').join('\n');
+      const runs = (job.steps ?? []).flatMap(step => commandsOf(step.run)).join('\n');
       if (/npm run binary\b/.test(runs)) expect(runs.indexOf('release-verify.mjs binary'), jobName).to.be.greaterThan(runs.indexOf('npm run binary'));
     }
   });
@@ -401,7 +407,14 @@ describe('workflows: a stamping step runs after a live generation exists', () =>
     expect(stampsWithoutGeneration('tests.yml', job('bun scripts/build-binary.mjs --unstamped "$RUNNER_TEMP/osd"'))).to.deep.equal([]);
     expect(stampsWithoutGeneration('preview.yml', job('node scripts/build-preview.mjs', 'npm run web:preview'))).to.have.length(1);
     expect(stampsWithoutGeneration('preview.yml', job('npm run web:preview', 'node scripts/capture-screenshots.mjs'))).to.deep.equal([]);
-    expect(stampsWithoutGeneration('release.yml', job('node tools/osd-provenance.mjs write build/release/x', 'npm run transpile'))).to.have.length(1);
+    expect(stampsWithoutGeneration('release.yml', job('node tools/osd-public-tree.mjs write build/release/x', 'npm run transpile'))).to.have.length(1);
+    expect(stampsWithoutGeneration('release.yml', job('npm run transpile', 'node tools/osd-provenance.mjs write build/release/x'))).to.have.length(1);
+    // a continued command is one command, for every rule
+    expect(stampsWithoutGeneration('release.yml', job('npm run transpile', 'npm run binary -- \\\n  --unstamped build/release/x'))).to.have.length(1);
+    expect(stampsWithoutGeneration('tests.yml', job('bun scripts/build-binary.mjs \\\n  --unstamped "$RUNNER_TEMP/osd"'))).to.deep.equal([]);
+    expect(stampsWithoutGeneration('tests.yml', job('bun scripts/build-binary.mjs --unstamped \\\n  x bun-linux-x64-baseline'))).to.have.length(1);
+    expect(stampsWithoutGeneration('tests.yml', job('node \\\n  scripts/build-preview.mjs', 'npm run transpile'))).to.have.length(1);
+    expect(stampsWithoutGeneration('tests.yml', job('node tools/osd-build.mjs \\\n  --publish', 'node scripts/build-preview.mjs'))).to.deep.equal([]);
     for (const [file, run] of [['release.yml', 'npm run binary -- --unstamped build/release/x'], ['tests.yml', 'npm run binary -- --seed --unstamped x'],
       ['tests.yml', 'bun scripts/build-binary.mjs --unstamped x bun-linux-x64-baseline'], ['tests.yml', 'node scripts/build-vsix.mjs --unstamped']])
       expect(stampsWithoutGeneration(file, job('npm run transpile', run)), run).to.have.length(1);

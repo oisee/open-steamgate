@@ -15,6 +15,7 @@
 // verifies with osd-provenance.mjs alone.
 import {assertPublicSystem, generationSystem, unknownPrivacy} from "./osd-system.mjs";
 import {hashOf, inputsOf} from "./osd-build.mjs";
+import {resolve} from "node:path";
 import {liveGenerationRecord, verifyPublicArtefact, writeArtefactProvenance} from "./osd-provenance.mjs";
 
 const fail = (code, message) => { const error = new Error(message); error.code = code; throw error; };
@@ -61,4 +62,18 @@ export function restampTreeArtefact(path, root, before) {
   if (current.generation !== before.generation || current.systemDigest !== before.systemDigest)
     fail("BAD_PROVENANCE", `the live generation changed from ${before.generation} to ${current.generation} while ${path} was being extended`);
   return writeArtefactProvenance(path, current);
+}
+
+// node tools/osd-public-tree.mjs write|verify <artefact>, from the tree's root:
+// stamp an artefact made from this tree, or verify one against it.
+if (process.argv[1] && resolve(process.argv[1]) === import.meta.filename) {
+  const [operation, path] = process.argv.slice(2);
+  try {
+    if (operation === "write" && path) writePublicArtefact(path, process.cwd());
+    else if (operation === "verify" && path) verifyTreeArtefact(path, process.cwd());
+    else fail("BAD_PROVENANCE", "usage: osd-public-tree.mjs write|verify <artifact>");
+  } catch (error) {
+    console.error(`${error.code ?? "BAD_PROVENANCE"}: ${error.message}`);
+    process.exitCode = 2;
+  }
 }
