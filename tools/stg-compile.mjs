@@ -384,15 +384,7 @@ export function annotationsClass(m) {
   const cls = m.classes.mpcAnn;
   const w = new AnnotationWriter();
   for (const a of m.annotations) {
-    // R8: Common.DraftRoot / DraftNode apply to the entity set, which the
-    // V2 model names inside its container (the V4 facade moves the target)
-    if (!a.property && (a.spec.draftRoot || a.spec.draftNode)) {
-      const d = a.spec.draftRoot ?? a.spec.draftNode;
-      w.target(`${m.namespace}.${m.namespace}_Entities/${d.set ?? a.entity.set}`);
-      w.draft(a.spec);
-      if (Object.keys(a.spec).every((k) => k === "draftRoot" || k === "draftNode")) continue;
-    }
-    w.target(`${m.namespace}.${a.target}`);
+    if (!w.targetOf(m.namespace, a)) continue;
     if (a.property) {
       w.property(a);
     } else {

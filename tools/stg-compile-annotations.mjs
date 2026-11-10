@@ -158,6 +158,23 @@ export class AnnotationWriter {
     }
   }
 
+  // The target of one annotations: entry. R8: Common.DraftRoot / DraftNode
+  // apply to the entity set, which the V2 model names inside its container
+  // (the V4 facade moves the target); written here, and false when the
+  // entry says nothing else, so no entity-type target follows
+  targetOf(namespace, a) {
+    if (!a.property && (a.spec.draftRoot || a.spec.draftNode)) {
+      const d = a.spec.draftRoot ?? a.spec.draftNode;
+      this.target(`${namespace}.${namespace}_Entities/${d.set ?? a.entity.set}`);
+      this.draft(a.spec);
+      if (Object.keys(a.spec).every((k) => k === "draftRoot" || k === "draftNode")) {
+        return false;
+      }
+    }
+    this.target(`${namespace}.${a.target}`);
+    return true;
+  }
+
   // R8: a draft-enabled entity set (docs/rap-runtime.md, R8):
   //   draftRoot: {set, activation, edit, prepare}  Common.DraftRoot
   //   draftNode: {set, prepare}                    Common.DraftNode
