@@ -182,8 +182,8 @@ describe("RAP derived type generator (R1)", () => {
     for (const [from, to, error] of [
       ["  create;", "  mystery;", /unparsed/],
       ["ZI_RAP_NOTE alias", "ZI_MISSING alias", /Unresolved CDS/],
-      ["managed implementation in class zbp_rap_note unique;", "projection;", /unsupported projection/],
-      ["  create;", "  association _Items { create; }", /associations/],
+      ["managed implementation in class zbp_rap_note unique;", "projection;", /needs a projection view/],
+      ["  create;", "  association _Items { create; }", /association _Items is no association of the CDS entity/],
       ["persistent table zrap_note", "persistent table zmissing", /missing persistent table/],
       ["NoteText = note_text", "Missing = note_text", /unknown mapping field/],
       ["NoteText = note_text", "NoteText = missing", /unknown mapping column/],
@@ -247,7 +247,8 @@ describe("RAP derived type generator (R1)", () => {
     assert.equal(r4.split("\n").length, 6, "rows kept for the source map");
     assert.ok(out.includes("METHODS other IMPORTING x TYPE i.") && out.includes("METHODS t FOR TESTING.") && out.includes('" a comment'));
     for (const [decl, error] of [
-      ["METHODS n FOR NUMBERING IMPORTING entities FOR CREATE Note\\_Items.", /create by association is outside R4/],
+      // R5: the cba numbering form is lowered; the note BO has no _Items
+      ["METHODS n FOR NUMBERING IMPORTING entities FOR CREATE Note\\_Items.", /unresolved RAP handler type CREATE Note\\_Items/],
       ["METHODS f FOR GLOBAL FEATURES IMPORTING REQUEST r FOR Note RESULT result.", /GLOBAL FEATURES has no derived/],
       ["METHODS a FOR INSTANCE AUTHORIZATION IMPORTING keys REQUEST r FOR Note RESULT result.", /INSTANCE AUTHORIZATION has no derived/],
       ["METHODS a FOR GLOBAL AUTHORIZATION IMPORTING REQUEST r FOR Note RESULT result.", /GLOBAL AUTHORIZATION has no derived/],
