@@ -43,6 +43,11 @@ tools/osd-host-contract.mjs --base <url> [--drain <pid>]` checks the
 contract against a running host and times the drain; the `osgo-host` CI job
 runs it on every change.
 
+The VS Code extension is one consumer: with `osd.engine: "osgo"` it downloads
+the asset for its platform from its own release tag, checks it against the
+`.sha256`, keeps it in its global storage and starts it with `-port N -root
+<tree> -home <dir> -adt` (docs/vscode-extension.md, "Engine").
+
 Pin a tested release tag in consumer CI and download both files from that
 tag. For example, on Linux x64:
 
