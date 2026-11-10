@@ -116,6 +116,8 @@ declaration implies them.
 | `METHODS m FOR MODIFY IMPORTING c FOR CREATE ent u FOR UPDATE ent d FOR DELETE ent.` | one `IMPORTING` per clause, `CHANGING mapped failed reported` |
 | `METHODS m FOR READ IMPORTING keys FOR READ ent RESULT result.` | `IMPORTING keys TYPE <read import> CHANGING result TYPE <read result> failed reported` |
 | `METHODS m FOR LOCK IMPORTING keys FOR LOCK ent.` | `IMPORTING keys TYPE <lock keys> CHANGING failed reported` |
+| `METHODS m FOR INSTANCE FEATURES IMPORTING keys REQUEST req FOR ent RESULT result.` (R4) | `IMPORTING keys TYPE <features key> req TYPE <features request> CHANGING result TYPE <features result> failed reported` |
+| `METHODS m FOR NUMBERING IMPORTING entities FOR CREATE ent.` (R4) | `IMPORTING entities TYPE <create> CHANGING mapped failed reported` |
 
 `failed`, `reported` and `mapped` are the BDEF's `RESPONSE FOR ... EARLY`
 structures. Which form has which of them follows the public ABAP keyword
@@ -133,9 +135,18 @@ abaplint parses these declarations but gives them no parameters at all
 (ANORMALIES, `rap-implicit-handler-params`), which is why the lowering is
 needed.
 
-Refused with the file, the row and the form: `FOR INSTANCE FEATURES`,
-`FOR GLOBAL FEATURES`, `FOR INSTANCE|GLOBAL AUTHORIZATION` (no derived
-request/result types are generated yet), `FOR NUMBERING`, `FOR PRECHECK`,
+R4 adds the instance feature types of every entity: `TABLE FOR INSTANCE
+FEATURES KEY` (the `%tky`), `STRUCTURE FOR INSTANCE FEATURES REQUEST` and
+the `%features` group of `TABLE FOR INSTANCE FEATURES RESULT` (both
+`%update`, `%delete` for the operations the entity declares, `%action-<a>`
+per action and `%field-<f>` per element, each `x LENGTH 1`, an
+`if_abap_behv=>fc-o` / `fc-f` value), the result row being `%tky` plus that
+group. Early numbering needs no new type: its `entities` are the `TABLE FOR
+CREATE`.
+
+Refused with the file, the row and the form: `FOR GLOBAL FEATURES`,
+`FOR INSTANCE|GLOBAL AUTHORIZATION` (no derived request/result types are
+generated yet), `FOR NUMBERING ... FOR CREATE ent\_assoc`, `FOR PRECHECK`,
 `FOR MODIFY ... FOR CREATE ent\_assoc` (create by association), and a
 reference no BDEF of that pool declares (an unknown entity, action or a
 `RESULT` on an action without one).

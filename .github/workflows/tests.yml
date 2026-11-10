@@ -779,6 +779,8 @@ jobs:
       - name: Measure creation, edits and activation through both clients
         run: |
           mkdir -p .local/adt-lifecycle/report
+          # This job measures the ADT lifecycle, not pack coverage (the suites keep every pack): rap-flight's objects add ~6 min of priming and cold checks.
+          export OSD_WEB_PACKS="$(node --input-type=module -e "import {packsOf} from './tools/osd-packs.mjs'; console.log(packsOf(process.cwd()).map(p => p.name).filter(n => n !== 'rap-flight').join(','))")"
           OSD_HEAVY_RANGE=90-99 OSD_HEAVY_SLOTS=4 tools/osd-heavy.sh node tools/adt-lifecycle.mjs --start 2>&1 | tee .local/adt-lifecycle/report/server.log
       # Save the required verdict before any optional network work. A failed
       # measurement still gets its functional report; timing cannot hide it.

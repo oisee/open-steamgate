@@ -6,6 +6,7 @@ import {existsSync, readFileSync, readdirSync, mkdirSync, writeFileSync, rmSync}
 import {parseBdef} from "./bdef-parse.mjs";
 import {parseDDLS} from "../cds2ddic.mjs";
 import {contentFoldersOf, winningByLayer} from "../osd-packs.mjs";
+import {nameOf} from "../osd-store-types.mjs";
 import {libraryPath} from "../osd-lib-path.mjs";
 import {runsAs} from "../osd-main.mjs";
 import {fieldControl, runtimeOutputs} from "./rap-runtime-gen.mjs";
@@ -26,6 +27,23 @@ const struct = (name, fields) => {
 // Named includes preserve both direct fields and RAP component groups.
 const included = (name, type, group, fields = []) => `  TYPES BEGIN OF ${name}.\n  INCLUDE TYPE ${type} AS ${group}.\n`
   + fields.map(([n, t]) => `  TYPES ${n} TYPE ${t}.\n`).join("") + `  TYPES END OF ${name}.\n`;
+
+// R4: the administrative fields a managed BO fills itself, named by the
+// element's @Semantics annotation (the public RAP contract: the framework
+// stamps them on create and on change, which is what makes an `etag master`
+// on a last-changed field change with every write)
+const ADMIN = [
+  ["CREATED_AT", /@Semantics\.systemDateTime\.createdAt\s*:\s*true/i],
+  ["CREATED_BY", /@Semantics\.user\.createdBy\s*:\s*true/i],
+  ["CHANGED_AT", /@Semantics\.systemDateTime\.lastChangedAt\s*:\s*true/i],
+  ["CHANGED_BY", /@Semantics\.user\.lastChangedBy\s*:\s*true/i],
+  ["LOCAL_CHANGED_AT", /@Semantics\.systemDateTime\.localInstanceLastChangedAt\s*:\s*true/i],
+  ["LOCAL_CHANGED_BY", /@Semantics\.user\.localInstanceLastChangedBy\s*:\s*true/i],
+];
+export function adminOf(annotations) {
+  const text = annotations.join("\n");
+  return ADMIN.find(([, re]) => re.test(text))?.[0];
+}
 
 /** Input files are already selected by content layer, never test/ or libraries' BDEFs. */
 export function generate(files, dependencies = []) {
@@ -66,7 +84,7 @@ export function generate(files, dependencies = []) {
       if (!f.virtual && !sourceType) throw new Error(`Unresolved CDS field ${name}.${f.name}`);
       const abap = f.abapType ?? sourceType;
       if (!ident(f.name) || !abap || /todo|unknown|void/i.test(abap)) throw new Error(`Unresolved CDS field ${name}.${f.name}`);
-      return {name: f.name.toLowerCase(), type: abap, key: f.key, base: f.base};
+      return {name: f.name.toLowerCase(), type: abap, key: f.key, base: f.base, admin: adminOf(f.annotations ?? [])};
     });
   };
   const outputs = {}, bindings = {}, plans = [];
@@ -148,6 +166,31 @@ export function generate(files, dependencies = []) {
           list.push([(entity.alias ?? entity.entity).toLowerCase(), `t_${name}`]); responses.set(kind, list);
         }
       }
+      // R4: instance feature control. The result row is the key and the
+      // %features group (%update, %delete, %action-<a>, %field-<f>, each an
+      // if_abap_behv=>fc-o / fc-f value), the request the same flags
+      const featureFields = [
+        ...entity.operations.filter(o => !o.use && o.kind !== "create").map(o => [`%${o.kind}`, "x LENGTH 1"]),
+        ...(entity.actions.length ? [["%action", `${p}_actions`]] : []),
+        ["%field", `${p}_control`],
+      ];
+      body += struct(`${p}_feat`, featureFields);
+      body += included(`${p}_features_key`, `${p}_tky`, "%tky");
+      body += `  TYPES t_${p}_features_key TYPE STANDARD TABLE OF ${p}_features_key WITH DEFAULT KEY.\n`;
+      body += `  TYPES BEGIN OF ${p}_features_result.\n  INCLUDE TYPE ${p}_tky AS %tky.\n  INCLUDE TYPE ${p}_feat AS %features.\n  TYPES END OF ${p}_features_result.\n`;
+      body += `  TYPES t_${p}_features_result TYPE STANDARD TABLE OF ${p}_features_result WITH DEFAULT KEY.\n`;
+      for (const ref of refs) {
+        bind("TABLE", "INSTANCE FEATURES KEY", ref, `${iface}=>t_${p}_features_key`);
+        bind("STRUCTURE", "INSTANCE FEATURES KEY", ref, `${iface}=>${p}_features_key`);
+        bind("STRUCTURE", "INSTANCE FEATURES REQUEST", ref, `${iface}=>${p}_feat`);
+        bind("TABLE", "INSTANCE FEATURES RESULT", ref, `${iface}=>t_${p}_features_result`);
+        bind("STRUCTURE", "INSTANCE FEATURES RESULT", ref, `${iface}=>${p}_features_result`);
+      }
+      for (const ref of local) {
+        poolBind("INSTANCE FEATURES KEY", ref, `${iface}=>t_${p}_features_key`);
+        poolBind("INSTANCE FEATURES REQUEST", ref, `${iface}=>${p}_feat`);
+        poolBind("INSTANCE FEATURES RESULT", ref, `${iface}=>t_${p}_features_result`);
+      }
       for (const [a, action] of entity.actions.entries()) {
         if (action.use || action.modifiers.length || action.parameter?.deep || action.parameter?.table || action.result?.deep) throw new Error(`${entity.entity}~${action.name}: unsupported action modifiers/parameter shape`);
         const param = action.parameter ? fieldsOf(action.parameter.name) : undefined;
@@ -190,12 +233,16 @@ export function generate(files, dependencies = []) {
     const {entity} = owner.e;
     const has = op => entity.operations.some(o => o.kind === op && !o.use);
     return {view, fields, behavior: {create: has("create"), update: has("update"), delete: has("delete"),
-      control: fieldControl(entity, fields), actions: entity.actions.map(a => a.name)}};
+      control: fieldControl(entity, fields), actions: entity.actions.map(a => a.name),
+      // R4: the `etag master` element is the entity type's ETag
+      etag: entity.etag?.kind === "master" ? entity.etag.field : undefined}};
   };
   for (const file of srvds) {
     const srvd = parseSrvd(file.contents, file.filename);
     const stem = basename(file.filename).replace(/\.srvd\.srvdsrv$/, "");
-    if (upper(stem) !== srvd.name) throw new Error(`${file.filename}: defines ${srvd.name}`);
+    // abapGit writes the namespace of /DMO/FLIGHT_LEGACY as `#`: the file is
+    // #dmo#flight_legacy (nameOf decodes, osd-store-types.mjs)
+    if (nameOf(stem) !== srvd.name) throw new Error(`${file.filename}: defines ${srvd.name}`);
     outputs[`${stem.toLowerCase()}.stg.yaml`] = serviceYaml(srvd, entityOf, file.filename);
   }
   return {outputs, bindings, plans};
@@ -215,7 +262,7 @@ export function main() {
   }
   const {outputs, bindings, plans} = generate(files, deps);
   // the runtime adapters read the behavior pools named by the BDEFs (R2)
-  const pools = new Set((plans ?? []).map(p => (p.model.implementationClass ?? "").toLowerCase()).filter(Boolean));
+  const pools = new Set((plans ?? []).map(p => (p.model.implementationClass ?? "").toLowerCase().replaceAll("/", "#")).filter(Boolean));
   const poolFiles = paths.filter(f => pools.has(basename(f).toLowerCase().split(".")[0]) && /\.clas\.(locals_imp\.|locals_def\.)?abap$/i.test(f))
     .map(f => ({filename: basename(f), contents: readFileSync(f, "utf8")}));
   Object.assign(outputs, runtimeOutputs(plans ?? [], poolFiles));

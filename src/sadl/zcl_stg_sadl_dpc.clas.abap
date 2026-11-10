@@ -5,6 +5,7 @@ CLASS zcl_stg_sadl_dpc DEFINITION PUBLIC INHERITING FROM /iwbep/cl_mgw_push_abs_
 * into Open SQL. Aggregate entities ($select on a cube) are grouped.
   PUBLIC SECTION.
     INTERFACES if_sadl_gw_dpc.
+    INTERFACES zif_stg_action_guard.
 
     METHODS constructor
       IMPORTING
@@ -798,6 +799,28 @@ CLASS zcl_stg_sadl_dpc IMPLEMENTATION.
                           is_row    = <ls_row> ).
     read_row( EXPORTING is_entity = ls_entity
               CHANGING  cs_row    = <ls_row> ).
+  ENDMETHOD.
+
+  METHOD zif_stg_action_guard~guards.
+* an action of a managed behavior changes its instance: If-Match applies
+    DATA ls_entity   TYPE zcl_stg_cds_registry=>ty_entity.
+    DATA li_behavior TYPE REF TO zif_stg_sadl_behavior.
+    DATA lt_actions  TYPE string_table.
+
+    TRY.
+        ls_entity = entity_of( iv_entity_set ).
+      CATCH /iwbep/cx_mgw_tech_exception.
+        RETURN.
+    ENDTRY.
+    li_behavior = behavior_of( ls_entity ).
+    IF li_behavior IS NOT BOUND.
+      RETURN.
+    ENDIF.
+    lt_actions = li_behavior->actions( ls_entity-name ).
+    READ TABLE lt_actions TRANSPORTING NO FIELDS WITH KEY table_line = to_upper( iv_action ).
+    IF sy-subrc = 0.
+      rv_guards = abap_true.
+    ENDIF.
   ENDMETHOD.
 
   METHOD behavior_of.

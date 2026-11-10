@@ -360,6 +360,7 @@ Format adapted from `larshp/hithub` (MIT).
 - Actual open-abap behaviour: DEC beyond 15 significant digits is stored as REAL by the SQLite seam; equality and ranges at the 16th digit collapse. The transpiled JS class through `@abaplint/database-sqlite` stores both rows as REAL `20261008100000.125` and returns `2, 0, 2, 2`; the same ABAP/table fixture on Go returns identical counts. Local measurement: `.local/hostcls/dec-measure.txt`, scripts `measure-dec.mjs` and `measure-dec-go.mjs` beside it.
 - Impact: DEC 15 timestamps remain exact; full DEC 21,7 timestamp precision is unavailable in SQLite comparisons on both hosts.
 - Smallest safe workaround: compare values within 15 significant digits when exactness is required; storage is unchanged.
+- Second impact, found 2026-11-10 (RAP R4 ETag): the runtime already loses the digits before SQLite sees them -- `UPDATE`/`INSERT` render a packed value through `Packed.get()`, a double, into the SQL text, so DuckDB's exact `DECIMAL(21,7)` gets the same rounded value. A RAP `etag master` over a TIMESTAMPL `last_changed_at` therefore resolves about 4 ms (2^-8 s at that size): two writes of one entity inside that window stored the same stamp, the ETag did not move, and a PATCH with the first write's tag was accepted after the second (lost update; reproduced on V2 and V4 with the clock held still, `test/rap-r4.mjs`). Workaround: `ZCL_OSD_RAP_RUNTIME=>APART` steps a new stamp (100 ns, 200 ns, 400 ns ...) until its double is above the old stamp's, so every write moves the ETag; under a burst a stamp may run a few milliseconds ahead of the clock. It is removed when the seam stores DEC beyond 15 digits exactly (the runtime's write path and the SQLite column type both).
 - Upstream issue: not reported; this round is local only.
 - Regression: the fixture asserts DEC 15 exactly, adjacent DEC 21,7 values `20261008.1234567` / `20261008.1234568` exactly, and measured high-precision host parity.
 - Upstream version containing a fix: unknown.
@@ -4361,6 +4362,152 @@ Not an anomaly, recorded for porting: on 7.58, `FIND ... REGEX` (POSIX) raises a
   `METHODS` statements.
 - Upstream: none filed. It belongs with implicit RAP handler signatures in
   abaplint; explicit signatures are this project's interim form.
+
+## The RAP flight reference scenario as a pack (packs/rap-flight)
+
+- Status: measured; worked around in the pack's overlay only, nothing
+  stubbed silently. The counts and the ranked walls are in
+  docs/rap-flight-pack.md. Discovery 2026-11-08, `@abaplint/core 2.120.73`,
+  `@abaplint/transpiler 2.14.3`.
+- EML: `READ ENTITIES`, `MODIFY ENTITIES`, `COMMIT ENTITIES` parse (abaplint)
+  and transpile to `throw new Error("ReadEntities, not supported, transpiler")`
+  (`@abaplint/transpiler/build/src/statements/read_entities.js`). The single
+  `READ ENTITY` form, `GET PERMISSIONS`, `SET LOCKS` and `RAISE ENTITY EVENT`
+  do not parse. Expected: the statements run against the business object.
+  Workaround: none; the 9 behavior pools and 5 test consumers are excluded
+  by pattern.
+- `bdef-gen.mjs` refuses every BDEF of the scenario (projection `use`,
+  associations / compositions, draft, determine actions, unparsed
+  extensions) and a refusal fails the build. Expected on a system: all 15
+  activate. Workaround: `\.bdef\.` excluded in the manifest; measured per
+  file in the document.
+- abaplint parser (open-abap version) refuses `CLASS x DEFINITION DEFERRED
+  FOR TESTING` (8 objects), `CORRESPONDING #( t DISCARDING DUPLICATES ... )`
+  (7), the lookup form `CORRESPONDING #( a FROM b USING k = k MAPPING ...
+  EXCEPT * )` (1), `MAPPING %fail = DEFAULT VALUE #( ... )` (2), `TYPES ...
+  WITH INDICATORS` and `UPDATE ... INDICATORS SET STRUCTURE` (1), a `SWITCH`
+  whose operands are `REDUCE ... LET ... IN` (1). Expected: all are 7.5x
+  syntax a system accepts. Workaround: the two data generators are copied
+  into the overlay with those statements spelled out as loops; the pools are
+  excluded. Upstream: not filed yet (abaplint issues with one-line
+  reproducers each; see the document's wall 8).
+- open-abap-core number ranges: `cl_numberrange_intervals` has `create`
+  only (a no-op) and no `read` / `update` / `delete`, `nr_nriv_line` has no
+  `nrlevel`, there is no `nr_subobject`; `cl_numberrange_runtime=>number_get`
+  has no `quantity` / `returncode` / `returned_quantity`, and
+  `kernel_numberrange` counts in memory from 1 per session. Expected: NRIV
+  intervals, a block of `quantity` numbers whose last one is returned.
+  Workaround in the overlay generators: the reset is a no-op and a block
+  starts at the interval's lower bound. Upstream: open-abap-core, not filed.
+- `CL_ABAP_RANDOM_INT8` and `CL_ABAP_RANDOM_FLOAT` are absent from
+  open-abap-core. Workaround: nine-digit `cl_abap_random_int` for the phone
+  numbers; the float user is in the excluded extensibility chapter.
+- `GET BADI` / `CALL BADI` are not transpiled and a BAdI definition (ENHS)
+  is not an object the registry types. Workaround: the one implementation is
+  constructed and called directly in the overlay copy.
+- Released DDIC absent from open-abap-core: `ABP_LOCINST_LASTCHANGE_USER`
+  (CHAR 12), `SDRAFT_UUID` (RAW 16), the views `I_Currency`, `I_Country`,
+  `I_CountryText`. Workaround: stand-ins in `packs/rap-flight/src/ddic/`
+  (the two data elements as they are documented, the two views as plain
+  tables with the columns the scenario reads); to send to open-abap-core
+  per the DDIC rule and then drop here.
+- `tools/cds2ddic.mjs` with a namespaced view: wrote `gen/cds/dmo/...`
+  (ENOENT) and would have named a class `zcl_stg_cds_/dmo/...`. Fixed:
+  `tools/cds-names.mjs`. Still open in the generator: a namespaced
+  association target (`association to /DMO/I_Agency`) parses as `/`, and a
+  view over a stand-in table with no fields yields 0 fields
+  (`/DMO/CURRENCY_HELPER`).
+- The transpiler lowers `UPDATE dbtab FROM wa` to one JS property access per
+  component of the row (`ls_row.get().<name>.get()`), which is not JavaScript
+  when a component is named `/dmo/...` (an append structure, `/dmo/agency`'s
+  slogan field) or `%admin` (a draft table's CDS admin include): the module
+  does not parse. Expected: an update of such a table is ordinary ABAP.
+  Measured: six generated `zcl_stg_tab_*` modules of packs/rap-flight were
+  unloadable while the build was green -- the build transpiles and never
+  loads what it wrote; the first failure was the runtime's init importing
+  every module, with an error that named no file (2026-11-08, found by
+  `tools/rap-flight/seed-capture.mjs`). Workaround: `tools/cds2ddic.mjs`
+  updates such tables `FROM TABLE @lt_rows`, which the transpiler hands to
+  the runtime as rows. Upstream: abaplint/transpiler, needs an issue.
+- A `RETURN.` at the top level of a program (legal ABAP: it ends the
+  program) is written by the transpiler as a top-level JS `return`, which
+  ESM forbids, so `output/zl3_fleet2.prog.mjs` cannot be loaded at all.
+  Nothing imports it and nothing runs the program, so no suite had noticed;
+  found by reading every module of the output with acorn
+  (`test/output-parses.mjs`, 2026-11-08), which carries the module as a
+  dated exception until it is fixed. Upstream: abaplint/transpiler, needs an
+  issue.
+- Seed files of a namespaced table (`#dmo#travel.tabu.json`, abapGit's form,
+  because a slash cannot be in a file name) were inserted into a table
+  named `#dmo#travel`, which no statement of the runtime reads, and the
+  reseed refused them outright ("invalid seed table"). Expected: the rows
+  land in `/dmo/travel`, the name the runtime's `buildDbTableName` uses.
+  Fixed: `test/seed.mjs` maps the file form to the ABAP name
+  (`dbTableName`). Found with packs/rap-flight's captured seed, 2026-11-08.
+- `INSERT dbtab FROM TABLE @itab` where the source row is wider than the
+  table (upstream's own connection generator inserts a type carrying a
+  `weekday` beside the columns of `/dmo/connection`): a system maps the
+  components the table has; the runtime writes every component of the row as
+  a column, the statement fails, and the exception's text guesses "duplicate
+  key?" for any failed row (2026-11-08, found by the pack's seed capture).
+  Workaround in the overlay: the `CORRESPONDING` table upstream builds and
+  leaves unused is the one inserted. Upstream: abaplint/runtime, needs an
+  issue.
+- `SELECT ... FROM @itab AS alias` (an internal table as the select's source,
+  7.50): the statement transpiles and the `@` reaches the SQL the runtime
+  builds -- SQLite answers `unrecognized token: "@"` wrapped as
+  CX_SY_DYNAMIC_OSQL_SEMANTICS. Two statements of the flight data generator
+  (`get_flight_info`, the plane-type count). Workaround in the overlay: a
+  LOOP over the same table. Upstream: abaplint/transpiler, needs an issue.
+- A functional method call inside a table expression's key
+  (`gt_plane_types[ long_distance = lv index = lo_random->get_next( ) ]`):
+  a system evaluates the call once; the transpiler lowers the key to a
+  predicate over the rows and calls it **per row tried**, so a side-effecting
+  call (a fresh random each time) misses and CX_SY_ITAB_LINE_NOT_FOUND is
+  raised -- measured, the first seed capture died there. Workaround in the
+  overlay: the number is drawn into a variable before the bracket. Upstream:
+  abaplint/transpiler, needs an issue.
+- `cl_abap_random_int=>create( min = n max = n )` asserts in open-abap-core
+  (`ASSERT high > low` in `intinrange`, reached from every `get_next`): a
+  system takes min = max and returns that value. The address generator of the
+  flight scenario hits it for every country with one street (AT, BE, CH).
+  Workaround in the overlay: the index is drawn only when there is a choice.
+  Upstream: open-abap-core, needs an issue.
+- A string function given an integer (`replace( val =
+  lo_random_phone_number->get_next( ) off = 3 len = 1 ... )`, upstream's own
+  phone-number expression): a system converts the argument; the runtime's
+  `replace` calls `getOffset` on it and dies with a JS TypeError. Workaround
+  in the overlay: the digits go through a string template first. Upstream:
+  abaplint/runtime, needs an issue.
+
+### ANOMALY-2026-11-09-view-ddl-registry-order -- the transpiler writes view DDL in registry order, so a view over a view reaches DuckDB before its base
+
+- Status: worked around where the registry is fed (tools/osd-warm-order.mjs),
+  generally and not only for the pack that found it. Discovery 2026-11-09,
+  `@abaplint/transpiler 2.14.3`, found by the DuckDB review of
+  packs/rap-flight.
+- `DatabaseSetup` (`build/src/db/index.js`) writes `CREATE VIEW` for every
+  `View` object in registry order and its own comment asks "todo: what if the
+  view is based on another view?" -- and one is: the pack's generated DDIC
+  views include `/dmo/c_connection_r` over `/dmo/i_connection_r` and
+  `/dmo/c_flight_r` over `/dmo/i_flight_r`, and `c_` sorts before `i_`, which
+  is the walk order and so the registry order. SQLite checks a view's bases
+  at first read and starts fine; DuckDB checks at CREATE and refuses
+  ("Catalog Error: Table with name /dmo/i_connection_r does not exist"),
+  which killed every DuckDB start of a tree with the pack: `STG_DB=duckdb`,
+  `unit:duckdb`, consumer-smoke's DuckDB slice, and the DuckDB-Wasm preview
+  (where the C++ exception surfaces as a wasm crash, `_setThrew is not
+  defined`). Expected: the DDL a view-over-a-view tree produces is valid for
+  every backend, as the same tree is on SQLite and PostgreSQL.
+- Workaround: `orderRegistry` feeds the registry, so it now names a view
+  after every base of its own that is a view (the bases read off the view
+  XML, which the pass already holds); checked by `test/warm-update.mjs`
+  against the pinned transpiler's own DDL. A cycle cannot be ordered: the
+  waiting views keep their rank order and the pinned type resolver then
+  overflows its stack (`View.parseType` / `DDIC.lookupView`, a `RangeError`)
+  before any DDL reaches a database, so no error names the cycle's views --
+  an upstream type-resolution limitation, measured 2026-11-09.
+- Upstream: abaplint/transpiler, needs an issue.
 
 ## Class statics outlive the HTTP request (LUW_HELD, PR #901)
 

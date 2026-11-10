@@ -84,7 +84,11 @@ describe("RAP managed runtime generator (R2)", () => {
   it("refuses what the runtime does not run", () => {
     for (const [suffix, from, to, error] of [
       [".asbdef", "managed implementation", "unmanaged implementation", /only managed/],
-      [".asbdef", "lock master", "early numbering\nlock master", /early numbering through the pool is outside R2/],
+      [".asbdef", "lock master", "early numbering\nlock master", /early numbering without a FOR NUMBERING/],
+      [".asbdef", "lock master", "late numbering\nlock master", /late numbering .* is outside R4/],
+      [".asbdef", "update;", "update ( features : instance );", /features : instance without a FOR INSTANCE FEATURES method/],
+      [".asbdef", "create;", "create ( features : instance );", /global features are outside R4/],
+      [".asbdef", "lock master", "etag master Missing\nlock master", /etag master Missing is no element/],
       [".asbdef", "field ( numbering : managed, readonly ) NoteId;", "field ( numbering : managed ) NoteText;", /needs a key of type x LENGTH 16/],
       [".asbdef", "determination Normalize on save { field NoteText; }", "determination Normalize on save { delete; }", /delete trigger/],
       [".asbdef", "action Approve result [1] $self;", "action Approve parameter ZI_RAP_NOTE result [1] $self;", /only instance actions/],

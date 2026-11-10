@@ -61,6 +61,11 @@ packs/*/upstream
 packs/*/games
 packs/*/.osd-fetched.json
 packs/*/.osd-fetch-*
+
+# rap-flight's seed rows are generator output (made at build by
+# tools/rap-flight/seed-capture.mjs, not tracked: derived content of the
+# fetched upstream, and the build remakes them when the generator changed)
+packs/rap-flight/data
 docker/workbench/ide-password.txt
 
 # Trace navigation companions are generated locally. Only L3 operational

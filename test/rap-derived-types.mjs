@@ -234,10 +234,22 @@ describe("RAP derived type generator (R1)", () => {
     assert.ok(out.includes(`rd IMPORTING k TYPE ${t("READ IMPORT ZI_RAP_NOTE_SF")} CHANGING r TYPE ${t("READ RESULT ZI_RAP_NOTE_SF")} failed TYPE ${t("RESPONSE FAILED")} reported TYPE`));
     assert.ok(out.includes(`lk IMPORTING k TYPE ${t("LOCK NOTE")} CHANGING failed TYPE`));
     assert.ok(out.includes(`cud IMPORTING c TYPE ${t("CREATE NOTE")} u TYPE ${t("UPDATE NOTE")} d TYPE ${t("DELETE NOTE")} CHANGING mapped TYPE`));
+    // R4: instance features and early numbering
+    const r4 = lowerDerived([
+      "CLASS lhc DEFINITION INHERITING FROM cl_abap_behavior_handler.",
+      "  PRIVATE SECTION.",
+      "    METHODS f FOR INSTANCE FEATURES",
+      "      IMPORTING keys REQUEST requested_features FOR Note RESULT result.",
+      "    METHODS n FOR NUMBERING IMPORTING entities FOR CREATE Note.",
+      "ENDCLASS."].join("\n"), "zbp_rap_note_sf.clas.locals_imp.abap", bindings);
+    assert.ok(r4.includes(`METHODS f IMPORTING keys TYPE ${t("INSTANCE FEATURES KEY NOTE")} requested_features TYPE ${t("INSTANCE FEATURES REQUEST NOTE")} CHANGING result TYPE ${t("INSTANCE FEATURES RESULT NOTE")} failed TYPE ${t("RESPONSE FAILED")} reported TYPE ${t("RESPONSE REPORTED")}`), r4);
+    assert.ok(r4.includes(`METHODS n IMPORTING entities TYPE ${t("CREATE NOTE")} CHANGING mapped TYPE ${t("RESPONSE MAPPED")} failed TYPE`), r4);
+    assert.equal(r4.split("\n").length, 6, "rows kept for the source map");
     assert.ok(out.includes("METHODS other IMPORTING x TYPE i.") && out.includes("METHODS t FOR TESTING.") && out.includes('" a comment'));
     for (const [decl, error] of [
-      ["METHODS n FOR NUMBERING IMPORTING entities FOR CREATE Note.", /FOR NUMBERING is outside R3/],
-      ["METHODS f FOR INSTANCE FEATURES IMPORTING keys REQUEST r FOR Note RESULT result.", /INSTANCE FEATURES has no derived request\/result types/],
+      ["METHODS n FOR NUMBERING IMPORTING entities FOR CREATE Note\\_Items.", /create by association is outside R4/],
+      ["METHODS f FOR GLOBAL FEATURES IMPORTING REQUEST r FOR Note RESULT result.", /GLOBAL FEATURES has no derived/],
+      ["METHODS a FOR INSTANCE AUTHORIZATION IMPORTING keys REQUEST r FOR Note RESULT result.", /INSTANCE AUTHORIZATION has no derived/],
       ["METHODS a FOR GLOBAL AUTHORIZATION IMPORTING REQUEST r FOR Note RESULT result.", /GLOBAL AUTHORIZATION has no derived/],
       ["METHODS c FOR MODIFY IMPORTING e FOR CREATE Note\\_Items.", /create by association/],
       ["METHODS d FOR DETERMINE ON MODIFY IMPORTING keys FOR Other~SetStatus.", /unresolved RAP handler type DETERMINATION Other/],
