@@ -6,7 +6,19 @@
 * unmanaged save), into ZRAP_TOURSTOP through the BDEF's mapping read
 * backwards (MAPPING FROM ENTITY).
 *
-* A new tour is open (O); close sets it to C.
+* A new tour is open (O); close sets it to C. A tour described "unsaveable"
+* makes the saver fail in the save (the test of a saver's failure).
+CLASS lcx_tour_save DEFINITION INHERITING FROM cx_no_check FINAL.
+  PUBLIC SECTION.
+    METHODS if_message~get_text REDEFINITION.
+ENDCLASS.
+
+CLASS lcx_tour_save IMPLEMENTATION.
+  METHOD if_message~get_text.
+    result = `The tour log refuses an unsaveable tour`.
+  ENDMETHOD.
+ENDCLASS.
+
 CLASS lhc_tour DEFINITION INHERITING FROM cl_abap_behavior_handler FINAL.
   PRIVATE SECTION.
     METHODS earlynumbering_create FOR NUMBERING
@@ -163,6 +175,9 @@ CLASS lsc_tour IMPLEMENTATION.
     DATA ls_upd   LIKE LINE OF update-stop.
 
 * the additional save of the tour: a change log, after the managed write
+    LOOP AT create-tour INTO ls_tour WHERE description = 'unsaveable'.
+      RAISE EXCEPTION TYPE lcx_tour_save.
+    ENDLOOP.
     LOOP AT create-tour INTO ls_tour.
       log( iv_tour = ls_tour-tour_id iv_op = 'CREATE' iv_field = 'description' iv_value = ls_tour-description ).
     ENDLOOP.

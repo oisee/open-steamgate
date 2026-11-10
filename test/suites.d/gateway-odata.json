@@ -20,6 +20,7 @@
     "test/sapevent.mjs",
     "test/se16.mjs",
     "test/seed-batching.mjs",
+    "test/seed-element-types.mjs",
     "test/sql-trace-buffer.mjs",
     "test/sql-trace.mjs",
     "test/sqlite-file-client.mjs",

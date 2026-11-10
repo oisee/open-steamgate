@@ -42,6 +42,7 @@ CLASS ltcl_save DEFINITION FOR TESTING DURATION SHORT RISK LEVEL DANGEROUS FINAL
     METHODS second_pool_validates FOR TESTING RAISING cx_static_check.
     METHODS action_is_logged FOR TESTING RAISING cx_static_check.
     METHODS model_names_pools FOR TESTING RAISING cx_static_check.
+    METHODS saver_failure_ends_it FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 
 CLASS ltcl_save IMPLEMENTATION.
@@ -322,6 +323,41 @@ CLASS ltcl_save IMPLEMENTATION.
     READ TABLE ls_model-entities INTO ls_entity WITH KEY alias = 'tour'.
     cl_abap_unit_assert=>assert_equals( act = ls_entity-save exp = 'A' ).
     cl_abap_unit_assert=>assert_equals( act = lines( ls_model-savers ) exp = 1 ).
+  ENDMETHOD.
+
+  METHOD saver_failure_ends_it.
+* a saver that fails in the save: the managed write is rolled back with it,
+* the savers' cleanup runs, the buffer is gone, and the exception says why
+    DATA lt_create   TYPE tt_create.
+    DATA ls_create   LIKE LINE OF lt_create.
+    DATA ls_mapped   TYPE ty_mapped.
+    DATA ls_failed   TYPE ty_failed.
+    DATA ls_reported TYPE ty_reported.
+    DATA lx_error    TYPE REF TO zcx_osd_rap.
+    DATA lt_trace    TYPE string_table.
+    DATA lv_last     TYPE string.
+    DATA lv_count    TYPE i.
+
+    ls_create-%cid = 'U1'.
+    ls_create-description = 'unsaveable'.
+    ls_create-%control-description = if_abap_behv=>mk-on.
+    APPEND ls_create TO lt_create.
+    mo_rap->modify( EXPORTING iv_entity = 'tour' iv_operation = zcl_osd_rap_runtime=>co_operation-create it_rows = lt_create
+                    CHANGING cs_mapped = ls_mapped cs_failed = ls_failed cs_reported = ls_reported ).
+    TRY.
+        mo_rap->commit( CHANGING cs_failed = ls_failed cs_reported = ls_reported ).
+        cl_abap_unit_assert=>fail( 'the save must fail' ).
+      CATCH zcx_osd_rap INTO lx_error.
+        cl_abap_unit_assert=>assert_true( lx_error->save ).
+        cl_abap_unit_assert=>assert_true( lx_error->business ).
+        cl_abap_unit_assert=>assert_equals( act = lx_error->get_text( ) exp = `The tour log refuses an unsaveable tour` ).
+    ENDTRY.
+    SELECT COUNT(*) FROM zrap_tour INTO lv_count.
+    cl_abap_unit_assert=>assert_equals( act = lv_count exp = 0 msg = 'the managed write is rolled back' ).
+    cl_abap_unit_assert=>assert_equals( act = mo_rap->pending( ) exp = 0 msg = 'the buffer is discarded' ).
+    lt_trace = mo_rap->trace( ).
+    READ TABLE lt_trace INDEX lines( lt_trace ) INTO lv_last.
+    cl_abap_unit_assert=>assert_equals( act = lv_last exp = 'CLEANUP' ).
   ENDMETHOD.
 
 ENDCLASS.

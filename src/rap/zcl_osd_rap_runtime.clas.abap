@@ -2627,6 +2627,8 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
     DATA lv_before TYPE i.
     DATA lx_error  TYPE REF TO zcx_osd_rap.
     DATA lx_root   TYPE REF TO cx_root.
+    DATA lv_text   TYPE string.
+    DATA lv_business TYPE abap_bool.
 
     ev_saved = abap_false.
     lt_savers = savers( ).
@@ -2668,23 +2670,42 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
     ENDLOOP.
 
     APPEND 'SAVE' TO mt_trace.
+* R7: a failure in the save ends the transaction here: the LUW is rolled
+* back (when the runtime owns it), the savers' cleanup runs and the buffer is
+* discarded -- the instances were already checked, so there is nothing a
+* caller could correct, and a buffer half written must not be saved again.
+* A saver's failure is the caller's to show (BUSINESS), a refused database
+* write a technical error.
     TRY.
         persist( ).
         save_savers( CHANGING cs_reported = cs_reported ).
       CATCH zcx_osd_rap INTO lx_error.
-        IF iv_end_luw = abap_true.
-          ROLLBACK WORK.
-          unlock( ).
-        ENDIF.
-        RAISE EXCEPTION lx_error.
+        lv_text = lx_error->get_text( ).
+        lv_business = abap_false.
       CATCH cx_root INTO lx_root.
-* a saver that fails in the save fails the save: the managed write goes too
-        IF iv_end_luw = abap_true.
-          ROLLBACK WORK.
-          unlock( ).
+        lv_text = |{ lx_root->get_text( ) }|.
+        IF lv_text IS INITIAL.
+          lv_text = |save of { ms_model-bdef } failed in a saver|.
         ENDIF.
-        RAISE EXCEPTION TYPE zcx_osd_rap EXPORTING iv_reason = |save of { ms_model-bdef } failed in a saver: { lx_root->get_text( ) }|.
+        lv_business = abap_true.
     ENDTRY.
+    IF lv_text IS NOT INITIAL OR lx_error IS BOUND.
+      IF iv_end_luw = abap_true.
+        ROLLBACK WORK.
+        unlock( ).
+      ENDIF.
+      APPEND 'CLEANUP' TO mt_trace.
+      LOOP AT lt_savers INTO lo_saver.
+        lo_saver->cleanup( ).
+      ENDLOOP.
+      mi_luw->discard( ).
+      CLEAR: mt_inst, mt_done.
+      RAISE EXCEPTION TYPE zcx_osd_rap
+        EXPORTING
+          iv_reason   = lv_text
+          iv_save     = abap_true
+          iv_business = lv_business.
+    ENDIF.
     IF iv_end_luw = abap_true.
       COMMIT WORK.
       unlock( ).

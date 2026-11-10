@@ -180,6 +180,14 @@ describe("RAP R7 saver over OData", function () {
     assert.deepEqual(await logOf(id), ["CREATE description=river", "DELETE =", "UPDATE status=C"]);
   });
 
+  it("answers a saver's failure in the save as a business error with its text, and writes nothing", async () => {
+    const res = await call(`${v2}/Tour`, {method: "POST", headers: write, body: JSON.stringify({description: "unsaveable"})});
+    assert.equal(res.status, 400, JSON.stringify(res.body));
+    assert.match(JSON.stringify(res.body), /The tour log refuses an unsaveable tour/);
+    const tours = (await get(`${v2}/Tour?$filter=description eq 'unsaveable'&$format=json`)).body.d.results;
+    assert.equal(tours.length, 0);
+  });
+
   it("does the same over V4", async () => {
     let res = await call(`${v4}/Tour`, {method: "POST", headers: write, body: JSON.stringify({description: "lakes"})});
     assert.equal(res.status, 201, JSON.stringify(res.body));

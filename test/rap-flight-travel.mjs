@@ -1,6 +1,8 @@
 // R7: the managed travel BO of SAP's flight reference scenario
-// (packs/rap-flight, /DMO/I_TRAVEL_M with its two projections) served end
-// to end, without draft: its BDEF and projection BDEFs as fetched, its
+// (packs/rap-flight, /DMO/I_TRAVEL_M with its two projections) served
+// without draft (V2 data requests and V4; V2 $metadata of a
+// namespaced service is ANORMALIES "RAP R7: a namespaced service's V2
+// $metadata"): its BDEF and projection BDEFs as fetched, its
 // three behavior pools from the pack's overlay (docs/rap-flight-pack.md),
 // its saver's additional save of the travel and unmanaged save of the
 // booking supplements (docs/rap-runtime.md, "R7"). Needs a transpiled tree
@@ -28,7 +30,7 @@ async function call(url, options) {
   return {status: res.status, body, headers: res.headers};
 }
 
-describe("RAP R7: the flight travel BO served (V2 and V4)", function () {
+describe("RAP R7: the flight travel BO served (V2 data requests and V4)", function () {
   this.timeout(300000);
   let server;
   before(async function () {

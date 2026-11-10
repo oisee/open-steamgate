@@ -972,12 +972,22 @@ cleanup           each saver's cleanup; the buffer is reset
 
 The entity is written by the managed save as before, and **after** that
 write, in the same LUW and before `COMMIT WORK`, the savers' `save_modified`
-gets the entity's changes. A database error in the additional save (an
-exception that leaves `save_modified`) is the save's error: `ROLLBACK
-WORK`, the managed write is undone with it (R2's rule for a failed
-write: `ZCX_OSD_RAP` when the runtime ends the LUW). Inside a held LUW (a
-`$batch` changeset or V4 atomicity group) both writes are committed or
-rolled back with the group. A behavior definition with an additional save
+gets the entity's changes. An exception that leaves a saver is the save's
+error, and the runtime ends the transaction itself:
+
+- `ROLLBACK WORK` undoes the managed write with the saver's;
+- the savers' `cleanup` runs;
+- the buffer is discarded;
+- then `ZCX_OSD_RAP` is raised with `save` set, and with `business` set and the saver's text.
+
+The checks have already passed, so the client could not have corrected
+anything, and a buffer that is half written must not be saved again.
+A refused managed write ends the same way, `technical` and without
+`business`. Over OData a saver's failure is a 400 business error carrying
+its text (`test/rap-r7.mjs`), while a refused write stays a 500. Inside a
+held LUW (a `$batch` changeset or V4 atomicity group) the runtime does not
+roll back; the group does. On a system a failure in the save is a short dump
+(the save phase must not fail; unmeasured here). A behavior definition with an additional save
 and no saver that implements `save_modified` is refused by the generator.
 
 ### with unmanaged save
@@ -1003,6 +1013,22 @@ explicit `MAPPING column = field ...` of that entity's `mapping for` (no
 clause when it is `corresponding` and names no field), and `MAPPING TO
 ENTITY` the other way round. The entity is found by the alias in the pool's
 bindings; a source that names none is refused with its line.
+
+The lowering is a token rewrite, so it has limits:
+
+- **One source shape**: the token before `MAPPING` must be the entity's
+  alias or name, as in `x-alias` (a component of a request or response).
+  A variable of the entity's type, `CORRESPONDING #( lt_rows MAPPING FROM
+  ENTITY )`, names no entity and is refused, though a system takes it.
+- **Keys by parameter name**: `delete-<alias>` maps the keys only because
+  `delete` is save_modified's REQUEST FOR DELETE; a delete request under
+  another name gets the full pair list, and the move fails at syntax check
+  if a pair names a non-key field.
+- **No `USING CONTROL`**: `MAPPING FROM ENTITY USING CONTROL` (move only the
+  fields flagged in `%control`) is not lowered. The `USING CONTROL`
+  tokens are left in place, and the transpile refuses them.
+- **One mapping per entity**: the `mapping for` of the persistent table, or
+  the first one; an entity with several mappings cannot choose.
 
 ### OData
 
@@ -1037,7 +1063,7 @@ What the flight needed beyond the three constructs, each small:
 
 | BDEF | after R6 | after R7 |
 | --- | --- | --- |
-| `/DMO/I_TRAVEL_M` | `with additional save` (then several pools, `with unmanaged save`) | **accepted**, and served end to end (V2, V4) |
+| `/DMO/I_TRAVEL_M` | `with additional save` (then several pools, `with unmanaged save`) | **accepted**; served: V2 data requests and V4 (V2 `$metadata` of a namespaced service fails, ANORMALIES) |
 | `/DMO/C_TRAVEL_PROCESSOR_M`, `/DMO/C_TRAVEL_APPROVER_M` | the base's `with additional save` | **accepted**, served |
 | `/DMO/I_SUPPLEMENT`, `/DMO/C_SUPPLEMENT` | draft (`association { with draft; }`) | unchanged |
 | `/DMO/R_AGENCYTP`, `/DMO/C_AGENCYTP` | draft (`draft action Resume`) | unchanged |

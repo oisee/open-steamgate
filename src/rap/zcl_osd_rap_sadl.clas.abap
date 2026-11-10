@@ -345,7 +345,14 @@ CLASS zcl_osd_rap_sadl IMPLEMENTATION.
                             CHANGING  cs_failed   = cs_failed
                                       cs_reported = cs_reported ).
       CATCH zcx_osd_rap INTO lx_error.
-        io_runtime->rollback( ).
+* R7: a failed save has ended the transaction itself; a saver's failure is
+* the client's to read (400 with its text), a refused write technical
+        IF lx_error->save = abap_false.
+          io_runtime->rollback( ).
+        ENDIF.
+        IF lx_error->business = abap_true.
+          refuse( lx_error->get_text( ) ).
+        ENDIF.
         technical( lx_error ).
     ENDTRY.
     IF lv_saved = abap_false.

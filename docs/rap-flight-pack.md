@@ -317,7 +317,7 @@ projections and draft are what stands between this tree and the scenario
 ## R7: the managed travel BO runs
 
 Since RAP R7 ([rap-runtime.md](rap-runtime.md), "R7") the managed travel
-business object is built and served, without draft:
+business object is built and served without draft (V2 data requests and V4; V2 `$metadata` of the namespaced services fails on open-abap-odata's unescape, ANORMALIES):
 
 - **Fetched as they are**: `/DMO/I_TRAVEL_M`, `/DMO/C_TRAVEL_PROCESSOR_M`
   and `/DMO/C_TRAVEL_APPROVER_M` (BDEFs) and the five consumption views of
