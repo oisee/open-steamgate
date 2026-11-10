@@ -183,6 +183,7 @@
   "test/osd-rfc.mjs": 1.295465751,
   "test/osd-routes.mjs": 1.174251674,
   "test/osd-runtime.mjs": 137.934586092,
+  "test/osd-seed-image.mjs": 1.2,
   "test/osd-size-budget.mjs": 2.188949351,
   "test/osd-status.mjs": 1.017501122,
   "test/osd-store.mjs": 17.464911967,
