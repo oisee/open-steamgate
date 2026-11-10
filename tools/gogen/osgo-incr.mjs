@@ -34,7 +34,7 @@ import {objectOfFile} from "./osgo-layers.mjs";
 import {portable, toolIdentity} from "./frontend-object-cache.mjs";
 import {prepareDynamicStatics} from "./frontend-dynamic-call.mjs";
 
-export const SCHEMA = "osgo-incr/3";
+export const SCHEMA = "osgo-incr/4";
 const sha = (value) => createHash("sha256").update(value).digest("hex");
 const upper = (text) => String(text).toUpperCase();
 const walk = (d) => readdirSync(d, {withFileTypes: true}).sort((a, b) => a.name.localeCompare(b.name))
@@ -104,6 +104,27 @@ function irNames(ir) {
 const RECORDED = ["structs", "consts", "sigs", "events", "missing", "dynStatics", "excAttrs", "intfOwnAttrs",
   "badStructs", "ddicOutputLen", "interfaces", "skipped", "partial", "classes"];
 
+/** every op of one collection an object's lowering made, all its passes in
+ *  order (a payload holds them per segment: one segment per `enter`) */
+const flatOps = (payload, coll) => (payload?.segs ?? []).flatMap((seg) => seg[coll] ?? []);
+
+/** the component names of an anonymous structure: what both builds can
+ *  name it by (abaplint keys it by type instance, which a new registry
+ *  does not share) */
+const shapeOf = (t) => { try { return t.getComponents().map((c) => upper(c.name)).join(","); } catch { return undefined; } };
+
+/** where a write outside every object's mark (a global pass) sits in the
+ *  sequence of segments: "A" before the first segment of the discovery
+ *  phase, "B" after its last, "C" before the first segment of the lowering
+ *  phase, "D" after its last; null anywhere else. With no segment in a
+ *  phase its two slots are one ("AB" / "CD"). */
+function straySlot(phase, at, count) {
+  if (count === 0) return phase === 0 ? "AB" : "CD";
+  if (at === 0) return phase === 0 ? "A" : "C";
+  if (at === count) return phase === 0 ? "B" : "D";
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // the write side
 // ---------------------------------------------------------------------------
@@ -135,24 +156,38 @@ function opProxy(coll, value, onOp) {
  */
 export function incrRecorder({root, folders, hidden, objects, includeTests}) {
   const buckets = new Map();
-  const order = []; // first-enter order == the lowering sequence
+  const order = []; // first-enter order
+  // the full build's write sequence: one segment per `enter`, in the order
+  // compileProgram enters them -- the local discovery, the class pass, the
+  // local classes after every class, the function groups -- as
+  // [key, occurrence of that key, phase]. An object's writes belong to the
+  // segment they were made in, not to the object as a whole: the locals
+  // pass writes an owner's local types after EVERY class, and a merge that
+  // grouped them at the owner's slot moved them (LCL_STACK__TY_DATA).
+  const segments = [];
+  const phaseCount = [0, 0];
   let current = null;
   let lowering = false;
   let program;
   const bucket = (key) => {
-    if (!buckets.has(key)) buckets.set(key, {key, writes: Object.fromEntries(RECORDED.map((c) => [c, []])),
-      early: {}, reads: new Set(), supplied: [], rttiDefs: []});
+    if (!buckets.has(key)) buckets.set(key, {key, segs: [], reads: new Set(), supplied: [], rttiDefs: [], anon: new Map()});
     return buckets.get(key);
   };
   // a write outside any object's mark is a global pass, which the fast
-  // build runs again over its own registry; what is recorded per object is
-  // how many of its writes came before the lowering started (the local
-  // discovery), so the merge can put the passes between the two parts
+  // build runs again over its own registry; recorded here is only WHERE it
+  // ran in the segment sequence, so the reader can put its own there and
+  // refuse when the layout is not one it can reproduce
+  const straySlots = {};
   const record = (coll, op) => {
-    if (current === null) return;
-    const b = bucket(current);
-    b.writes[coll].push(op);
-    if (!lowering) b.early[coll] = b.writes[coll].length;
+    if (current === null) {
+      // the phase's segment count is not known yet: remember the position,
+      // classify it at finish
+      const phase = lowering ? 1 : 0;
+      (straySlots[coll] ??= []).push([phase, phaseCount[phase]]);
+      return;
+    }
+    const seg = bucket(current).segs.at(-1);
+    (seg[coll] ??= []).push(op);
   };
   const proxy = (coll, value) => opProxy(coll, value, (op) => record(coll, op));
   const ownership = new Map();
@@ -163,6 +198,24 @@ export function incrRecorder({root, folders, hidden, objects, includeTests}) {
       for (const coll of RECORDED) {
         if (p[coll] instanceof Map || p[coll] instanceof Set || Array.isArray(p[coll])) p[coll] = proxy(coll, p[coll]);
       }
+      // which names each object's lowering gave the anonymous structures it
+      // reached, per shape, and how many distinct instances of the shape it
+      // reached: the reader pins a fresh lowering to the full build's name
+      const anon = p.anonStructs;
+      const note = (t, go) => {
+        if (current === null) return;
+        const shape = shapeOf(t);
+        if (shape === undefined) return;
+        const b = bucket(current);
+        if (!b.anon.has(shape)) b.anon.set(shape, {names: new Set(), instances: new Set()});
+        b.anon.get(shape).names.add(go);
+        b.anon.get(shape).instances.add(t);
+      };
+      p.anonStructs = {
+        get(t) { const go = anon.get(t); if (go !== undefined) note(t, go); return go; },
+        set(t, go) { note(t, go); anon.set(t, go); return this; },
+        has(t) { return anon.has(t); },
+      };
       const get = reg.getObject.bind(reg);
       reg.getObject = (type, name) => {
         const value = get(type, name);
@@ -170,7 +223,14 @@ export function incrRecorder({root, folders, hidden, objects, includeTests}) {
         return value;
       };
     },
-    enter(key) { if (!order.includes(key)) order.push(key); current = key; },
+    enter(key) {
+      if (!order.includes(key)) order.push(key);
+      const b = bucket(key);
+      b.segs.push({});
+      segments.push([key, b.segs.length - 1, lowering ? 1 : 0]);
+      phaseCount[lowering ? 1 : 0] += 1;
+      current = key;
+    },
     exit() { current = null; },
     lowering() { lowering = true; },
     suppliedOf(owner, contributed) { bucket(keyOf("CLAS", owner)).supplied = contributed; },
@@ -182,7 +242,7 @@ export function incrRecorder({root, folders, hidden, objects, includeTests}) {
       const reg = program.reg;
       // which bucket pushed each class, off the recorded push ops
       const pushedNames = new Map(); // class name -> bucket key
-      for (const b of order) for (const op of bucket(b).writes.classes) if (op[0] === "push") pushedNames.set(op[1].name ?? op[1], b);
+      for (const b of order) for (const op of flatOps(bucket(b), "classes")) if (op[0] === "push") pushedNames.set(op[1].name ?? op[1], b);
       const supers = Object.fromEntries([...reg.getObjects()].filter((o) => o.getType() === "CLAS")
         .map((o) => [upper(o.getName()), o.getDefinition()?.getSuperClass()?.toUpperCase() ?? null]));
       // per pushed class or interface: the symbols its generated type names
@@ -220,7 +280,7 @@ export function incrRecorder({root, folders, hidden, objects, includeTests}) {
         }
         deps.delete(key);
         /** @type {any} */ const payload = {key, ir: Object.fromEntries(irs.map((c) => [c.name, c])),
-          writes: b.writes, early: b.early, reads: [...b.reads], supplied: b.supplied, rttiDefs: b.rttiDefs};
+          segs: b.segs, reads: [...b.reads], supplied: b.supplied, rttiDefs: b.rttiDefs};
         let ok = true;
         try { if (!portable(payload)) ok = false; } catch { ok = false; }
         // the file name the registry gives each pushed class (status.mjs
@@ -228,7 +288,8 @@ export function incrRecorder({root, folders, hidden, objects, includeTests}) {
         const regFiles = Object.fromEntries(irs.map((c) => [c.name, (reg.getObject("CLAS", c.name) ?? reg.getObject("INTF", c.name))?.getFiles?.()[0]?.getFilename?.()])
           .filter(([, f]) => f !== undefined));
         const entry = {deps: [...deps].sort(), reads: [...b.reads].sort(), pushed: irs.map((c) => c.name), regFiles,
-          anonRefs: [...anonRefs].sort(), broken: false,
+          anonRefs: [...anonRefs].sort(), broken: false, segs: b.segs.length,
+          anonUse: Object.fromEntries([...b.anon].map(([shape, u]) => [shape, {names: [...u.names], instances: u.instances.size}])),
           super: irs.find((c) => !c.name.includes(":"))?.super ?? supers[key.slice(5)] ?? null,
           files: Object.fromEntries((filesByObject.get(key) ?? []).map((f) => [relative(root, f), sha(readFileSync(f))]))};
         if (ok) {
@@ -248,7 +309,20 @@ export function incrRecorder({root, folders, hidden, objects, includeTests}) {
       }
       const broken = [...program.broken].map(upper);
       for (const name of broken) if (!entries[keyOf("CLAS", name)] && !entries[keyOf("INTF", name)]) entries[keyOf("CLAS", name)] = {deps: [], reads: [], pushed: [], anonRefs: [], broken: true, super: supers[name] ?? null, files: {}, portable: true};
-      const index = {schema: SCHEMA, tool: toolIdentity(), folders, objects, order, classes: program.classes.map((c) => [pushedNames.get(c.name), c.name]),
+      // the global passes' slots, per collection; a write in the middle of
+      // a phase is a layout the reader cannot reproduce, and it refuses
+      const slots = {};
+      let strayLayoutOk = true;
+      for (const [coll, positions] of Object.entries(straySlots)) {
+        for (const [phase, at] of positions) {
+          const slot = straySlot(phase, at, phaseCount[phase]);
+          if (slot === null) strayLayoutOk = false;
+          else (slots[coll] ??= new Set()).add(slot);
+        }
+      }
+      const index = {schema: SCHEMA, tool: toolIdentity(), folders, objects, order, segments, strayLayoutOk,
+        straySlots: Object.fromEntries(Object.entries(slots).map(([c, s]) => [c, [...s].sort()])),
+        classes: program.classes.map((c) => [pushedNames.get(c.name), c.name]),
         entries, broken, supers, wanted: [...program.wanted],
         // the CDS views are read off the .ddls.asddls sources, which the
         // closure registry never holds (registryFiles takes .abap/.xml
@@ -295,10 +369,48 @@ function pruneGenerations(root, current) {
  *  shared the instance -- and never invents one (a miss lowers as the full
  *  build would, naming the structure after the class that reached it) */
 class AnonShapes {
-  constructor(seed) { this.seed = seed; this.mine = new Map(); }
+  /** @param {Map<string, string>} seed shape -> the one name the write-time build gave it
+   *  @param {() => string | null} currentKey the object lowering now
+   *  @param {(key: string) => Record<string, {names: string[], instances: number}> | undefined} useOf what that object reached in the full build
+   *  @param {Set<string>} namedShapes every shape some object of the full build named */
+  constructor(seed, currentKey = () => null, useOf = () => undefined, namedShapes = new Set()) {
+    Object.assign(this, {seed, currentKey, useOf, namedShapes});
+    this.mine = new Map();
+    this.reached = new Map(); // key \0 shape -> Set of instances (this build)
+    this.doubt = undefined;
+  }
+  /** the full build named every instance of a shape after the FIRST object
+   *  to reach it in its own order; a fresh lowering reaches it in another
+   *  order (the first reacher may be cached), so it takes the name its own
+   *  object used in the full build -- when that is one name, and it reaches
+   *  no more instances of the shape than it did then. Anything else is a
+   *  doubt, and the caller refuses. */
   get(t) {
-    if (this.mine.has(t)) return this.mine.get(t);
-    try { return this.seed.get(t.getComponents().map((c) => upper(c.name)).join(",")); } catch { return undefined; }
+    const key = this.currentKey();
+    const shape = shapeOf(t);
+    if (key === null || shape === undefined) {
+      if (this.mine.has(t)) return this.mine.get(t);
+      return shape === undefined ? undefined : this.seed.get(shape);
+    }
+    const seen = `${key}\0${shape}`;
+    if (!this.reached.has(seen)) this.reached.set(seen, new Set());
+    this.reached.get(seen).add(t);
+    const use = this.useOf(key)?.[shape];
+    if (use !== undefined && this.reached.get(seen).size > use.instances) {
+      this.doubt ??= `${key} reaches more anonymous structures of the shape ${shape} than in the live generation`;
+    }
+    if (this.mine.has(t)) {
+      const go = this.mine.get(t);
+      if (use !== undefined && !use.names.includes(go)) this.doubt ??= `${key} reaches the anonymous structure ${go} the live generation named ${use.names.join("/")}`;
+      return go;
+    }
+    if (use !== undefined && use.names.length === 1) { this.mine.set(t, use.names[0]); return use.names[0]; }
+    if (use !== undefined) { this.doubt ??= `${key} named the anonymous shape ${shape} ${use.names.join(" and ")} in the live generation`; return undefined; }
+    // the edit reaches a shape this object did not: when some other object
+    // of the full build named it, which name the full build gives this
+    // instance depends on who reached it first -- not provable here
+    if (this.namedShapes.has(shape)) { this.doubt ??= `${key} newly reaches the anonymous shape ${shape}`; return undefined; }
+    return undefined;
   }
   set(t, go) { this.mine.set(t, go); }
   has(t) { return this.get(t) !== undefined; }
@@ -438,7 +550,7 @@ export function incrAssemble({root, folders, objects, hidden, includeTests, proo
   const creatorOf = new Map(), referencers = new Map(), namesOfShape = new Map();
   for (const key of index.order) {
     const payload = load(key);
-    if (payload !== undefined) for (const op of payload.writes.structs) {
+    if (payload !== undefined) for (const op of flatOps(payload, "structs")) {
       if (op[0] !== "set") continue;
       creatorOf.set(op[1], key);
       if (op[2]?.qname !== undefined) continue;
@@ -460,6 +572,20 @@ export function incrAssemble({root, folders, objects, hidden, includeTests, proo
     if (refs.size >= 2 || (refs.size === 1 && !refs.has(creator))) seeds.set(shape, name);
   }
   const seededNames = new Set(seeds.values());
+  // the full build's layout of the global passes must be one this build can
+  // reproduce (see straySlot)
+  if (index.strayLayoutOk !== true) return {ok: false, reason: "a global pass of the live generation wrote between two objects"};
+  // which object first wrote each key of the keyed collections in the
+  // live generation (the re-lowered objects' entries describe their last
+  // lowering): a fresh lowering that FIRST writes a key another object
+  // first wrote there would put it at the wrong slot of the merge
+  const firstSetter = new Map(); // coll \0 key -> object key
+  for (const [key, occ] of index.segments) {
+    const payload = load(key);
+    for (const coll of ["structs", "consts", "sigs", "events"]) for (const op of payload?.segs?.[occ]?.[coll] ?? []) {
+      if (op[0] === "set" && !firstSetter.has(`${coll}\0${op[1]}`)) firstSetter.set(`${coll}\0${op[1]}`, key);
+    }
+  }
 
   // the fast compileProgram: fresh lowerings over the closure registry,
   // with the shared state pre-seeded from the cache. The fresh lowering's
@@ -469,22 +595,26 @@ export function incrAssemble({root, folders, objects, hidden, includeTests, proo
   // insertion order, and "reused first, fresh after it" is not that order
   const freshRtti = [];
   const freshOwnership = new Map();
-  const freshOps = new Map(); // key -> {coll: [ops]} (the writes of a fresh lowering)
-  const strayOps = [{}, {}]; // [before, after the lowering starts]: coll -> [ops], the global passes
-  const freshEarly = new Map(); // key -> {coll: n}, how many fresh writes came before the lowering
+  const freshSegs = new Map(); // key -> [{coll: [ops]}], one per `enter`, as the write side records
+  const freshPhases = new Map(); // key -> [phase of each segment]
+  const freshStrays = []; // [coll, op, phase, segments of the phase before it]
+  const freshCount = [0, 0];
   let currentKey = null;
   let lowering = 0;
-  const opsOf = (key) => {
-    if (!freshOps.has(key)) freshOps.set(key, {});
-    return freshOps.get(key);
-  };
+  let orderDoubt;
   const supers = new Map(Object.entries(index.supers));
   const readIncr = {
     // only the re-lowered objects compile; everything else stays in `wanted`
     // (a call of a class outside the program is refused during lowering) and
     // its IR comes from the cache
     compiles: (key) => relower.has(key),
-    enter(key) { currentKey = key; },
+    enter(key) {
+      if (!freshSegs.has(key)) { freshSegs.set(key, []); freshPhases.set(key, []); }
+      freshSegs.get(key).push({});
+      freshPhases.get(key).push(lowering);
+      freshCount[lowering] += 1;
+      currentKey = key;
+    },
     exit() { currentKey = null; },
     lowering() { lowering = 1; },
     // the partial registry cannot walk the superclass chains of the classes
@@ -497,8 +627,10 @@ export function incrAssemble({root, folders, objects, hidden, includeTests, proo
       for (const coll of RECORDED) {
         const target = p[coll];
         if (!["skipped", "partial", "classes"].includes(coll)) {
-          for (const key of reusedKeys) {
-            for (const [method, ...args] of load(key).writes[coll] ?? []) {
+          // in the full build's segment order, the cached objects only
+          for (const [key, occ] of index.segments) {
+            if (relower.has(key)) continue;
+            for (const [method, ...args] of load(key).segs?.[occ]?.[coll] ?? []) {
               if (method === "set") target.set(args[0], args[1]);
               else if (method === "add") target.add(args[0]);
               else if (method === "delete") target.delete(args[0]);
@@ -512,19 +644,24 @@ export function incrAssemble({root, folders, objects, hidden, includeTests, proo
         // below puts it there).
         // `classes` keeps its own merge off index.classes below.
         if (coll !== "classes") p[coll] = opProxy(coll, target, (op) => {
-          if (currentKey === null) { (strayOps[lowering][coll] ??= []).push(op); return; }
-          const ops = (opsOf(currentKey)[coll] ??= []);
-          ops.push(op);
-          if (lowering === 0) {
-            if (!freshEarly.has(currentKey)) freshEarly.set(currentKey, {});
-            freshEarly.get(currentKey)[coll] = ops.length;
+          if (currentKey === null) { freshStrays.push([coll, op, lowering, freshCount[lowering]]); return; }
+          const seg = freshSegs.get(currentKey).at(-1);
+          (seg[coll] ??= []).push(op);
+          // a key this object writes FIRST in this build must be one it (or
+          // nobody) wrote first in the full build, or the merge puts it at
+          // another object's slot
+          if (op[0] === "set" && target instanceof Map && !target.has(op[1])) {
+            const id = `${coll}\0${op[1]}`;
+            const before = firstSetter.get(id);
+            if (before !== undefined && before !== currentKey) orderDoubt ??= `${currentKey} now first writes ${coll} ${op[1]}, which ${before} wrote first in the live generation`;
           }
         });
       }
       const supplied = new Map(p.supplied);
       for (const key of reusedKeys) for (const [k, params] of load(key).supplied ?? []) supplied.set(k, new Set([...(supplied.get(k) ?? []), ...params]));
       p.supplied = supplied;
-      p.anonStructs = new AnonShapes(seeds);
+      const namedShapes = new Set(namesOfShape.keys());
+      p.anonStructs = anonShapes = new AnonShapes(seeds, () => currentKey, (key) => index.entries[key]?.anonUse, namedShapes);
       // the fresh lowering resolves CDS view types through this map
       // (frontend.mjs), and the mini registry's own is empty -- its walk
       // never reaches the .ddls.asddls sources; the merge restores the
@@ -534,6 +671,7 @@ export function incrAssemble({root, folders, objects, hidden, includeTests, proo
     rttiOf(owner, defs) { freshRtti.push([owner, defs]); },
     ownershipOf(name, value) { freshOwnership.set(upper(name), value); },
   };
+  let anonShapes;
   let mini;
   try {
     mini = compileProgram({folders, objects, tolerant: true, skip: (p) => hidden.has(p) || !need.has(p), includeTests, incr: readIncr});
@@ -552,16 +690,45 @@ export function incrAssemble({root, folders, objects, hidden, includeTests, proo
     return {ok: false, reason: `${name}: the edit left it with syntax errors the live generation did not have (${why})`};
   }
 
-  // the merged program's shared collections, in the order the full build's
-  // lowering wrote them: per object of the recorded sequence, the fresh
-  // writes of one that lowered again and the recorded writes of one taken
-  // from the cache. "Reused first, fresh after it" is not that order, and
-  // the program digest and the emitted Go read several of these collections
-  // in insertion order. Writes outside any object's mark (the global passes
-  // inside compileProgram) go where the full build makes them: some run
-  // before the lowering (function group signatures: TLINE first of all)
-  // and some after it, and "at the end" put the first kind after every
-  // object, which moved their structures in the emitted Go.
+  if (anonShapes?.doubt !== undefined) return {ok: false, reason: anonShapes.doubt};
+  // the full build entered every re-lowered object as often, and in the
+  // same phases, as this one did (the discovery, the class pass, the local
+  // classes, the function groups); an edit that changed that changes the
+  // full build's sequence too, and the merge below could not follow it
+  const recordedSegs = new Map();
+  for (const [key, , phase] of index.segments) {
+    if (!recordedSegs.has(key)) recordedSegs.set(key, []);
+    recordedSegs.get(key).push(phase);
+  }
+  for (const key of relower) {
+    if (JSON.stringify(freshPhases.get(key) ?? []) !== JSON.stringify(recordedSegs.get(key) ?? [])) {
+      return {ok: false, reason: `${key}: its passes differ from the live generation's (${JSON.stringify(freshPhases.get(key) ?? [])} against ${JSON.stringify(recordedSegs.get(key) ?? [])})`};
+    }
+  }
+  if (orderDoubt !== undefined) return {ok: false, reason: orderDoubt};
+
+  // the merged program's shared collections, in the order the full build
+  // wrote them: its segment sequence (index.segments), each segment the
+  // fresh writes of an object that lowered again or the recorded ones of an
+  // object taken from the cache, and the global passes in the slots they
+  // ran in. The program digest and the emitted Go read several of these
+  // collections in insertion order; any other order names another
+  // generation. The passes are this build's own: its registry holds every
+  // object they read (every non-class object is a member).
+  const strayBySlot = {}; // coll -> slot -> [ops]
+  for (const [coll, op, phase, at] of freshStrays) {
+    let slot = straySlot(phase, at, freshCount[phase]);
+    if (slot === null) return {ok: false, reason: `a global pass wrote ${coll} between two objects`};
+    if (slot === "AB" || slot === "CD") {
+      // this build had no segment in the phase: the slot is the one the
+      // full build used, if it used only one of the two
+      const both = slot.split("");
+      const used = (index.straySlots[coll] ?? []).filter((s) => both.includes(s));
+      if (used.length > 1) return {ok: false, reason: `the global passes of ${coll} ran on both sides of a phase this build has no object in`};
+      slot = used[0] ?? both[0];
+    }
+    ((strayBySlot[coll] ??= {})[slot] ??= []).push(op);
+  }
   const apply = (target, op) => {
     const [method, ...args] = op;
     if (method === "set") target.set(args[0], args[1]);
@@ -575,21 +742,16 @@ export function incrAssemble({root, folders, objects, hidden, includeTests, proo
     if (coll === "classes") continue; // merged below, off index.classes
     const like = program2[coll];
     const out = like instanceof Map ? new Map() : like instanceof Set ? new Set() : [];
-    // the full build's sequence: each object's local discovery, the global
-    // passes before the lowering (the function group signatures), each
-    // object's lowering, the global passes after it (interface methods,
-    // tables). The passes are the fast build's own: its registry holds every
-    // object they read (every non-class object is a member)
-    for (const half of [0, 1]) {
-      for (const key of index.order) {
-        let ops, early;
-        if (opsOf(key)[coll] !== undefined) { ops = opsOf(key)[coll]; early = freshEarly.get(key)?.[coll] ?? 0; }
-        else if (relower.has(key)) continue;
-        else { ops = load(key).writes[coll] ?? []; early = load(key).early?.[coll] ?? 0; }
-        for (const op of half === 0 ? ops.slice(0, early) : ops.slice(early)) apply(out, op);
+    const strays = (slot) => { for (const op of strayBySlot[coll]?.[slot] ?? []) apply(out, op); };
+    const segs = (phase) => {
+      for (const [key, occ, p] of index.segments) {
+        if (p !== phase) continue;
+        const ops = relower.has(key) ? freshSegs.get(key)?.[occ]?.[coll] : load(key).segs?.[occ]?.[coll];
+        for (const op of ops ?? []) apply(out, op);
       }
-      for (const op of strayOps[half][coll] ?? []) apply(out, op);
-    }
+    };
+    strays("A"); segs(0); strays("B");
+    strays("C"); segs(1); strays("D");
     program2[coll] = out;
   }
 

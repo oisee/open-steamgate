@@ -183,9 +183,9 @@ function canon(value, depth = 0) {
 }
 const text = (value) => JSON.stringify(canon(value));
 
-function tree() {
+function tree(extra = {}) {
   const root = mkdtempSync(join(tmpdir(), "osgo-incr-"));
-  for (const [file, text] of Object.entries(sources)) {
+  for (const [file, text] of Object.entries({...sources, ...extra})) {
     mkdirSync(join(root, file, ".."), {recursive: true});
     writeFileSync(join(root, file), text);
   }
@@ -195,13 +195,15 @@ function tree() {
 const objectNames = (root) => [...registryFiles([join(root, "app")], new Set(), new Set()).values()].map((k) => k.slice(5).toLowerCase());
 
 /** the program a full front end makes of the tree as it is now */
-const fullProgram = (root) => compileProgram({folders: [join(root, "app")], objects: objectNames(root), tolerant: true});
+// (the ABAP Unit owners as osgo passes them, a Set: every class runs the
+// local discovery then, which is a pass of its own in the write sequence)
+const fullProgram = (root, includeTests = new Set()) => compileProgram({folders: [join(root, "app")], objects: objectNames(root), tolerant: true, includeTests});
 
 /** a cache of the tree as it is now, the way a full build records it */
-const writeCache = (root, gen = "live1") => {
+const writeCache = (root, gen = "live1", includeTests = new Set()) => {
   const folders = [join(root, "app")];
-  const recorder = incrRecorder({root, folders, hidden: new Set(), objects: objectNames(root), includeTests: new Set()});
-  const program = compileProgram({folders, objects: objectNames(root), tolerant: true, incr: recorder});
+  const recorder = incrRecorder({root, folders, hidden: new Set(), objects: objectNames(root), includeTests});
+  const program = compileProgram({folders, objects: objectNames(root), tolerant: true, includeTests, incr: recorder});
   return {program, written: recorder.finish({gen}), gen};
 };
 
@@ -305,11 +307,149 @@ test("a CATCH whose chain leaves the partial registry answers from the recorded 
 });
 
 /** the files this test edited (the cache's proof names root-relative files) */
-function changedFiles(root) {
-  return [...registryFiles([join(root, "app")], new Set(), new Set()).keys()]
+function changedFiles(root, extra = {}, includeTests = new Set()) {
+  const all = {...sources, ...extra};
+  return [...registryFiles([join(root, "app")], new Set(), includeTests).keys()]
     .map((f) => f.slice(root.length + 1))
-    .filter((f) => readFileSync(join(root, f), "utf8") !== sources[f]);
+    .filter((f) => readFileSync(join(root, f), "utf8") !== all[f]);
 }
+
+// A class with local classes compiled (the ABAP Unit owners osgo passes, or
+// LOCAL_CLASSES): the full build lowers them in a pass of their own AFTER
+// every class, so the structures their types make come after every class's.
+// The real tree's LCL_STACK__TY_DATA moved to its owner's slot under a merge
+// that grouped an object's writes per object rather than per pass.
+const withLocals = {
+  "app/zcl_incr_aaa.clas.abap": `CLASS zcl_incr_aaa DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    METHODS one RETURNING VALUE(r) TYPE i.
+ENDCLASS.
+CLASS zcl_incr_aaa IMPLEMENTATION.
+  METHOD one.
+    r = 1.
+  ENDMETHOD.
+ENDCLASS.`,
+  "app/zcl_incr_aaa.clas.testclasses.abap": `CLASS ltcl_aaa DEFINITION FINAL FOR TESTING DURATION SHORT RISK LEVEL HARMLESS.
+  PRIVATE SECTION.
+    TYPES: BEGIN OF ty_loc, x TYPE i, y TYPE string, END OF ty_loc.
+    METHODS run FOR TESTING.
+ENDCLASS.
+CLASS ltcl_aaa IMPLEMENTATION.
+  METHOD run.
+    DATA s TYPE ty_loc.
+    s-x = 1.
+    s-y = |{ s-x }|.
+  ENDMETHOD.
+ENDCLASS.`,
+};
+
+for (const [name, file] of [["cached", "app/zcl_incr_hot.clas.abap"], ["re-lowered", "app/zcl_incr_aaa.clas.testclasses.abap"]]) {
+  test(`the local classes' writes keep their pass after every class (owner ${name})`, () => {
+    const units = new Set(["ZCL_INCR_AAA"]);
+    const root = tree(withLocals);
+    try {
+      writeCache(root, "live1", units);
+      if (file.includes("hot")) edit(root, file, "'Key TravelId missing'", "'Key TravelId missing (edited)'");
+      else edit(root, file, "s-x = 1.", "s-x = 2.");
+      const reference = fullProgram(root, units);
+      const local = [...reference.structs.keys()].findIndex((k) => /TY_LOC/.test(k));
+      const pair = [...reference.structs.keys()].findIndex((k) => /TY_PAIR/.test(k));
+      assert.ok(local > pair && pair >= 0, `the fixture must write the local type after the classes' (${[...reference.structs.keys()]})`);
+      const attempt = incrAssemble({root, folders: [join(root, "app")], objects: objectNames(root), hidden: new Set(), includeTests: units,
+        proof: {ok: true, base: "live1", changed: changedFiles(root, withLocals, units)}});
+      assert.equal(attempt.ok, true, attempt.reason);
+      assert.equal(attempt.lowered.includes("CLAS ZCL_INCR_AAA"), name === "re-lowered");
+      assert.deepEqual([...attempt.program.structs.keys()], [...reference.structs.keys()]);
+      assert.equal(text([...attempt.program.consts]), text([...reference.consts]));
+      assert.equal(text(attempt.program.classes), text(reference.classes));
+      assert.equal(emitted(attempt.program), emitted(reference));
+    } finally { rmSync(root, {recursive: true, force: true}); }
+  });
+}
+
+// An anonymous structure (a structured constant of an interface) reached by
+// several classes is one abaplint type instance, named after the FIRST class
+// of the full build's order to reach it; another constant of the same shape
+// is another instance with another name, so the shape alone does not say
+// which. A fast build that re-lowers a later reacher while the first one
+// stays cached must still give it the first reacher's name (the real tree:
+// ZCL_STG_SADL_DPC__S_MSGID_... where the full build has
+// ZCL_OSD_RAP_SADL__S_MSGID_...).
+const withAnon = {
+  "app/zif_incr_msg.intf.abap": `INTERFACE zif_incr_msg PUBLIC.
+  CONSTANTS: BEGIN OF co_err, msgid TYPE c LENGTH 20 VALUE 'M1', msgno TYPE c LENGTH 3 VALUE '001', END OF co_err.
+ENDINTERFACE.`,
+  "app/zif_incr_msg2.intf.abap": `INTERFACE zif_incr_msg2 PUBLIC.
+  CONSTANTS: BEGIN OF co_other, msgid TYPE c LENGTH 20 VALUE 'M2', msgno TYPE c LENGTH 3 VALUE '002', END OF co_other.
+ENDINTERFACE.`,
+  "app/zcl_incr_a1.clas.abap": `CLASS zcl_incr_a1 DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    METHODS m RETURNING VALUE(r) TYPE string.
+ENDCLASS.
+CLASS zcl_incr_a1 IMPLEMENTATION.
+  METHOD m.
+    DATA e LIKE zif_incr_msg=>co_err.
+    e = zif_incr_msg=>co_err.
+    r = e-msgid.
+  ENDMETHOD.
+ENDCLASS.`,
+  "app/zcl_incr_b2.clas.abap": `CLASS zcl_incr_b2 DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    METHODS m RETURNING VALUE(r) TYPE string.
+ENDCLASS.
+CLASS zcl_incr_b2 IMPLEMENTATION.
+  METHOD m.
+    DATA e LIKE zif_incr_msg2=>co_other.
+    e = zif_incr_msg2=>co_other.
+    r = e-msgno.
+  ENDMETHOD.
+ENDCLASS.`,
+  "app/zcl_incr_z9.clas.abap": `CLASS zcl_incr_z9 DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    METHODS m RETURNING VALUE(r) TYPE string.
+ENDCLASS.
+CLASS zcl_incr_z9 IMPLEMENTATION.
+  METHOD m.
+    DATA e LIKE zif_incr_msg=>co_err.
+    e = zif_incr_msg=>co_err.
+    r = |z9:{ e-msgno }|.
+  ENDMETHOD.
+ENDCLASS.`,
+};
+
+test("a re-lowered later reacher of a shared anonymous structure keeps the first reacher's name", () => {
+  const root = tree(withAnon);
+  try {
+    writeCache(root);
+    edit(root, "app/zcl_incr_z9.clas.abap", "|z9:{ e-msgno }|", "|z9!{ e-msgno }|");
+    const reference = fullProgram(root);
+    const names = [...reference.structs.keys()].filter((k) => /S_MSGID_MSGNO/.test(k));
+    assert.ok(names.some((k) => k.startsWith("ZCL_INCR_A1__")) && names.some((k) => k.startsWith("ZCL_INCR_B2__")),
+      `the fixture must name one shape twice (${names})`);
+    assert.ok(!names.some((k) => k.startsWith("ZCL_INCR_Z9__")), `z9 must reuse a1's name in the full build (${names})`);
+    const attempt = incrAssemble({root, folders: [join(root, "app")], objects: objectNames(root), hidden: new Set(), includeTests: new Set(),
+      proof: {ok: true, base: "live1", changed: changedFiles(root, withAnon)}});
+    assert.equal(attempt.ok, true, attempt.reason);
+    assert.ok(attempt.lowered.includes("CLAS ZCL_INCR_Z9") && !attempt.lowered.includes("CLAS ZCL_INCR_A1"));
+    assert.deepEqual([...attempt.program.structs.keys()], [...reference.structs.keys()]);
+    assert.equal(text([...attempt.program.consts]), text([...reference.consts]));
+    assert.equal(emitted(attempt.program), emitted(reference));
+  } finally { rmSync(root, {recursive: true, force: true}); }
+});
+
+test("an edit that newly reaches an anonymous shape other objects named refuses", () => {
+  const root = tree(withAnon);
+  try {
+    writeCache(root);
+    // hot never reached the shape; whose name the full build gives it now
+    // depends on who reaches that instance first -- not provable from here
+    edit(root, "app/zcl_incr_hot.clas.abap", "r = |hot:{ travelid }|.", "DATA e LIKE zif_incr_msg2=>co_other.\n    e = zif_incr_msg2=>co_other.\n    r = |hot:{ travelid }{ e-msgid }|.");
+    const attempt = incrAssemble({root, folders: [join(root, "app")], objects: objectNames(root), hidden: new Set(), includeTests: new Set(),
+      proof: {ok: true, base: "live1", changed: changedFiles(root, withAnon)}});
+    assert.equal(attempt.ok, false);
+    assert.match(attempt.reason, /newly reaches the anonymous shape MSGID,MSGNO/);
+  } finally { rmSync(root, {recursive: true, force: true}); }
+});
 
 test("a cache of another generation is refused, and so is an unreadable entry", async () => {
   const root = tree();
