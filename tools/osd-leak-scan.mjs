@@ -35,9 +35,13 @@ import { execFileSync } from "node:child_process";
 import { resolve, join, relative } from "node:path";
 
 export const MAX_SCAN_BYTES = 8 * 1024 * 1024;
-// Entries in this one category are private SAP object names. Other identifier
-// categories and all structural checks remain active for private layers.
-export const SAP_CORPUS_CATEGORY = "sap-corpus-names";
+// --private-layer drops exactly these two identifier-list categories (the
+// owner's keys for SAP-derived names, never renamed). Every other category and
+// all structural checks stay active; a list with neither key is refused.
+export const SAP_CORPUS_CATEGORIES = new Set([
+  "корпус SAP (A4H, только локально)",
+  "SEGW-образцы SAP (только локально)",
+]);
 
 const PRIVATE_V4 =
   /\b(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})\b/g;
@@ -306,6 +310,8 @@ function blobsInRange(root, rangeArgs) {
 }
 
 function scan(root, sources, names, publication = false, privateLayer = false) {
+  if (privateLayer && !names?.some(({kind}) => SAP_CORPUS_CATEGORIES.has(kind)))
+    throw Object.assign(new Error("private-layer scan requires a SAP corpus category in the identifier list"), {code: "NO_SAP_CORPUS"});
   const hits = [];
   // A 64-hex value seen once after a canonical digest marker is that digest
   // wherever else it stands: abapiti's runtime descriptor names a shape by its
@@ -360,7 +366,7 @@ function scan(root, sources, names, publication = false, privateLayer = false) {
       if (names) {
         const hay = view.text.toLowerCase();
         for (const { kind, value } of names) {
-          if (privateLayer && kind === SAP_CORPUS_CATEGORY) continue;
+          if (privateLayer && SAP_CORPUS_CATEGORIES.has(kind)) continue;
           if (hay.includes(value.toLowerCase())) note(view.how, kind, value, "identifier");
         }
       }
@@ -468,7 +474,13 @@ if (runsAs("osd-leak-scan.mjs")) {
   const files = pathArgs
     ? namedFiles(root, pathArgs)
     : rangeArgs ? blobsInRange(root, rangeArgs) : all ? trackedFiles(root) : stagedFiles(root);
-  let hits = scan(root, files, names, args.includes("--publication-allow"), args.includes("--private-layer"));
+  let hits;
+  try { hits = scan(root, files, names, args.includes("--publication-allow"), args.includes("--private-layer")); }
+  catch (error) {
+    if (error.code !== "NO_SAP_CORPUS") throw error;
+    console.error(`osd-leak-scan: ${error.message}`);
+    process.exit(2);
+  }
   if (args.includes("--publication-allow")) {
     const entries = JSON.parse(readFileSync(join(root, ".leak-publication-allow.json"), "utf8")).allow;
     for (const [i, entry] of entries.entries()) {

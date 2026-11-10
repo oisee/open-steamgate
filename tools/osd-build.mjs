@@ -1,6 +1,6 @@
 import {missingLibraries, describeMissingLibraries} from "./osd-build-libraries.mjs";
 export {missingLibraries, describeMissingLibraries};
-import {activeSystem, assertPublicSystem, systemFile, rootWebappOf} from "./osd-system.mjs";
+import {activeSystem, assertPublicSystem, generationSystem, unrecordedGeneration, systemFile, rootWebappOf} from "./osd-system.mjs";
 import {verifySystem} from "./osd-system-verify.mjs";
 import {warnSystemToolchain} from "./osd-system-toolchain.mjs";
 import {userLayersOf} from "./osd-source-layers.mjs";
@@ -761,9 +761,9 @@ export async function build(options = {}) {
   } catch (error) {
     warmUnchecked = error.code !== "ENOENT";
   }
-  if (warmUnchecked) {
+  if (warmUnchecked || options.force !== true && unrecordedGeneration(target)) { // publishers refuse one without its system record
     options = {...options, force: true, replace: true};
-    log(`generation ${hash} was made warm and nobody has compared it yet: building it cold`);
+    log(warmUnchecked ? `generation ${hash} was made warm and nobody has compared it yet: building it cold` : `generation ${hash} does not record its system: building it again`);
   }
 
   if (options.force !== true && existsSync(join(target, "manifest.json"))) {
@@ -858,7 +858,7 @@ export async function build(options = {}) {
     const objects = made.objects;
 
     const manifest = {
-      sourceLayers: inputs.sourceLayers ?? [],
+      sourceLayers: inputs.sourceLayers ?? [], ...generationSystem(root),
       hash,
       builtAt: new Date().toISOString(),
       ms: Date.now() - started,

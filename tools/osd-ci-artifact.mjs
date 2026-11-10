@@ -1,6 +1,7 @@
 // Archive the output of this run for the suite and browser jobs.
 import {readFileSync, readdirSync, existsSync} from "node:fs";
 import {spawnSync} from "node:child_process";
+import {assertPublicSystem} from "./osd-system.mjs";
 
 if (process.argv[2] === "verify") {
   const {generationStateSnapshot} = await import("./osd-build.mjs");
@@ -14,6 +15,7 @@ if (!archive) {
   console.error("usage: node tools/osd-ci-artifact.mjs pack <tar-file> | verify");
   process.exit(2);
 }
+assertPublicSystem(process.cwd());
 const paths = ["gen", "output", "build", ".local/lars", ".local/ci-artifact/transpiler"];
 for (const pack of readdirSync("packs")) {
   const manifest = `packs/${pack}/osd-pack.json`;

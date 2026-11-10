@@ -37,11 +37,20 @@ are `org.osd.layer.name`, `org.osd.layer.kind` and, when source is known,
 manifest. Without the flag, neither field is present and existing digests
 remain unchanged. Private layers, including any system containing one, may
 be pushed only to an exact registry host in `OSD_PRIVATE_REGISTRIES` (comma or
-whitespace separated `host[:port]`). The default is empty. `ghcr.io` and
+whitespace separated `host[:port]`). A bare host matches only a reference
+without a port; `host:port` matches only that port. The default is empty. `ghcr.io` and
 `*.github.io` always refuse private layers, even when listed. A refusal is
 `PRIVATE_LAYER` (CLI exit 2) and names the layer and destination registry.
 System descriptors carry the private annotation; system push reads every
 layer config again before uploading.
+
+Public artefacts made from a checkout (release and download archives, the
+VSIX and binary seeds, the OSGo and Bun release binaries, Pages, the Docker
+image, CI artifacts, the system release) call `assertPublicSystem`. It
+refuses, as `PRIVATE_LAYER`, an installed system with a private layer and a
+live generation built from one: every generation's `manifest.json` records
+`systemDigest` and `systemPrivate`. A live generation without that record,
+or from another system than the installed one, is refused until rebuilt.
 
 `build` and `push` also accept `--closure <file.json>`. The file must hold
 `{"unresolved":0,"items":[]}` with a nonnegative integer and an array of
@@ -87,20 +96,20 @@ not apply to a published layer: a folder whose content is only allowed in this
 repository (`packs/lsd`, `packs/zvdb`'s vectors) cannot be published as is.
 A layer brings its own exceptions instead: `osd-layer push … --leak-allow
 <file>` and `osd-layer system push … --leak-allow <file>` take a file in the
-publication exception format. Every entry requires archive `file`,
+publication exception format. Every entry requires `layer`, archive `file`,
 `fileSha256` (SHA-256 of the entire staged file), `category`, exact positive
-`count`, and a reviewed `reason`. `layer` may scope an entry to one named
-layer; an entry without it retains its original scope. Identifier categories use numbered category
+`count`, and a reviewed `reason`. Identifier categories use numbered category
 IDs; entries never contain matched text or a hash of matched text. Changed
 bytes, missing paths, ambiguous layers and changed category counts are
 `BAD_ALLOW`. Metadata documents are never excepted. The flag repeats.
 Public scanner output contains categories and paths only.
 For private layers the same gate uses `--private-layer`: it ignores only
-entries in the identifier-list category `sap-corpus-names`. Put SAP object
-and corpus names in that category in `.local/leak-identifiers.json`. Existing
-identifier lists must move their SAP corpus entries to `sap-corpus-names`;
-the owner migrates the private list. Hosts,
-users, credentials, tokens, addresses and binary IPv4 views remain checked.
+entries in the two existing identifier-list categories
+`корпус SAP (A4H, только локально)` and `SEGW-образцы SAP (только локально)`
+(`SAP_CORPUS_CATEGORIES` in `tools/osd-leak-scan.mjs`); no list is renamed.
+A list with neither category is refused. Every other category, hosts, users,
+logons, project names, credentials, tokens, addresses, home paths and binary
+IPv4 views remain checked.
 
 `treeDigest` uses `tools/osd-oci.mjs`'s shared helper: SHA-256 of concatenated
 `<content sha256 hex>  <archive relative path>\n` lines, sorted by UTF-8 path

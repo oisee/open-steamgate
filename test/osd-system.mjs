@@ -6,7 +6,7 @@ import {registry, listening} from "./helpers/oci-registry.mjs";
 import {build as layerBuild, pushSystem, validateLayer} from "../tools/osd-layer.mjs";
 import {push, pushManifest, manifest, pull, sha256, treeDigest} from "../tools/osd-oci.mjs";
 import {fetchSystem, main as fetchMain} from "../tools/osd-fetch.mjs";
-import {activeSystem, rootWebappOf, LAYER_ID} from "../tools/osd-system.mjs";
+import {activeSystem, assertPublicSystem, generationSystem, rootWebappOf, LAYER_ID} from "../tools/osd-system.mjs";
 import {libraryPath} from "../tools/osd-lib-path.mjs";
 import {inputFoldersOf, packsOf, dataDirsOf, ddicDirsOf, webappsOf, tilesOf, contentFoldersOf} from "../tools/osd-packs.mjs";
 import {layers, libraryFiles, excludePatterns} from "../tools/osd-inputs.mjs";
@@ -26,6 +26,30 @@ const rejects = async (fn, code) => { let e; try { await fn(); } catch (error) {
 
 describe("osd-system: one digest supplies the system", function () {
   this.timeout(60000);
+  it("refuses a stale live generation compiled from a private system", () => {
+    const scratch = mkdtempSync(join(tmpdir(), "osd-private-generation-"));
+    try {
+      // built while a private system was installed, which has since gone
+      json(join(scratch, "build/by-input/fixture/manifest.json"), {systemDigest: "sha256:" + "a".repeat(64), systemPrivate: true});
+      symlinkSync("by-input/fixture", join(scratch, "build/live"));
+      expect(() => assertPublicSystem(scratch)).to.throw(/private live generation/).with.property("code", "PRIVATE_LAYER");
+      json(join(scratch, "build/by-input/fixture/manifest.json"), {systemDigest: null, systemPrivate: true});
+      expect(() => assertPublicSystem(scratch)).to.throw().with.property("code", "PRIVATE_LAYER");
+      // from another system, or from before the record: not known to be public
+      json(join(scratch, "build/by-input/fixture/manifest.json"), {systemDigest: "sha256:" + "a".repeat(64), systemPrivate: false});
+      expect(() => assertPublicSystem(scratch)).to.throw(/no matching public system identity/);
+      json(join(scratch, "build/by-input/fixture/manifest.json"), {hash: "fixture"});
+      expect(() => assertPublicSystem(scratch)).to.throw(/no matching public system identity/);
+      json(join(scratch, "build/by-input/fixture/manifest.json"), {systemDigest: null, systemPrivate: false});
+      expect(() => assertPublicSystem(scratch)).not.to.throw();
+      // what osd-build and osd-warm record while a private system is installed
+      const identity = {order: 0, name: "synthetic", kind: "lib", private: true,
+        digest: `sha256:${"1".repeat(64)}`, treeDigest: `sha256:${"2".repeat(64)}`, path: "libs/synthetic"};
+      json(join(scratch, ".local/system/.osd-system.json"), {digest: `sha256:${"3".repeat(64)}`, layers: [identity]});
+      json(join(scratch, ".local/system/libs/synthetic", LAYER_ID), identity);
+      expect(generationSystem(scratch)).to.deep.equal({systemDigest: `sha256:${"3".repeat(64)}`, systemPrivate: true});
+    } finally { rmSync(scratch, {recursive: true, force: true}); }
+  });
   let root, source, r, host, ref, env, cwd;
   beforeEach(async () => {
     root = mkdtempSync(join(tmpdir(), "osd-system-"));

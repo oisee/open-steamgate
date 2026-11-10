@@ -43,6 +43,36 @@ export function assertPublicSystem(root) {
     error.code = "PRIVATE_LAYER";
     throw error;
   }
+  // The live generation records the system it was compiled from
+  // (generationSystem, written by osd-build and osd-warm). A generation built
+  // while a private system was installed stays private after that system is
+  // replaced; one without a record, or from another system, is refused too.
+  const liveManifest = join(root, "build/live/manifest.json");
+  if (existsSync(liveManifest)) {
+    let generation;
+    try { generation = JSON.parse(readFileSync(liveManifest, "utf8")); }
+    catch { fail("invalid live generation manifest"); }
+    if (generation?.systemPrivate === true) {
+      const error = new Error("private live generation cannot be published to a public destination");
+      error.code = "PRIVATE_LAYER";
+      throw error;
+    }
+    if (generation?.systemPrivate !== false || generation.systemDigest !== (system?.digest ?? null))
+      fail("live generation has no matching public system identity; rebuild with node tools/osd-build.mjs");
+  }
+}
+
+// What a generation records about the system it was compiled from.
+export function generationSystem(root) {
+  const system = activeSystem(root);
+  return {systemDigest: system?.digest ?? null, systemPrivate: system?.layers.some(layer => layer.private === true) ?? false};
+}
+
+// A built generation from before that record: osd-build builds it again.
+export function unrecordedGeneration(dir) {
+  const file = join(dir, "manifest.json");
+  if (!existsSync(file)) return false;
+  try { return typeof JSON.parse(readFileSync(file, "utf8")).systemPrivate !== "boolean"; } catch { return true; }
 }
 
 export const layerDir = (root, layer) => join(root, ".local/system", layer.path);

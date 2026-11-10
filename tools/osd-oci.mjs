@@ -131,8 +131,8 @@ export function assertPrivateTarget(ref, layers, env = readEnvironment(["OSD_PRI
   if (!layer) return;
   const target = normalizedRegistry(registry);
   const allowed = (env.OSD_PRIVATE_REGISTRIES ?? "").split(/[\s,]+/).filter(Boolean)
-    .map(normalizedRegistry).some(entry => entry && entry.host === target.host && (entry.port === undefined || entry.port === target.port));
-  if (target.host === "ghcr.io" || target.host === "github.io" || target.host.endsWith(".github.io") || !allowed)
+    .map(normalizedRegistry).some(entry => entry && target && entry.host === target.host && entry.port === target.port);
+  if (!target || target.host === "ghcr.io" || target.host === "github.io" || target.host.endsWith(".github.io") || !allowed)
     throw new OciError("PRIVATE_LAYER", `private layer ${layer.config.name} cannot be published to ${registry}`);
 }
 

@@ -83,6 +83,7 @@ import {packagedVersion, writeVersionMarker} from "../tools/layer-version/index.
 import {readLock} from "../tools/osd-lock.mjs";
 import {writeThirdPartyNotices} from "./third-party-notices.mjs";
 import {forPublishing, generationTmpProblem} from "../tools/osd-tmp.mjs";
+import {assertPublicSystem} from "../tools/osd-system.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const EXT_DIR = join(ROOT, "editors", "vscode");
@@ -353,7 +354,8 @@ export function excludeTestOnlyIncludes(seedRoot, excludedPaths) {
 export const SEED_DIRS = ["src", "webapp", "tools", "data"];
 export const SEED_FILES = ["abap_transpile.json", "abaplint.jsonc", "libs.lock.json", "package.json"];
 
-export function copySeedTree(seedRoot, selectedPacks) {
+export function copySeedTree(seedRoot, selectedPacks, sourceRoot = ROOT) {
+  assertPublicSystem(sourceRoot);
   mkdirSync(seedRoot, {recursive: true});
 
   // No output/ and no gen/ from the checkout: the checkout's generation
@@ -576,7 +578,8 @@ function prebuildGeneration(seedRoot, env) {
  *  its generations by its own bytes (tools/osd-build.mjs generatorIdentity),
  *  so a prebuilt generation could never be reused there: `prebuild` is the
  *  VSIX's alone. */
-export async function stageSystemSeed(seedRoot, env = process.env, {prebuild = false, version = packagedVersion(ROOT)} = {}) {
+export async function stageSystemSeed(seedRoot, env = process.env, {prebuild = false, version = packagedVersion(ROOT), sourceRoot = ROOT} = {}) {
+  assertPublicSystem(sourceRoot);
   requireSupportedNode(process.versions.node, "system seed: ");
   const transpilerRef = pinnedTranspilerRef();
   const preflight = describeVsixPreflight(vsixPreflightMissing(ROOT));

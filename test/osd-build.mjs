@@ -74,6 +74,31 @@ describe("tools/osd-build: the layers, refused before a lock is taken", function
     expect(spawnSync(process.execPath, [resolve("tools/osd-ci-artifact.mjs"), "pack", archive], {cwd: root}).status).to.equal(0);
   });
 
+  it("refuses to pack a CI artifact from a private live generation", () => {
+    for (const path of ["gen", "output", "packs", ".local/lars", ".local/ci-artifact/transpiler", "build/by-input/fixture"]) mkdirSync(join(root, path), {recursive: true});
+    write("build/by-input/fixture/manifest.json", JSON.stringify({systemDigest: null, systemPrivate: true}));
+    symlinkSync("by-input/fixture", join(root, "build/live"));
+    const archive = join(root, "artifact.tar");
+    const packed = spawnSync(process.execPath, [resolve("tools/osd-ci-artifact.mjs"), "pack", archive], {cwd: root, encoding: "utf8"});
+    expect(packed.status, packed.stderr).to.not.equal(0);
+    expect(packed.stderr).to.match(/private live generation cannot be published/);
+    expect(existsSync(archive)).to.equal(false);
+  });
+
+  it("records the system a generation was built from and rebuilds a generation without that record", async () => {
+    write("src/zcl_recorded.clas.abap", "CLASS zcl_recorded DEFINITION PUBLIC. ENDCLASS. CLASS zcl_recorded IMPLEMENTATION. ENDCLASS.\n");
+    const first = await build({root, generators: false});
+    const file = join(root, "build", "by-input", first.hash, "manifest.json");
+    expect(JSON.parse(readFileSync(file, "utf8"))).to.include({systemDigest: null, systemPrivate: false});
+    const {systemDigest, systemPrivate, ...old} = JSON.parse(readFileSync(file, "utf8"));
+    writeFileSync(file, JSON.stringify(old));
+    const again = await build({root, generators: false});
+    expect(again.hash).to.equal(first.hash);
+    expect(again.cached).to.equal(false);
+    expect(JSON.parse(readFileSync(file, "utf8"))).to.include({systemDigest: null, systemPrivate: false});
+    expect((await build({root, generators: false})).cached).to.equal(true);
+  });
+
   it("freezes identical compiler metadata across build locations and processes", async () => {
     write("src/zcl_frozen.clas.abap", "CLASS zcl_frozen DEFINITION PUBLIC. ENDCLASS. CLASS zcl_frozen IMPLEMENTATION. ENDCLASS.\n");
     const first = await build({root, generators: false});

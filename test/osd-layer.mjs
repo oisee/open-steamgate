@@ -42,7 +42,7 @@ describe("osd-layer: reproducible publishing", function () {
     // No chdir: the gate runs the scanner from its own scan directory, so the
     // test list below wins over a checkout's private one (and the timing
     // reporter, which maps tests to files by the cwd, keeps working).
-    write(join(root, "identifiers.json"), JSON.stringify({test: ["forbidden_publish_identifier"]}));
+    write(join(root, "identifiers.json"), JSON.stringify({test: ["forbidden_publish_identifier"], "корпус SAP (A4H, только локально)": ["Z_UNUSED_SYNTHETIC_CORPUS"]}));
     process.env.OSD_LEAK_IDENTIFIERS = join(root, "identifiers.json");
     process.env.OSD_SELF = JSON.stringify([process.execPath, join(oldCwd, "test/helpers/osd-layer-host.mjs")]);
   });
@@ -96,7 +96,7 @@ describe("osd-layer: reproducible publishing", function () {
   });
 
   it("passes private mode through the hosted scanner used by compiled hosts", () => {
-    write(join(root, "identifiers.json"), JSON.stringify({"sap-corpus-names": ["Z_SYNTHETIC_CORPUS_OBJECT"], host: ["local-test-host"]}));
+    write(join(root, "identifiers.json"), JSON.stringify({"корпус SAP (A4H, только локально)": ["Z_SYNTHETIC_CORPUS_OBJECT"], host: ["local-test-host"]}));
     write(join(folder, "probe.txt"), "Z_SYNTHETIC_CORPUS_OBJECT");
     installHostedLeakScanner();
     const layer = build(folder, {...options, private: true});
@@ -118,7 +118,9 @@ describe("osd-layer: reproducible publishing", function () {
         expect(() => assertPrivateTarget(ref, [layer], env)).to.throw().with.property("code", "PRIVATE_LAYER");
       }
     } finally { await new Promise(done => r.server.close(done)); }
-    expect(() => assertPrivateTarget("localhost:1234/test/layer:v1", [layer], {OSD_PRIVATE_REGISTRIES: "LOCALHOST"})).not.to.throw();
+    expect(() => assertPrivateTarget("localhost:1234/test/layer:v1", [layer], {OSD_PRIVATE_REGISTRIES: "LOCALHOST"})).to.throw().with.property("code", "PRIVATE_LAYER");
+    expect(() => assertPrivateTarget("localhost/test/layer:v1", [layer], {OSD_PRIVATE_REGISTRIES: "LOCALHOST"})).not.to.throw();
+    expect(() => assertPrivateTarget("localhost/test/layer:v1", [layer], {OSD_PRIVATE_REGISTRIES: "localhost:1234"})).to.throw().with.property("code", "PRIVATE_LAYER");
     expect(() => assertPrivateTarget("localhost:1234/test/layer:v1", [layer], {OSD_PRIVATE_REGISTRIES: "localhost:5678"})).to.throw().with.property("code", "PRIVATE_LAYER");
   });
 
@@ -141,7 +143,7 @@ describe("osd-layer: reproducible publishing", function () {
   });
 
   it("passes private leak mode only for private layers", () => {
-    write(join(root, "identifiers.json"), JSON.stringify({"sap-corpus-names": ["Z_SYNTHETIC_CORPUS_OBJECT"], host: ["local-test-host"], credential: ["test-token-secret"]}));
+    write(join(root, "identifiers.json"), JSON.stringify({"корпус SAP (A4H, только локально)": ["Z_SYNTHETIC_CORPUS_OBJECT"], host: ["local-test-host"], credential: ["test-token-secret"]}));
     const file = join(folder, "probe.txt");
     write(file, "Z_SYNTHETIC_CORPUS_OBJECT");
     const privateLayer = build(folder, {...options, private: true});
@@ -488,8 +490,8 @@ describe("osd-layer: reproducible publishing", function () {
     expect(() => leakGate(trees, {}, [], [{...entry, layer: "one"}, {...entry, layer: "two"}], ["one", "two"])).not.to.throw();
     expect(() => leakGate(trees, {}, [], [{...entry, layer: "three"}], ["one", "two"])).to.throw(/BAD_ALLOW|no such file/);
     expect(() => leakGate(trees, {}, [], [{...entry, layer: "one"}], ["one", "one"])).to.throw(/more than one layer/);
-    // Existing publication allow files without a layer still apply to matching files.
-    expect(() => leakGate(trees, {}, [], [entry], ["one", "two"])).not.to.throw();
+    // an unscoped entry in a system is refused rather than applied to every layer
+    expect(() => leakGate(trees, {}, [], [entry], ["one", "two"])).to.throw(/needs "layer"/);
     expect(() => leakGate([trees[0]], {}, [], [entry], ["one"])).not.to.throw();
   });
 
@@ -501,8 +503,6 @@ describe("osd-layer: reproducible publishing", function () {
     expect(() => readLeakAllow(file)).to.throw(/allow/);
     writeFileSync(file, JSON.stringify({allow: [{file: "src/a.clas.abap", fileSha256: sha256(Buffer.from("safe")), layer: "one", category: "uuid", count: 1, reason: "upstream vector"}]}));
     expect(readLeakAllow(file)).to.have.length(1);
-    writeFileSync(file, JSON.stringify({allow: [{file: "src/a.clas.abap", fileSha256: sha256(Buffer.from("safe")), category: "uuid", count: 1, reason: "existing exception"}]}));
-    expect(readLeakAllow(file)[0]).not.to.have.property("layer");
     writeFileSync(file, JSON.stringify({allow: [{file: "a", fileSha256: sha256(Buffer.from("safe")), category: "uuid", count: 1, reason: "r", layer: ""}]}));
     expect(() => readLeakAllow(file)).to.throw(/layer/);
     for (const bad of [{allow: [{file: "a", value: "v", reason: "r", Layer: "x"}]}, {allow: [], extra: 1}, {allow: ["x"]}, {allow: [[]]}]) {

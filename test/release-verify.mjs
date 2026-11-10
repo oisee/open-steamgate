@@ -4,10 +4,10 @@
 // release and preview workflows against the real artefacts.
 import {expect} from "chai";
 import {createHash} from "node:crypto";
-import {mkdtempSync, rmSync, writeFileSync} from "node:fs";
+import {mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
-import {checkBinary, executableOf} from "../scripts/release-verify.mjs";
+import {checkBinary, checkReleaseBinary, executableOf} from "../scripts/release-verify.mjs";
 
 const elf = (machine) => {
   const b = Buffer.alloc(64);
@@ -66,6 +66,23 @@ describe("scripts/release-verify: an artefact by its content", () => {
     expect(() => checkBinary(write("f", pe(0x8664)), "bun-windows-arm64")).to.throw(/not the pe machine 0xaa64/);
     expect(() => checkBinary(write("g", macho(0x01000007)), "go-darwin-arm64")).to.throw(/not the macho machine 0x100000c/);
     expect(() => checkBinary(write("h", pe(0xaa64)), "go-windows-amd64")).to.throw(/not the pe machine 0x8664/);
+  });
+
+  it("refuses to release a binary built from a private live generation, OSGo included", () => {
+    const source = join(dir, "private-source");
+    mkdirSync(join(source, "build/by-input/fixture"), {recursive: true});
+    const generation = (record) => writeFileSync(join(source, "build/by-input/fixture/manifest.json"), JSON.stringify(record));
+    symlinkSync("by-input/fixture", join(source, "build/live"));
+    const binary = write("osgo-private", elf(0x3e));
+    generation({systemDigest: null, systemPrivate: true});
+    expect(() => checkReleaseBinary(binary, "go-linux-amd64", source)).to.throw().with.property("code", "PRIVATE_LAYER");
+    generation({systemDigest: null});
+    expect(() => checkReleaseBinary(binary, "go-linux-amd64", source)).to.throw(/no matching public system identity/);
+    generation({systemDigest: null, systemPrivate: false});
+    expect(checkReleaseBinary(binary, "go-linux-amd64", source).target).to.equal("go-linux-amd64");
+    // the command the release workflow runs before each upload is this check
+    expect(readFileSync(new URL("../scripts/release-verify.mjs", import.meta.url), "utf8"))
+      .to.match(/command === "binary" && args\.length >= 2\) result = checkReleaseBinary\(args\[0\], args\[1\]\)/);
   });
 
   it("checks Go release formats by the bytes they contain", () => {

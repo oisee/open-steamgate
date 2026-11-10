@@ -119,12 +119,11 @@ export function readLeakAllow(file) {
   for (const [i, entry] of allow.entries()) {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) fail("BAD_ALLOW", `${file}: entry ${i} is not an object`);
     for (const key of Object.keys(entry)) if (!["file", "fileSha256", "category", "count", "reason", "layer"].includes(key)) fail("BAD_ALLOW", `${file}: entry ${i} has unknown key ${JSON.stringify(key)}`);
-    for (const key of ["file", "fileSha256", "category", "reason"]) {
+    for (const key of ["file", "fileSha256", "category", "reason", "layer"]) {
       const value = Object.entries(entry).find(([name]) => name === key)?.at(1);
       if (typeof value !== "string" || !value.trim()) fail("BAD_ALLOW", `${file}: entry ${i} needs a non-empty ${key}`);
     }
     if (!/^sha256:[0-9a-f]{64}$/.test(entry.fileSha256)) fail("BAD_ALLOW", `${file}: entry ${i} needs a full lowercase SHA-256 file digest`);
-    if (entry.layer !== undefined && (typeof entry.layer !== "string" || !entry.layer.trim())) fail("BAD_ALLOW", `${file}: entry ${i} needs a non-empty layer`);
     if (!Number.isSafeInteger(entry.count) || entry.count < 1) fail("BAD_ALLOW", `${file}: entry ${i} needs a positive match count`);
   }
   return allow;
@@ -170,8 +169,9 @@ export function leakGate(trees, metadata, documents = [], allow = [], layerNames
     // system may carry the same one; a scope naming such a name is ambiguous
     const repeated = new Set(layerNames.filter((name, i) => layerNames.indexOf(name) !== i));
     const translated = allow.flatMap((entry) => {
-      // An optional layer name narrows the exception; unscoped entries keep
-      // the format's original matching behavior for existing allow files.
+      // allow files are concatenated, so in a system an unscoped entry reviewed
+      // for one layer would excuse the same path and value in every other
+      if (entry.layer === undefined && trees.length > 1) fail("BAD_ALLOW", `allow entry for ${entry.file}: a system needs "layer" on every entry`);
       if (entry.layer !== undefined && repeated.has(entry.layer)) fail("BAD_ALLOW", `allow entry for ${entry.layer}:${entry.file}: more than one layer is called ${entry.layer}`);
       const hits = archive.filter(({path, layer}) => path === entry.file && (entry.layer === undefined || layer === entry.layer));
       if (!hits.length) fail("BAD_ALLOW", `allow entry for ${entry.layer ? `${entry.layer}:` : ""}${entry.file}: no such file in the layer`);
@@ -241,6 +241,7 @@ function systemAnnotations(root, release = false) {
 export function prepareSystem(target, layers, options = {}) {
   assertPrivateTarget(target, layers.map(({layer}) => layer), options.env);
   if (options.annotations?.["org.osd.system.unresolved"] !== undefined) fail("BAD_SYSTEM", "system unresolved annotation is computed from layer closures");
+  if (layers.length > 1 && options.allow?.some(entry => entry.layer === undefined)) fail("BAD_ALLOW", "a system needs layer on every allow entry");
   const names = layers.map(({layer}) => layer.config.name);
   if (options.allow?.some(entry => names.filter(name => name === entry.layer).length > 1)) fail("BAD_ALLOW", "an allow entry names more than one system layer");
   for (const entry of options.allow ?? []) if (entry.layer !== undefined && !layers.some(({layer}) => layer.config.name === entry.layer)) fail("BAD_ALLOW", `allow entry names no system layer: ${entry.layer}`);

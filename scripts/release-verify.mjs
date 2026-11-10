@@ -25,6 +25,7 @@ import {execFileSync, spawn} from "node:child_process";
 import {createHash} from "node:crypto";
 import {existsSync, mkdtempSync, openSync, readSync, closeSync, readFileSync, rmSync, statSync, mkdirSync} from "node:fs";
 import {report} from "../tools/osd-inputs.mjs";
+import {assertPublicSystem} from "../tools/osd-system.mjs";
 import {createServer} from "node:net";
 import {tmpdir} from "node:os";
 import {dirname, join, resolve} from "node:path";
@@ -76,6 +77,14 @@ export function executableOf(bytes) {
     }
   }
   return {format: "unknown", machine: 0};
+}
+
+// What the release workflow runs on every binary before uploading it: the
+// checkout it was built from must hold no private layer, installed or in the
+// live generation (the OSGo binary compiles both in).
+export function checkReleaseBinary(file, target, sourceRoot = root) {
+  assertPublicSystem(sourceRoot);
+  return checkBinary(file, target);
 }
 
 export function checkBinary(file, target) {
@@ -228,7 +237,7 @@ if (isMain) {
   };
   try {
     let result;
-    if (command === "binary" && args.length >= 2) result = checkBinary(args[0], args[1]);
+    if (command === "binary" && args.length >= 2) result = checkReleaseBinary(args[0], args[1]);
     else if (command === "serve" && args.length >= 1) result = await checkServe(args[0], {timeoutSeconds: option("--timeout", 600)});
     else if (command === "pages" && args.length >= 2) result = await checkPages(args[0], args[1], {waitSeconds: option("--wait", 600)});
     else {
