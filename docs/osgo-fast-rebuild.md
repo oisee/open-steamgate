@@ -325,7 +325,7 @@ target.
 
 Measured on the same shared host as above, under the heavy-job lock, the
 same `osgo-cycle.mjs --fast` edits. Code: `tools/gogen/osgo-incr.mjs`,
-`osgo-incr-anon.mjs`, `osgo-incr-db.mjs` (README:
+`osgo-incr-anon.mjs`, `osgo-incr-deps.mjs`, `osgo-incr-meta.mjs`, `osgo-incr-db.mjs` (README:
 `tools/gogen/osgo-incr.md`).
 
 Why not the runners' whole-tree cache again: it was measured slower on this

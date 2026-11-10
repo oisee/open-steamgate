@@ -1,8 +1,12 @@
 # osgo-incr.mjs — the per-object front-end cache of the osgo fast path
 
 Files: `osgo-incr.mjs` (the recorder and the assembly), `osgo-incr-anon.mjs`
-(which declaration owns an anonymous structure), `osgo-incr-db.mjs` (the
-database statements per object), `osgo-incr.test.mjs`.
+(which declaration owns an anonymous structure, and whether its first
+reacher moved), `osgo-incr-deps.mjs` (the semantic dependencies of an
+object, off abaplint's syntax pass), `osgo-incr-meta.mjs` (the completion
+stamp and the whole-metadata check), `osgo-incr-db.mjs` (the database
+statements per object), `osgo-incr.test.mjs`, `osgo-incr-fallback.test.mjs`
+(the production entry points, compileOsg / osgDatabase).
 
 Measured and designed in `docs/osgo-fast-rebuild.md`, "The incremental front
 end". This is the README of the module the house rule asks a self-contained
@@ -45,7 +49,18 @@ build/osgo-incr/<generation>/        one directory per live generation,
                                       object, in the order DatabaseSetup makes
                                       them (proved equal to the real run before
                                       being written)
+  complete.json                       written LAST (after db.json): the
+                                      digests of index.json and db.json.
+                                      Removed first when a generation is
+                                      recorded again
 ```
+
+A generation is usable only with its stamp, both digests matching and both
+files of the shape the reader walks (`readSealedCache`): a build interrupted
+between the recorder's finish and the database record, a database record
+that did not attribute (never written then), a damaged or truncated file --
+each is a miss of the whole cache, and the full front end runs. compileOsg
+also turns any exception out of the assembly into that miss.
 
 The newest three generations are kept. The cache is refused whole when the
 front end itself changed (`toolIdentity()`, frontend-object-cache.mjs) or the
@@ -56,8 +71,13 @@ layer folders / object list / Unit owners differ.
 1. **What to re-lower**: the edited objects (from the proof's changed files)
    plus, transitively, every object whose recorded `deps` include one -- deps
    are the registry objects the lowering read, the classes and interfaces its
-   IR names, and the owner of every generated type name it spells (a
-   structure a class first used is named after it). Entries whose IR did not
+   IR names, the owner of every generated type name it spells (a
+   structure a class first used is named after it), every object abaplint's
+   syntax pass resolved a reference in (`osgo-incr-deps.mjs`: a `TYPES`
+   alias of a primitive lowers to the primitive, and neither the IR nor the
+   lowering's reads keep the declaring class), and every class or interface
+   the object's text spells. An object whose syntax pass cannot run has no
+   certified deps and always re-lowers. Entries whose IR did not
    serialize are always re-lowered.
 2. **The registry**: every non-class file `compileProgram` loads (all of
    them: abaplint enumerates objects in the order a *name* first appeared,
@@ -119,8 +139,9 @@ layer folders / object list / Unit owners differ.
 Anything the cache cannot prove, each with a reason printed as
 `osgo incr: the full front end runs (...`:
 
-- no cache of the live generation, wrong schema, another front end (tool
-  identity), other folders, objects or Unit owners;
+- no cache of the live generation, no completion stamp, a digest or a shape
+  that does not match (index.json, db.json), wrong schema, another front end
+  (tool identity), other folders, objects or Unit owners;
 - a changed file that is not a class or interface, or a class the cache has
   no entry for;
 - an entry that is unreadable or whose IR did not serialize;
@@ -129,7 +150,9 @@ Anything the cache cannot prove, each with a reason printed as
 - an object outside the re-lowered set turning broken (the edit broke it);
 - a fresh IR newly naming a shared anonymous structure under a shape-only
   seed (global passes only), or a declared anonymous structure whose name
-  here is not the one the live generation gave its declaration;
+  here is not the one the live generation gave its declaration, or whose
+  first reacher in the segment sequence moved (an earlier object reaches it
+  now, or the first one stopped: the full build renames it);
 - a re-lowered object entered in other passes than the live generation's
   (an edit that adds the first local class, say), a fresh lowering that
   first writes a key another object first wrote, a global pass writing
@@ -154,7 +177,12 @@ components and rows below them) to its paths; both registries parse the same
 declarations, and the write side records the name each path's instance got.
 A fresh lowering then:
 
-- takes the recorded name for a declared instance; with none recorded no
+- takes the recorded name for a declared instance -- valid only while its
+  first reacher stays first: the write side records per path the first
+  segment each object reached it at (a global pass between two segments),
+  the read side where the fresh lowerings reach it, and `anonFirstMoved`
+  refuses when the earliest of the cached reachers and the fresh ones is
+  not the recorded first; with none recorded no
   object of the full build reached it, a cached object reaches what it
   reached then, so the first re-lowered reacher names it here as there;
 - mints the name for an instance no global member owns, which comes from
@@ -189,5 +217,14 @@ reacher of a declared anonymous structure, an object that reaches its own
 and another class's structure of one shape, an edit that newly reaches a
 declared structure, a cached class's skipped methods, a cached class with
 constructor DEFAULTs, and a non-class file that orders the table pass.
+The critic's three counterexamples on #898, each failing on the code before
+the fix: a primitive `TYPES` alias of a class and of an interface edited
+(the user re-lowers, the Go is the full build's), an earlier object made
+the first reacher of a shared anonymous structure (refuses), and incomplete
+or damaged metadata (no stamp, db.json gone or not parsing, index.json
+`null`, an entry or the database record of another shape under a matching
+stamp, a generation recorded again without its database record) -- refused
+by `incrAssemble`, and through compileOsg / osgDatabase a full build that
+completes (`osgo-incr-fallback.test.mjs`).
 The real-tree proof (same generation, byte
 identical files, fast against full) is recorded in the doc.
