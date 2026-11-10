@@ -250,13 +250,18 @@ function lowerMappingEntity(source, filename, bindings) {
 
 // R7: the clean-room saver declares save_modified for abaplint's static
 // check only; in the build each pool declares its own, typed by its BDEF, so
-// the base's lines between the LINT-ONLY markers are blanked (rows kept)
+// the base's declaration and implementation are blanked (rows kept)
 function lowerLintOnly(source, filename) {
   if (!/^cl_abap_behavior_saver\.clas\.abap$/i.test(filename.split(/[\\/]/).pop())) return source;
-  let blank = false;
+  // the declaration between the markers (definition part), and the method's
+  // implementation from METHOD save_modified to its ENDMETHOD (a comment
+  // outside a method of the implementation part is not storable on a system)
+  let blank = false, method = false;
   return source.split("\n").map(line => {
     if (/^\* LINT-ONLY begin/.test(line)) { blank = true; return ""; }
     if (/^\* LINT-ONLY end/.test(line)) { blank = false; return ""; }
+    if (/^\s*METHOD save_modified\./i.test(line)) method = true;
+    if (method) { if (/^\s*ENDMETHOD\./i.test(line)) method = false; return ""; }
     return blank ? "" : line;
   }).join("\n");
 }

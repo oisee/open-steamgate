@@ -12,7 +12,7 @@ CLASS cl_abap_behavior_saver DEFINITION PUBLIC INHERITING FROM cl_abap_behv CREA
 * R7: save_modified (with additional / unmanaged save) has parameters typed
 * by the BDEF. It is declared below for abaplint's static check, which voids
 * them as it voids every parameter here; the build blanks that declaration
-* (the lines between the LINT-ONLY markers, tools/rap/lower-derived.mjs) and
+* (between the LINT-ONLY markers, and the METHOD, tools/rap/lower-derived.mjs) and
 * turns a pool's `METHODS save_modified REDEFINITION.` into a typed
 * declaration of its own, which the generated adapter calls by name
 * (docs/rap-runtime.md, R7).
@@ -65,11 +65,10 @@ CLASS cl_abap_behavior_saver IMPLEMENTATION.
     RETURN.
   ENDMETHOD.
 
-* LINT-ONLY begin
   METHOD save_modified.
+* LINT-ONLY: blanked in the build with its declaration (see the header)
     RETURN.
   ENDMETHOD.
-* LINT-ONLY end
 
   METHOD cleanup.
     RETURN.
