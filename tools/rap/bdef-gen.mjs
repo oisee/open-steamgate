@@ -83,11 +83,20 @@ export function treeOf(model, entity, view, projection = false) {
         throw new Error(`${entity.entity}: ${clause} dependent by ${mode.association}, which the behavior definition does not declare (association ${mode.association};)`);
     }
     if (entity.lock?.kind === "master" && parent) throw new Error(`${entity.entity}: lock master on a child (it is locked with its root: lock dependent by ${parent.alias})`);
+    const ancestors = [];
     for (const [clause, mode] of [["lock", entity.lock], ["etag", entity.etag], ["authorization", entity.authorization]]) {
       if (mode?.kind !== "dependent") continue;
       if (!parent) throw new Error(`${entity.entity}: ${clause} dependent without a parent (no association to parent in ${view.name})`);
-      if (mode.association && upper(mode.association) !== upper(parent.alias)) throw new Error(`${entity.entity}: ${clause} dependent by ${mode.association}, which is not the association to the parent (${parent.alias})`);
+      // R6: the association names the master, which is the parent or an
+      // ancestor further up (a grandchild's lock dependent by _Root); which
+      // one is checked against the whole tree (rap-runtime-gen.mjs)
+      if (mode.association && upper(mode.association) !== upper(parent.alias)) {
+        const own = assocs.find(a => upper(a.name) === upper(mode.association));
+        if (!own || own.kind !== "A") throw new Error(`${entity.entity}: ${clause} dependent by ${mode.association}, which is not the association to the parent (${parent.alias}) or to an ancestor`);
+        ancestors.push({clause, assoc: own.name, target: own.target});
+      }
     }
+    if (ancestors.length) return {parent: upper(parent.target), parentAssoc: parent.alias, assocs, ancestors};
     if (!parent && entity.lock?.kind === "dependent") throw new Error(`${entity.entity}: lock dependent on a root`);
   }
   return {parent: parent ? upper(parent.target) : undefined, parentAssoc: parent?.alias, assocs};

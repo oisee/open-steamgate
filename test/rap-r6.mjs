@@ -113,6 +113,65 @@ describe("RAP R6 actions (generator)", () => {
   });
 });
 
+// R5's order demo with a third level, a note below each item that is
+// locked by its order through an association other than its parent's
+const grandchild = (lock = "lock dependent by _Order") => {
+  const order = walk("src/rap_r5").filter(f => /\.(abap|xml|asbdef|asddls)$/.test(f) && !/zc_rap_|\.srvd\./.test(f))
+    .map(f => ({filename: basename(f), contents: readFileSync(f, "utf8")}));
+  const table = order.find(f => f.filename === "zrap_orditem.tabl.xml").contents.replaceAll("ZRAP_ORDITEM", "ZRAP_ORDSUB")
+    .replace(/<DD03P><FIELDNAME>PRODUCT<\/FIELDNAME>/, "<DD03P><FIELDNAME>SUB_NO</FIELDNAME><KEYFLAG>X</KEYFLAG><INTTYPE>N</INTTYPE><INTLEN>000008</INTLEN><DATATYPE>NUMC</DATATYPE><LENG>000004</LENG><NOTNULL>X</NOTNULL></DD03P>\n<DD03P><FIELDNAME>PRODUCT</FIELDNAME>");
+  return order.map(f => {
+    if (f.filename === "zi_rap_orditem.ddls.asddls") return {...f, contents: f.contents
+      .replace("as select from zrap_orditem\n", "as select from zrap_orditem\n  composition [0..*] of ZI_RAP_ORDSUB as _Subs\n")
+      .replace("      _Order\n", "      _Order,\n      _Subs\n")};
+    if (f.filename === "zi_rap_order.bdef.asbdef") return {...f, contents: f.contents.replace("  association _Order;\n", "  association _Order;\n  association _Subs { create; }\n") + `
+define behavior for ZI_RAP_ORDSUB alias sub
+persistent table zrap_ordsub
+${lock}
+{
+  update;
+  field ( readonly ) order_id, item_no, sub_no;
+  association _Item;
+  association _Order;
+  association _ItemToo;
+  mapping for zrap_ordsub corresponding;
+}
+`};
+    return f;
+  }).concat([
+    {filename: "zrap_ordsub.tabl.xml", contents: table},
+    {filename: "zi_rap_ordsub.ddls.asddls", contents: `@EndUserText.label: 'RAP order item note (R6 test)'
+define view entity ZI_RAP_ORDSUB as select from zrap_ordsub
+  association to parent ZI_RAP_ORDITEM as _Item on $projection.order_id = _Item.order_id and $projection.item_no = _Item.item_no
+  association [1..1] to ZI_RAP_ORDER as _Order on $projection.order_id = _Order.order_id
+  association [1..1] to ZI_RAP_ORDITEM as _ItemToo on $projection.order_id = _ItemToo.order_id and $projection.item_no = _ItemToo.item_no
+{
+  key order_id,
+  key item_no,
+  key sub_no,
+      product,
+      _Item,
+      _Order,
+      _ItemToo
+}
+`}]);
+};
+
+describe("RAP R6 dependencies on an ancestor (generator)", () => {
+  it("accepts a grandchild locked by its root through an association of its own (the flight booking supplement)", () => {
+    assert.equal(refusal(grandchild()), "accepted");
+    const {runtime} = build(grandchild());
+    const adapter = Object.entries(runtime).find(([n, s]) => n.startsWith("zcl_rap_") && s.includes("ZI_RAP_ORDSUB"))[1];
+    assert.ok(adapter.includes("ls_entity-name = 'ZI_RAP_ORDSUB'."));
+    assert.match(adapter, /ls_entity-name = 'ZI_RAP_ORDSUB'\.[\s\S]*?ls_entity-root = 'ZI_RAP_ORDER'\.\n    ls_entity-parent = 'ZI_RAP_ORDITEM'\.\n    ls_entity-parent_assoc = '_ITEM'\.\n    ls_entity-lock = 'D'\./);
+    assert.equal(refusal(grandchild("lock dependent by _Item\netag dependent by _Order\nauthorization dependent by _Order")), "accepted");
+  });
+
+  it("refuses a lock by an ancestor that is not the lock master", () => {
+    assert.match(refusal(grandchild("lock dependent by _ItemToo")), /lock dependent by _ItemToo, whose target ZI_RAP_ORDITEM is not the lock master ZI_RAP_ORDER/);
+  });
+});
+
 describe("RAP R6 actions over OData", function () {
   this.timeout(120000);
   let server;

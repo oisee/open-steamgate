@@ -155,7 +155,7 @@ export function runtimeOutputs(plans, files) {
       if (entity.numbering === "late") throw new Error(`${entity.entity}: late numbering (adjust_numbers, %pid) is outside R4`);
       if (entity.numbering && entity.numbering !== "early") throw new Error(`${entity.entity}: ${entity.numbering} numbering is outside R4`);
       if (entity.options?.length && entity.options.some(o => o.name !== "unique")) {
-        throw new Error(`${entity.entity}: behavior options ${entity.options.map(o => o.name).join(", ")} are outside R2`);
+        throw new Error(`${entity.entity}: behavior options ${entity.options.filter(o => o.name !== "unique").map(o => o.name ?? (o.kind.endsWith(" save") ? `with ${o.kind}` : o.kind)).join(", ")} are outside R6`);
       }
       const table = entity.persistentTable;
       if (!table) throw new Error(`${entity.entity}: a managed entity needs a persistent table`);
@@ -178,9 +178,17 @@ export function runtimeOutputs(plans, files) {
       // R5: the entity's place in the tree, and its associations
       const tree = e.tree ?? {assocs: []};
       let top = e;
+      const chain = [];
       for (let depth = 0; top.tree?.parent; depth++) {
         if (depth > 16) throw new Error(`${entity.entity}: the parent chain does not end`);
         top = plan.entities.find(x => upper(x.entity.entity) === top.tree.parent);
+        chain.push(upper(top.entity.entity));
+      }
+      // R6: a dependency by an association other than the parent's names an
+      // ancestor; a lock's is the lock master (the root, which is locked)
+      for (const d of tree.ancestors ?? []) {
+        if (!chain.includes(d.target)) throw new Error(`${entity.entity}: ${d.clause} dependent by ${d.assoc}, whose target ${d.target} is no ancestor`);
+        if (d.clause === "lock" && d.target !== upper(top.entity.entity)) throw new Error(`${entity.entity}: lock dependent by ${d.assoc}, whose target ${d.target} is not the lock master ${upper(top.entity.entity)}`);
       }
       model_ += `    ls_entity-root = ${lit(upper(top.entity.entity))}.\n`;
       if (tree.parent) model_ += `    ls_entity-parent = ${lit(tree.parent)}.\n    ls_entity-parent_assoc = ${lit(upper(tree.parentAssoc))}.\n`;

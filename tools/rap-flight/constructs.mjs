@@ -51,13 +51,13 @@ export const SUPPORT = {
   "with draft": ["refused", "rap-runtime-gen: draft is outside R2"],
   "several pools": ["refused", "rap-runtime-gen reads the pool of the BDEF header only"],
   "persistent table": ["runs", "test/rap-serve.mjs"],
-  "with additional save": ["refused", "rap-runtime-gen: behavior options"],
+  "with additional save": ["refused", "rap-runtime-gen: behavior options with additional save"],
   "with unmanaged save": ["refused", "rap-runtime-gen: behavior options / no persistent table"],
   "etag master": ["runs", "test/rap-r4.mjs: ETag, 428, 412 over V2 and V4"],
   "etag dependent": ["ignored", "checked against the parent association (R5), not served: the child type gets no ETag"],
   "total etag": ["ignored", "draft only"],
   "lock master": ["runs", "test/rap-r5.mjs, ZCL_OSD_RAP_R5_TEST: the root instance is locked (EZOSD_RAP_LOCK)"],
-  "lock dependent": ["runs", "test/rap-r5.mjs: a child write locks its root"],
+  "lock dependent": ["runs", "test/rap-r5.mjs: a child write locks its root; R6: by the parent's association or one to the lock master (test/rap-r6.mjs)"],
   "authorization master": ["ignored", "no authorization checks"],
   "authorization dependent": ["ignored", "no authorization checks"],
   "early numbering": ["runs", "test/rap-r4.mjs: FOR NUMBERING draws the key"],
@@ -72,13 +72,14 @@ export const SUPPORT = {
   "action": ["runs", "test/rap-serve.mjs"],
   "action ( features : instance )": ["runs", "test/rap-r4.mjs: a disabled action is 400"],
   "association create ( features : instance )": ["runs", "test/rap-r5.mjs generator: %assoc-<a> asked before a create by association"],
-  "internal action": ["refused", "rap-runtime-gen: action modifiers"],
-  "factory action": ["refused", "rap-runtime-gen: action modifiers"],
-  "static action": ["refused", "rap-runtime-gen: action modifiers"],
+  "internal action": ["runs", "test/rap-r6.mjs, ZCL_OSD_RAP_R6_TEST: run IN LOCAL MODE by a determination, refused outside, not exposed"],
+  "factory action": ["runs", "test/rap-r6.mjs, ZCL_OSD_RAP_R6_TEST: the copy in MAPPED, answered over V2 and V4"],
+  "static action": ["refused", "bdef-gen: static actions are outside R6"],
   "action parameter": ["refused", "rap-runtime-gen: action parameters"],
   "action result not $self": ["refused", "rap-runtime-gen: only $self results"],
-  "determine action": ["refused", "bdef-gen: determine actions"],
-  "function": ["refused", "bdef-gen: functions"],
+  "determine action": ["runs", "test/rap-r6.mjs, ZCL_OSD_RAP_R6_TEST: members where their triggers hold, ( always ) always"],
+  "draft determine action": ["refused", "bdef-gen: draft actions are outside R6 (draft)"],
+  "function": ["refused", "bdef-gen: functions are outside R6"],
   "side effects": ["ignored", "parsed, nothing reads them"],
   "determination/validation": ["runs", "test/rap-serve.mjs"],
   "unparsed grammar": ["refused", "bdef-parse leaves it unparsed"],
@@ -148,7 +149,7 @@ export function bdefConstructs(model) {
       if (a.parameter) add("action parameter", `${n}~${a.name}`);
       if (a.result && a.result.type !== "$self") add("action result not $self", `${n}~${a.name}`);
     }
-    for (const a of e.determineActions) add("determine action", `${n}~${a.name}`);
+    for (const a of e.determineActions) add(a.modifiers.includes("draft") ? "draft determine action" : "determine action", `${n}~${a.name}`);
     for (const f of e.functions) add("function", `${n}~${f.name}`);
     if (e.sideEffects.length) add("side effects", n);
     if (e.determinations.length || e.validations.length) add("determination/validation", `${n}: ${e.determinations.length} + ${e.validations.length}`);
