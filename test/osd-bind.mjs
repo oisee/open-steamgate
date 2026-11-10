@@ -155,6 +155,36 @@ describe("bind address (OSD_BIND)", function () {
       }
     });
 
+    // A client that pools sockets (fetch) and then blocks longer than the
+    // front's keep-alive -- a spawnSync between two requests -- sends its next
+    // request into a socket the front has closed: "fetch failed", other side
+    // closed. Node's default is 5 s; the serving child already waits 65 s
+    // (tools/osd-serve.mjs) and the front in front of it has to as well.
+    it("keeps an idle keep-alive connection open past Node's 5 s default", async function () {
+      this.timeout(60000);
+      one = await front({OSD_BIND: undefined});
+      const socket = connect(one.port, "127.0.0.1");
+      let ended = false;
+      let received = "";
+      socket.on("data", (chunk) => { received += chunk; });
+      socket.on("end", () => { ended = true; });
+      socket.on("close", () => { ended = true; });
+      const ask = async () => {
+        received = "";
+        socket.write(`GET /osd/serving HTTP/1.1\r\nHost: 127.0.0.1:${one.port}\r\nConnection: keep-alive\r\n\r\n`);
+        for (let i = 0; i < 300 && !/^HTTP\/1\.1 \d{3}/.test(received) && !ended; i++) {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+        return received;
+      };
+      await new Promise((resolve, reject) => { socket.once("connect", resolve); socket.once("error", reject); });
+      expect(await ask()).to.match(/^HTTP\/1\.1 \d{3}/);
+      await new Promise((resolve) => setTimeout(resolve, 6500));
+      expect(ended, "the front closed an idle keep-alive connection within 6.5 s").to.equal(false);
+      expect(await ask()).to.match(/^HTTP\/1\.1 \d{3}/);
+      socket.destroy();
+    });
+
     it("binds every interface with OSD_BIND=0.0.0.0", async function () {
       const address = outside();
       if (address === undefined) this.skip();
