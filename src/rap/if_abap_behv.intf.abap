@@ -15,6 +15,24 @@ INTERFACE if_abap_behv PUBLIC.
       on  TYPE t_xflag VALUE '01',
     END OF mk.
 
+* feature control (R4): what a FOR INSTANCE FEATURES method answers per
+* operation (fc-o) and per field (fc-f). A pool compares and assigns the
+* names only; the values are this runtime's, not measured on a system.
+  TYPES t_op_ctrl TYPE x LENGTH 1.
+  CONSTANTS:
+    BEGIN OF fc,
+      BEGIN OF o,
+        enabled  TYPE t_op_ctrl VALUE '00',
+        disabled TYPE t_op_ctrl VALUE '01',
+      END OF o,
+      BEGIN OF f,
+        unrestricted TYPE t_op_ctrl VALUE '00',
+        read_only    TYPE t_op_ctrl VALUE '01',
+        mandatory    TYPE t_op_ctrl VALUE '02',
+        all          TYPE t_op_ctrl VALUE '03',
+      END OF f,
+    END OF fc.
+
   CONSTANTS:
     BEGIN OF cause,
       unspecific   TYPE t_fail_cause VALUE 0,

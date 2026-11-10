@@ -15,7 +15,13 @@ CLASS zcl_osd_rap_runtime DEFINITION PUBLIC CREATE PRIVATE.
 *
 * What it does, in the order a request meets it:
 *   field control   read-only fields refused, mandatory fields required
-*   numbering       a managed key drawn as a UUID on create
+*   numbering       a managed key drawn as a UUID on create; with early
+*                   numbering the pool's FOR NUMBERING method draws it (R4)
+*   features        an update, delete or action declared ( features :
+*                   instance ) asks the pool's FOR INSTANCE FEATURES method
+*                   and is refused (cause disabled) when it answers disabled
+*   admin fields    @Semantics created/last changed at/by stamped on create
+*                   and change, so an etag master field moves with each write
 *   %cid            mapped back with the key; %cid_ref resolved later
 *   determinations  on modify after each request, on save in finalize
 *   validations     on save in check_before_save; a FAILED row stops the
@@ -173,6 +179,9 @@ CLASS zcl_osd_rap_runtime DEFINITION PUBLIC CREATE PRIVATE.
 * local (IN LOCAL MODE) and inside the request that called them
     DATA mv_depth TYPE i.
     CLASS-DATA gt_active TYPE STANDARD TABLE OF REF TO zcl_osd_rap_runtime WITH DEFAULT KEY.
+* the last time stamp given to an administrative field: a new one is always
+* later, also where the clock does not move between two writes
+    CLASS-DATA gv_stamp TYPE timestampl.
 
     METHODS entity_of
       IMPORTING
@@ -281,6 +290,57 @@ CLASS zcl_osd_rap_runtime DEFINITION PUBLIC CREATE PRIVATE.
         cs_failed    TYPE any
         cs_reported  TYPE any.
 
+* R4: whether the pool's instance features enable an operation of one
+* instance: IV_FLAG %UPDATE, %DELETE, or an action name with IV_GROUP %ACTION
+    METHODS enabled
+      IMPORTING
+        is_entity         TYPE zif_osd_rap_bo=>ty_entity
+        iv_index          TYPE i
+        iv_group          TYPE string OPTIONAL
+        iv_flag           TYPE string
+      RETURNING
+        VALUE(rv_enabled) TYPE abap_bool
+      RAISING
+        zcx_osd_rap.
+* R4: a handler method of the pool that is no determination, validation or
+* action (%FEATURES, %NUMBERING), with this runtime ACTIVE while it runs
+    METHODS call_pool
+      IMPORTING
+        is_entity   TYPE zif_osd_rap_bo=>ty_entity
+        iv_name     TYPE string
+        ir_rows     TYPE REF TO data
+        ir_result   TYPE REF TO data OPTIONAL
+        ir_mapped   TYPE REF TO data OPTIONAL
+      CHANGING
+        cs_failed   TYPE any
+        cs_reported TYPE any
+      RAISING
+        zcx_osd_rap.
+* R4: early numbering, the keys of a create drawn by the pool before the
+* instances enter the buffer
+    METHODS number
+      IMPORTING
+        is_entity   TYPE zif_osd_rap_bo=>ty_entity
+        it_rows     TYPE ANY TABLE
+      EXPORTING
+        er_rows     TYPE REF TO data
+      CHANGING
+        cs_failed   TYPE any
+        cs_reported TYPE any
+      RAISING
+        zcx_osd_rap.
+* R4: the 100 ns after a time stamp, valid by the calendar
+    CLASS-METHODS later
+      IMPORTING
+        iv_stamp        TYPE timestampl
+      RETURNING
+        VALUE(rv_stamp) TYPE timestampl.
+* R4: the administrative fields of an instance, on create or on change
+    METHODS stamp
+      IMPORTING
+        is_entity TYPE zif_osd_rap_bo=>ty_entity
+        iv_index  TYPE i
+        iv_create TYPE abap_bool.
     METHODS create_one
       IMPORTING
         is_entity   TYPE zif_osd_rap_bo=>ty_entity
@@ -847,6 +907,7 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
         mark( iv_index = lv_index iv_field = ls_field-name ).
       ENDIF.
     ENDLOOP.
+    stamp( is_entity = is_entity iv_index = lv_index iv_create = abap_true ).
     mi_luw->modify( iv_entity = is_entity-name iv_key = ls_inst-key
                     iv_operation = co_operation-create ir_row = lr_row ).
 
@@ -878,6 +939,14 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
             CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
       RETURN.
     ENDIF.
+    IF is_entity-feat_update = abap_true
+        AND enabled( is_entity = is_entity iv_index = lv_index iv_flag = '%UPDATE' ) = abap_false.
+      fail( EXPORTING is_entity = is_entity is_input = is_input
+                      iv_cause = if_abap_behv=>cause-disabled
+                      iv_text = |Update of { is_entity-alias } is disabled| iv_op = '%UPDATE'
+            CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
+      RETURN.
+    ENDIF.
     check_fields( EXPORTING is_entity = is_entity is_input = is_input iv_operation = co_operation-update
                   IMPORTING ev_ok = lv_ok
                   CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
@@ -902,6 +971,7 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
     ENDIF.
     <ls_inst>-updated = abap_true.
     <ls_inst>-req_updated = abap_true.
+    stamp( is_entity = is_entity iv_index = lv_index iv_create = abap_false ).
     mi_luw->modify( iv_entity = is_entity-name iv_key = <ls_inst>-key
                     iv_operation = co_operation-update ir_row = <ls_inst>-row ).
   ENDMETHOD.
@@ -915,6 +985,14 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
       fail( EXPORTING is_entity = is_entity is_input = is_input
                       iv_cause = if_abap_behv=>cause-not_found
                       iv_text = |{ is_entity-alias } not found| iv_op = '%DELETE'
+            CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
+      RETURN.
+    ENDIF.
+    IF is_entity-feat_delete = abap_true
+        AND enabled( is_entity = is_entity iv_index = lv_index iv_flag = '%DELETE' ) = abap_false.
+      fail( EXPORTING is_entity = is_entity is_input = is_input
+                      iv_cause = if_abap_behv=>cause-disabled
+                      iv_text = |Delete of { is_entity-alias } is disabled| iv_op = '%DELETE'
             CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
       RETURN.
     ENDIF.
@@ -934,7 +1012,9 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
 
   METHOD modify.
     DATA ls_entity TYPE zif_osd_rap_bo=>ty_entity.
+    DATA lr_rows   TYPE REF TO data.
     FIELD-SYMBOLS <ls_input> TYPE any.
+    FIELD-SYMBOLS <lt_rows>  TYPE ANY TABLE.
 
     ls_entity = entity_of( iv_entity ).
     CASE iv_operation.
@@ -959,7 +1039,18 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
     IF mv_depth = 0.
       start_request( ).
     ENDIF.
-    LOOP AT it_rows ASSIGNING <ls_input>.
+* early numbering: the pool draws the keys of the new instances first
+    IF iv_operation = co_operation-create AND ls_entity-numbering = 'E'.
+      number( EXPORTING is_entity = ls_entity it_rows = it_rows
+              IMPORTING er_rows = lr_rows
+              CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
+    ELSE.
+      CREATE DATA lr_rows LIKE it_rows.
+      ASSIGN lr_rows->* TO <lt_rows>.
+      <lt_rows> = it_rows.
+    ENDIF.
+    ASSIGN lr_rows->* TO <lt_rows>.
+    LOOP AT <lt_rows> ASSIGNING <ls_input>.
       CASE iv_operation.
         WHEN co_operation-create.
           create_one( EXPORTING is_entity = ls_entity is_input = <ls_input>
@@ -1046,6 +1137,14 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
         fail( EXPORTING is_entity = ls_entity is_input = <ls_key>
                         iv_cause = if_abap_behv=>cause-not_found
                         iv_text = |{ ls_entity-alias } not found|
+              CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
+        CONTINUE.
+      ENDIF.
+      IF ls_callable-features = abap_true
+          AND enabled( is_entity = ls_entity iv_index = lv_index iv_group = '%ACTION' iv_flag = lv_name ) = abap_false.
+        fail( EXPORTING is_entity = ls_entity is_input = <ls_key>
+                        iv_cause = if_abap_behv=>cause-disabled
+                        iv_text = |Action { iv_action } of { ls_entity-alias } is disabled|
               CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
         CONTINUE.
       ENDIF.
@@ -1219,6 +1318,248 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
     ENDIF.
   ENDMETHOD.
 
+  METHOD call_pool.
+    DATA lr_failed   TYPE REF TO data.
+    DATA lr_reported TYPE REF TO data.
+    DATA lo_handler  TYPE REF TO object.
+    DATA lx_error    TYPE REF TO cx_root.
+    DATA lv_top      TYPE i.
+
+    APPEND |{ iv_name } { is_entity-alias }| TO mt_trace.
+    lo_handler = handler_of( is_entity ).
+    GET REFERENCE OF cs_failed INTO lr_failed.
+    GET REFERENCE OF cs_reported INTO lr_reported.
+    APPEND me TO gt_active.
+    mv_depth = mv_depth + 1.
+    TRY.
+        mo_bo->call( io_handler = lo_handler iv_entity = is_entity-name iv_name = iv_name
+                     ir_rows = ir_rows ir_result = ir_result ir_mapped = ir_mapped
+                     ir_failed = lr_failed ir_reported = lr_reported ).
+      CATCH cx_root INTO lx_error.
+        mv_depth = mv_depth - 1.
+        lv_top = lines( gt_active ).
+        DELETE gt_active INDEX lv_top.
+        RAISE EXCEPTION lx_error.
+    ENDTRY.
+    mv_depth = mv_depth - 1.
+    lv_top = lines( gt_active ).
+    DELETE gt_active INDEX lv_top.
+  ENDMETHOD.
+
+  METHOD enabled.
+* IN LOCAL MODE (a handler of this runtime is running) skips feature control
+    DATA lr_rows     TYPE REF TO data.
+    DATA lr_result   TYPE REF TO data.
+    DATA lr_failed   TYPE REF TO data.
+    DATA lr_reported TYPE REF TO data.
+    DATA ls_inst     TYPE ty_inst.
+    FIELD-SYMBOLS <lt_rows>     TYPE STANDARD TABLE.
+    FIELD-SYMBOLS <lt_result>   TYPE STANDARD TABLE.
+    FIELD-SYMBOLS <ls_result>   TYPE any.
+    FIELD-SYMBOLS <ls_row>      TYPE any.
+    FIELD-SYMBOLS <ls_group>    TYPE any.
+    FIELD-SYMBOLS <lv_flag>     TYPE any.
+    FIELD-SYMBOLS <ls_failed>   TYPE any.
+    FIELD-SYMBOLS <ls_reported> TYPE any.
+
+    rv_enabled = abap_true.
+    IF is_entity-features = abap_false OR mv_depth > 0.
+      RETURN.
+    ENDIF.
+    READ TABLE mt_inst INDEX iv_index INTO ls_inst.
+    lr_rows = mo_bo->new_rows( is_entity-name ).
+    ASSIGN lr_rows->* TO <lt_rows>.
+    ASSIGN ls_inst-row->* TO <ls_row>.
+    APPEND <ls_row> TO <lt_rows>.
+    lr_result = mo_bo->new_table( iv_entity = is_entity-name iv_kind = 'FEATURES RESULT' ).
+    ASSIGN lr_result->* TO <lt_result>.
+* what the method reports is its own business: an operation it does not
+* answer for stays enabled
+    lr_failed = mo_bo->new_response( 'FAILED' ).
+    lr_reported = mo_bo->new_response( 'REPORTED' ).
+    ASSIGN lr_failed->* TO <ls_failed>.
+    ASSIGN lr_reported->* TO <ls_reported>.
+    call_pool( EXPORTING is_entity = is_entity iv_name = '%FEATURES' ir_rows = lr_rows ir_result = lr_result
+               CHANGING cs_failed = <ls_failed> cs_reported = <ls_reported> ).
+    LOOP AT <lt_result> ASSIGNING <ls_result>.
+      IF key_of( is_entity = is_entity is_row = <ls_result> ) <> ls_inst-key.
+        CONTINUE.
+      ENDIF.
+      IF iv_group IS INITIAL.
+        ASSIGN COMPONENT iv_flag OF STRUCTURE <ls_result> TO <lv_flag>.
+      ELSE.
+        ASSIGN COMPONENT iv_group OF STRUCTURE <ls_result> TO <ls_group>.
+        CHECK sy-subrc = 0.
+        ASSIGN COMPONENT iv_flag OF STRUCTURE <ls_group> TO <lv_flag>.
+      ENDIF.
+      IF sy-subrc = 0 AND <lv_flag> = if_abap_behv=>fc-o-disabled.
+        rv_enabled = abap_false.
+      ENDIF.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD number.
+* the rows go to the pool's FOR NUMBERING method; each key it maps for a
+* content ID is the key of that create. A row it fails is dropped with the
+* method's FAILED and REPORTED. A row it neither maps nor fails breaks the
+* method's contract (every input %cid is in MAPPED or FAILED): it is failed
+* here and not created with the key it came with
+    DATA lr_mapped TYPE REF TO data.
+    DATA lv_cid    TYPE string.
+    DATA lv_temp   TYPE string.
+    DATA lv_index  TYPE i.
+    DATA lv_try    TYPE i.
+    DATA lv_found  TYPE abap_bool.
+    DATA lv_failed TYPE abap_bool.
+    DATA lt_drop   TYPE STANDARD TABLE OF i WITH DEFAULT KEY.
+    DATA lt_cids   TYPE string_table.
+    DATA lt_temp   TYPE STANDARD TABLE OF i WITH DEFAULT KEY.
+    FIELD-SYMBOLS <lt_rows>   TYPE STANDARD TABLE.
+    FIELD-SYMBOLS <ls_row>    TYPE any.
+    FIELD-SYMBOLS <ls_mapped> TYPE any.
+    FIELD-SYMBOLS <lt_mapped> TYPE STANDARD TABLE.
+    FIELD-SYMBOLS <lt_failed> TYPE STANDARD TABLE.
+    FIELD-SYMBOLS <ls_line>   TYPE any.
+    FIELD-SYMBOLS <lv_cid>    TYPE any.
+
+    CREATE DATA er_rows LIKE it_rows.
+    ASSIGN er_rows->* TO <lt_rows>.
+    <lt_rows> = it_rows.
+* a row without a content ID gets one for the call, so its key can be told
+* apart: one no row of the call carries, and only those rows lose it again
+    LOOP AT <lt_rows> ASSIGNING <ls_row>.
+      APPEND text_of( is_row = <ls_row> iv_component = '%CID' ) TO lt_cids.
+    ENDLOOP.
+    LOOP AT <lt_rows> ASSIGNING <ls_row>.
+      lv_index = sy-tabix.
+      ASSIGN COMPONENT '%CID' OF STRUCTURE <ls_row> TO <lv_cid>.
+      IF sy-subrc <> 0 OR <lv_cid> IS NOT INITIAL.
+        CONTINUE.
+      ENDIF.
+      lv_try = 0.
+      DO.
+        lv_temp = |%OSD-NUMBERING-{ lv_index }-{ lv_try }|.
+        READ TABLE lt_cids TRANSPORTING NO FIELDS WITH KEY table_line = lv_temp.
+        IF sy-subrc <> 0.
+          EXIT.
+        ENDIF.
+        lv_try = lv_try + 1.
+      ENDDO.
+      <lv_cid> = lv_temp.
+      APPEND lv_temp TO lt_cids.
+      APPEND lv_index TO lt_temp.
+    ENDLOOP.
+    lr_mapped = mo_bo->new_response( 'MAPPED' ).
+    ASSIGN lr_mapped->* TO <ls_mapped>.
+    call_pool( EXPORTING is_entity = is_entity iv_name = '%NUMBERING' ir_rows = er_rows ir_mapped = lr_mapped
+               CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
+    ASSIGN COMPONENT is_entity-response OF STRUCTURE <ls_mapped> TO <lt_mapped>.
+    ASSIGN COMPONENT is_entity-response OF STRUCTURE cs_failed TO <lt_failed>.
+    LOOP AT <lt_rows> ASSIGNING <ls_row>.
+      lv_index = sy-tabix.
+      lv_cid = text_of( is_row = <ls_row> iv_component = '%CID' ).
+      lv_found = abap_false.
+      lv_failed = abap_false.
+      IF <lt_mapped> IS ASSIGNED.
+        LOOP AT <lt_mapped> ASSIGNING <ls_line>.
+          IF text_of( is_row = <ls_line> iv_component = '%CID' ) = lv_cid.
+            copy_keys( EXPORTING is_entity = is_entity is_from = <ls_line> CHANGING cs_to = <ls_row> ).
+            lv_found = abap_true.
+          ENDIF.
+        ENDLOOP.
+      ENDIF.
+      IF lv_found = abap_false AND <lt_failed> IS ASSIGNED.
+        LOOP AT <lt_failed> ASSIGNING <ls_line>.
+          IF text_of( is_row = <ls_line> iv_component = '%CID' ) = lv_cid.
+            lv_failed = abap_true.
+          ENDIF.
+        ENDLOOP.
+      ENDIF.
+      READ TABLE lt_temp TRANSPORTING NO FIELDS WITH KEY table_line = lv_index.
+      IF sy-subrc = 0.
+        ASSIGN COMPONENT '%CID' OF STRUCTURE <ls_row> TO <lv_cid>.
+        CLEAR <lv_cid>.
+      ENDIF.
+      IF lv_found = abap_false AND lv_failed = abap_false.
+        fail( EXPORTING is_entity = is_entity is_input = <ls_row>
+                        iv_cause = if_abap_behv=>cause-unspecific
+                        iv_text = |Early numbering of { is_entity-alias } gave no key and no failure for an instance|
+                        iv_op = '%CREATE'
+              CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
+        lv_failed = abap_true.
+      ENDIF.
+      IF lv_failed = abap_true.
+        INSERT lv_index INTO lt_drop INDEX 1.
+      ENDIF.
+    ENDLOOP.
+    LOOP AT lt_drop INTO lv_index.
+      DELETE <lt_rows> INDEX lv_index.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD stamp.
+    DATA ls_field TYPE zif_osd_rap_bo=>ty_field.
+    DATA lv_now   TYPE timestampl.
+    DATA lv_old   TYPE timestampl.
+    DATA lv_short TYPE timestamp.
+    DATA lv_decimals TYPE i.
+    FIELD-SYMBOLS <ls_inst>  TYPE ty_inst.
+    FIELD-SYMBOLS <ls_row>   TYPE any.
+    FIELD-SYMBOLS <lv_value> TYPE any.
+
+    READ TABLE mt_inst INDEX iv_index ASSIGNING <ls_inst>.
+    ASSIGN <ls_inst>-row->* TO <ls_row>.
+    LOOP AT is_entity-fields INTO ls_field WHERE admin IS NOT INITIAL.
+      IF iv_create = abap_false AND ( ls_field-admin = 'CREATED_AT' OR ls_field-admin = 'CREATED_BY' ).
+        CONTINUE.
+      ENDIF.
+      ASSIGN COMPONENT ls_field-name OF STRUCTURE <ls_row> TO <lv_value>.
+      CHECK sy-subrc = 0.
+      IF ls_field-admin CP '*_BY'.
+        <lv_value> = sy-uname.
+      ELSE.
+        GET TIME STAMP FIELD lv_now.
+        lv_old = <lv_value>.
+        IF lv_now <= gv_stamp.
+          lv_now = later( gv_stamp ).
+        ENDIF.
+        IF lv_now <= lv_old.
+          lv_now = later( lv_old ).
+        ENDIF.
+        gv_stamp = lv_now.
+        DESCRIBE FIELD <lv_value> DECIMALS lv_decimals.
+        IF lv_decimals = 0.
+* a field of seconds takes the second it falls in, and still has to move:
+* the next second, by the calendar
+          lv_short = floor( lv_now ).
+          IF lv_short <= lv_old AND iv_create = abap_false.
+            lv_short = floor( lv_old ).
+            lv_short = cl_abap_tstmp=>add( tstmp = lv_short secs = 1 ).
+          ENDIF.
+          <lv_value> = lv_short.
+        ELSE.
+          <lv_value> = lv_now.
+        ENDIF.
+      ENDIF.
+      mark( iv_index = iv_index iv_field = ls_field-name ).
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD later.
+* the next 100 ns after a TIMESTAMPL, carried into the next second by the
+* calendar (cl_abap_tstmp=>add), never to a 60th second
+    DATA lv_second TYPE timestamp.
+    DATA lv_fraction TYPE timestampl.
+
+    lv_second = floor( iv_stamp ).
+    lv_fraction = iv_stamp - lv_second.
+    IF lv_fraction < '0.9999999'.
+      rv_stamp = iv_stamp + '0.0000001'.
+    ELSE.
+      rv_stamp = cl_abap_tstmp=>add( tstmp = lv_second secs = 1 ).
+    ENDIF.
+  ENDMETHOD.
+
   METHOD take_back.
 * what a determination or action changed, into the buffer: field by field,
 * so the changed fields trigger what depends on them
@@ -1264,6 +1605,7 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
           <ls_inst>-updated = abap_true.
           <ls_inst>-req_updated = abap_true.
         ENDIF.
+        stamp( is_entity = is_entity iv_index = lv_index iv_create = abap_false ).
         mi_luw->modify( iv_entity = is_entity-name iv_key = <ls_inst>-key
                         iv_operation = co_operation-update ir_row = <ls_inst>-row ).
       ENDIF.

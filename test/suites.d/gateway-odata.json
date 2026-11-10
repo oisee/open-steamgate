@@ -30,8 +30,10 @@
     "test/transaction.mjs",
     "test/write-boundary.mjs",
     "test/odata-v4.mjs",
-    "test/rap-serve.mjs"
+    "test/rap-serve.mjs",
+    "test/rap-r4.mjs"
   ],
   "_odata-v4": "Gateway ownership: V4 wire suite belongs beside V2 wire tests.",
-  "_rap-serve": "Gateway ownership: the RAP R2c wire suite needs the transpiled gateway beside the V2 and V4 wire tests."
+  "_rap-serve": "Gateway ownership: the RAP R2c wire suite needs the transpiled gateway beside the V2 and V4 wire tests.",
+  "_rap-r4": "Gateway ownership: the RAP R4 wire suite (ETag, features, numbering) needs the transpiled gateway beside rap-serve."
 }

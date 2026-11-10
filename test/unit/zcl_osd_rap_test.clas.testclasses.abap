@@ -43,7 +43,7 @@ CLASS lcl_narrow IMPLEMENTATION.
   METHOD zif_osd_rap_bo~call.
     mi_bo->call( io_handler = io_handler iv_entity = iv_entity iv_name = iv_name
                  ir_rows = ir_rows ir_keys = ir_keys ir_result = ir_result
-                 ir_failed = ir_failed ir_reported = ir_reported ).
+                 ir_failed = ir_failed ir_reported = ir_reported ir_mapped = ir_mapped ).
   ENDMETHOD.
 
 ENDCLASS.

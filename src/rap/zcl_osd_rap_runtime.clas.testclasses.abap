@@ -1,5 +1,6 @@
 CLASS ltcl_key DEFINITION DEFERRED.
-CLASS zcl_osd_rap_runtime DEFINITION LOCAL FRIENDS ltcl_key.
+CLASS ltcl_stamp DEFINITION DEFERRED.
+CLASS zcl_osd_rap_runtime DEFINITION LOCAL FRIENDS ltcl_key ltcl_stamp.
 
 CLASS ltcl_key DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
 * The buffer, the conflict check and the delta all identify an instance by
@@ -39,6 +40,56 @@ CLASS ltcl_key IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals(
       act = lo_runtime->key_of( is_entity = ls_entity is_row = ls_one )
       exp = lo_runtime->key_of( is_entity = ls_entity is_row = ls_two ) ).
+  ENDMETHOD.
+
+ENDCLASS.
+
+CLASS ltcl_stamp DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
+* R4: an administrative time stamp moves forward by the calendar -- never
+* to a 60th second -- also where the clock is behind the stored value
+  PRIVATE SECTION.
+    TYPES:
+      BEGIN OF ty_row,
+        id   TYPE c LENGTH 4,
+        at   TYPE timestamp,
+        at_l TYPE timestampl,
+      END OF ty_row.
+    METHODS later_carries FOR TESTING RAISING cx_static_check.
+    METHODS stamp_at_year_end FOR TESTING RAISING cx_static_check.
+ENDCLASS.
+
+CLASS ltcl_stamp IMPLEMENTATION.
+
+  METHOD later_carries.
+    DATA lv_stamp TYPE timestampl.
+    lv_stamp = '20261110120000.5'.
+    cl_abap_unit_assert=>assert_equals( act = zcl_osd_rap_runtime=>later( lv_stamp ) exp = '20261110120000.5000001' ).
+    lv_stamp = '20991231235959.9999999'.
+    cl_abap_unit_assert=>assert_equals( act = zcl_osd_rap_runtime=>later( lv_stamp ) exp = '21000101000000' ).
+  ENDMETHOD.
+
+  METHOD stamp_at_year_end.
+    DATA lo_runtime TYPE REF TO zcl_osd_rap_runtime.
+    DATA ls_entity  TYPE zif_osd_rap_bo=>ty_entity.
+    DATA ls_field   TYPE zif_osd_rap_bo=>ty_field.
+    DATA ls_inst    TYPE zcl_osd_rap_runtime=>ty_inst.
+    DATA lr_row     TYPE REF TO ty_row.
+
+    CREATE OBJECT lo_runtime.
+    ls_field-name = 'AT'.
+    ls_field-admin = 'CHANGED_AT'.
+    APPEND ls_field TO ls_entity-fields.
+    ls_field-name = 'AT_L'.
+    ls_field-admin = 'LOCAL_CHANGED_AT'.
+    APPEND ls_field TO ls_entity-fields.
+    CREATE DATA lr_row.
+    lr_row->at = '20991231235959'.
+    lr_row->at_l = '20991231235959.9999999'.
+    ls_inst-row = lr_row.
+    APPEND ls_inst TO lo_runtime->mt_inst.
+    lo_runtime->stamp( is_entity = ls_entity iv_index = 1 iv_create = abap_false ).
+    cl_abap_unit_assert=>assert_equals( act = lr_row->at exp = '21000101000000' ).
+    cl_abap_unit_assert=>assert_equals( act = lr_row->at_l exp = '21000101000000' ).
   ENDMETHOD.
 
 ENDCLASS.

@@ -22,11 +22,29 @@ const upper = s => s.toUpperCase();
 const squash = s => s.toLowerCase().replaceAll("_", "");
 const lit = s => `'${String(s).replaceAll("'", "''")}'`;
 const PARAMS = new Set(["keys", "entities", "result", "failed", "reported", "mapped"]);
+const featured = opts => (opts ?? []).some(o => o.name === "features" && o.value === "instance");
+
+// the CALL METHOD of a handler method, each parameter by its role
+function callMethod(h, m, actual) {
+  const groups = {importing: [], changing: [], exporting: []};
+  for (const x of m.parameters) {
+    if (!(x.role in actual)) throw new Error(`${h.name}->${m.name}: unexpected parameter ${x.name}`);
+    const side = x.direction === "importing" ? "exporting" : x.direction === "exporting" ? "importing" : x.direction === "changing" ? "changing" : undefined;
+    if (!side) throw new Error(`${h.name}->${m.name}: ${x.direction} parameter ${x.name}`);
+    groups[side].push(`${x.name} = ${actual[x.role]}`);
+  }
+  return `    CALL METHOD io_handler->(${lit(upper(m.name))})`
+    + (groups.exporting.length ? `\n      EXPORTING\n        ${groups.exporting.join("\n        ")}` : "")
+    + (groups.importing.length ? `\n      IMPORTING\n        ${groups.importing.join("\n        ")}` : "")
+    + (groups.changing.length ? `\n      CHANGING\n        ${groups.changing.join("\n        ")}` : "") + ".\n";
+}
 
 /** local handler and saver classes of a pool, from the parse */
 export function poolClasses(name, files) {
-  const pool = files.filter(f => f.filename.toLowerCase().startsWith(`${name.toLowerCase()}.clas.`));
-  if (!pool.some(f => f.filename.toLowerCase() === `${name.toLowerCase()}.clas.abap`)) throw new Error(`behavior pool ${name} not found`);
+  // abapGit writes the namespace of /DMO/BP_X as # (#dmo#bp_x.clas.abap)
+  const file = name.toLowerCase().replaceAll("/", "#");
+  const pool = files.filter(f => f.filename.toLowerCase().startsWith(`${file}.clas.`));
+  if (!pool.some(f => f.filename.toLowerCase() === `${file}.clas.abap`)) throw new Error(`behavior pool ${name} not found`);
   const reg = new core.Registry(new core.Config(JSON.stringify({global: {files: "/**/*.*"}, syntax: {version: "open-abap", errorNamespace: "."}, rules: {}})));
   reg.addFiles(pool.map(f => new core.MemoryFile(f.filename, f.contents)));
   reg.parse();
@@ -90,7 +108,8 @@ export function runtimeOutputs(plans, files) {
     let rows = "", results = "", calls = "", methods = "", defs = "", tables = "";
     for (const e of plan.entities) {
       const {entity, prefix: p} = e;
-      if (entity.numbering) throw new Error(`${entity.entity}: ${entity.numbering} numbering through the pool is outside R2`);
+      if (entity.numbering === "late") throw new Error(`${entity.entity}: late numbering (adjust_numbers, %pid) is outside R4`);
+      if (entity.numbering && entity.numbering !== "early") throw new Error(`${entity.entity}: ${entity.numbering} numbering is outside R4`);
       if (entity.options?.length && entity.options.some(o => o.name !== "unique")) {
         throw new Error(`${entity.entity}: behavior options ${entity.options.map(o => o.name).join(", ")} are outside R2`);
       }
@@ -103,6 +122,15 @@ export function runtimeOutputs(plans, files) {
         + `    ls_entity-response = ${lit(upper(response))}.\n    ls_entity-table = ${lit(upper(table))}.\n`
         + `    ls_entity-source = ${lit(upper(`zcl_stg_tab_${table.toLowerCase()}`))}.\n`;
       for (const op of ["create", "update", "delete"]) if (entity.operations.some(o => o.kind === op && !o.use)) model_ += `    ls_entity-${op} = abap_true.\n`;
+      // R4: the ETag field, and which operations ask the pool's features
+      if (entity.etag?.kind === "master") {
+        const field = e.fields.find(f => upper(f.name) === upper(entity.etag.field));
+        if (!field) throw new Error(`${entity.entity}: etag master ${entity.etag.field} is no element of the entity`);
+        model_ += `    ls_entity-etag = ${lit(upper(field.name))}.\n`;
+      }
+      for (const op of ["update", "delete"]) if (entity.operations.some(o => o.kind === op && !o.use && featured(o.options))) model_ += `    ls_entity-feat_${op} = abap_true.\n`;
+      if (entity.operations.some(o => o.kind === "create" && featured(o.options))) throw new Error(`${entity.entity}: create ( features : instance ) has no instance to ask (global features are outside R4)`);
+      if (entity.numbering === "early") model_ += "    ls_entity-numbering = 'E'.\n";
       for (const f of e.fields) {
         const mapped = mapping?.fields.find(m => upper(m.field) === upper(f.name))?.column;
         const column = mapped ?? (upper(e.source) === upper(table) && f.base ? f.base : f.name);
@@ -113,6 +141,7 @@ export function runtimeOutputs(plans, files) {
           + (c.readonly ? `    ls_field-readonly = ${lit(c.readonly)}.\n` : "")
           + (c.mandatory ? `    ls_field-mandatory = ${lit(c.mandatory)}.\n` : "")
           + (c.numbering ? "    ls_field-numbering = abap_true.\n" : "")
+          + (f.admin ? `    ls_field-admin = ${lit(f.admin)}.\n` : "")
           + "    APPEND ls_field TO ls_entity-fields.\n";
       }
       const callables = [
@@ -149,6 +178,7 @@ export function runtimeOutputs(plans, files) {
         model_ += `    CLEAR ls_callable.\n    ls_callable-kind = '${c.kind}'.\n    ls_callable-name = ${lit(upper(c.name))}.\n`
           + `    ls_callable-method = ${lit(upper(m.name))}.\n`
           + (m.parameters.some(x => x.role === "entities") ? "    ls_callable-entities = abap_true.\n" : "")
+          + (c.kind === "A" && featured(c.options) ? "    ls_callable-features = abap_true.\n" : "")
           + (c.on ? `    ls_callable-on = '${c.on === "modify" ? "M" : "S"}'.\n` : "")
           + (trig.some(t => t.kind === "create") ? "    ls_callable-on_create = abap_true.\n" : "")
           + (trig.some(t => t.kind === "update") ? "    ls_callable-on_update = abap_true.\n" : "")
@@ -191,6 +221,54 @@ export function runtimeOutputs(plans, files) {
           + (groups.importing.length ? `\n      IMPORTING\n        ${groups.importing.join("\n        ")}` : "")
           + (groups.changing.length ? `\n      CHANGING\n        ${groups.changing.join("\n        ")}` : "") + ".\n";
         methods += `  METHOD ${method}.\n* ${c.kind === "D" ? "determination" : c.kind === "V" ? "validation" : "action"} ${c.name}: ${h.name}->${m.name}\n${body}  ENDMETHOD.\n\n`;
+      }
+      // R4: the instance features and the early numbering of the entity, each
+      // a method in the system's form bound by its FOR clause
+      const names = new Set([upper(entity.entity), upper(entity.alias ?? entity.entity)]);
+      const special = form => {
+        const found = handlers.flatMap(h => h.methods.filter(m => m.implicit?.form === form && m.implicit.clauses.some(x => names.has(upper(x.entity)))).map(m => ({h, m})));
+        if (found.length > 1) throw new Error(`${entity.entity}: more than one FOR ${form} method in ${pool}`);
+        if (found.length && handler && handler !== found[0].h.name) throw new Error(`${entity.entity}: handler methods in two classes (${handler}, ${found[0].h.name})`);
+        if (found.length) handler = found[0].h.name;
+        return found[0];
+      };
+      const wantsFeatures = entity.operations.some(o => featured(o.options)) || entity.actions.some(a => featured(a.options));
+      const feat = special("FEATURES");
+      if (wantsFeatures && !feat) throw new Error(`${entity.entity}: features : instance without a FOR INSTANCE FEATURES method in ${pool}`);
+      if (feat) {
+        const method = `${p}_feat`;
+        model_ += "    ls_entity-features = abap_true.\n";
+        defs += `    METHODS ${method}\n      IMPORTING\n        io_handler  TYPE REF TO object\n        ir_rows     TYPE REF TO data\n        ir_result   TYPE REF TO data\n        ir_failed   TYPE REF TO data\n        ir_reported TYPE REF TO data.\n`;
+        calls += `      WHEN ${lit(`${upper(entity.entity)}~%FEATURES`)}.\n        ${method}( io_handler = io_handler ir_rows = ir_rows ir_result = ir_result ir_failed = ir_failed ir_reported = ir_reported ).\n`;
+        const flags = [
+          ...entity.operations.filter(o => !o.use && o.kind !== "create").map(o => `%${o.kind}`),
+          ...entity.actions.map(a => `%action-${a.name.toLowerCase()}`),
+        ];
+        const body = `    DATA lt_keys TYPE ${iface}=>t_${p}_features_key.\n    DATA ls_key LIKE LINE OF lt_keys.\n    DATA ls_request TYPE ${iface}=>${p}_feat.\n`
+          + `    FIELD-SYMBOLS <lt_rows> TYPE ${iface}=>t_${p}_read_result.\n    FIELD-SYMBOLS <ls_row> LIKE LINE OF <lt_rows>.\n`
+          + `    FIELD-SYMBOLS <lt_result> TYPE ${iface}=>t_${p}_features_result.\n`
+          + `    FIELD-SYMBOLS <ls_failed> TYPE ${iface}=>r_failed.\n    FIELD-SYMBOLS <ls_reported> TYPE ${iface}=>r_reported.\n\n`
+          + "    ASSIGN ir_rows->* TO <lt_rows>.\n    ASSIGN ir_result->* TO <lt_result>.\n    ASSIGN ir_failed->* TO <ls_failed>.\n    ASSIGN ir_reported->* TO <ls_reported>.\n"
+          + "    LOOP AT <lt_rows> ASSIGNING <ls_row>.\n      CLEAR ls_key.\n"
+          + e.fields.filter(f => f.key).map(f => `      ls_key-${f.name} = <ls_row>-${f.name}.\n`).join("")
+          + "      APPEND ls_key TO lt_keys.\n    ENDLOOP.\n"
+          + flags.map(f => `    ls_request-${f} = if_abap_behv=>mk-on.\n`).join("")
+          + callMethod(feat.h, feat.m, {keys: "lt_keys", request: "ls_request", result: "<lt_result>", failed: "<ls_failed>", reported: "<ls_reported>"});
+        methods += `  METHOD ${method}.\n* instance features: ${feat.h.name}->${feat.m.name}\n${body}  ENDMETHOD.\n\n`;
+        tables += `      WHEN ${lit(`${upper(entity.entity)}~FEATURES RESULT~`)}.\n        CREATE DATA rr_table TYPE ${iface}=>t_${p}_features_result.\n`;
+      }
+      if (entity.numbering === "early") {
+        const num = special("NUMBERING");
+        if (!num) throw new Error(`${entity.entity}: early numbering without a FOR NUMBERING ... FOR CREATE method in ${pool}`);
+        if (!entity.operations.some(o => o.kind === "create" && !o.use)) throw new Error(`${entity.entity}: early numbering without create`);
+        const method = `${p}_num`;
+        defs += `    METHODS ${method}\n      IMPORTING\n        io_handler  TYPE REF TO object\n        ir_rows     TYPE REF TO data\n        ir_mapped   TYPE REF TO data\n        ir_failed   TYPE REF TO data\n        ir_reported TYPE REF TO data.\n`;
+        calls += `      WHEN ${lit(`${upper(entity.entity)}~%NUMBERING`)}.\n        ${method}( io_handler = io_handler ir_rows = ir_rows ir_mapped = ir_mapped ir_failed = ir_failed ir_reported = ir_reported ).\n`;
+        const body = `    FIELD-SYMBOLS <lt_rows> TYPE ${iface}=>t_${p}_create.\n    FIELD-SYMBOLS <ls_mapped> TYPE ${iface}=>r_mapped.\n`
+          + `    FIELD-SYMBOLS <ls_failed> TYPE ${iface}=>r_failed.\n    FIELD-SYMBOLS <ls_reported> TYPE ${iface}=>r_reported.\n\n`
+          + "    ASSIGN ir_rows->* TO <lt_rows>.\n    ASSIGN ir_mapped->* TO <ls_mapped>.\n    ASSIGN ir_failed->* TO <ls_failed>.\n    ASSIGN ir_reported->* TO <ls_reported>.\n"
+          + callMethod(num.h, num.m, {entities: "<lt_rows>", mapped: "<ls_mapped>", failed: "<ls_failed>", reported: "<ls_reported>"});
+        methods += `  METHOD ${method}.\n* early numbering: ${num.h.name}->${num.m.name}\n${body}  ENDMETHOD.\n\n`;
       }
       if (handler) model_ += `    ls_entity-handler = ${lit(absolute(handler))}.\n`;
       model_ += "    APPEND ls_entity TO rs_model-entities.\n";
