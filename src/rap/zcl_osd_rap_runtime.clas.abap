@@ -379,6 +379,17 @@ CLASS zcl_osd_rap_runtime DEFINITION PUBLIC CREATE PRIVATE.
         iv_stamp        TYPE timestampl
       RETURNING
         VALUE(rv_stamp) TYPE timestampl.
+* iv_stamp, or the first stamp after it that a double tells from iv_old.
+* The database seams write a DEC as a double (ANORMALIES.md,
+* ANOMALY-2026-10-08-dec-sqlite-real), which resolves about 4 ms at the
+* size of a TIMESTAMPL: two writes inside that window were stored as the
+* same value, the ETag over it did not move, and a stale If-Match passed.
+    CLASS-METHODS apart
+      IMPORTING
+        iv_stamp        TYPE timestampl
+        iv_old          TYPE timestampl
+      RETURNING
+        VALUE(rv_stamp) TYPE timestampl.
 * R4: the administrative fields of an instance, on create or on change
     METHODS stamp
       IMPORTING
@@ -2406,6 +2417,7 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
         IF lv_now <= lv_old.
           lv_now = later( lv_old ).
         ENDIF.
+        lv_now = apart( iv_stamp = lv_now iv_old = lv_old ).
         gv_stamp = lv_now.
         DESCRIBE FIELD <lv_value> DECIMALS lv_decimals.
         IF lv_decimals = 0.
@@ -2438,6 +2450,35 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
     ELSE.
       rv_stamp = cl_abap_tstmp=>add( tstmp = lv_second secs = 1 ).
     ENDIF.
+  ENDMETHOD.
+
+  METHOD apart.
+* step away from iv_stamp by 100 ns, 200 ns, 400 ns ... until the double of
+* the result is above the double of iv_old; about 16 steps cross the 4 ms
+* a double resolves there. A step past the second takes the next second by
+* the calendar, which a double always tells apart.
+    DATA lv_new    TYPE f.
+    DATA lv_old    TYPE f.
+    DATA lv_step   TYPE timestampl.
+    DATA lv_second TYPE timestamp.
+    DATA lv_fraction TYPE timestampl.
+
+    rv_stamp = iv_stamp.
+    lv_old = iv_old.
+    lv_new = rv_stamp.
+    lv_step = '0.0000001'.
+    WHILE lv_new <= lv_old AND rv_stamp IS NOT INITIAL.
+      lv_second = floor( iv_stamp ).
+      lv_fraction = iv_stamp - lv_second + lv_step.
+      IF lv_fraction < 1.
+        rv_stamp = lv_second + lv_fraction.
+      ELSE.
+        rv_stamp = cl_abap_tstmp=>add( tstmp = lv_second secs = 1 ).
+        RETURN.
+      ENDIF.
+      lv_new = rv_stamp.
+      lv_step = lv_step * 2.
+    ENDWHILE.
   ENDMETHOD.
 
   METHOD take_back.
