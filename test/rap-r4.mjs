@@ -111,6 +111,52 @@ describe("RAP R4 constructs over OData", function () {
     assert.equal(res.status, 428);
   });
 
+  // Two writes inside one millisecond: the runtime's stamps are 100 ns apart,
+  // but the database seam writes a DEC(21,7) as a double, which resolves about
+  // 4 ms at that size (ANOMALY-2026-10-08-dec-sqlite-real). Before the stamp
+  // stepped past that, both writes stored the same value, the ETag did not
+  // move, and a PATCH with the tag of the first write overwrote the second.
+  // The clock is held still so the window is hit every time, not by chance.
+  it("moves the ETag on every write, also two writes inside one millisecond (V2 and V4)", async () => {
+    const id = (await create("same millisecond")).body.d.trip_id;
+    const RealDate = Date;
+    const still = RealDate.now();
+    globalThis.Date = class extends RealDate {
+      constructor(...args) { if (args.length) super(...args); else super(still); }
+      static now() { return still; }
+    };
+    try {
+      const tagV2 = async () => (await read(id)).headers.get("etag");
+      const patchV2 = (tag, description) => call(`${v2}/Trip('${id}')`, {method: "PATCH", headers: {...write, "if-match": tag}, body: JSON.stringify({description})});
+      const t0 = await tagV2();
+      assert.equal((await patchV2(t0, "first")).status, 204);
+      const t1 = await tagV2();
+      assert.equal((await patchV2(t1, "second")).status, 204);
+      const t2 = await tagV2();
+      assert.notEqual(t1, t0, "the first write moved the ETag");
+      assert.notEqual(t2, t1, "the second write moved the ETag");
+      const stale = await patchV2(t1, "lost update");
+      assert.equal(stale.status, 412, "the first write's tag is stale after the second");
+      assert.equal((await read(id)).body.d.description, "second");
+
+      const key = `${v4}/Trip('${id}')`;
+      const tagV4 = async () => (await call(key)).body["@odata.etag"];
+      const patchV4 = (tag, description) => call(key, {method: "PATCH", headers: {...write, "if-match": tag}, body: JSON.stringify({description})});
+      const u0 = await tagV4();
+      assert.equal(u0, t2, "V2 and V4 name the same ETag");
+      assert.ok([200, 204].includes((await patchV4(u0, "third")).status));
+      const u1 = await tagV4();
+      assert.ok([200, 204].includes((await patchV4(u1, "fourth")).status));
+      const u2 = await tagV4();
+      assert.notEqual(u1, u0);
+      assert.notEqual(u2, u1);
+      assert.equal((await patchV4(u1, "lost update")).status, 412);
+      assert.equal((await call(key)).body.description, "fourth");
+    } finally {
+      globalThis.Date = RealDate;
+    }
+  });
+
   it("refuses an operation the instance features disable, with the runtime's message", async () => {
     const id = (await create("features trip")).body.d.trip_id;
     const tagOf = async (key) => (await read(key)).headers.get("etag");
