@@ -1,4 +1,4 @@
-# The managed RAP runtime (R2 .. R5)
+# The managed RAP runtime (R2 .. R6)
 
 R2 of [the RAP plan](oracle-rap.md): a managed behavior definition runs. Its
 behavior pool's determinations, validations and action are called, its
@@ -683,6 +683,128 @@ and determine actions, late numbering, deep insert as one create by
 association (a POST with the children inline on the parent), `etag
 dependent` served, EML on a projection, a projection's own pool, `FOR
 LOCK` of an unmanaged lock, global features and authorization.
+
+## R6: internal, determine and factory actions
+
+After R5 the travel BO (`/DMO/I_TRAVEL_M`) and its two projections stop at
+`internal action ReCalcTotalPrice`, the supplement and agency BOs and their
+projections at `determine action Prepare` (measured with
+`node tools/rap-flight/constructs.mjs`, the table in R5 above). R6 makes
+the three kinds of action the managed scenario declares run, and measures
+each one before building it:
+
+| construct | flight BDEFs | why now |
+| --- | ---: | --- |
+| `internal action` | 1 (travel; its two projections stop at it too) | the first wall of three BDEFs |
+| `determine action X { validation v; determination ( always ) d; }` | 2 (supplement, agency; both `draft determine action`) | the first wall of four BDEFs |
+| `factory action x [1]` (instance) | 1 (travel `copyTravel`) | the travel's next wall behind the internal action |
+| `static` actions, action parameters, results other than `$self` | 0 of the ten (a parameter only in a draft BDEF) | not hit: still refused by name |
+
+Proven on the bill demo of [`src/rap_r6`](../src/rap_r6/README.md)
+(`ZI_RAP_BILL`, served as `ZUI_RAP_BILL`, `test/rap-r6.mjs`,
+`ZCL_OSD_RAP_R6_TEST`). Nothing is measured on a system; the semantics
+follow the public RAP documentation (the BDEF reference's "action",
+"determine action" and "factory action") and each choice of this runtime
+is written down.
+
+### Internal actions
+
+`internal action a;` is an instance action that only the business object's
+own implementation may execute: on a system, EML outside the BO that names
+it does not compile, and the service does not expose it. Here:
+
+- **The model.** The callable gets `internal = abap_true`; the derived
+  types are an ordinary action's (`TABLE FOR ACTION IMPORT e~a`, a result
+  when it declares one).
+- **The runtime.** `execute` of an internal action is refused with
+  `ZCX_OSD_RAP` (`Action A of e is internal: only the business object's own
+  handlers execute it, IN LOCAL MODE`) unless a handler of the same
+  runtime is running (`mv_depth > 0`, the R3 rule that makes EML inside a
+  handler local). A handler of another behavior definition is outside: its
+  EML reaches the session's runtime, at depth 0, and is refused. The
+  refusal is an exception, not a FAILED row, because on a system it is a
+  syntax error and nothing a caller could correct.
+- **Features** are not asked (IN LOCAL MODE skips them, as R4 already does).
+- **OData.** `srvd-gen.mjs` exposes no internal action: no V2 function
+  import, no V4 bound action, so a call is the service's ordinary 404 for
+  an unknown operation. `ZCL_OSD_RAP_SADL->actions( )` does not list it
+  either, so the bridge never reaches the runtime with it.
+- **Projections.** `use action a` of an internal action is refused by the
+  generator (a projection exposes, and an internal action is not exposable).
+
+The flight travel's pattern is the demo's: a determination on modify
+executes the internal action with `MODIFY ENTITIES ... IN LOCAL MODE
+ENTITY bill EXECUTE recalctotal FROM CORRESPONDING #( keys )`.
+
+### Determine actions
+
+`determine action x { determination [( always )] d; validation [( always )]
+v; }` runs the named determinations and validations on request. The
+grammar is R0's; R6 adds the `( always )` option of a member.
+
+- **Members.** A member names a determination **on save** or a validation
+  of the same entity (also qualified with the entity's alias or name, `e~d`).
+  A determination on modify, a member of another entity (a child's
+  validation, `Child~v`) and an unknown name are refused by the generator,
+  each with its name. `draft determine action` (Prepare, the only form the
+  ten flight BDEFs use) is refused as draft.
+- **When a member runs.** For the instances the call names: a member
+  without `( always )` runs for the instances whose trigger conditions are
+  met since the last save (the same test the save sequence makes:
+  `create`, `update`, a field), a member with `( always )` for all of them.
+  Determinations first, then validations, each in the order declared --
+  the save sequence's order. **That order is this runtime's choice**, not
+  read off a system.
+- **What it does not consume.** A determination that ran in a determine
+  action runs again at the save if its triggers still hold: the action does
+  not reset the triggers (determinations are expected to be idempotent, as
+  on a system).
+- **Failures.** A validation that fails puts the instance into the call's
+  FAILED / REPORTED, as in the save, and nothing is rolled back: the
+  instance stays in the buffer. Over OData a FAILED row is the usual 400
+  and the transaction is rolled back.
+- **The rest is an action's.** Unknown key: FAILED `not_found`. The root
+  instance is locked as for any action (a determination may change the
+  instance). The import type is `TABLE FOR ACTION IMPORT e~x` (`%tky`,
+  `%cid_ref`); there is no result. After the call the determinations on
+  modify its changes trigger run, as after any request.
+- **OData.** A determine action is exposed like an instance action (V2
+  function import, V4 bound action) and answers the instance.
+
+### Factory actions
+
+`factory action x [1];` (instance) creates a new instance from an
+existing one (the travel's `copyTravel`). The import row carries `%cid` --
+the content ID the new instance is mapped under -- beside `%tky` and
+`%cid_ref`; there is no result, the new instance comes back in **MAPPED**.
+
+- **The handler** (`FOR MODIFY IMPORTING keys FOR ACTION e~x`) gets the
+  caller's MAPPED (R2's adapter dropped the `mapped` parameter of an action
+  handler into a local; it is now passed through), creates with EML IN
+  LOCAL MODE with `%cid = key-%cid`, and copies the MAPPED of the create
+  into its own -- the flight pool's code.
+- **The runtime** passes `cs_mapped` through (`execute` takes it as an
+  optional CHANGING; `ZCL_OSD_RAP_EML=>EXECUTE` and `KERNEL_RAP_EML`'s
+  `execute` pass the statement's MAPPED) and checks the handler's
+  contract: an import row whose `%cid` is neither in MAPPED nor in FAILED
+  of the entity is failed (`Factory action X of e gave no instance and no
+  failure`), as early numbering does for a key.
+- **OData.** The bridge gives the import row a `%cid` of its own, reads
+  the new key from MAPPED, and answers **the new instance** (V2 function
+  import, V4 bound action, both 200 as for the other actions; a system's V4
+  status for a factory action is not measured). `zif_stg_sadl_behavior~execute`
+  gains an optional `es_row`, the instance to answer when it is not the
+  one in the URL.
+- `static factory action` and the `[1]` cardinality's alternatives are
+  refused (static actions are not in R6).
+
+### Not in R6
+
+`static` actions and functions, action parameters (the `%param` type is
+generated, the runtime and the service do not pass it), results other
+than `$self`, members of a determine action in another entity, draft
+actions (`draft action`, `draft determine action`), `internal create /
+update / delete`, and everything R5 left.
 
 ## Not in R2
 
