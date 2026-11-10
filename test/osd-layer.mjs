@@ -1,7 +1,7 @@
 import {syncBuiltinESMExports} from 'node:module';
 import {expect} from "chai";
 import childProcess, {execFileSync, spawn, spawnSync} from "node:child_process";
-import {copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
+import {copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {load as parseYaml} from "js-yaml";
@@ -667,5 +667,85 @@ describe("osd-layer: reproducible publishing", function () {
     }}), "UNSAFE_LOCATION");
     expect(requests).to.have.length(2);
     await refusal(() => pushManifest(`registry.example/osd/pack@sha256:${"a".repeat(64)}`, Buffer.from("{}")), "DIGEST_MISMATCH");
+  });
+});
+
+// Every public entry point that copies the checkout, run as CI runs it, from
+// a copy beside a synthetic private installed system: each refuses before it
+// writes anything (a Pages push, a preview, an image, a seeded binary, a
+// release asset, a publishing build).
+describe("public entry points refuse a private installed system", function () {
+  this.timeout(120000);
+  const repo = new URL("..", import.meta.url).pathname;
+  let fixture, outside;
+  const put = (path, text) => { mkdirSync(join(fixture, path, ".."), {recursive: true}); writeFileSync(join(fixture, path), text); };
+  const copy = (...paths) => { for (const path of paths) { mkdirSync(join(fixture, path, ".."), {recursive: true}); copyFileSync(join(repo, path), join(fixture, path)); } };
+  const tree = () => readdirSync(fixture, {recursive: true}).map(String).sort();
+  const refusedWithoutWrites = (command, args, env = {}) => {
+    const before = tree();
+    const result = spawnSync(command, args, {cwd: fixture, encoding: "utf8", env: {...process.env, ...env}});
+    expect(result.status, result.stdout + result.stderr).not.to.equal(0);
+    expect(result.stderr).to.include("private layer smoke");
+    expect(tree()).to.deep.equal(before);
+    return result;
+  };
+  beforeEach(() => {
+    fixture = mkdtempSync(join(tmpdir(), "osd-public-guard-"));
+    outside = mkdtempSync(join(tmpdir(), "osd-public-guard-origin-"));
+    const identity = {order: 0, name: "smoke", kind: "input", private: true,
+      digest: `sha256:${"1".repeat(64)}`, treeDigest: `sha256:${"2".repeat(64)}`, path: "inputs/smoke"};
+    put(".local/system/.osd-system.json", JSON.stringify({digest: `sha256:${"3".repeat(64)}`, layers: [identity]}));
+    put(".local/system/inputs/smoke/.osd-layer.json", JSON.stringify(identity));
+    symlinkSync(join(repo, "tools"), join(fixture, "tools"), "dir");
+  });
+  afterEach(() => { rmSync(fixture, {recursive: true, force: true}); rmSync(outside, {recursive: true, force: true}); });
+
+  it("pages-push publish leaves the gh-pages tip and the checkout as they were", () => {
+    const origin = join(outside, "origin.git"), seed = join(outside, "seed"), git = (...args) => execFileSync("git", args, {encoding: "utf8"}).trim();
+    git("init", "-q", "--bare", origin);
+    git("init", "-q", seed);
+    writeFileSync(join(seed, "index.html"), "synthetic\n");
+    git("-C", seed, "add", "index.html");
+    git("-C", seed, "-c", "user.name=test", "-c", "user.email=test@localhost", "commit", "-q", "-m", "seed");
+    git("-C", seed, "push", "-q", origin, "HEAD:refs/heads/gh-pages");
+    const tip = git("--git-dir", origin, "rev-parse", "refs/heads/gh-pages");
+    git("init", "-q", fixture);
+    git("-C", fixture, "remote", "add", "origin", origin);
+    copy("scripts/pages-push.mjs", "scripts/pages-index.mjs");
+    put("build/preview/index.html", "synthetic preview\n");
+    refusedWithoutWrites(process.execPath, ["scripts/pages-push.mjs", "publish", "main", "build/preview"], {GITHUB_SHA: ""});
+    expect(git("--git-dir", origin, "rev-parse", "refs/heads/gh-pages")).to.equal(tip);
+  });
+
+  it("build-preview writes no preview", () => {
+    symlinkSync(join(repo, "test"), join(fixture, "test"), "dir");
+    copy("scripts/build-preview.mjs");
+    refusedWithoutWrites(process.execPath, ["scripts/build-preview.mjs"]);
+  });
+
+  it("the Docker image build stops before its first step", () => {
+    copy("docker/image/build.mjs", "docker/image/packs.mjs");
+    refusedWithoutWrites(process.execPath, ["docker/image/build.mjs"]);
+  });
+
+  it("osd-build --publish builds nothing", () => {
+    refusedWithoutWrites(process.execPath, [join(fixture, "tools/osd-build.mjs"), "--publish"], {OSD_ROOT: fixture});
+  });
+
+  it("release-verify binary refuses the asset", () => {
+    copy("scripts/release-verify.mjs");
+    const elf = Buffer.alloc(64);
+    elf.writeUInt32BE(0x7f454c46, 0); elf[4] = 2; elf[5] = 1; elf.writeUInt16LE(0x3e, 18);
+    put("osgo-linux-x64", elf);
+    put("osgo-linux-x64.sha256", `${sha256(elf).slice(7)}  osgo-linux-x64\n`);
+    refusedWithoutWrites(process.execPath, ["scripts/release-verify.mjs", "binary", "osgo-linux-x64", "go-linux-amd64"]);
+  });
+
+  it("build-binary --seed stages no seed", function () {
+    if (spawnSync("bun", ["--version"]).status !== 0) this.skip();
+    symlinkSync(join(repo, "editors"), join(fixture, "editors"), "dir");
+    symlinkSync(join(repo, "node_modules"), join(fixture, "node_modules"), "dir");
+    copy("scripts/build-binary.mjs", "scripts/build-vsix.mjs", "scripts/third-party-notices.mjs");
+    refusedWithoutWrites("bun", ["scripts/build-binary.mjs", "--seed", join(outside, "osd")]);
   });
 });

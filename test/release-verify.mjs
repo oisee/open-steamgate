@@ -4,7 +4,7 @@
 // release and preview workflows against the real artefacts.
 import {expect} from "chai";
 import {createHash} from "node:crypto";
-import {mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
+import {mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {checkBinary, checkReleaseBinary, executableOf} from "../scripts/release-verify.mjs";
@@ -80,9 +80,7 @@ describe("scripts/release-verify: an artefact by its content", () => {
     expect(() => checkReleaseBinary(binary, "go-linux-amd64", source)).to.throw(/no matching public system identity/);
     generation({systemDigest: null, systemPrivate: false});
     expect(checkReleaseBinary(binary, "go-linux-amd64", source).target).to.equal("go-linux-amd64");
-    // the command the release workflow runs before each upload is this check
-    expect(readFileSync(new URL("../scripts/release-verify.mjs", import.meta.url), "utf8"))
-      .to.match(/command === "binary" && args\.length >= 2\) result = checkReleaseBinary\(args\[0\], args\[1\]\)/);
+    // the CLI the release workflow runs: test/osd-layer.mjs, "public entry points"
   });
 
   it("checks Go release formats by the bytes they contain", () => {

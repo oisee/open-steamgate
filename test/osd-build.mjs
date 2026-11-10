@@ -85,6 +85,27 @@ describe("tools/osd-build: the layers, refused before a lock is taken", function
     expect(existsSync(archive)).to.equal(false);
   });
 
+  // the archive carries all of build/: an older generation's sources too
+  it("refuses to pack a CI artifact beside an older private or unrecorded generation", () => {
+    for (const path of ["gen", "output", "packs", ".local/lars", ".local/ci-artifact/transpiler", "build/by-input/live", "build/by-input/older"]) mkdirSync(join(root, path), {recursive: true});
+    write("build/by-input/live/manifest.json", JSON.stringify({systemDigest: null, systemPrivate: false}));
+    symlinkSync("by-input/live", join(root, "build/live"));
+    const archive = join(root, "artifact.tar");
+    const pack = () => spawnSync(process.execPath, [resolve("tools/osd-ci-artifact.mjs"), "pack", archive], {cwd: root, encoding: "utf8"});
+    for (const [older, message] of [[{systemDigest: `sha256:${"a".repeat(64)}`, systemPrivate: true}, /generation older is from a private system/],
+      [{hash: "older"}, /generation older is not recorded public/]]) {
+      write("build/by-input/older/manifest.json", JSON.stringify(older));
+      const refused = pack();
+      expect(refused.status, refused.stderr).to.not.equal(0);
+      expect(refused.stderr).to.match(message);
+      expect(existsSync(archive)).to.equal(false);
+    }
+    write("build/by-input/older/manifest.json", JSON.stringify({systemDigest: null, systemPrivate: false}));
+    const packed = pack();
+    expect(packed.status, packed.stderr).to.equal(0);
+    expect(existsSync(archive)).to.equal(true);
+  });
+
   it("records the system a generation was built from and rebuilds a generation without that record", async () => {
     write("src/zcl_recorded.clas.abap", "CLASS zcl_recorded DEFINITION PUBLIC. ENDCLASS. CLASS zcl_recorded IMPLEMENTATION. ENDCLASS.\n");
     const first = await build({root, generators: false});

@@ -1,6 +1,6 @@
 import {layerEnvironment} from './osd-layer-env.mjs';
 // One installed index supplies the complete source closure. No Git or network here.
-import {existsSync, readFileSync} from "node:fs";
+import {existsSync, readFileSync, readdirSync} from "node:fs";
 import {dirname, isAbsolute, join, relative, resolve} from "node:path";
 import {repositoryConfig, sourceFolder} from "./osd-abapgit-config.mjs";
 
@@ -66,6 +66,25 @@ export function assertPublicSystem(root) {
 export function generationSystem(root) {
   const system = activeSystem(root);
   return {systemDigest: system?.digest ?? null, systemPrivate: system?.layers.some(layer => layer.private === true) ?? false};
+}
+
+// Everything under build/ for an archive of the whole store: every kept
+// generation, not only the live one, must be recorded public, since
+// build/source-by-digest and build/xref are shared by all of them. A
+// generation without a manifest or without the record is refused too.
+export function assertPublicGenerations(root) {
+  assertPublicSystem(root);
+  const byInput = join(root, "build/by-input");
+  if (!existsSync(byInput)) return;
+  for (const entry of readdirSync(byInput, {withFileTypes: true})) {
+    if (!entry.isDirectory()) continue;
+    let generation;
+    try { generation = JSON.parse(readFileSync(join(byInput, entry.name, "manifest.json"), "utf8")); } catch { generation = undefined; }
+    if (generation?.systemPrivate === false) continue;
+    const error = new Error(`generation ${entry.name} is ${generation?.systemPrivate === true ? "from a private system" : "not recorded public"}; remove it or rebuild before publishing build/`);
+    error.code = "PRIVATE_LAYER";
+    throw error;
+  }
 }
 
 // A built generation from before that record: osd-build builds it again.

@@ -44,10 +44,6 @@ describe("private system seed boundary", () => {
       await refuses(source);
     } finally { rmSync(source, {recursive: true, force: true}); }
   });
-
-  it("checks the checkout before build-binary --seed stages anything", () => {
-    expect(readFileSync(join(root, "scripts/build-binary.mjs"), "utf8")).to.match(/if \(seeded\) \{\n  assertPublicSystem\(root\);/);
-  });
 });
 
 describe("packaging changed seed content", function () {

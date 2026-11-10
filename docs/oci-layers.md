@@ -51,6 +51,8 @@ refuses, as `PRIVATE_LAYER`, an installed system with a private layer and a
 live generation built from one: every generation's `manifest.json` records
 `systemDigest` and `systemPrivate`. A live generation without that record,
 or from another system than the installed one, is refused until rebuilt.
+A CI artifact packs all of `build/`, so it also refuses any kept generation
+in `build/by-input` that is not recorded public.
 
 `build` and `push` also accept `--closure <file.json>`. The file must hold
 `{"unresolved":0,"items":[]}` with a nonnegative integer and an array of
