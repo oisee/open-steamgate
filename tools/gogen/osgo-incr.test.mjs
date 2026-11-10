@@ -437,17 +437,58 @@ test("a re-lowered later reacher of a shared anonymous structure keeps the first
   } finally { rmSync(root, {recursive: true, force: true}); }
 });
 
-test("an edit that newly reaches an anonymous shape other objects named refuses", () => {
+test("an edit that newly reaches a declared anonymous structure takes the name the full build gives it", () => {
+  // hot never reached the shape; the structure it now reaches is a member
+  // of zif_incr_msg2 that b2 (cached, earlier in the full build's order)
+  // named: the full build names it after b2, and so must the fast one --
+  // by the declaration, not by the shape, which a1's constant shares
   const root = tree(withAnon);
   try {
     writeCache(root);
-    // hot never reached the shape; whose name the full build gives it now
-    // depends on who reaches that instance first -- not provable from here
     edit(root, "app/zcl_incr_hot.clas.abap", "r = |hot:{ travelid }|.", "DATA e LIKE zif_incr_msg2=>co_other.\n    e = zif_incr_msg2=>co_other.\n    r = |hot:{ travelid }{ e-msgid }|.");
+    const reference = fullProgram(root);
+    assert.ok([...reference.structs.keys()].some((k) => k.startsWith("ZCL_INCR_B2__S_MSGID")));
     const attempt = incrAssemble({root, folders: [join(root, "app")], objects: objectNames(root), hidden: new Set(), includeTests: new Set(),
       proof: {ok: true, base: "live1", changed: changedFiles(root, withAnon)}});
-    assert.equal(attempt.ok, false);
-    assert.match(attempt.reason, /newly reaches the anonymous shape MSGID,MSGNO/);
+    assert.equal(attempt.ok, true, attempt.reason);
+    assert.ok(!attempt.lowered.includes("CLAS ZCL_INCR_B2"));
+    assert.deepEqual([...attempt.program.structs.keys()], [...reference.structs.keys()]);
+    assert.equal(emitted(attempt.program), emitted(reference));
+  } finally { rmSync(root, {recursive: true, force: true}); }
+});
+
+test("a re-lowered object that reached its own and another class's structure of one shape keeps both names", () => {
+  // the real tree's case: ZCL_STG_SADL_DPC mints a name for its own message
+  // structure and reaches ZCL_OSD_RAP_SADL's of the same shape under that
+  // class's name -- one object, one shape, two names, told apart only by
+  // the declaration each instance belongs to
+  const root = tree({...withAnon,
+    "app/zcl_incr_z9.clas.abap": `CLASS zcl_incr_z9 DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    CONSTANTS: BEGIN OF co_mine, msgid TYPE c LENGTH 20 VALUE 'M9', msgno TYPE c LENGTH 3 VALUE '009', END OF co_mine.
+    METHODS m RETURNING VALUE(r) TYPE string.
+ENDCLASS.
+CLASS zcl_incr_z9 IMPLEMENTATION.
+  METHOD m.
+    DATA e LIKE zif_incr_msg=>co_err.
+    DATA f LIKE co_mine.
+    e = zif_incr_msg=>co_err.
+    f = co_mine.
+    r = |z9:{ e-msgno }{ f-msgno }|.
+  ENDMETHOD.
+ENDCLASS.`});
+  try {
+    writeCache(root);
+    edit(root, "app/zcl_incr_z9.clas.abap", "|z9:{ e-msgno }{ f-msgno }|", "|z9!{ e-msgno }{ f-msgno }|");
+    const reference = fullProgram(root);
+    const names = [...reference.structs.keys()].filter((k) => /S_MSGID_MSGNO/.test(k));
+    assert.ok(names.some((k) => k.startsWith("ZCL_INCR_A1__")) && names.some((k) => k.startsWith("ZCL_INCR_Z9__")), `fixture (${names})`);
+    const attempt = incrAssemble({root, folders: [join(root, "app")], objects: objectNames(root), hidden: new Set(), includeTests: new Set(),
+      proof: {ok: true, base: "live1", changed: changedFiles(root, withAnon)}});
+    assert.equal(attempt.ok, true, attempt.reason);
+    assert.deepEqual([...attempt.program.structs.keys()], [...reference.structs.keys()]);
+    assert.equal(text([...attempt.program.consts]), text([...reference.consts]));
+    assert.equal(emitted(attempt.program), emitted(reference));
   } finally { rmSync(root, {recursive: true, force: true}); }
 });
 

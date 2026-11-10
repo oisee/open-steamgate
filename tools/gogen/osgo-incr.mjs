@@ -32,7 +32,7 @@ import {objectOfFile} from "./osgo-layers.mjs";
 import {portable, toolIdentity} from "./frontend-object-cache.mjs";
 import {prepareDynamicStatics} from "./frontend-dynamic-call.mjs";
 
-export const SCHEMA = "osgo-incr/4";
+export const SCHEMA = "osgo-incr/5";
 const sha = (value) => createHash("sha256").update(value).digest("hex");
 const upper = (text) => String(text).toUpperCase();
 const walk = (d) => readdirSync(d, {withFileTypes: true}).sort((a, b) => a.name.localeCompare(b.name))
@@ -121,6 +121,43 @@ function applyOp(target, op) {
   else if (method === "push") target.push(args[0]);
 }
 
+/** where each anonymous structure instance of a registry is declared: the
+ *  global class or interface member that owns it, as paths
+ *  ("CLAS ZCX_A|C|BUSINESS_ERROR", a component or row below it appended).
+ *  Both builds' registries parse the same declarations, so a path names the
+ *  same instance in both -- which the shape alone does not (every exception
+ *  class has its own MSGID/MSGNO/ATTR1..4 textid constant). Built once per
+ *  registry, after the syntax pass, at the first anonymous structure the
+ *  lowering reaches. An instance no global member owns (a method's own
+ *  local type) has no path. */
+function anonOrigins(reg) {
+  const out = new Map(); // instance -> [paths]
+  const visit = (t, path, depth) => {
+    if (!t || typeof t !== "object" || depth > 12) return;
+    try {
+      if (typeof t.getComponents === "function" && typeof t.getQualifiedName === "function") {
+        if (!t.getQualifiedName()) { if (!out.has(t)) out.set(t, []); out.get(t).push(path); }
+        for (const c of t.getComponents()) visit(c.type, `${path}-${upper(c.name)}`, depth + 1);
+      } else if (typeof t.getRowType === "function") visit(t.getRowType(), `${path}[]`, depth + 1);
+    } catch { /* a type abaplint cannot describe owns no path */ }
+  };
+  for (const obj of reg.getObjects()) {
+    const type = obj.getType();
+    if (type !== "CLAS" && type !== "INTF") continue;
+    let def;
+    try { def = obj.getDefinition(); } catch { continue; }
+    if (!def) continue;
+    const base = keyOf(type, upper(obj.getName()));
+    try { for (const a of def.getAttributes().getAll()) visit(a.getType(), `${base}|A|${upper(a.getName())}`, 0); } catch { /* none */ }
+    try { for (const c of def.getAttributes().getConstants()) visit(c.getType(), `${base}|C|${upper(c.getName())}`, 0); } catch { /* none */ }
+    try { for (const td of def.getTypeDefinitions().getAll()) visit(td.type.getType(), `${base}|T|${upper(td.type.getName())}`, 0); } catch { /* none */ }
+    try {
+      for (const m of def.getMethodDefinitions().getAll()) for (const prm of m.getParameters().getAll()) visit(prm.getType(), `${base}|M|${upper(m.getName())}|${upper(prm.getName())}`, 0);
+    } catch { /* none */ }
+  }
+  return out;
+}
+
 /** where a write outside every object's mark (a global pass) sits in the
  *  sequence of segments: "A" before the first segment of the discovery
  *  phase, "B" after its last, "C" before the first segment of the lowering
@@ -174,11 +211,12 @@ export function incrRecorder({root, folders, hidden, objects, includeTests}) {
   // grouped them at the owner's slot moved them (LCL_STACK__TY_DATA).
   const segments = [];
   const phaseCount = [0, 0];
+  const anonNamed = new Map(); // declaration path -> the name its instance got (null: ambiguous)
   let current = null;
   let lowering = false;
   let program;
   const bucket = (key) => {
-    if (!buckets.has(key)) buckets.set(key, {key, segs: [], reads: new Set(), supplied: [], rttiDefs: [], anon: new Map()});
+    if (!buckets.has(key)) buckets.set(key, {key, segs: [], reads: new Set(), supplied: [], rttiDefs: []});
     return buckets.get(key);
   };
   // a write outside any object's mark is a global pass, which the fast
@@ -206,18 +244,18 @@ export function incrRecorder({root, folders, hidden, objects, includeTests}) {
       for (const coll of RECORDED) {
         if (p[coll] instanceof Map || p[coll] instanceof Set || Array.isArray(p[coll])) p[coll] = proxy(coll, p[coll]);
       }
-      // which names each object's lowering gave the anonymous structures it
-      // reached, per shape, and how many distinct instances of the shape it
-      // reached: the reader pins a fresh lowering to the full build's name
+      // which name the lowering gave each declared anonymous structure it
+      // reached (anonOrigins): the reader pins a fresh lowering to it
       const anon = p.anonStructs;
+      let origins;
       const note = (t, go) => {
-        if (current === null) return;
-        const shape = shapeOf(t);
-        if (shape === undefined) return;
-        const b = bucket(current);
-        if (!b.anon.has(shape)) b.anon.set(shape, {names: new Set(), instances: new Set()});
-        b.anon.get(shape).names.add(go);
-        b.anon.get(shape).instances.add(t);
+        // the name each declared instance got, by every path that names it;
+        // two names for one path (it cannot happen in one registry) poison it
+        origins ??= anonOrigins(reg);
+        for (const path of origins.get(t) ?? []) {
+          if (anonNamed.has(path) && anonNamed.get(path) !== go) anonNamed.set(path, null);
+          else anonNamed.set(path, go);
+        }
       };
       p.anonStructs = {
         get(t) { const go = anon.get(t); if (go !== undefined) note(t, go); return go; },
@@ -297,7 +335,6 @@ export function incrRecorder({root, folders, hidden, objects, includeTests}) {
           .filter(([, f]) => f !== undefined));
         const entry = {deps: [...deps].sort(), reads: [...b.reads].sort(), pushed: irs.map((c) => c.name), regFiles,
           anonRefs: [...anonRefs].sort(), broken: false, segs: b.segs.length,
-          anonUse: Object.fromEntries([...b.anon].map(([shape, u]) => [shape, {names: [...u.names], instances: u.instances.size}])),
           super: irs.find((c) => !c.name.includes(":"))?.super ?? supers[key.slice(5)] ?? null,
           files: Object.fromEntries((filesByObject.get(key) ?? []).map((f) => [relative(root, f), sha(readFileSync(f))]))};
         if (ok) {
@@ -329,6 +366,7 @@ export function incrRecorder({root, folders, hidden, objects, includeTests}) {
         }
       }
       const index = {schema: SCHEMA, tool: toolIdentity(), folders, objects, order, segments, strayLayoutOk,
+        anonNamed: Object.fromEntries(anonNamed),
         straySlots: Object.fromEntries(Object.entries(slots).map(([c, s]) => [c, [...s].sort()])),
         classes: program.classes.map((c) => [pushedNames.get(c.name), c.name]),
         entries, broken, supers, wanted: [...program.wanted],
@@ -379,46 +417,51 @@ function pruneGenerations(root, current) {
 class AnonShapes {
   /** @param {Map<string, string>} seed shape -> the one name the write-time build gave it
    *  @param {() => string | null} currentKey the object lowering now
-   *  @param {(key: string) => Record<string, {names: string[], instances: number}> | undefined} useOf what that object reached in the full build
-   *  @param {Set<string>} namedShapes every shape some object of the full build named */
-  constructor(seed, currentKey = () => null, useOf = () => undefined, namedShapes = new Set()) {
-    Object.assign(this, {seed, currentKey, useOf, namedShapes});
+   *  @param {Record<string, string | null>} named declaration path -> the name the full build gave its instance
+   *  @param {(t: any) => string[]} originsOf the declaration paths of an instance in this registry */
+  constructor(seed, currentKey = () => null, named = {}, originsOf = () => []) {
+    Object.assign(this, {seed, currentKey, named, originsOf});
     this.mine = new Map();
-    this.reached = new Map(); // key \0 shape -> Set of instances (this build)
     this.doubt = undefined;
   }
-  /** the full build named every instance of a shape after the FIRST object
-   *  to reach it in its own order; a fresh lowering reaches it in another
-   *  order (the first reacher may be cached), so it takes the name its own
-   *  object used in the full build -- when that is one name, and it reaches
-   *  no more instances of the shape than it did then. Anything else is a
-   *  doubt, and the caller refuses. */
+  /** The full build named every instance after the FIRST object of its
+   *  order to reach it; a fresh lowering reaches it in another order (the
+   *  first reacher may be cached), and the shape does not say which
+   *  instance it is (every exception class has its own MSGID/MSGNO/ATTR1..4
+   *  textid constant). The declaration does:
+   *  - an instance a global class or interface member owns takes the name
+   *    the full build gave that declaration. None recorded means no object
+   *    of the full build reached it -- a cached object reaches what it
+   *    reached then, so only re-lowered objects reach it now, in the full
+   *    build's relative order, and the first of them names it, here as
+   *    there.
+   *  - an instance no global member owns comes from the lowering object's
+   *    own syntax run (its own definition, a method's local type): only
+   *    that object reaches it, and it names it after itself, both ways.
+   *  - outside every object's mark (a global pass) the old answer stands:
+   *    the one name the write-time build gave the shape, if it gave one. */
   get(t) {
-    const key = this.currentKey();
-    const shape = shapeOf(t);
-    if (key === null || shape === undefined) {
-      if (this.mine.has(t)) return this.mine.get(t);
-      return shape === undefined ? undefined : this.seed.get(shape);
-    }
-    const seen = `${key}\0${shape}`;
-    if (!this.reached.has(seen)) this.reached.set(seen, new Set());
-    this.reached.get(seen).add(t);
-    const use = this.useOf(key)?.[shape];
-    if (use !== undefined && this.reached.get(seen).size > use.instances) {
-      this.doubt ??= `${key} reaches more anonymous structures of the shape ${shape} than in the live generation`;
-    }
     if (this.mine.has(t)) {
       const go = this.mine.get(t);
-      if (use !== undefined && !use.names.includes(go)) this.doubt ??= `${key} reaches the anonymous structure ${go} the live generation named ${use.names.join("/")}`;
+      for (const p of this.originsOf(t)) {
+        if (Object.hasOwn(this.named, p) && this.named[p] !== go) this.doubt ??= `the anonymous structure of ${p} is ${go} here, ${this.named[p]} in the live generation`;
+      }
       return go;
     }
-    if (use !== undefined && use.names.length === 1) { this.mine.set(t, use.names[0]); return use.names[0]; }
-    if (use !== undefined) { this.doubt ??= `${key} named the anonymous shape ${shape} ${use.names.join(" and ")} in the live generation`; return undefined; }
-    // the edit reaches a shape this object did not: when some other object
-    // of the full build named it, which name the full build gives this
-    // instance depends on who reached it first -- not provable here
-    if (this.namedShapes.has(shape)) { this.doubt ??= `${key} newly reaches the anonymous shape ${shape}`; return undefined; }
-    return undefined;
+    const paths = this.originsOf(t);
+    if (paths.length > 0) {
+      const names = new Set(paths.filter((p) => Object.hasOwn(this.named, p)).map((p) => this.named[p]));
+      if (names.has(null) || names.size > 1) {
+        this.doubt ??= `the anonymous structure of ${paths[0]} had several names in the live generation`;
+        return undefined;
+      }
+      const recorded = [...names][0];
+      if (recorded !== undefined) this.mine.set(t, recorded);
+      return recorded;
+    }
+    if (this.currentKey() !== null) return undefined;
+    const shape = shapeOf(t);
+    return shape === undefined ? undefined : this.seed.get(shape);
   }
   set(t, go) { this.mine.set(t, go); }
   has(t) { return this.get(t) !== undefined; }
@@ -672,8 +715,8 @@ export function incrAssemble({root, folders, objects, hidden, includeTests, proo
       const supplied = new Map(p.supplied);
       for (const key of reusedKeys) for (const [k, params] of load(key).supplied ?? []) supplied.set(k, new Set([...(supplied.get(k) ?? []), ...params]));
       p.supplied = supplied;
-      const namedShapes = new Set(namesOfShape.keys());
-      p.anonStructs = anonShapes = new AnonShapes(seeds, () => currentKey, (key) => index.entries[key]?.anonUse, namedShapes);
+      let origins;
+      p.anonStructs = anonShapes = new AnonShapes(seeds, () => currentKey, index.anonNamed ?? {}, (t) => (origins ??= anonOrigins(reg)).get(t) ?? []);
       // the fresh lowering resolves CDS view types through this map
       // (frontend.mjs), and the mini registry's own is empty -- its walk
       // never reaches the .ddls.asddls sources; the merge restores the
