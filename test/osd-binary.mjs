@@ -50,7 +50,8 @@ describe("binary build modes from a clean checkout", function () {
 
   it("builds checkout mode without .local/lars and reports its mode", () => {
     const output = join(checkout, "osd-test");
-    const build = spawnSync("bun", ["scripts/build-binary.mjs", output], {cwd: checkout, encoding: "utf8"});
+    // a clean checkout has no generation to stamp from: test-only, unstamped
+    const build = spawnSync("bun", ["scripts/build-binary.mjs", "--unstamped", output], {cwd: checkout, encoding: "utf8"});
     expect(build.status, build.stderr).to.equal(0);
     expect(build.stdout).to.contain("checkout mode: no embedded system seed");
     const doctor = spawnSync(output, ["doctor"], {cwd: checkout, encoding: "utf8"});
@@ -84,7 +85,7 @@ describe("binary build modes from a clean checkout", function () {
 
   it("refuses a checkout toolchain changed after the binary was built", () => {
     const output = join(checkout, "osd-identity-test");
-    const compiled = spawnSync("bun", ["scripts/build-binary.mjs", output], {cwd: checkout, encoding: "utf8"});
+    const compiled = spawnSync("bun", ["scripts/build-binary.mjs", "--unstamped", output], {cwd: checkout, encoding: "utf8"});
     expect(compiled.status, compiled.stderr).to.equal(0);
     const view = join(checkout, "changed-toolchain");
     mkdirSync(join(view, "src"), {recursive: true});

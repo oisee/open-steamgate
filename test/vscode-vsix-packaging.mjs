@@ -8,6 +8,7 @@ import {basename, isAbsolute, join, win32} from "node:path";
 import {copySeedTree, excludeStagedPackSources, excludeTestOnlyIncludes, loadSeedDependencies, shipsTestPath, stageSystemSeed, TEST_ONLY_ABAP} from "../scripts/build-vsix.mjs";
 import {inventoryThirdParties} from "../scripts/third-party-notices.mjs";
 import {tilesOf} from "../tools/osd-packs.mjs";
+import {verifyPublicArtefact} from "../tools/osd-provenance.mjs";
 import {root, currentVsixFile, packagedSeedEntries, packagedPacks, testScratch, buildTestVsix, packagedController, timeVsixTests} from "./helpers/vsix.mjs";
 
 describe("private system seed boundary", () => {
@@ -422,6 +423,8 @@ describe("packaging a prebuilt generation (T2, docs/ideas.md)", function () {
       const generations = [...new Set(entries.map((entry) => /^build\/by-input\/([0-9a-f]{16})\//.exec(entry)?.[1])
         .filter((hash) => hash !== undefined))];
       expect(generations, "exactly one generation, as real files").to.have.length(1);
+      // stamped from the seed's own public live generation, as a release is
+      expect(verifyPublicArtefact(out).generation).to.equal(generations[0]);
       expect(entries.some((entry) => entry.startsWith("gen/"))).to.equal(true);
       expect(entries.some((entry) => /^(output|build\/live)\/?$/.test(entry)), "no links: the first build makes them").to.equal(false);
       // and the cross-reference rows of that generation, one file

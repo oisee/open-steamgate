@@ -516,6 +516,9 @@ export function excludeStagedPackSources(seedRoot, selectedPacks) {
  *  launcher's empty notebook-scratch pack, which names nothing since a pack
  *  that brings nothing is not an input (tools/osd-build.mjs inputsOf); a
  *  workspace pack with content is another input and builds cold, as before. */
+// seed root -> the checked provenance of its prebuilt generation
+const SEED_PROVENANCE = new Map();
+
 function prebuildGeneration(seedRoot, env) {
   // a seed is published: $TMP is left out (tools/osd-tmp.mjs)
   const buildEnv = forPublishing({...env});
@@ -555,6 +558,19 @@ function prebuildGeneration(seedRoot, env) {
       ? "build-vsix: cacheKey() gave no key for the seed (tools/osd-xref-seed.mjs), so the cross-reference cache cannot ship"
       : `build-vsix: the cross-reference cache was not written for key ${xrefKey} (found: ${xrefFiles.join(", ") || "none"})`);
   }
+  // The seed's provenance, while it still has its live link: the seed's own
+  // tree, in the build's environment, must be its public live generation
+  // (tools/osd-public-tree.mjs). The links go below, so it is taken now.
+  let provenance;
+  try {
+    provenance = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e",
+      'const m = await import("./tools/osd-public-tree.mjs"); process.stdout.write(JSON.stringify(m.publicProvenance(process.cwd())));'],
+    {cwd: seedRoot, env: buildEnv, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"]}));
+  } catch (error) {
+    throw new Error(`build-vsix: the prebuilt seed is not a public live generation: ${String(error.stderr ?? error.message).trim().split("\n").at(-1)}`, {cause: error});
+  }
+  if (provenance.generation !== hash) throw new Error(`build-vsix: the seed's provenance names ${provenance.generation}, its live generation is ${hash}`);
+  SEED_PROVENANCE.set(resolve(seedRoot), provenance);
   for (const name of readdirSync(join(seedRoot, "build"))) {
     if (name !== "by-input" && name !== "xref") rmSync(join(seedRoot, "build", name), {recursive: true, force: true});
   }
@@ -815,7 +831,10 @@ ${prerelease ? '      <Property Id="Microsoft.VisualStudio.Code.PreRelease" Valu
 
 // ---- entry point ------------------------------------------------------------
 
-export async function buildVsix(env = process.env, outputDir = BUILD_DIR) {
+// `stamp: false` is for tests only and is not reachable from the command line:
+// the package then has no provenance sidecar, which every release path
+// (tools/osd-provenance.mjs verify in release.yml) refuses.
+export async function buildVsix(env = process.env, outputDir = BUILD_DIR, {stamp = true} = {}) {
   const profile = env.OSD_VSIX_PROFILE ?? "default";
   const qualityText = env.OSD_VSIX_BROTLI_QUALITY;
   const quality = qualityText === undefined ? 5 : Number(qualityText);
@@ -888,8 +907,17 @@ export async function buildVsix(env = process.env, outputDir = BUILD_DIR) {
   };
   const unpackedTotal = Object.values(breakdown).reduce((a, b) => a + b, 0);
   const vsixSize = statSync(out).size;
-  const {writePublicArtefact} = await import("../tools/osd-public-tree.mjs");
-  writePublicArtefact(out, generation === undefined ? ROOT : seedRoot);
+  if (!stamp) {
+    rmSync(`${out}.osd-provenance.json`, {force: true});
+  } else if (generation === undefined) {
+    const {writePublicArtefact} = await import("../tools/osd-public-tree.mjs");
+    writePublicArtefact(out, ROOT);
+  } else {
+    const provenance = SEED_PROVENANCE.get(resolve(seedRoot));
+    if (provenance?.generation !== generation) throw new Error("build-vsix: no checked provenance for the prebuilt seed");
+    const {writeArtefactProvenance} = await import("../tools/osd-provenance.mjs");
+    writeArtefactProvenance(out, provenance);
+  }
 
   log(`.vsix: ${out} (${fmtMB(vsixSize)})`);
   log(`unpacked: ${fmtMB(unpackedTotal)}`);

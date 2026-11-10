@@ -88,9 +88,11 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.2
+      # --unstamped: no generation exists before the transpile, so this test
+      # binary carries no provenance and no publishing path accepts it.
       - name: Build the binary from the clean checkout
         run: |
-          bun scripts/build-binary.mjs "$RUNNER_TEMP/osd"
+          bun scripts/build-binary.mjs --unstamped "$RUNNER_TEMP/osd"
           "$RUNNER_TEMP/osd" doctor
 
       # libs.lock.json includes the pinned repository and commit. Hashing the

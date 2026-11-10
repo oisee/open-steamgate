@@ -65,6 +65,15 @@ public build is refused; any other change asks for a rebuild. The sidecar of
 a directory artefact records links by their target and refuses a link that
 leaves the artefact.
 
+A binary built before any generation exists (the fresh-clone check in
+`tests.yml`) is built with `build-binary --unstamped`: test only, refused with
+`--seed` or a release target, and without a sidecar, so make-release,
+make-download-bundle and release-verify refuse it. `buildVsix(..., {stamp:
+false})` is the same for test packages and has no command-line form; a
+prebuilt VSIX is stamped from its own seed's live generation.
+`test/oci-release-workflow.mjs` checks every workflow job: a stamping step
+comes after a step that builds a generation.
+
 A fetched identity has `private` true or false, or `null` when the source
 cannot attest it: only an osd layer config can, so a foreign OCI zip (an
 empty config) records `null`. An identity fetched before the field existed

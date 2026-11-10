@@ -30,9 +30,6 @@ import {cdsEntityOf} from "../tools/adt-cds.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 assertPublicSystem(root);
-// a preview bundles the tree: it must be the public live generation now
-// (OSD_PREVIEW_GENERATE_ONLY writes web/generated/ for tests, no artefact)
-if (process.env.OSD_PREVIEW_GENERATE_ONLY !== "1") assertPublicTree(root);
 const generated = resolve(root, "web/generated");
 // build/preview, not build/: build/ is the generation store of tools/osd-build.mjs
 // (build/live is what output/ points at), and webpack cleans its output
@@ -49,6 +46,10 @@ process.env.OSD_ROOT = root;
 // leave it out, and a generation that was built with it in is refused rather
 // than bundled -- fail closed, checked by the modules output/ actually holds.
 forPublishing(process.env);
+// a preview bundles the tree: it must be the public live generation now, as
+// the publishing build named it ($TMP off, above). OSD_PREVIEW_GENERATE_ONLY
+// writes web/generated/ for tests and makes no artefact.
+if (process.env.OSD_PREVIEW_GENERATE_ONLY !== "1") assertPublicTree(root);
 {
   // by provenance: what the build read, whatever the tree holds now
   let generation;

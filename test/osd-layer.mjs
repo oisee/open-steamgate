@@ -900,11 +900,21 @@ describe("public entry points refuse a tree that is not the public live generati
     rmSync(join(fixture, "src/zlate.prog.abap"));
     latePrivatePack();
     refused(PRIVATE, process.execPath, ["scripts/build-preview.mjs"]);
+    // $TMP: the preview names the tree as the publishing build did, $TMP off
+    rmSync(join(fixture, "packs"), {recursive: true});
+    put("local/tmp/ztmp.prog.abap", "REPORT ztmp.\n");
+    const old = process.env.OSD_TMP;
+    process.env.OSD_TMP = "off";
+    try { rmSync(join(fixture, "build/live")); rmSync(join(fixture, "output")); live(); }
+    finally { if (old === undefined) delete process.env.OSD_TMP; else process.env.OSD_TMP = old; }
+    const result = spawnSync(process.execPath, ["scripts/build-preview.mjs"], {cwd: fixture, encoding: "utf8"});
+    expect(result.stderr).not.to.match(STALE);
+    expect(result.stderr).not.to.match(PRIVATE);
   });
 
   // P3: the binary is stamped from the tree it was built from (root), not
   // from whatever directory it was started in
-  it("build-binary stamps from the tree it builds, not the working directory", function () {
+  it("build-binary stamps from the tree it builds, not the working directory, and --unstamped is test-only", function () {
     if (spawnSync("bun", ["--version"]).status !== 0) this.skip();
     for (const entry of ["web", "webapp", "editors", "node_modules", "data", "test", "package.json", "libs.lock.json"])
       symlinkSync(join(repo, entry), join(fixture, entry));
@@ -918,6 +928,16 @@ describe("public entry points refuse a tree that is not the public live generati
     const built = spawnSync("bun", [join(fixture, "scripts/build-binary.mjs"), binary], {cwd: elsewhere, encoding: "utf8"});
     expect(built.status, built.stdout + built.stderr).to.equal(0);
     expect(verifyPublicArtefact(binary).generation).to.equal(hash);
+    // --unstamped: test-only, no sidecar (a stale one goes too), so every
+    // shipping path's verifyPublicArtefact refuses it; never for what ships
+    const bare = spawnSync("bun", [join(fixture, "scripts/build-binary.mjs"), "--unstamped", binary], {cwd: elsewhere, encoding: "utf8"});
+    expect(bare.status, bare.stdout + bare.stderr).to.equal(0);
+    expect(() => verifyPublicArtefact(binary)).to.throw(/missing or invalid provenance/).with.property("code", "BAD_PROVENANCE");
+    for (const args of [["--unstamped", "--seed", join(outside, "seeded")], ["--unstamped", join(outside, "target"), "bun-linux-x64-baseline"]]) {
+      const misuse = spawnSync("bun", [join(fixture, "scripts/build-binary.mjs"), ...args], {cwd: elsewhere, encoding: "utf8"});
+      expect(misuse.status, args.join(" ")).not.to.equal(0);
+      expect(misuse.stderr).to.include("--unstamped is for a test-only checkout binary");
+    }
   });
 
   it("build-binary --seed stages no seed", function () {
@@ -925,6 +945,8 @@ describe("public entry points refuse a tree that is not the public live generati
     symlinkSync(join(repo, "editors"), join(fixture, "editors"), "dir");
     symlinkSync(join(repo, "node_modules"), join(fixture, "node_modules"), "dir");
     copy("scripts/build-binary.mjs", "scripts/build-vsix.mjs", "scripts/third-party-notices.mjs");
+    // the library preflight runs first: the fixture's config has no libraries, nor does its lock
+    put("libs.lock.json", JSON.stringify({...JSON.parse(readFileSync(join(repo, "libs.lock.json"), "utf8")), libraries: []}));
     live();
     // bun names the same generation as node does
     const agrees = spawnSync("bun", ["-e", `import {publicProvenance} from ${JSON.stringify(join(repo, "tools/osd-public-tree.mjs"))}; publicProvenance(${JSON.stringify(fixture)});`], {encoding: "utf8"});

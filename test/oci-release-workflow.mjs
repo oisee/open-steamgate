@@ -1,5 +1,5 @@
 import {expect} from 'chai';
-import {readFileSync, mkdtempSync, mkdirSync, rmSync, symlinkSync} from 'node:fs';
+import {readFileSync, readdirSync, mkdtempSync, mkdirSync, rmSync, symlinkSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {spawnSync} from 'node:child_process';
@@ -338,5 +338,72 @@ describe('OCI release workflow gates', () => {
     const lock = JSON.parse(readFileSync(new URL('../libs.lock.json', import.meta.url)));
     const expected = [...lock.libraries.map(l => `lib-${l.folder}`), 'input-src', 'input-test', 'pack-o4d', 'pack-zork', 'pack-gui-examples', 'pack-travels-a4h', 'osd-system'];
     expect(expected.every(name => docs.includes('`' + name + '`'))).to.equal(true);
+  });
+});
+
+// Every workflow step that stamps or verifies an artefact against the tree
+// (tools/osd-public-tree.mjs) needs a live generation built earlier in the
+// same job, or builds one itself. A test-only binary may skip the stamp
+// with --unstamped, never on a seeded or release-target build, and only in
+// the test workflow: every shipping path verifies the sidecar it lacks.
+const STAMPS = [
+  /\bbuild-binary\.mjs\b|\bnpm run binary(?![:\w])/, /\bbuild-sea\.mjs\b|\bnpm run binary:(?:sea|bundle)\b/,
+  /\bbuild-vsix\.mjs\b|\bnpm run vsix\b/, /\bbuild-preview\.mjs\b/, /\bmake-release\.mjs\b/,
+  /\bmake-download-bundle\.mjs\b/, /\bosd-ci-artifact\.mjs pack\b/, /\bosd-provenance\.mjs write\b/,
+  /\bcapture-screenshots\.mjs\b/, /\bassemble\.mjs\b/,
+];
+// what leaves a live generation behind in the job's tree (web:vscode and the
+// image build make their own before they stamp)
+const BUILDS = /\bnpm run (?:transpile|bootstrap|web:preview(?::duckdb)?|web:vscode)\b|\btools\/osd-build\.mjs\b|\bbuild-vscode-web\.mjs\b|\bosd-ci-artifact\.mjs verify\b|\bdocker (?:buildx )?build\b/;
+export function stampsWithoutGeneration(name, workflow) {
+  const problems = [];
+  for (const [jobName, job] of Object.entries(workflow.jobs ?? {})) {
+    let built = false;
+    for (const [index, step] of (job.steps ?? []).entries()) {
+      for (const line of String(step.run ?? '').split('\n').map(text => text.trim()).filter(text => text && !text.startsWith('#'))) {
+        const where = `${name} ${jobName} step ${index + 1} (${step.name ?? line})`;
+        const unstamped = /\s--unstamped\b/.test(line);
+        if (unstamped && (!/\bbuild-binary\.mjs\b|\bnpm run binary(?![:\w])/.test(line) || /\s--seed\b/.test(line) || /\sbun-[a-z0-9-]+/.test(line) || name !== 'tests.yml'))
+          problems.push(`${where}: --unstamped outside a test-only checkout binary`);
+        if (!built && !unstamped && STAMPS.some(stamp => stamp.test(line)) && !BUILDS.test(line))
+          problems.push(`${where}: stamps with no live generation built before it in this job`);
+        if (BUILDS.test(line)) built = true;
+      }
+    }
+  }
+  return problems;
+}
+
+describe('workflows: a stamping step runs after a live generation exists', () => {
+  const dir = new URL('../.github/workflows/', import.meta.url);
+  const workflows = readdirSync(dir).filter(file => file.endsWith('.yml')).map(file => [file, load(readFileSync(new URL(file, dir), 'utf8'))]);
+
+  it('holds for every job of every workflow', () => {
+    expect(workflows.flatMap(([file, workflow]) => stampsWithoutGeneration(file, workflow))).to.deep.equal([]);
+  });
+
+  it('builds the pre-transpile test binary unstamped, and every release binary is verified after it is built', () => {
+    const build = load(readFileSync(new URL('tests.yml', dir), 'utf8')).jobs.build.steps;
+    const first = build.findIndex(step => /build-binary\.mjs/.test(step.run ?? ''));
+    expect(build[first].run).to.match(/build-binary\.mjs --unstamped /);
+    expect(build.findIndex(step => /npm run transpile/.test(step.run ?? ''))).to.be.greaterThan(first);
+    const release = load(readFileSync(new URL('release.yml', dir), 'utf8'));
+    for (const [jobName, job] of Object.entries(release.jobs)) {
+      const runs = (job.steps ?? []).map(step => step.run ?? '').join('\n');
+      if (/npm run binary\b/.test(runs)) expect(runs.indexOf('release-verify.mjs binary'), jobName).to.be.greaterThan(runs.indexOf('npm run binary'));
+    }
+  });
+
+  it('catches a stamping step before the generation, and a misused --unstamped', () => {
+    const job = (...runs) => ({jobs: {build: {steps: runs.map(run => ({run}))}}});
+    expect(stampsWithoutGeneration('tests.yml', job('bun scripts/build-binary.mjs "$RUNNER_TEMP/osd"', 'npm run transpile'))).to.have.length(1);
+    expect(stampsWithoutGeneration('tests.yml', job('npm run transpile', 'bun scripts/build-binary.mjs "$RUNNER_TEMP/osd"'))).to.deep.equal([]);
+    expect(stampsWithoutGeneration('tests.yml', job('bun scripts/build-binary.mjs --unstamped "$RUNNER_TEMP/osd"'))).to.deep.equal([]);
+    expect(stampsWithoutGeneration('preview.yml', job('node scripts/build-preview.mjs', 'npm run web:preview'))).to.have.length(1);
+    expect(stampsWithoutGeneration('preview.yml', job('npm run web:preview', 'node scripts/capture-screenshots.mjs'))).to.deep.equal([]);
+    expect(stampsWithoutGeneration('release.yml', job('node tools/osd-provenance.mjs write build/release/x', 'npm run transpile'))).to.have.length(1);
+    for (const [file, run] of [['release.yml', 'npm run binary -- --unstamped build/release/x'], ['tests.yml', 'npm run binary -- --seed --unstamped x'],
+      ['tests.yml', 'bun scripts/build-binary.mjs --unstamped x bun-linux-x64-baseline'], ['tests.yml', 'node scripts/build-vsix.mjs --unstamped']])
+      expect(stampsWithoutGeneration(file, job('npm run transpile', run)), run).to.have.length(1);
   });
 });
