@@ -1,0 +1,264 @@
+#!/usr/bin/env node
+// R4's measurement: per behavior definition of the flight reference
+// scenario, which behavior constructs it uses and what the RAP generators
+// and runtime of this tree do with each one -- run, ignore or refuse.
+//
+//   node tools/rap-flight/constructs.mjs [--all]
+//
+// Two halves, both read off code rather than written by hand:
+//
+// 1. the constructs: every BDEF of the kept folders (the managed scenario
+//    and the reuse layer; --all adds the extension BDEFs) parsed with
+//    tools/rap/bdef-parse.mjs, every behavior pool it names scanned with
+//    abaplint's lexer for its handler forms (METHODS m FOR <form>) and its
+//    saver redefinitions, and its EML statements counted;
+// 2. the first wall: tools/rap/bdef-gen.mjs's generate() and
+//    rap-runtime-gen.mjs's runtimeOutputs() over the BDEF, the scenario's
+//    DDIC and the pool, and the first refusal verbatim -- the same call the
+//    build makes.
+//
+// The verdict of a construct is the SUPPORT table below: what the generator
+// and runtime do with it, each "runs" naming the test that shows it. That
+// table is the one hand-kept part, and it is kept beside the code that
+// would have to change with it.
+//
+// The tree comes from the same place as classify.mjs's: the pinned commit
+// with no exclude list, in .local/rap-flight-classify/upstream (fetched if
+// missing).
+import {basename, join, resolve} from "node:path";
+import {existsSync, mkdirSync, readFileSync} from "node:fs";
+import {Lexer} from "@abaplint/core/build/src/abap/1_lexer/lexer.js";
+import {MemoryFile} from "@abaplint/core";
+import {fetchSource} from "../osd-fetch.mjs";
+import {parseBdef} from "../rap/bdef-parse.mjs";
+import {generate, walk} from "../rap/bdef-gen.mjs";
+import {runtimeOutputs} from "../rap/rap-runtime-gen.mjs";
+import {libraryPath} from "../osd-lib-path.mjs";
+import {runsAs} from "../osd-main.mjs";
+
+const root = resolve(process.env.OSD_ROOT ?? process.cwd());
+const dir = join(root, ".local", "rap-flight-classify");
+const KEPT = /^(managed|reuse)\//;
+const EXTENSION = /\/(cntry|rev)\//;
+
+// what the tree does with each construct: runs (with the test that shows
+// it), ignored (accepted, no effect) or refused (the generator stops)
+export const SUPPORT = {
+  "managed": ["runs", "test/rap-serve.mjs"],
+  "projection": ["refused", "bdef-gen: projection uses need resolution"],
+  "interface": ["refused", "bdef-gen: interface BDEF"],
+  "with draft": ["refused", "rap-runtime-gen: draft is outside R2"],
+  "several pools": ["refused", "rap-runtime-gen reads the pool of the BDEF header only"],
+  "persistent table": ["runs", "test/rap-serve.mjs"],
+  "with additional save": ["refused", "rap-runtime-gen: behavior options"],
+  "with unmanaged save": ["refused", "rap-runtime-gen: behavior options / no persistent table"],
+  "etag master": ["ignored", "parsed; no ETag in the service"],
+  "etag dependent": ["ignored", "parsed; the ETag of a dependent entity is its master's"],
+  "total etag": ["ignored", "draft only"],
+  "lock master": ["ignored", "the gateway's entity lock (V4) is the only lock"],
+  "lock dependent": ["ignored", "as lock master"],
+  "authorization master": ["ignored", "no authorization checks"],
+  "authorization dependent": ["ignored", "no authorization checks"],
+  "early numbering": ["refused", "rap-runtime-gen: numbering through the pool"],
+  "late numbering": ["refused", "rap-runtime-gen: late numbering (adjust_numbers) needs a design"],
+  "numbering : managed": ["runs", "test/rap-serve.mjs"],
+  "create/update/delete": ["runs", "test/rap-serve.mjs"],
+  "update/delete ( features : instance )": ["ignored", "x"],
+  "field ( features : instance )": ["ignored", "dynamic field control: the features result's %field is not read"],
+  "field control readonly/mandatory": ["runs", "test/rap-serve.mjs"],
+  "association (read)": ["refused", "bdef-gen: associations are outside R1"],
+  "association create": ["refused", "bdef-gen: compositions (create by association) need a design"],
+  "action": ["runs", "test/rap-serve.mjs"],
+  "action ( features : instance )": ["ignored", "x"],
+  "internal action": ["refused", "rap-runtime-gen: action modifiers"],
+  "factory action": ["refused", "rap-runtime-gen: action modifiers"],
+  "static action": ["refused", "rap-runtime-gen: action modifiers"],
+  "action parameter": ["refused", "rap-runtime-gen: action parameters"],
+  "action result not $self": ["refused", "rap-runtime-gen: only $self results"],
+  "determine action": ["refused", "bdef-gen: determine actions"],
+  "function": ["refused", "bdef-gen: functions"],
+  "side effects": ["ignored", "parsed, nothing reads them"],
+  "determination/validation": ["runs", "test/rap-serve.mjs"],
+  "unparsed grammar": ["refused", "bdef-parse leaves it unparsed"],
+  // handler forms
+  "FOR DETERMINE": ["runs", "ZCL_OSD_RAP_TEST system form"],
+  "FOR VALIDATE": ["runs", "ZCL_OSD_RAP_TEST system form"],
+  "FOR MODIFY action": ["runs", "ZCL_OSD_RAP_TEST system form"],
+  "FOR MODIFY create by association": ["refused", "lower-derived: create by association"],
+  "FOR READ": ["runs", "lower-derived (R3)"],
+  "FOR READ by association": ["refused", "lower-derived: unsupported clause"],
+  "FOR LOCK": ["ignored", "lowered (R3), never called: no locks"],
+  "FOR INSTANCE FEATURES": ["refused", "x"],
+  "FOR GLOBAL FEATURES": ["refused", "lower-derived: GLOBAL"],
+  "FOR INSTANCE AUTHORIZATION": ["refused", "lower-derived: INSTANCE AUTHORIZATION"],
+  "FOR GLOBAL AUTHORIZATION": ["refused", "lower-derived: GLOBAL"],
+  "FOR NUMBERING (create)": ["refused", "x"],
+  "FOR NUMBERING (create by association)": ["refused", "lower-derived: create by association"],
+  "FOR PRECHECK": ["refused", "lower-derived: PRECHECK"],
+  "saver save_modified": ["refused", "unmanaged/additional save"],
+  "saver adjust_numbers": ["refused", "late numbering"],
+};
+
+const has = (opts, name, value) => (opts ?? []).some(o => o.name === name && (value === undefined || o.value === value));
+
+/** the constructs of one BDEF model, each with where it is */
+export function bdefConstructs(model) {
+  const out = [];
+  const add = (id, where) => out.push({id, where});
+  if (model.unparsed.length) add("unparsed grammar", `${model.unparsed.length} statement(s)`);
+  if (["managed", "projection", "interface"].includes(model.implementationType)) add(model.implementationType, "header");
+  else if (model.implementationType) add(model.implementationType, "header");
+  if (model.withDraft) add("with draft", "header");
+  const pools = new Set(model.entities.map(e => (e.implementationClass ?? model.implementationClass ?? "").toUpperCase()).filter(Boolean));
+  if (pools.size > 1) add("several pools", [...pools].join(", "));
+  for (const e of model.entities) {
+    const n = e.alias ?? e.entity;
+    if (e.persistentTable) add("persistent table", n);
+    for (const o of e.options ?? []) if (o.kind === "additional save") add("with additional save", n);
+      else if (o.kind === "unmanaged save") add("with unmanaged save", n);
+    if (e.etag) add(`etag ${e.etag.kind}`, n);
+    if (e.totalEtag) add("total etag", n);
+    if (e.lock) add(`lock ${e.lock.kind}`, n);
+    if (e.authorization) add(`authorization ${e.authorization.kind}`, n);
+    if (e.numbering) add(`${e.numbering} numbering`, n);
+    for (const g of e.fields) {
+      if (g.attributes.some(a => a.name === "numbering" && a.value === "managed")) add("numbering : managed", n);
+      if (g.attributes.some(a => a.name === "features")) add("field ( features : instance )", `${n}: ${g.fields.join(", ")}`);
+      if (g.attributes.some(a => a.name === "readonly" || a.name === "mandatory")) add("field control readonly/mandatory", n);
+    }
+    for (const op of e.operations.filter(o => !o.use)) {
+      add("create/update/delete", `${n}: ${op.kind}`);
+      if (has(op.options, "features", "instance")) add("update/delete ( features : instance )", `${n}: ${op.kind}`);
+    }
+    for (const a of e.associations) {
+      const create = a.operations.find(o => o.kind === "create");
+      if (create) {
+        add("association create", `${n}\\${a.name}`);
+        if (has(create.options, "features", "instance")) add("action ( features : instance )".replace("action", "association create"), `${n}\\${a.name}`);
+      } else add("association (read)", `${n}\\${a.name}`);
+    }
+    for (const a of e.actions.filter(x => !x.use)) {
+      const mods = a.modifiers.filter(m => m !== "draft");
+      if (a.modifiers.includes("draft")) continue;
+      if (!mods.length) add("action", `${n}~${a.name}`);
+      for (const m of mods) add(`${m} action`, `${n}~${a.name}`);
+      if (has(a.options, "features", "instance")) add("action ( features : instance )", `${n}~${a.name}`);
+      if (a.parameter) add("action parameter", `${n}~${a.name}`);
+      if (a.result && a.result.type !== "$self") add("action result not $self", `${n}~${a.name}`);
+    }
+    for (const a of e.determineActions) add("determine action", `${n}~${a.name}`);
+    for (const f of e.functions) add("function", `${n}~${f.name}`);
+    if (e.sideEffects.length) add("side effects", n);
+    if (e.determinations.length || e.validations.length) add("determination/validation", `${n}: ${e.determinations.length} + ${e.validations.length}`);
+  }
+  return out;
+}
+
+/** the handler forms and saver redefinitions of a pool's sources */
+export function poolConstructs(sources) {
+  const out = [];
+  for (const {filename, contents} of sources) {
+    const tokens = new Lexer().run(new MemoryFile(filename, contents)).tokens.filter(t => t.constructor.name !== "Comment");
+    const w = i => tokens[i]?.getStr().toUpperCase();
+    let declaring = false;
+    for (let i = 0; i < tokens.length; i++) {
+      if (i === 0 || w(i - 1) === ".") declaring = w(i) === "METHODS";
+      if (!declaring) continue;
+      const head = w(i - 1) === "METHODS" || w(i - 1) === ":" || w(i - 1) === ",";
+      if (!head) continue;
+      const name = tokens[i].getStr();
+      let end = i;
+      while (end < tokens.length && ![".", ","].includes(w(end))) end++;
+      const words = tokens.slice(i + 1, end).map(t => t.getStr()).join(" ").replace(/\s*([\\~])\s*/g, "$1").toUpperCase();
+      const where = `${basename(filename).split(".")[0].replace(/#/g, "/").toUpperCase()}->${name}`;
+      let id;
+      if (/^REDEFINITION$/.test(words) && ["SAVE_MODIFIED", "ADJUST_NUMBERS"].includes(name.toUpperCase())) id = `saver ${name.toLowerCase()}`;
+      else if (/^FOR DETERMINE /.test(words)) id = "FOR DETERMINE";
+      else if (/^FOR VALIDATE /.test(words)) id = "FOR VALIDATE";
+      else if (/^FOR MODIFY /.test(words)) id = /\bFOR CREATE \S+\\/.test(words) ? "FOR MODIFY create by association" : "FOR MODIFY action";
+      else if (/^FOR READ /.test(words)) id = /\bFOR READ \S+\\/.test(words) ? "FOR READ by association" : "FOR READ";
+      else if (/^FOR LOCK /.test(words)) id = "FOR LOCK";
+      else if (/^FOR (INSTANCE|GLOBAL) (FEATURES|AUTHORIZATION)/.test(words)) id = words.split(" ").slice(0, 3).join(" ");
+      else if (/^FOR NUMBERING /.test(words)) id = /\bFOR CREATE \S+\\/.test(words) ? "FOR NUMBERING (create by association)" : "FOR NUMBERING (create)";
+      else if (/^FOR PRECHECK /.test(words)) id = "FOR PRECHECK";
+      if (id) out.push({id, where});
+      i = end;
+      if (w(end) === ".") declaring = false;
+    }
+  }
+  return out;
+}
+
+function libraryDdic() {
+  const deps = [];
+  for (const name of ["open-abap-core", "open-abap-odata"]) {
+    const libDir = join(libraryPath(root, name), "src");
+    deps.push(...walk(libDir).filter((f) => /\.(tabl|view|dtel|doma)\.xml$/.test(f))
+      .map((f) => ({filename: basename(f), contents: readFileSync(f, "utf8")})));
+  }
+  return deps;
+}
+
+async function tree(log) {
+  const manifest = JSON.parse(readFileSync(join(root, "packs/rap-flight/osd-pack.json"), "utf8"));
+  const [source] = manifest.sources;
+  const already = join(dir, "upstream");
+  if (!existsSync(already)) {
+    mkdirSync(dir, {recursive: true});
+    await fetchSource({name: "rap-flight-classify", dir, root}, {...source, exclude: [], folder: "upstream", dir: already}, {log});
+  }
+  return walk(already).map(path => ({path, rel: path.slice(already.length + 1), filename: basename(path), contents: readFileSync(path, "utf8")}));
+}
+
+async function main() {
+  const all = process.argv.includes("--all");
+  const files = (await tree(l => console.error(`constructs: ${l}`))).filter(f => KEPT.test(f.rel));
+  const ddic = files.filter(f => /\.(ddls\.(asddls|xml)|tabl\.xml|view\.xml|dtel\.xml|doma\.xml)$/.test(f.filename));
+  const libDdic = libraryDdic();
+  const bdefs = files.filter(f => f.filename.endsWith(".bdef.asbdef") && (all || !EXTENSION.test(f.rel)))
+    .sort((a, b) => a.filename.localeCompare(b.filename));
+  const name = f => f.filename.split(".")[0].replace(/#/g, "/").toUpperCase();
+  const totals = new Map();
+  console.log("## Constructs per behavior definition\n");
+  console.log("| BDEF | construct | where | verdict |");
+  console.log("| --- | --- | --- | --- |");
+  const walls = [];
+  for (const bdef of bdefs) {
+    const model = parseBdef(bdef.contents);
+    const pools = new Set([model.implementationClass, ...model.entities.map(e => e.implementationClass)].filter(Boolean).map(p => p.toLowerCase().replace(/\//g, "#")));
+    const poolFiles = files.filter(f => pools.has(f.filename.split(".")[0]) && /\.clas\.(locals_imp\.|locals_def\.)?abap$/.test(f.filename));
+    const found = [...bdefConstructs(model), ...poolConstructs(poolFiles)];
+    const grouped = new Map();
+    for (const c of found) grouped.set(c.id, [...(grouped.get(c.id) ?? []), c.where]);
+    for (const [id, where] of grouped) {
+      const verdict = SUPPORT[id]?.[0] ?? "unknown";
+      totals.set(`${id}|${verdict}`, (totals.get(`${id}|${verdict}`) ?? 0) + 1);
+      console.log(`| ${name(bdef)} | ${id} | ${[...new Set(where)].slice(0, 4).join("; ")}${where.length > 4 ? "; ..." : ""} | ${verdict} |`);
+    }
+    let wall = "accepted";
+    try {
+      const {plans} = generate([bdef, ...ddic], libDdic);
+      runtimeOutputs(plans ?? [], files.filter(f => /\.clas\.(locals_imp\.|locals_def\.)?abap$/.test(f.filename))
+        .map(f => ({filename: f.filename, contents: f.contents})));
+    } catch (error) {
+      wall = String(error.message).split("\n")[0];
+    }
+    walls.push([name(bdef), model.implementationType ?? "?", wall]);
+  }
+  console.log("\n## First wall per behavior definition (bdef-gen + rap-runtime-gen)\n");
+  console.log("| BDEF | kind | first refusal |");
+  console.log("| --- | --- | --- |");
+  for (const w of walls) console.log(`| ${w.join(" | ")} |`);
+  console.log("\n## Constructs over all BDEFs, by verdict\n");
+  console.log("| construct | verdict | BDEFs |");
+  console.log("| --- | --- | ---: |");
+  for (const [k, v] of [...totals].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))) {
+    const [id, verdict] = k.split("|");
+    console.log(`| ${id} | ${verdict} | ${v} |`);
+  }
+  return 0;
+}
+
+if (runsAs("constructs.mjs")) {
+  main().then(code => process.exit(code), error => { console.error(error); process.exit(1); });
+}

@@ -21,8 +21,11 @@ export function readRapBindings(root, onRead) {
 // Each becomes an explicit signature over the BDEF's derived types (the
 // pool-scoped bindings bdef-gen writes), with the implicit response
 // parameters the form has: FAILED / REPORTED / MAPPED (EARLY), CHANGING.
+//   METHODS m FOR INSTANCE FEATURES IMPORTING keys REQUEST req FOR ent RESULT result.   (R4)
+//   METHODS m FOR NUMBERING IMPORTING entities FOR CREATE ent.                           (R4)
 const RESPONSES = {DETERMINE: ["reported"], VALIDATE: ["failed", "reported"], MODIFY: ["mapped", "failed", "reported"],
-  READ: ["failed", "reported"], LOCK: ["failed", "reported"]};
+  READ: ["failed", "reported"], LOCK: ["failed", "reported"], FEATURES: ["failed", "reported"],
+  NUMBERING: ["mapped", "failed", "reported"]};
 // forms a system knows that are not lowered: named in the refusal
 const REFUSED = ["NUMBERING", "INSTANCE", "GLOBAL", "PRECHECK", "FEATURES", "AUTHORIZATION", "DETERMINE", "VALIDATE", "MODIFY", "READ", "LOCK", "BEHAVIOR"];
 const ident = "[A-Za-z_/%][A-Za-z0-9_/%]*";
@@ -49,6 +52,13 @@ function parseForm(text, where) {
   if ((m = re(`LOCK IMPORTING (${ident}) FOR LOCK (${ident})`))) {
     return {form: "LOCK", clauses: [{param: m[1], kind: "LOCK", entity: m[2]}]};
   }
+  if ((m = re(`INSTANCE FEATURES IMPORTING (${ident}) REQUEST (${ident}) FOR (${ident}) RESULT (${ident})`))) {
+    return {form: "FEATURES", clauses: [{param: m[1], kind: "FEATURES", entity: m[3], request: m[2], result: m[4]}]};
+  }
+  if ((m = re(`NUMBERING IMPORTING (${ident}) FOR CREATE (${ident})`))) {
+    return {form: "NUMBERING", clauses: [{param: m[1], kind: "CREATE", entity: m[2]}]};
+  }
+  if (/^NUMBERING IMPORTING \S+ FOR CREATE \S+\\/i.test(text)) fail("create by association is outside R4 (compositions need a design)");
   if ((m = re("MODIFY IMPORTING (.+)"))) {
     const clauses = [];
     let rest = m[1];
@@ -97,6 +107,7 @@ export function implicitHandlers(source, filename) {
     const params = [];
     for (const c of parsed.clauses) {
       params.push({name: c.param.toLowerCase(), direction: "importing", role: ["CREATE", "UPDATE"].includes(c.kind) ? "entities" : "keys", clause: c, of: "import"});
+      if (c.request) params.push({name: c.request.toLowerCase(), direction: "importing", role: "request", clause: c, of: "request"});
       if (c.result) params.push({name: c.result.toLowerCase(), direction: "changing", role: "result", clause: c, of: "result"});
     }
     for (const r of RESPONSES[parsed.form]) params.push({name: r, direction: "changing", role: r});
@@ -129,6 +140,7 @@ function lowerImplicit(source, filename, bindings) {
       const c = p.clause;
       if (c.kind === "ACTION") return type(`ACTION ${p.of === "result" ? "RESULT" : "IMPORT"} ${c.entity}~${c.name}`);
       if (c.kind === "READ") return type(`READ ${p.of === "result" ? "RESULT" : "IMPORT"} ${c.entity}`);
+      if (c.kind === "FEATURES") return type(`INSTANCE FEATURES ${{import: "KEY", request: "REQUEST", result: "RESULT"}[p.of]} ${c.entity}`);
       return type(`${c.kind} ${c.entity}`);
     };
     const group = d => h.params.filter(p => p.direction === d).map(p => `${p.name} TYPE ${typeOf(p)}`).join(" ");

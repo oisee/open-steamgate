@@ -21,6 +21,7 @@ INTERFACE zif_osd_rap_bo PUBLIC.
       readonly  TYPE ty_flag,
       mandatory TYPE ty_flag,
       numbering TYPE abap_bool,
+      admin     TYPE string,
     END OF ty_field,
     tt_field TYPE STANDARD TABLE OF ty_field WITH DEFAULT KEY.
 
@@ -29,6 +30,8 @@ INTERFACE zif_osd_rap_bo PUBLIC.
 * operations and the CDS names in FIELDS. METHOD is the pool's method;
 * ENTITIES is set when it takes the instances as a table it changes in
 * place (the explicit form), and not when it uses EML (the system's form).
+* FEATURES: an action declared ( features : instance ) asks the pool's
+* FOR INSTANCE FEATURES method before it runs (R4).
   TYPES:
     BEGIN OF ty_callable,
       kind      TYPE ty_flag,
@@ -39,13 +42,17 @@ INTERFACE zif_osd_rap_bo PUBLIC.
       fields    TYPE string_table,
       method    TYPE string,
       entities  TYPE abap_bool,
+      features  TYPE abap_bool,
     END OF ty_callable,
     tt_callable TYPE STANDARD TABLE OF ty_callable WITH DEFAULT KEY.
 
 * NAME the CDS entity, ALIAS the BDEF alias, RESPONSE the component of the
 * response structures, SOURCE the generated table class
 * (zif_stg_cds_source) of the persistent table, HANDLER the absolute name of
-* the pool's local handler class.
+* the pool's local handler class. R4: ETAG the element of `etag master`;
+* FEATURES set when the pool has a FOR INSTANCE FEATURES method, FEAT_UPDATE
+* and FEAT_DELETE when update / delete are declared ( features : instance );
+* NUMBERING E for `early numbering` (a FOR NUMBERING method draws the key).
   TYPES:
     BEGIN OF ty_entity,
       name      TYPE string,
@@ -57,6 +64,11 @@ INTERFACE zif_osd_rap_bo PUBLIC.
       create    TYPE abap_bool,
       update    TYPE abap_bool,
       delete    TYPE abap_bool,
+      etag        TYPE string,
+      features    TYPE abap_bool,
+      feat_update TYPE abap_bool,
+      feat_delete TYPE abap_bool,
+      numbering   TYPE ty_flag,
       fields    TYPE tt_field,
       callables TYPE tt_callable,
     END OF ty_entity,
@@ -114,6 +126,10 @@ INTERFACE zif_osd_rap_bo PUBLIC.
 * may change (the runtime takes the changes back). IR_KEYS: for an action,
 * the caller's TABLE FOR ACTION IMPORT; for the others the keys are built
 * from IR_ROWS. IR_RESULT: for an action, a TABLE FOR ACTION RESULT.
+* R4: IV_NAME %FEATURES calls the FOR INSTANCE FEATURES method (IR_ROWS the
+* instances, IR_RESULT a table from NEW_TABLE( kind = 'FEATURES RESULT' ));
+* %NUMBERING the FOR NUMBERING method (IR_ROWS a TABLE FOR CREATE, IR_MAPPED
+* the RESPONSE FOR MAPPED it fills).
   METHODS call
     IMPORTING
       io_handler  TYPE REF TO object
@@ -123,6 +139,7 @@ INTERFACE zif_osd_rap_bo PUBLIC.
       ir_keys     TYPE REF TO data OPTIONAL
       ir_result   TYPE REF TO data OPTIONAL
       ir_failed   TYPE REF TO data
-      ir_reported TYPE REF TO data.
+      ir_reported TYPE REF TO data
+      ir_mapped   TYPE REF TO data OPTIONAL.
 
 ENDINTERFACE.

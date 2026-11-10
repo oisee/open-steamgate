@@ -162,7 +162,8 @@ export function serviceYaml(srvd, entityOf, file = "srvd") {
       // every property is labelled (the CDS label, else its name), which is
       // what a Fiori client shows as the column and field title
       const label = nameOf.get(upper(f.name))?.label;
-      lines.push(`      ${prop(f)}: {type: ${edm(f.type, `${x.entity}.${f.name}`)}, field: ${upper(f.name)}${flags}, label: ${yamlString(String(label && upper(label) !== upper(f.name) ? label : prop(f)).slice(0, 60))}}`);
+      const etag = b.etag && upper(b.etag) === upper(f.name) ? ", etag: true" : "";
+      lines.push(`      ${prop(f)}: {type: ${edm(f.type, `${x.entity}.${f.name}`)}, field: ${upper(f.name)}${flags}${etag}, label: ${yamlString(String(label && upper(label) !== upper(f.name) ? label : prop(f)).slice(0, 60))}}`);
     }
     for (const a of b.actions) {
       if (functionNames.has(upper(a))) throw new Error(`${file}: two exposed entities have an action ${a}; a V2 function import needs one name`);
