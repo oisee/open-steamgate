@@ -2,6 +2,9 @@ import {execFileSync} from "node:child_process";
 import {readFileSync, mkdirSync, existsSync, chmodSync} from "node:fs";
 import {resolve} from "node:path";
 import {imagePacks} from "./packs.mjs";
+import {assertPublicSystem} from "../../tools/osd-system.mjs";
+
+assertPublicSystem(process.cwd());
 
 const selectedPacks = imagePacks(process.cwd(), process.env.OSD_IMAGE_PACKS ?? "");
 process.env.OSD_WEB_PACKS = selectedPacks.map((pack) => pack.name).join(",");

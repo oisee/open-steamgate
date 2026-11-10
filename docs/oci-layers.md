@@ -32,6 +32,24 @@ is supplied by `--source <repo>@<commit>:<path>`. The manifest annotations
 are `org.osd.layer.name`, `org.osd.layer.kind` and, when source is known,
 `org.opencontainers.image.source` (the repository).
 
+`build` and `push` accept `--private` for private source. This adds
+`"private":true` to the config and `org.osd.layer.private=true` to the
+manifest. Without the flag, neither field is present and existing digests
+remain unchanged. Private layers, including any system containing one, may
+be pushed only to an exact registry host in `OSD_PRIVATE_REGISTRIES` (comma or
+whitespace separated `host[:port]`). The default is empty. `ghcr.io` and
+`*.github.io` always refuse private layers, even when listed. A refusal is
+`PRIVATE_LAYER` (CLI exit 2) and names the layer and destination registry.
+System descriptors carry the private annotation; system push reads every
+layer config again before uploading.
+
+`build` and `push` also accept `--closure <file.json>`. The file must hold
+`{"unresolved":0,"items":[]}` with a nonnegative integer and an array of
+opaque objects, within 4 MiB. The config stores it only when supplied. A
+system with closures records their sum as `org.osd.system.unresolved` on the
+index. `inspect` and `osd-fetch --system` report each layer's count and the
+system total when present.
+
 There is exactly one layer blob, media type `application/vnd.osd.abapgit.zip`,
 with `org.opencontainers.image.title` equal to `<name>.zip`. Config and blob
 descriptors contain the SHA-256 digest and byte size of their exact bytes.
@@ -76,6 +94,10 @@ IDs; entries never contain matched text or a hash of matched text. Changed
 bytes, missing paths, ambiguous layers and changed category counts are
 `BAD_ALLOW`. Metadata documents are never excepted. The flag repeats.
 Public scanner output contains categorys and paths only.
+For private layers the same gate uses `--private-layer`: it ignores only
+entries in the identifier-list category `sap-corpus-names`. Put SAP object
+and corpus names in that category in `.local/leak-identifiers.json`; hosts,
+users, credentials, tokens, addresses and binary IPv4 views remain checked.
 
 `treeDigest` uses `tools/osd-oci.mjs`'s shared helper: SHA-256 of concatenated
 `<content sha256 hex>  <archive relative path>\n` lines, sorted by UTF-8 path

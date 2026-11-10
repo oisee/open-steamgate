@@ -248,6 +248,12 @@ export async function pushManifest(ref, bytes, options = {}) {
 
 /** Push a built layer's blobs followed by its manifest. */
 export async function push(ref, layer, options = {}) {
+  if (layer.config?.private === true) {
+    const registry = parseRef(ref).registry;
+    const allowed = (process.env.OSD_PRIVATE_REGISTRIES ?? "").split(/[\s,]+/).filter(Boolean);
+    if (registry === "ghcr.io" || registry.endsWith(".github.io") || !allowed.includes(registry))
+      throw new OciError("PRIVATE_LAYER", `private layer ${layer.config.name} cannot be published to ${registry}`);
+  }
   const c = client(ref, {...options, push: true});
   for (const bytes of [layer.configBytes, layer.zip]) await pushBlob(ref, bytes, {...options, client: c});
   return pushManifest(ref, layer.manifestBytes, {...options, client: c});

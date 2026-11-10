@@ -7,6 +7,7 @@ import {join, resolve} from "node:path";
 import {promisify} from "node:util";
 import {execFile} from "node:child_process";
 import {renderPreviewIndex} from "./pages-index.mjs";
+import {assertPublicSystem} from "../tools/osd-system.mjs";
 
 const exec = promisify(execFile);
 const repository = process.cwd();
@@ -41,6 +42,7 @@ async function main() {
       || (operation === "index" && (directory || source))) {
     throw new Error("Usage: pages-push.mjs publish <main|pr-N> <build-dir> | index | remove <main|pr-N>");
   }
+  if (operation === "publish") assertPublicSystem(repository);
 
   for (let attempt = 1; attempt <= attempts; attempt++) {
     // FETCH_HEAD is the actual fetched commit even in a shallow checkout;

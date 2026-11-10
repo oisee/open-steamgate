@@ -7,6 +7,21 @@ import {spawnSync} from "node:child_process";
 import {publicationFindings} from '../tools/osd-leak-scan.mjs';
 
 describe("leak scanner", () => {
+  it("private-layer mode drops only sap-corpus-names and keeps host, credential and packed IPv4 checks", () => {
+    const root = mkdtempSync(join(tmpdir(), "leak-private-"));
+    try {
+      const list = join(root, "identifiers.json"), file = join(root, "content.txt");
+      writeFileSync(list, JSON.stringify({"sap-corpus-names": ["Z_SYNTHETIC_CORPUS_OBJECT"], host: ["local-test-host"], credential: ["test-token-secret"]}));
+      const run = content => {
+        writeFileSync(file, content);
+        return spawnSync(process.execPath, ["tools/osd-leak-scan.mjs", root, "--identifiers", list, "--private-layer", "--redact", "--paths", file], {encoding: "utf8"});
+      };
+      assert.equal(run("Z_SYNTHETIC_CORPUS_OBJECT").status, 0);
+      for (const content of ["local-test-host", "test-token-secret", [192, 168, 1, 42].join("."), ["c0", "a8", "01", "2a", "112233445566778899aabbcc"].join("")]) {
+        assert.equal(run(content).status, 1, content);
+      }
+    } finally { rmSync(root, {recursive: true, force: true}); }
+  });
   it('supports publicationFindings as a library with explicit or discovered identifiers', () => {
     const root = mkdtempSync(join(tmpdir(), 'leak-library-'));
     try {

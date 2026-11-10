@@ -1,6 +1,6 @@
 import {missingLibraries, describeMissingLibraries} from "./osd-build-libraries.mjs";
 export {missingLibraries, describeMissingLibraries};
-import {activeSystem, systemFile, rootWebappOf} from "./osd-system.mjs";
+import {activeSystem, assertPublicSystem, systemFile, rootWebappOf} from "./osd-system.mjs";
 import {verifySystem} from "./osd-system-verify.mjs";
 import {warnSystemToolchain} from "./osd-system-toolchain.mjs";
 import {userLayersOf} from "./osd-source-layers.mjs";
@@ -1005,9 +1005,9 @@ async function makePackSeeds(root, inputs, hash, log) {
 }
 
 export async function main(args) {
-  // a build for publishing leaves $TMP out (tools/osd-tmp.mjs)
-  if (args.includes("--publish")) forPublishing(process.env);
   const root = process.env.OSD_ROOT ?? process.cwd();
+  // a build for publishing leaves $TMP out (tools/osd-tmp.mjs)
+  if (args.includes("--publish")) { assertPublicSystem(root); forPublishing(process.env); }
   const say = (m) => console.log(`osd-build: ${m}`);
   const cmd = args.find((a) => !a.startsWith("--")) ?? "build";
   if (cmd === "list") {

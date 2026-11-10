@@ -10,7 +10,7 @@ import {push, pushBlob, pushManifest, client, manifest, sha256, treeDigest, form
 import {runsAs} from '../tools/osd-main.mjs';
 import {fullCommit} from '../tools/osd-release-git.mjs';
 import {suggestedTag} from './release-version-source.mjs';
-import {build, leakGate, prepareSystem, readLeakAllow} from '../tools/osd-layer.mjs';
+import {assertPrivateTarget, build, leakGate, prepareSystem, readLeakAllow} from '../tools/osd-layer.mjs';
 
 export const OMITTED = {
   lsd: 'Repository-only content requires leak exceptions unavailable to public layers; whole pack omitted.',
@@ -96,8 +96,9 @@ export async function publishSystem(root, temp, options) {
   }
   for (const pack of plan.omitted) console.log(`OMITTED pack ${pack.name}: ${pack.reason}`);
   const prepared = plan.layers.map(layer => ({...layer, built: readPrepared(layer)}));
+  for (const layer of prepared) assertPrivateTarget(layer.target, [layer.built]);
   for (const layer of prepared) leakGate([layer.built.files], {destination: layer.target, config: layer.built.config, manifest: layer.built.manifest},
-    [layer.built.configBytes, layer.built.manifestBytes], allow.filter(e => e.layer === layer.name), [layer.name]);
+    [layer.built.configBytes, layer.built.manifestBytes], allow.filter(e => e.layer === layer.name), [layer.name], layer.built.config.private === true);
   const annotations = {
     'org.opencontainers.image.source': `https://github.com/${options.repository.split('/').slice(1).join('/')}`,
     'org.osd.osg.commit': plan.commit,

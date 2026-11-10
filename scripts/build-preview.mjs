@@ -1,4 +1,4 @@
-import {rootWebappOf} from "../tools/osd-system.mjs";
+import {assertPublicSystem, rootWebappOf} from "../tools/osd-system.mjs";
 // Builds the static preview deployment into build/:
 //   sw.js        the transpiled gateway + sql.js in a service worker
 //   index.html   installs the worker, then goes to app/
@@ -28,6 +28,7 @@ import {tableFieldsOf} from "../tools/adt-documents.mjs";
 import {cdsEntityOf} from "../tools/adt-cds.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
+assertPublicSystem(root);
 const generated = resolve(root, "web/generated");
 // build/preview, not build/: build/ is the generation store of tools/osd-build.mjs
 // (build/live is what output/ points at), and webpack cleans its output

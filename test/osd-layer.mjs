@@ -6,10 +6,12 @@ import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {load as parseYaml} from "js-yaml";
 import {abapgitXml, zipFiles} from "../tools/osd-abapgit-zip.mjs";
-import {build, inspect, leakGate, main, pushSystem, readLeakAllow, systemLayers} from "../tools/osd-layer.mjs";
+import {build, inspect, leakGate, main, pushSystem, readLeakAllow, systemLayers, unresolvedLines} from "../tools/osd-layer.mjs";
 import {manifest, pull, push, pushBlob, pushManifest, sha256, treeDigest} from "../tools/osd-oci.mjs";
 import {archiveFiles} from "../tools/osd-source-zip.mjs";
 import {fetchAll} from "../tools/osd-fetch.mjs";
+import {fetchSystem} from "../tools/osd-system-fetch.mjs";
+import {assertPublicSystem} from "../tools/osd-system.mjs";
 import {registry, listening} from "./helpers/oci-registry.mjs";
 
 import {toolCommand, setHostedLeakScanner} from "../tools/osd-host.mjs";
@@ -32,8 +34,8 @@ describe("osd-layer: reproducible publishing", function () {
     oldList = process.env.OSD_LEAK_IDENTIFIERS;
     oldSelf = process.env.OSD_SELF;
     oldCwd = process.cwd();
-    setHostedLeakScanner((cwd, paths) => {
-      const [command, ...args] = toolCommand(join(oldCwd, "tools/osd-leak-scan.mjs"), ["--redact", "--publication-allow", "--paths", ...paths]);
+    setHostedLeakScanner((cwd, paths, privateLayer) => {
+      const [command, ...args] = toolCommand(join(oldCwd, "tools/osd-leak-scan.mjs"), [...(privateLayer ? ["--private-layer"] : []), "--redact", "--publication-allow", "--paths", ...paths]);
       return spawnSync(command, args, {cwd, encoding: "utf8", maxBuffer: 4 * 1024 * 1024});
     });
     // No chdir: the gate runs the scanner from its own scan directory, so the
@@ -67,6 +69,63 @@ describe("osd-layer: reproducible publishing", function () {
     await main(["build", folder, "--name", "smoke", "--kind", "input", "--out", join(root, "out")]);
     expect(readFileSync(join(root, "out/smoke.zip"))).to.deep.equal(a.zip);
     expect(sha256(readFileSync(join(root, "out/manifest.json")))).to.equal(a.digest);
+  });
+
+  it("stores private and closure only when requested and preserves the old digest", async () => {
+    const old = build(folder, options);
+    expect(old.digest).to.equal("sha256:3f810f6ff458d65df7b0ca41c704b6dc1cb410dd55afc7533ca3def06e449864");
+    const same = build(folder, {...options, private: false});
+    expect(same.digest).to.equal(old.digest);
+    expect(same.config).not.to.have.property("private");
+    const closure = {unresolved: 3, items: [{kind: "synthetic"}]};
+    const marked = build(folder, {...options, private: true, closure});
+    expect(marked.config.private).to.equal(true);
+    expect(marked.manifest.annotations["org.osd.layer.private"]).to.equal("true");
+    expect(marked.config.closure).to.deep.equal(closure);
+    const closureFile = join(root, "closure.json");
+    write(closureFile, JSON.stringify(closure));
+    await main(["build", folder, "--name", "smoke", "--kind", "input", "--private", "--closure", closureFile, "--out", join(root, "closure-build")]);
+    expect(JSON.parse(readFileSync(join(root, "closure-build/config.json"))).closure).to.deep.equal(closure);
+    expect(() => build(folder, {...options, closure: {unresolved: -1, items: []}})).to.throw(/closure/);
+    expect(() => build(folder, {...options, closure: {unresolved: 1, items: ["bad"]}})).to.throw(/closure/);
+  });
+
+  it("passes private leak mode only for private layers", () => {
+    write(join(root, "identifiers.json"), JSON.stringify({"sap-corpus-names": ["Z_SYNTHETIC_CORPUS_OBJECT"], host: ["local-test-host"], credential: ["test-token-secret"]}));
+    const file = join(folder, "probe.txt");
+    write(file, "Z_SYNTHETIC_CORPUS_OBJECT");
+    const privateLayer = build(folder, {...options, private: true});
+    const publicLayer = build(folder, options);
+    leakGate([privateLayer.files], {config: privateLayer.config}, [privateLayer.configBytes], [], ["smoke"], true);
+    expect(() => leakGate([publicLayer.files], {}, [], [], ["smoke"])).to.throw(/publish refused/);
+    for (const content of ["local-test-host", "test-token-secret", [192, 168, 1, 42].join("."), ["c0", "a8", "01", "2a", "112233445566778899aabbcc"].join("")]) {
+      write(file, content);
+      const marked = build(folder, {...options, private: true});
+      expect(() => leakGate([marked.files], {}, [], [], ["smoke"], true)).to.throw(/publish refused/);
+    }
+  });
+
+  it("refuses private layer pushes without an exact local registry allow-list, including GHCR", async () => {
+    const r = registry(), host = await listening(r), old = process.env.OSD_PRIVATE_REGISTRIES;
+    const target = `${host}/osd/private:v1`;
+    try {
+      delete process.env.OSD_PRIVATE_REGISTRIES;
+      await refusal(() => main(["push", target, folder, "--name", "smoke", "--kind", "customer", "--private"]), "PRIVATE_LAYER");
+      const cli = spawnSync(process.execPath, [join(oldCwd, "tools/osd-layer.mjs"), "push", target, folder, "--name", "smoke", "--kind", "customer", "--private"],
+        {encoding: "utf8", env: {...process.env, OSD_PRIVATE_REGISTRIES: ""}});
+      expect(cli.status).to.equal(2);
+      expect(cli.stderr).to.include(`PRIVATE_LAYER: private layer smoke cannot be published to ${host}`);
+      process.env.OSD_PRIVATE_REGISTRIES = "";
+      await refusal(() => main(["push", target, folder, "--name", "smoke", "--kind", "customer", "--private"]), "PRIVATE_LAYER");
+      process.env.OSD_PRIVATE_REGISTRIES = `127.0.0.1, ${host}`;
+      await main(["push", target, folder, "--name", "smoke", "--kind", "customer", "--private"]);
+      expect((await pull(`${host}/osd/private@${build(folder, {name: "smoke", kind: "customer", private: true}).digest}`)).config.private).to.equal(true);
+      process.env.OSD_PRIVATE_REGISTRIES = `ghcr.io, ${host}`;
+      await refusal(() => main(["push", "ghcr.io/example/private:v1", folder, "--name", "smoke", "--kind", "customer", "--private"]), "PRIVATE_LAYER");
+    } finally {
+      if (old === undefined) delete process.env.OSD_PRIVATE_REGISTRIES; else process.env.OSD_PRIVATE_REGISTRIES = old;
+      await new Promise(done => r.server.close(done));
+    }
   });
 
   it("keeps every existing repository file and its custom starting folder", () => {
@@ -190,6 +249,41 @@ describe("osd-layer: reproducible publishing", function () {
       expect(r.uploads).to.equal(uploads);
       expect(r.mounts).to.equal(0);
     } finally { await new Promise((done) => r.server.close(done)); }
+  });
+
+  it("marks private system descriptors, sums closure, and refuses a private config even if its marker is stripped", async () => {
+    const r = registry(), host = await listening(r), old = process.env.OSD_PRIVATE_REGISTRIES;
+    try {
+      process.env.OSD_PRIVATE_REGISTRIES = host;
+      const privateLayer = build(folder, {...options, private: true, closure: {unresolved: 2, items: []}});
+      const publicLayer = build(folder, {...options, name: "upper", closure: {unresolved: 3, items: [{}]}});
+      const one = await push(`${host}/source/one:v1`, privateLayer);
+      const two = await push(`${host}/source/two:v1`, publicLayer);
+      const refs = [`${host}/source/one@${one}`, `${host}/source/two@${two}`];
+      delete process.env.OSD_PRIVATE_REGISTRIES;
+      await refusal(() => pushSystem(`${host}/system/all:v1`, refs), "PRIVATE_LAYER");
+      process.env.OSD_PRIVATE_REGISTRIES = host;
+      const digest = await pushSystem(`${host}/system/all:v1`, refs);
+      const index = await manifest(`${host}/system/all@${digest}`);
+      expect(index.json.manifests[0].annotations["org.osd.layer.private"]).to.equal("true");
+      expect(index.json.annotations["org.osd.system.unresolved"]).to.equal("5");
+      const summary = await inspect(`${host}/system/all@${digest}`);
+      expect(summary.layers.map(layer => layer.closure.unresolved)).to.deep.equal([2, 3]);
+      expect(unresolvedLines(summary)).to.deep.equal(["layer smoke: unresolved 2", "layer upper: unresolved 3", "system: unresolved 5"]);
+      const log = [];
+      await fetchSystem(root, `${host}/system/all@${digest}`, {log: line => log.push(line)});
+      expect(log.filter(line => line.includes("unresolved"))).to.deep.equal(unresolvedLines(summary));
+      expect(() => assertPublicSystem(root)).to.throw(/private layer smoke/);
+      const stripped = structuredClone(privateLayer);
+      delete stripped.manifest.annotations["org.osd.layer.private"];
+      stripped.manifestBytes = Buffer.from(JSON.stringify(stripped.manifest));
+      const strippedDigest = await push(`${host}/source/stripped:v1`, stripped);
+      delete process.env.OSD_PRIVATE_REGISTRIES;
+      await refusal(() => pushSystem(`${host}/system/all:v2`, [`${host}/source/stripped@${strippedDigest}`]), "PRIVATE_LAYER");
+    } finally {
+      if (old === undefined) delete process.env.OSD_PRIVATE_REGISTRIES; else process.env.OSD_PRIVATE_REGISTRIES = old;
+      await new Promise(done => r.server.close(done));
+    }
   });
 
   it("scans original config and manifest bytes before copying foreign layers", async () => {

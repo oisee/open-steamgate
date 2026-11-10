@@ -35,6 +35,16 @@ export function activeSystem(root, env) {
   return system;
 }
 
+export function assertPublicSystem(root) {
+  const system = activeSystem(root);
+  const layer = system?.layers.find(layer => layer.private === true);
+  if (layer) {
+    const error = new Error(`private layer ${layer.name} cannot be published to a public destination`);
+    error.code = "PRIVATE_LAYER";
+    throw error;
+  }
+}
+
 export const layerDir = (root, layer) => join(root, ".local/system", layer.path);
 export const layerSource = (root, layer) => sourceFolder(layerDir(root, layer), repositoryConfig(layerDir(root, layer)));
 
