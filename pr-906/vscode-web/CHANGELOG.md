@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **`osd.engine: "osgo"`** (default `"node"`): Start runs the Go executable of this extension's release instead of the Node host. It is downloaded once into the extension's storage, verified against its `.sha256` and re-used; it is never in the VSIX. No asset for this platform, a checksum mismatch and no network each say so, with **Use the Node engine**. `osd.osgo.releaseTag` and `osd.osgo.binary` choose another release or a local executable.
+
 - **open-steamgate in vscode.dev.** The extension now has a browser entry: in vscode.dev (and other VS Code for the Web hosts) the whole ABAP gateway runs in the extension's web worker, with no server, on sql.js persisted in IndexedDB (or DuckDB-Wasm with `osd.web.database`). Available there:
   - the OSD view;
   - F8 Data Preview on TABL/DDLS;
