@@ -58,7 +58,11 @@ function parseForm(text, where) {
   if ((m = re(`NUMBERING IMPORTING (${ident}) FOR CREATE (${ident})`))) {
     return {form: "NUMBERING", clauses: [{param: m[1], kind: "CREATE", entity: m[2]}]};
   }
-  if (/^NUMBERING IMPORTING \S+ FOR CREATE \S+\\/i.test(text)) fail("create by association is outside R4 (compositions need a design)");
+  // R5: the early numbering of a create by association (cba), in the
+  // parent's handler: the rows are a TABLE FOR CREATE parent\_child
+  if ((m = re(`NUMBERING IMPORTING (${ident}) FOR CREATE (${ident})\\\\(${ident})`))) {
+    return {form: "NUMBERING", clauses: [{param: m[1], kind: "CREATE", entity: `${m[2]}\\${m[3]}`, source: m[2], assoc: m[3]}]};
+  }
   if ((m = re("MODIFY IMPORTING (.+)"))) {
     const clauses = [];
     let rest = m[1];

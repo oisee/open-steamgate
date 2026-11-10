@@ -1,4 +1,4 @@
-# The managed RAP runtime (R2)
+# The managed RAP runtime (R2 .. R5)
 
 R2 of [the RAP plan](oracle-rap.md): a managed behavior definition runs. Its
 behavior pool's determinations, validations and action are called, its
@@ -181,8 +181,9 @@ the save sequence); nothing measured on a system.
   a later failing member undoes a create, update, delete or action that
   had already run (`test/rap-serve.mjs`). Each operation is still its own
   save sequence (validations run per operation, not once at the end).
-- **Locks and authorization** are parsed and ignored; ETags, instance
-  features and early numbering are R4 (below).
+- **Authorization** is parsed and ignored; ETags, instance features and
+  early numbering are R4, locks (`lock master` / `lock dependent`) R5
+  (below).
 
 ## Handler methods
 
@@ -454,6 +455,234 @@ for an instance`) rather than created with the key it came with. Field control s
 - **`with additional save` / `with unmanaged save`** (`save_modified`), the
   **internal** and **factory** actions, **determine actions**, and
   **global authorization**; each is refused by the generator with its name.
+
+## R5: compositions, associations and projections
+
+R4 left every flight BDEF at its first wall, and the walls that stop most
+of them are the business object as a **tree** (compositions, `association
+_x { create; }`, read by association, `lock dependent`) and the
+**projection** BDEF (`projection;` with `use`). R5 is the smallest model
+of both that is sound on its own terms; draft stays out (its own track),
+and so do several pools, `with additional/unmanaged save`, internal,
+factory and determine actions and late numbering, each still refused by
+name. Proven on the order demo of [`src/rap_r5`](../src/rap_r5/README.md)
+(`ZI_RAP_ORDER` with its items, projected by `ZC_RAP_ORDER`, served as
+`ZUI_RAP_ORDER`, `test/rap-r5.mjs`, `ZCL_OSD_RAP_R5_TEST`). Nothing here is
+measured on a system; the semantics follow the public RAP documentation and
+each deviation is written down below.
+
+### The tree comes from CDS, the behavior from the BDEF
+
+A composition is declared where a system declares it: the root view says
+`composition [0..*] of ZI_CHILD as _Child`, the child view `association to
+parent ZI_ROOT as _Root on $projection.k = _Root.k`. `tools/cds2ddic.mjs`
+reads both (`CDSComposition`, `association to parent`): the composition is
+an association of kind `CHILD` whose key pairs are the reverse of the
+child's to-parent `ON` condition (a composition has no `ON` of its own),
+and the to-parent association one of kind `PARENT`. The parent of an entity
+is the target of its `PARENT` association, its children the targets of its
+`CHILD` ones; a BDEF entity's `lock dependent by _x`, `etag dependent by
+_x` and `authorization dependent by _x` must name that association (the
+generator refuses another). One root per BDEF, any depth.
+
+**The key of a child extends its parent's.** The pairs of the to-parent
+association say which child fields carry the parent key; the runtime fills
+them from the parent on a create by association, and a client cannot
+(a create by association that names another parent's key in them is
+overwritten, not refused: the parent in the URL or the `%tky` decides).
+They are the framework's fields: set on the child whether or not they are
+part of its key (a UUID child carries its parent's UUID as a plain field),
+whatever its `%control` and field control say.
+
+### The model the runtime gets
+
+`ZIF_OSD_RAP_BO=>TY_ENTITY` gains:
+
+| component | what |
+| --- | --- |
+| `parent`, `parent_assoc` | the parent entity (CDS name) and the to-parent association, initial for the root |
+| `root` | the root entity of the tree |
+| `lock` | `M` for `lock master`, `D` for `lock dependent` |
+| `assocs` | every association the BDEF declares for the entity: `name`, `target`, `kind` (`C` composition child, `P` to parent, `A` other), `create` (`association _x { create; }`), `feat_create` (`create ( features : instance )`), `numbering` (`E` when the target is drawn by a `FOR NUMBERING ... FOR CREATE e\_x` method), `pairs` (source field to target field) |
+
+### Derived types
+
+Per association `_x` of entity `e` with target `t`, `bdef-gen.mjs` writes
+the types a pool and EML use (`TYPE TABLE FOR ... e\_x`):
+
+- `CREATE e\_x`: the source's `%tky`, `%cid_ref`, and `%target`, a table
+  of `t`'s create rows (`%cid`, `t`'s fields, `%control`);
+- `READ IMPORT e\_x`: the source's `%tky` and `t`'s `%control`;
+  `READ RESULT e\_x`: `t`'s read result rows; `READ LINK e\_x`:
+  `source` (the source's `%tky`) and `target` (`t`'s `%tky`);
+- the features result of `e` gets `%assoc-_x` for a `create ( features :
+  instance )`;
+- `FOR NUMBERING IMPORTING entities FOR CREATE e\_x` gets `TABLE FOR
+  CREATE e\_x` and the BDEF's `RESPONSE FOR MAPPED EARLY`, as on a system.
+  A `%target` row without a `%cid` gets a temporary one for the call
+  that no row of the call carries, and only those rows lose it again; a
+  caller's `%cid` always comes back in MAPPED.
+
+### Runtime
+
+- **Create by association** (`create_by( iv_entity iv_assoc it_rows )`,
+  `TABLE FOR CREATE e\_x`): each row's parent is resolved by `%tky` or
+  `%cid_ref` (an instance created earlier in the same transaction, also in
+  the same request), else the row fails on the source entity
+  (`not_found`). `create ( features : instance )` asks the source's
+  features (`%assoc-_x`). The parent is locked (below). Each `%target` row
+  becomes a create of `t`: the parent's key is put into the pair fields
+  (not flagged in `%control`, so a read-only key is no refusal), early
+  numbering of `t` calls the pool's `FOR NUMBERING ... FOR CREATE e\_x`
+  method with the rows, and from there it is the create of R2/R4 (field
+  control, `%cid`, MAPPED of `t`, determinations and validations of `t`).
+  A create of an entity that has a parent is refused unless it goes through
+  the association (a child is never created on its own).
+- **Read by association** (`read_by( iv_entity iv_assoc it_keys ct_result
+  ct_link )`): for each source instance the target instances whose pair
+  fields equal the source's, from the buffer and from the persistent table
+  (a buffered instance hides its saved row, a deleted one is not read), in
+  key order; to the parent it is one instance. `ct_link` gets the source
+  and target keys.
+- **Delete cascades.** Deleting an instance deletes its composition
+  children, recursively, without asking their features (it is the
+  framework's delete, not the client's); the save writes the children's
+  deletes too.
+- **Lock.** `lock master` / `lock dependent by _parent`: before an update,
+  delete, action or create by association of an instance, the runtime
+  takes an exclusive lock on its **root** instance (lock object
+  `EZOSD_RAP_LOCK`, argument the SHA-256 of BDEF, root entity and root
+  key, `_SCOPE 2`), released by the runtime itself (`DEQUEUE`) when the
+  transaction ends: after the save's `COMMIT WORK`, after a failed save's
+  `ROLLBACK WORK`, and on `rollback( )`. That is needed and not a
+  nicety: a `COMMIT WORK` that queued no update releases no lock
+  (`tools/osd-enq.mjs`, the measured owner model). Inside a batch that
+  holds the LUW the locks stay until the request ends. One lock per root
+  per transaction. Held by another owner, the operation fails with
+  `%fail-cause = if_abap_behv=>cause-locked` and the message `<Root alias>
+  <key> is locked by another user` (this runtime's text). The OData bridge
+  answers it with 400 like every other refusal: a system answers a locked
+  instance with 409, but `/IWBEP/CX_MGW_BUSI_EXCEPTION` of this tree
+  carries no HTTP status yet, so the bridge cannot say so (a gateway
+  change of its own). A new root is not locked (nobody else can
+  see it); `lock master` on a child, `lock dependent` without a parent or by an
+  association the BDEF does not declare, and any lock, etag or
+  authorization clause in a projection are refused by the generator. The pool's `FOR LOCK` method (unmanaged lock)
+  is not called: managed only.
+- **ETag of the root.** A field annotated
+  `@Semantics.systemDateTime.lastChangedAt` (or `@Semantics.user.lastChangedBy`)
+  on the root is the BO's total change stamp, as on a system: a create,
+  update or delete of any instance of the tree stamps the root instance's
+  fields too (the `localInstanceLastChanged*` fields stay per instance).
+  So the root's `etag master` moves with every child write and a client
+  holding the old ETag of the root gets 412 **on the root**. The
+  boundary: a write of a child is checked against the child's own `etag
+  master` only. The root's tag is not the child's (412 if sent on a child
+  PATCH), and a POST through the navigation (a create by association) takes
+  no If-Match of the root at all (`test/rap-r5.mjs`). Each entity's own `etag
+  master` works as in R4; `etag dependent by _parent` (the child's ETag is
+  its master's) is accepted and not served (the child type gets no ETag).
+- **Save order.** The delta keeps the order of the changes, and a parent
+  is always created before its children; deletes of the children come
+  first in the delta of a cascade.
+
+### EML
+
+`ZCL_OSD_RAP_EML=>CREATE_BY` and `=>READ_BY` (and `KERNEL_RAP_EML`'s
+`create_by` / `read_by`, with the parameter shape of the other kernel
+calls plus `assoc`) are what `MODIFY ENTITIES ... CREATE BY \_x` and `READ
+ENTITIES ... BY \_x [LINK]` lower to. The pinned transpiler does not
+lower `BY` yet (`ModifyEntities BY, not supported, transpiler`), so the
+demo pool writes the call with the statement in a comment above it, as R3
+did before the EML pin; the lowering is a transpiler follow-up.
+
+### Projections
+
+A projection BDEF (`projection; define behavior for ZC_X alias X { use
+create; use update; use delete; use action a; use association _y { create;
+} }`) over projection views (`define root view entity ZC_X provider
+contract transactional_query as projection on ZI_X { key a as A, ...,
+_Y : redirected to composition child ZC_Y }`) is a **thin layer**: no
+buffer, no pool, no runtime of its own.
+
+- `tools/cds2ddic.mjs` reads `as projection on` (one base view, elements
+  with `as` renames, `redirected to [composition child|parent]`): a
+  redirected association is the base view's association with the target
+  replaced and its pairs renamed through both projections.
+- `bdef-gen.mjs` resolves a projection BDEF against its base BDEF (the BDEF
+  of the base view of its root): every projection entity names a base
+  entity, every `use` names something the base declares (else refused),
+  and the derived types are written for the projection entities as for
+  any (field names as the projection spells them).
+- The registry (`ZIF_OSD_RAP_REGISTRY=>PROJECTION`) answers per projection
+  entity the base BDEF, base entity, the field map (projection element to
+  base element), the `use`d operations, actions and associations, and the
+  projection's own `field ( readonly )`.
+- `ZCL_OSD_RAP_SADL` maps a projection row to a base row by that map, runs
+  the base runtime, and maps the keys back; an operation the projection
+  does not `use` is refused (400) before the base sees it.
+- EML on a projection (`MODIFY ENTITIES OF zc_x`) is not routed yet; a
+  projection's own behavior pool (`augment`, `precheck`) is refused.
+
+### OData
+
+`srvd-gen.mjs` writes for every exposed entity its associations to other
+exposed entities: an association `to_<alias without _>` with the pairs as
+the referential constraint and the navigation on the source (both
+directions of a composition are navigable). Reads through a navigation and
+`$expand` then take the existing SADL path (the CDS registry's pairs).
+`POST Root(...)/to_Child` (V2) and `POST Root(...)/to_Child` (V4, where
+writes through a navigation property were 501) create by association:
+the SADL provider sees the navigation path and hands the parent key and
+the association to `zif_stg_sadl_behavior~create_by`. A child set has
+`creatable` only through its parent: a POST on the child's own set is 400
+("created through its parent"). The navigation name is the V2 one
+(`to_Items`) on both protocols, as for every service of this registry; a
+RAP V4 binding on a system names it `_Items`.
+
+### The measurement: the flight BDEFs before and after
+
+`node tools/rap-flight/constructs.mjs` again, now with the dictionary the
+pack builds with (`legacy/` and the overlay's stubs: before R5 no BDEF got
+as far as its fields, so nobody had noticed the tool resolved the scenario's
+types without them), and a projection generated together with its base BDEF.
+The first wall per behavior definition:
+
+| BDEF | before R5 | after R5 |
+| --- | --- | --- |
+| `/DMO/I_TRAVEL_M` | associations (the combined R1 refusal) | **past compositions, cba numbering, lock and associations**; stops at `internal action ReCalcTotalPrice` (then: factory action, several pools, additional and unmanaged save) |
+| `/DMO/C_TRAVEL_PROCESSOR_M`, `/DMO/C_TRAVEL_APPROVER_M` | projection | **the projection resolves**; stops at its base's wall (`ReCalcTotalPrice`) |
+| `/DMO/I_SUPPLEMENT`, `/DMO/R_AGENCYTP` | associations / functions / determine actions | `determine action Prepare` (named now; then draft) |
+| `/DMO/C_SUPPLEMENT`, `/DMO/C_AGENCYTP` | projection | the base's `determine action` |
+| `/DMO/I_CARRIERSLOCKSINGLETON_S`, `/DMO/C_CARRIERSLOCKSINGLETON_S` | unparsed grammar / projection | unparsed singleton grammar (the base's, for the projection) |
+| `/DMO/I_AGENCYTP` | interface | interface |
+
+Constructs whose verdict changed (over the ten BDEFs):
+
+| construct | BDEFs | before | after |
+| --- | ---: | --- | --- |
+| `association (read)` | 5 | refused | runs |
+| `association create` | 5 | refused | runs |
+| `projection` | 5 | refused | runs |
+| `lock master` | 4 | ignored | runs |
+| `lock dependent` | 3 | ignored | runs |
+| `association create ( features : instance )` | 1 | refused | runs |
+| `FOR NUMBERING (create by association)` | 1 | refused | runs |
+
+No flight BDEF runs end to end yet. Three (the travel BO and its two
+projections) are past the tree and stop at the internal action; the
+supplement and agency BOs and their projections stop earlier, at a
+determine action, so whether their trees pass is not measured yet; and
+draft is behind seven of the ten.
+
+### What R5 leaves
+
+Draft (and `association _x { with draft; }`, refused), several pools
+(`/DMO/I_TRAVEL_M`), `with additional/unmanaged save`, internal, factory
+and determine actions, late numbering, deep insert as one create by
+association (a POST with the children inline on the parent), `etag
+dependent` served, EML on a projection, a projection's own pool, `FOR
+LOCK` of an unmanaged lock, global features and authorization.
 
 ## Not in R2
 

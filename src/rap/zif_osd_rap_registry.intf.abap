@@ -18,4 +18,36 @@ INTERFACE zif_osd_rap_registry PUBLIC.
     RETURNING
       VALUE(rt_bdef) TYPE tt_name.
 
+* R5: a projection entity (docs/rap-runtime.md, "Projections"): the base
+* entity it runs on, the field map (projection element NAME = base element
+* BASE), what it uses (CREATE, UPDATE, DELETE, ACTIONS, ASSOCS, and CREATES
+* for use association _x { create; }) and its own READONLY fields. Initial
+* when IV_ENTITY is no projection entity
+  TYPES:
+    BEGIN OF ty_map,
+      name TYPE string,
+      base TYPE string,
+    END OF ty_map,
+    tt_map TYPE STANDARD TABLE OF ty_map WITH DEFAULT KEY,
+    BEGIN OF ty_projection,
+      entity      TYPE string,
+      alias       TYPE string,
+      bdef        TYPE string,
+      base_bdef   TYPE string,
+      base_entity TYPE string,
+      create      TYPE abap_bool,
+      update      TYPE abap_bool,
+      delete      TYPE abap_bool,
+      actions     TYPE tt_name,
+      assocs      TYPE tt_name,
+      creates     TYPE tt_name,
+      fields      TYPE tt_map,
+      readonly    TYPE tt_name,
+    END OF ty_projection.
+  METHODS projection
+    IMPORTING
+      iv_entity            TYPE csequence
+    RETURNING
+      VALUE(rs_projection) TYPE ty_projection.
+
 ENDINTERFACE.

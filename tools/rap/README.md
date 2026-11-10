@@ -9,6 +9,11 @@ declarations of the system's form (`FOR DETERMINE` / `FOR VALIDATE` /
 `rap-runtime-gen.mjs` (called by `bdef-gen.mjs`) writes the typed adapter of
 each managed BDEF and `ZCL_OSD_RAP_REGISTRY` for the ABAP runtime in
 `src/rap/` ([R2](../../docs/rap-runtime.md)).
+R5: `bdef-gen.mjs` also resolves the tree of a BDEF from its CDS
+compositions (`treeOf`), writes the derived types of its associations
+(`TABLE FOR CREATE e\_x`, `READ IMPORT/RESULT/LINK e\_x`), and resolves a
+projection BDEF against its base (`projectionOf`); the registry answers the
+projection entities ([R5](../../docs/rap-runtime.md)).
 `srvd-gen.mjs` (called by `bdef-gen.mjs`) reads service definitions
 (`*.srvd.srvdsrv`) into `gen/rap/<srvd>.stg.yaml`, which `stg-compile --all`
 compiles into a service ([R2c](../../docs/rap-runtime.md#serving-r2c)).

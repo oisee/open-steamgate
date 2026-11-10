@@ -86,6 +86,39 @@ CLASS zcl_osd_rap_eml DEFINITION PUBLIC FINAL CREATE PRIVATE.
       RAISING
         zcx_osd_rap.
 
+* R5: MODIFY ENTITIES ... ENTITY e CREATE BY \_assoc FROM rows (a TABLE FOR
+* CREATE e\_assoc); IV_FIELDS / IV_SET_FIELDS / IV_AUTO_FILL_CID act on the
+* %target rows, as on a system
+    CLASS-METHODS create_by
+      IMPORTING
+        iv_bdef          TYPE csequence
+        iv_entity        TYPE csequence
+        iv_assoc         TYPE csequence
+        it_rows          TYPE STANDARD TABLE
+        iv_fields        TYPE csequence OPTIONAL
+        iv_set_fields    TYPE abap_bool DEFAULT abap_false
+        iv_auto_fill_cid TYPE abap_bool DEFAULT abap_false
+      CHANGING
+        cs_mapped        TYPE any
+        cs_failed        TYPE any
+        cs_reported      TYPE any
+      RAISING
+        zcx_osd_rap.
+
+* R5: READ ENTITIES ... ENTITY e BY \_assoc FROM keys RESULT result LINK link
+    CLASS-METHODS read_by
+      IMPORTING
+        iv_bdef   TYPE csequence
+        iv_entity TYPE csequence
+        iv_assoc  TYPE csequence
+        it_keys   TYPE ANY TABLE
+      CHANGING
+        ct_result TYPE STANDARD TABLE
+        ct_link   TYPE STANDARD TABLE
+        cs_failed TYPE any
+      RAISING
+        zcx_osd_rap.
+
 * COMMIT ENTITIES: the save sequence of every runtime of the session.
 * IV_BDEF names the behavior definition whose FAILED and REPORTED the
 * caller wants (RESPONSE OF); EV_SAVED is false when any save failed, and
@@ -272,6 +305,44 @@ CLASS zcl_osd_rap_eml IMPLEMENTATION.
 
     lo_runtime->modify( EXPORTING iv_entity = iv_entity iv_operation = lv_operation it_rows = <lt_rows>
                         CHANGING cs_mapped = cs_mapped cs_failed = cs_failed cs_reported = cs_reported ).
+    subrc( is_failed = cs_failed iv_before = lv_before ).
+  ENDMETHOD.
+
+  METHOD create_by.
+    DATA lo_runtime TYPE REF TO zcl_osd_rap_runtime.
+    DATA lr_rows    TYPE REF TO data.
+    DATA lv_before  TYPE i.
+    FIELD-SYMBOLS <lt_rows>   TYPE STANDARD TABLE.
+    FIELD-SYMBOLS <ls_row>    TYPE any.
+    FIELD-SYMBOLS <lt_target> TYPE STANDARD TABLE.
+
+    lo_runtime = runtime( iv_bdef ).
+    lv_before = count_rows( cs_failed ).
+    CREATE DATA lr_rows LIKE it_rows.
+    ASSIGN lr_rows->* TO <lt_rows>.
+    <lt_rows> = it_rows.
+    LOOP AT <lt_rows> ASSIGNING <ls_row>.
+      ASSIGN COMPONENT '%TARGET' OF STRUCTURE <ls_row> TO <lt_target>.
+      IF sy-subrc = 0.
+        prepare_rows( EXPORTING iv_fields = iv_fields iv_set_fields = iv_set_fields
+                                iv_auto_fill_cid = iv_auto_fill_cid
+                      CHANGING ct_rows = <lt_target> ).
+      ENDIF.
+    ENDLOOP.
+    lo_runtime->create_by( EXPORTING iv_entity = iv_entity iv_assoc = iv_assoc it_rows = <lt_rows>
+                           CHANGING cs_mapped = cs_mapped cs_failed = cs_failed cs_reported = cs_reported ).
+    subrc( is_failed = cs_failed iv_before = lv_before ).
+  ENDMETHOD.
+
+  METHOD read_by.
+    DATA lo_runtime TYPE REF TO zcl_osd_rap_runtime.
+    DATA lv_before  TYPE i.
+
+    lo_runtime = runtime( iv_bdef ).
+    lv_before = count_rows( cs_failed ).
+    CLEAR: ct_result, ct_link.
+    lo_runtime->read_by( EXPORTING iv_entity = iv_entity iv_assoc = iv_assoc it_keys = it_keys
+                         CHANGING ct_result = ct_result ct_link = ct_link cs_failed = cs_failed ).
     subrc( is_failed = cs_failed iv_before = lv_before ).
   ENDMETHOD.
 

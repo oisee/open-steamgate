@@ -39,13 +39,14 @@ import {runsAs} from "../osd-main.mjs";
 const root = resolve(process.env.OSD_ROOT ?? process.cwd());
 const dir = join(root, ".local", "rap-flight-classify");
 const KEPT = /^(managed|reuse)\//;
+const DDIC = /^(managed|reuse|legacy|readonly)\//;
 const EXTENSION = /\/(cntry|rev)\//;
 
 // what the tree does with each construct: runs (with the test that shows
 // it), ignored (accepted, no effect) or refused (the generator stops)
 export const SUPPORT = {
   "managed": ["runs", "test/rap-serve.mjs"],
-  "projection": ["refused", "bdef-gen: projection uses need resolution"],
+  "projection": ["runs", "test/rap-r5.mjs: the order projection served over V2 and V4"],
   "interface": ["refused", "bdef-gen: interface BDEF"],
   "with draft": ["refused", "rap-runtime-gen: draft is outside R2"],
   "several pools": ["refused", "rap-runtime-gen reads the pool of the BDEF header only"],
@@ -53,10 +54,10 @@ export const SUPPORT = {
   "with additional save": ["refused", "rap-runtime-gen: behavior options"],
   "with unmanaged save": ["refused", "rap-runtime-gen: behavior options / no persistent table"],
   "etag master": ["runs", "test/rap-r4.mjs: ETag, 428, 412 over V2 and V4"],
-  "etag dependent": ["ignored", "parsed; the ETag of a dependent entity is its master's"],
+  "etag dependent": ["ignored", "checked against the parent association (R5), not served: the child type gets no ETag"],
   "total etag": ["ignored", "draft only"],
-  "lock master": ["ignored", "the gateway's entity lock (V4) is the only lock"],
-  "lock dependent": ["ignored", "as lock master"],
+  "lock master": ["runs", "test/rap-r5.mjs, ZCL_OSD_RAP_R5_TEST: the root instance is locked (EZOSD_RAP_LOCK)"],
+  "lock dependent": ["runs", "test/rap-r5.mjs: a child write locks its root"],
   "authorization master": ["ignored", "no authorization checks"],
   "authorization dependent": ["ignored", "no authorization checks"],
   "early numbering": ["runs", "test/rap-r4.mjs: FOR NUMBERING draws the key"],
@@ -66,11 +67,11 @@ export const SUPPORT = {
   "update/delete ( features : instance )": ["runs", "test/rap-r4.mjs: disabled update and delete are 400"],
   "field ( features : instance )": ["ignored", "dynamic field control: the features result's %field is not read"],
   "field control readonly/mandatory": ["runs", "test/rap-serve.mjs"],
-  "association (read)": ["refused", "bdef-gen: associations are outside R1"],
-  "association create": ["refused", "bdef-gen: compositions (create by association) need a design"],
+  "association (read)": ["runs", "ZCL_OSD_RAP_R5_TEST read by association, test/rap-r5.mjs navigation"],
+  "association create": ["runs", "test/rap-r5.mjs: POST through the navigation, ZCL_OSD_RAP_R5_TEST create_by"],
   "action": ["runs", "test/rap-serve.mjs"],
   "action ( features : instance )": ["runs", "test/rap-r4.mjs: a disabled action is 400"],
-  "association create ( features : instance )": ["refused", "with the association create it controls"],
+  "association create ( features : instance )": ["runs", "test/rap-r5.mjs generator: %assoc-<a> asked before a create by association"],
   "internal action": ["refused", "rap-runtime-gen: action modifiers"],
   "factory action": ["refused", "rap-runtime-gen: action modifiers"],
   "static action": ["refused", "rap-runtime-gen: action modifiers"],
@@ -85,16 +86,16 @@ export const SUPPORT = {
   "FOR DETERMINE": ["runs", "ZCL_OSD_RAP_TEST system form"],
   "FOR VALIDATE": ["runs", "ZCL_OSD_RAP_TEST system form"],
   "FOR MODIFY action": ["runs", "ZCL_OSD_RAP_TEST system form"],
-  "FOR MODIFY create by association": ["refused", "lower-derived: create by association"],
+  "FOR MODIFY create by association": ["refused", "lower-derived: unmanaged create by association is outside R5"],
   "FOR READ": ["runs", "lower-derived (R3)"],
-  "FOR READ by association": ["refused", "lower-derived: unsupported clause"],
+  "FOR READ by association": ["refused", "lower-derived: unmanaged read by association is outside R5"],
   "FOR LOCK": ["ignored", "lowered (R3), never called: no locks"],
   "FOR INSTANCE FEATURES": ["runs", "test/rap-r4.mjs"],
   "FOR GLOBAL FEATURES": ["refused", "lower-derived: GLOBAL"],
   "FOR INSTANCE AUTHORIZATION": ["refused", "lower-derived: INSTANCE AUTHORIZATION"],
   "FOR GLOBAL AUTHORIZATION": ["refused", "lower-derived: GLOBAL"],
   "FOR NUMBERING (create)": ["runs", "test/rap-r4.mjs"],
-  "FOR NUMBERING (create by association)": ["refused", "lower-derived: create by association"],
+  "FOR NUMBERING (create by association)": ["runs", "test/rap-r5.mjs, ZCL_OSD_RAP_R5_TEST: the items numbered 10, 20"],
   "FOR PRECHECK": ["refused", "lower-derived: PRECHECK"],
   "saver save_modified": ["refused", "unmanaged/additional save"],
   "saver adjust_numbers": ["refused", "late numbering"],
@@ -213,8 +214,15 @@ async function tree(log) {
 
 async function main() {
   const all = process.argv.includes("--all");
-  const files = (await tree(l => console.error(`constructs: ${l}`))).filter(f => KEPT.test(f.rel));
-  const ddic = files.filter(f => /\.(ddls\.(asddls|xml)|tabl\.xml|view\.xml|dtel\.xml|doma\.xml)$/.test(f.filename));
+  const fetched = await tree(l => console.error(`constructs: ${l}`));
+  const files = fetched.filter(f => KEPT.test(f.rel));
+  // R5: the dictionary the pack builds with, legacy/ included (the /dmo/
+  // data elements live there); before R5 no BDEF got as far as its fields
+  // and the pack's overlay (packs/rap-flight/src: the standard data elements
+  // the scenario's tables name, as stubs)
+  const overlay = walk(join(root, "packs/rap-flight/src")).map(path => ({path, rel: "overlay", filename: basename(path), contents: readFileSync(path, "utf8")}));
+  const ddic = [...fetched.filter(f => DDIC.test(f.rel)), ...overlay]
+    .filter(f => /\.(ddls\.(asddls|xml)|tabl\.xml|view\.xml|dtel\.xml|doma\.xml)$/.test(f.filename));
   const libDdic = libraryDdic();
   const bdefs = files.filter(f => f.filename.endsWith(".bdef.asbdef") && (all || !EXTENSION.test(f.rel)))
     .sort((a, b) => a.filename.localeCompare(b.filename));
@@ -237,8 +245,19 @@ async function main() {
       console.log(`| ${name(bdef)} | ${id} | ${[...new Set(where)].slice(0, 4).join("; ")}${where.length > 4 ? "; ..." : ""} | ${verdict} |`);
     }
     let wall = "accepted";
+    // R5: a projection is generated against its base, so the base BDEF (the
+    // one with the entity the projection's root view projects on) goes along
+    // and the projection's wall may be its base's
+    const inputs = [bdef];
+    if (model.implementationType === "projection") {
+      const rootView = model.entities[0]?.entity ?? "";
+      const ddls = ddic.find(f => f.filename.endsWith(".ddls.asddls") && name(f) === rootView.toUpperCase());
+      const base = /as\s+projection\s+on\s+([\w/]+)/i.exec(ddls?.contents ?? "")?.[1]?.toUpperCase();
+      const baseBdef = files.find(f => f.filename.endsWith(".bdef.asbdef") && parseBdef(f.contents).entities.some(e => e.entity.toUpperCase() === base));
+      if (baseBdef) inputs.push(baseBdef);
+    }
     try {
-      const {plans} = generate([bdef, ...ddic], libDdic);
+      const {plans} = generate([...inputs, ...ddic], libDdic);
       runtimeOutputs(plans ?? [], files.filter(f => /\.clas\.(locals_imp\.|locals_def\.)?abap$/.test(f.filename))
         .map(f => ({filename: f.filename, contents: f.contents})));
     } catch (error) {

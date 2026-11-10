@@ -130,11 +130,13 @@ export function serviceYaml(srvd, entityOf, file = "srvd") {
   const functions = [];
   const functionNames = new Set();
   const aliases = new Set();
+  const resolved = [];
   for (const x of srvd.exposed) {
     if (aliases.has(upper(x.alias))) throw new Error(`${file}: ${x.alias} is exposed twice`);
     aliases.add(upper(x.alias));
     const {view, fields, behavior} = entityOf(x.entity);
     const type = `${x.alias}Type`;
+    resolved.push({x, view, type});
     const b = behavior ?? {create: false, update: false, delete: false, control: new Map(), actions: []};
     const ops = ["R", "Q"];
     if (b.create) ops.unshift("C");
@@ -172,6 +174,30 @@ export function serviceYaml(srvd, entityOf, file = "srvd") {
         `    parameters: {${fields.filter(f => f.key).map(f => `${prop(f)}: ${edm(f.type, `${x.entity}.${f.name}`)}`).join(", ")}}`);
     }
   }
+  // R5: the associations of an exposed entity to another exposed entity are
+  // its navigation properties (the V2 name, to_<alias without _>, on V4
+  // too, as for every service of this registry); a composition's pairs are
+  // the referential constraint, a to-parent association is N:1 without one
+  const element = (r, name) => {
+    const f = r.view.fields.find(v => upper(v.name) === upper(name));
+    return f?.element ?? f?.name ?? name;
+  };
+  const assocLines = [];
+  for (const r of resolved) {
+    for (const a of r.view.associations ?? []) {
+      if (!a.exposed || !(a.pairs ?? []).length) continue;
+      const to = resolved.find(t => upper(t.x.entity) === upper(a.target));
+      if (!to) continue;
+      const nav = `to_${a.alias.replace(/^_/, "")}`;
+      const name = `${r.x.alias}_${a.alias.replace(/^_/, "")}`;
+      const parent = a.composition === "PARENT";
+      const card = parent ? "N:1" : a.max === "*" ? "1:N" : a.min === "0" ? "1:0" : "1:1";
+      assocLines.push(`  ${name}:`, `    from: ${r.type}`, `    to: ${to.type}`, `    cardinality: "${card}"`, `    set: ${name}`);
+      if (!parent) assocLines.push(`    constraint: {${a.pairs.map(pr => `${element(r, pr.source)}: ${element(to, pr.target)}`).join(", ")}}`);
+      assocLines.push(`    navigation: {${r.type}: ${nav}}`);
+    }
+  }
+  if (assocLines.length) lines.push("associations:", ...assocLines);
   if (functions.length) lines.push("functions:", ...functions);
   return lines.join("\n") + "\n";
 }

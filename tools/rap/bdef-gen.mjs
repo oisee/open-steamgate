@@ -5,6 +5,7 @@ import {basename, join, resolve} from "node:path";
 import {existsSync, readFileSync, readdirSync, mkdirSync, writeFileSync, rmSync} from "node:fs";
 import {parseBdef} from "./bdef-parse.mjs";
 import {parseDDLS} from "../cds2ddic.mjs";
+import {resolveTree} from "../cds-tree.mjs";
 import {contentFoldersOf, winningByLayer} from "../osd-packs.mjs";
 import {nameOf} from "../osd-store-types.mjs";
 import {libraryPath} from "../osd-lib-path.mjs";
@@ -45,6 +46,142 @@ export function adminOf(annotations) {
   return ADMIN.find(([, re]) => re.test(text))?.[0];
 }
 
+const featuredOpts = opts => (opts ?? []).some(o => o.name === "features" && o.value === "instance");
+
+// R5 (docs/rap-runtime.md): the place of an entity in its business object's
+// tree, read off the CDS associations the BDEF names. The parent is the
+// target of the view's `association to parent` (when it is an entity of the
+// same BDEF); each association of the BDEF must be one of the view's, end
+// in an entity of the same BDEF, and carry key pairs; a create by
+// association needs a composition. lock / etag / authorization dependent
+// name the association to the parent.
+export function treeOf(model, entity, view, projection = false) {
+  const names = new Set(model.entities.map(e => upper(e.entity)));
+  const cds = view.associations ?? [];
+  const parent = cds.find(a => a.composition === "PARENT" && names.has(upper(a.target)));
+  const assocs = entity.associations.map(a => {
+    if (a.withDraft) throw new Error(`${entity.entity}\\${a.name}: association { with draft; } is outside R5 (draft has a track of its own)`);
+    if (a.operations.some(o => o.kind !== "create")) throw new Error(`${entity.entity}\\${a.name}: link / unlink actions are outside R5`);
+    if (projection !== !!a.use) throw new Error(`${entity.entity}\\${a.name}: ${projection ? "a projection uses an association (use association)" : "use association belongs to a projection"}`);
+    const c = cds.find(x => upper(x.alias) === upper(a.name));
+    if (!c) throw new Error(`${entity.entity}: association ${a.name} is no association of the CDS entity ${view.name}`);
+    if (!names.has(upper(c.target))) throw new Error(`${entity.entity}\\${a.name}: its target ${c.target} is no entity of this behavior definition (associations to other business objects are outside R5)`);
+    if (!(c.pairs ?? []).length) throw new Error(`${entity.entity}\\${a.name}: no key pairs (a composition takes them from the child's association to parent)`);
+    const create = a.operations.find(o => o.kind === "create");
+    if (create && c.composition !== "CHILD") throw new Error(`${entity.entity}\\${a.name}: create by association needs a composition`);
+    return {name: a.name, target: upper(c.target), kind: c.composition === "CHILD" ? "C" : c.composition === "PARENT" ? "P" : "A",
+      create: !!create, featCreate: !!create && featuredOpts(create.options), pairs: c.pairs};
+  });
+  if (projection) {
+    // locking belongs to the interface layer; a projection that declares it
+    // would say something nothing runs
+    for (const clause of ["lock", "etag", "authorization"]) if (entity[clause]) throw new Error(`${entity.entity}: ${clause} ${entity[clause].kind} in a projection (it is the base's, R5)`);
+  } else {
+    // the association a dependency names must be one the BDEF declares
+    for (const [clause, mode] of [["lock", entity.lock], ["etag", entity.etag], ["authorization", entity.authorization]]) {
+      if (mode?.kind === "dependent" && mode.association && !entity.associations.some(a => upper(a.name) === upper(mode.association)))
+        throw new Error(`${entity.entity}: ${clause} dependent by ${mode.association}, which the behavior definition does not declare (association ${mode.association};)`);
+    }
+    if (entity.lock?.kind === "master" && parent) throw new Error(`${entity.entity}: lock master on a child (it is locked with its root: lock dependent by ${parent.alias})`);
+    for (const [clause, mode] of [["lock", entity.lock], ["etag", entity.etag], ["authorization", entity.authorization]]) {
+      if (mode?.kind !== "dependent") continue;
+      if (!parent) throw new Error(`${entity.entity}: ${clause} dependent without a parent (no association to parent in ${view.name})`);
+      if (mode.association && upper(mode.association) !== upper(parent.alias)) throw new Error(`${entity.entity}: ${clause} dependent by ${mode.association}, which is not the association to the parent (${parent.alias})`);
+    }
+    if (!parent && entity.lock?.kind === "dependent") throw new Error(`${entity.entity}: lock dependent on a root`);
+  }
+  return {parent: parent ? upper(parent.target) : undefined, parentAssoc: parent?.alias, assocs};
+}
+
+// R5: a projection entity names its base entity (the base view of its
+// projection view, an entity of a managed BDEF of the tree), maps its fields
+// onto the base's, and only uses what the base declares
+function projectionOf(plan, planned, plans) {
+  const {entity, view} = planned;
+  if (!view.projectionOf) throw new Error(`${entity.entity}: a projection behavior needs a projection view (as projection on), ${view.name} is not one`);
+  const base = plans.filter(p => !p.projection).flatMap(p => p.entities.map(e => ({p, e}))).find(({e}) => upper(e.entity.entity) === upper(view.projectionOf));
+  if (!base) throw new Error(`${entity.entity}: its base ${view.projectionOf} is no entity of a behavior definition of this tree`);
+  if (plan.base && plan.base !== base.p) throw new Error(`${plan.root}: a projection of two behavior definitions`);
+  plan.base = base.p;
+  planned.base = base.e;
+  for (const f of planned.fields) if (!f.from) throw new Error(`${entity.entity}.${f.name}: no base element`);
+  const b = base.e.entity;
+  const bhas = op => b.operations.some(o => o.kind === op && !o.use);
+  for (const op of entity.operations) {
+    if (!op.use) throw new Error(`${entity.entity}: a projection uses its operations (use ${op.kind})`);
+    if (!bhas(op.kind)) throw new Error(`${entity.entity}: use ${op.kind}, which ${b.entity} does not declare`);
+  }
+  for (const a of entity.actions) {
+    if (!a.use) throw new Error(`${entity.entity}~${a.name}: a projection's own actions are outside R5`);
+    if (!b.actions.some(x => upper(x.name) === upper(a.name))) throw new Error(`${entity.entity}: use action ${a.name}, which ${b.entity} does not declare`);
+  }
+  for (const a of planned.tree.assocs) {
+    const own = base.e.tree.assocs.find(x => upper(x.name) === upper(a.name));
+    if (!own) throw new Error(`${entity.entity}: use association ${a.name}, which ${b.entity} does not declare`);
+    if (a.create && !own.create) throw new Error(`${entity.entity}: use association ${a.name} { create; }, which ${b.entity} does not allow`);
+  }
+  for (const g of entity.fields) {
+    if (g.attributes.some(x => x.name !== "readonly" || x.value)) throw new Error(`${entity.entity}: a projection's field control other than readonly is outside R5`);
+  }
+  if (entity.determinations.length || entity.validations.length || entity.mappings.length || entity.persistentTable || entity.numbering)
+    throw new Error(`${entity.entity}: a projection has no determinations, validations, mapping, table or numbering of its own`);
+  if (entity.implementationClass || plan.model.implementationClass) throw new Error(`${plan.root}: a projection's own behavior pool (augment, precheck) is outside R5`);
+}
+
+/** R5: what a projection entity serves, the base's behavior through its `use`s */
+export function projectedBehavior(planned) {
+  const {entity, base, fields} = planned;
+  const used = op => entity.operations.some(o => o.kind === op);
+  const baseControl = fieldControl(base.entity, base.fields);
+  const control = new Map();
+  for (const f of fields) {
+    const c = {...(baseControl.get(upper(f.from)) ?? {readonly: "", mandatory: "", numbering: false})};
+    if (entity.fields.some(g => g.fields.some(x => upper(x) === upper(f.name)))) c.readonly = "X";
+    control.set(upper(f.name), c);
+  }
+  const baseEtag = base.entity.etag?.kind === "master" ? base.entity.etag.field : undefined;
+  return {create: used("create"), update: used("update"), delete: used("delete"), control,
+    actions: entity.actions.map(a => a.name),
+    etag: entity.useEtag && baseEtag ? fields.find(f => upper(f.from) === upper(baseEtag))?.name : undefined};
+}
+
+// R5: the derived types of the associations of one entity
+//   TABLE FOR CREATE e\_x        %tky, %cid_ref, %target (the target's create rows)
+//   TABLE FOR READ IMPORT e\_x   %tky, %control (the target's fields)
+//   TABLE FOR READ RESULT e\_x   the target's read result rows
+//   TABLE FOR READ LINK e\_x     source-%tky, target-%tky
+function associationTypes(plan, e, bind) {
+  let out = "";
+  const {entity, prefix: p} = e;
+  const iface = plan.iface;
+  const refs = new Set([entity.entity, `${plan.root}\\${entity.alias ?? entity.entity}`, `${plan.root}\\${entity.entity}`]);
+  const local = [...new Set([entity.alias ?? entity.entity, entity.entity])];
+  const pool = upper(entity.implementationClass ?? plan.model.implementationClass ?? "");
+  for (const [k, a] of e.tree.assocs.entries()) {
+    const t = plan.entities.find(x => upper(x.entity.entity) === a.target);
+    const tp = t.prefix;
+    const x = `${p}_x${k}`;
+    out += included(`${x}_trow`, `${tp}_data`, "%data", [["%cid", "c LENGTH 128"], ["%control", `${tp}_control`]]);
+    out += `  TYPES t_${x}_trow TYPE STANDARD TABLE OF ${x}_trow WITH DEFAULT KEY.\n`;
+    out += included(`${x}_create`, `${p}_tky`, "%tky", [["%cid_ref", "c LENGTH 128"], ["%target", `t_${x}_trow`]]);
+    out += `  TYPES t_${x}_create TYPE STANDARD TABLE OF ${x}_create WITH DEFAULT KEY.\n`;
+    out += included(`${x}_rimport`, `${p}_tky`, "%tky", [["%control", `${tp}_control`]]);
+    out += `  TYPES t_${x}_rimport TYPE STANDARD TABLE OF ${x}_rimport WITH DEFAULT KEY.\n`;
+    out += struct(`${x}_link`, [["source", `${p}_features_key`], ["target", `${tp}_features_key`]]);
+    out += `  TYPES t_${x}_link TYPE STANDARD TABLE OF ${x}_link WITH DEFAULT KEY.\n`;
+    const kinds = [["CREATE", `${x}_create`], ["READ IMPORT", `${x}_rimport`], ["READ RESULT", `${tp}_read_result`], ["READ LINK", `${x}_link`]];
+    for (const [kind, type] of kinds) {
+      for (const ref of refs) {
+        bind("TABLE", kind, `${ref}\\${a.name}`, `${iface}=>t_${type}`);
+        bind("STRUCTURE", kind, `${ref}\\${a.name}`, `${iface}=>${type}`);
+      }
+      if (pool) for (const ref of local) bind(`POOL ${pool}`, kind, `${ref}\\${a.name}`, `${iface}=>t_${type}`);
+    }
+    e.assocTypes = [...(e.assocTypes ?? []), {name: a.name, prefix: x, target: t}];
+  }
+  return out;
+}
+
 /** Input files are already selected by content layer, never test/ or libraries' BDEFs. */
 export function generate(files, dependencies = []) {
   const bdefs = files.filter(f => f.filename.endsWith(".bdef.asbdef"));
@@ -68,6 +205,9 @@ export function generate(files, dependencies = []) {
     if (view && !view.skip && elements !== view.fields.length + view.exposedAssociations.length) view.skip = "unsupported CDS elements";
     return [upper(o.getName()), view];
   }));
+  // R5: composition pairs and projection associations need every view
+  const parsedViews = [...views.values()].filter(v => v && !v.skip);
+  resolveTree(parsedViews, views);
   const fieldsOf = (name, visiting = new Set()) => {
     const key = upper(name);
     if (visiting.has(key)) throw new Error(`Cyclic CDS type ${name}`);
@@ -84,7 +224,8 @@ export function generate(files, dependencies = []) {
       if (!f.virtual && !sourceType) throw new Error(`Unresolved CDS field ${name}.${f.name}`);
       const abap = f.abapType ?? sourceType;
       if (!ident(f.name) || !abap || /todo|unknown|void/i.test(abap)) throw new Error(`Unresolved CDS field ${name}.${f.name}`);
-      return {name: f.name.toLowerCase(), type: abap, key: f.key, base: f.base, admin: adminOf(f.annotations ?? [])};
+      return {name: f.name.toLowerCase(), type: abap, key: f.key, base: f.base, admin: adminOf(f.annotations ?? []),
+        from: f.fromElement ? f.fromElement.toLowerCase() : undefined};
     });
   };
   const outputs = {}, bindings = {}, plans = [];
@@ -93,21 +234,28 @@ export function generate(files, dependencies = []) {
     if (bindings[key] && bindings[key] !== type) throw new Error(`Ambiguous RAP reference ${ref}`);
     bindings[key] = type;
   };
-  for (const file of bdefs) {
-    const model = parseBdef(file.contents);
+  // R5: a projection BDEF is resolved against its base, so the bases go first
+  const ordered = bdefs.map(file => ({file, model: parseBdef(file.contents)}))
+    .sort((a, b) => (a.model.implementationType === "projection") - (b.model.implementationType === "projection"));
+  for (const {file, model} of ordered) {
     if (model.unparsed.length) throw new Error(`${file.filename}: unparsed BDEF grammar`);
-    if (model.implementationType !== "managed" && model.implementationType !== "unmanaged") throw new Error(`${file.filename}: unsupported ${model.implementationType} BDEF (projection uses need resolution)`);
+    const projection = model.implementationType === "projection";
+    if (model.implementationType !== "managed" && model.implementationType !== "unmanaged" && !projection) throw new Error(`${file.filename}: unsupported ${model.implementationType} BDEF (interface BDEFs are outside R5)`);
     const root = basename(file.filename).replace(/\.bdef\.asbdef$/, "");
     const iface = `zif_rap_${digest(upper(root))}`;
     let body = `INTERFACE ${iface} PUBLIC.\n`;
     const responses = new Map();
-    const plan = {root, iface, model, entities: []};
+    const plan = {root, iface, model, entities: [], projection};
     plans.push(plan);
     for (const [index, entity] of model.entities.entries()) {
-      if (entity.associations.length || entity.functions.length || entity.determineActions.length) throw new Error(`${entity.entity}: associations/functions/determine actions are outside R1`);
+      if (entity.functions.length || entity.determineActions.length) throw new Error(`${entity.entity}: functions/determine actions are outside R5`);
       const p = `e${index}`;
       const fields = fieldsOf(entity.entity);
-      plan.entities.push({entity, prefix: p, fields, source: views.get(upper(entity.entity)).source});
+      const view = views.get(upper(entity.entity));
+      const planned = {entity, prefix: p, fields, source: view.source, view};
+      plan.entities.push(planned);
+      planned.tree = treeOf(model, entity, view, projection);
+      if (projection) projectionOf(plan, planned, plans);
       if (entity.persistentTable && !reg.getObject("TABL", entity.persistentTable)) throw new Error(`${entity.entity}: missing persistent table ${entity.persistentTable}`);
       for (const mapping of entity.mappings) {
         const table = reg.getObject("TABL", mapping.table);
@@ -169,9 +317,12 @@ export function generate(files, dependencies = []) {
       // R4: instance feature control. The result row is the key and the
       // %features group (%update, %delete, %action-<a>, %field-<f>, each an
       // if_abap_behv=>fc-o / fc-f value), the request the same flags
+      const creating = entity.associations.filter(a => a.operations.some(o => o.kind === "create"));
+      if (creating.length) body += struct(`${p}_assocs`, creating.map(a => [a.name.toLowerCase(), "x LENGTH 1"]));
       const featureFields = [
         ...entity.operations.filter(o => !o.use && o.kind !== "create").map(o => [`%${o.kind}`, "x LENGTH 1"]),
         ...(entity.actions.length ? [["%action", `${p}_actions`]] : []),
+        ...(creating.length ? [["%assoc", `${p}_assocs`]] : []),
         ["%field", `${p}_control`],
       ];
       body += struct(`${p}_feat`, featureFields);
@@ -192,7 +343,7 @@ export function generate(files, dependencies = []) {
         poolBind("INSTANCE FEATURES RESULT", ref, `${iface}=>t_${p}_features_result`);
       }
       for (const [a, action] of entity.actions.entries()) {
-        if (action.use || action.modifiers.length || action.parameter?.deep || action.parameter?.table || action.result?.deep) throw new Error(`${entity.entity}~${action.name}: unsupported action modifiers/parameter shape`);
+        if ((action.use && !projection) || action.modifiers.length || action.parameter?.deep || action.parameter?.table || action.result?.deep) throw new Error(`${entity.entity}~${action.name}: unsupported action modifiers/parameter shape`);
         const param = action.parameter ? fieldsOf(action.parameter.name) : undefined;
         if (param) body += struct(`${p}_a${a}_param`, pairs(param));
         for (const kind of ["IMPORT", "RESULT"]) {
@@ -212,6 +363,9 @@ export function generate(files, dependencies = []) {
         }
       }
     }
+    // R5: the derived types of every association of the BDEF, once the
+    // types of all its entities exist (a parent may come before its child)
+    for (const e of plan.entities) body += associationTypes(plan, e, bind);
     for (const [kind, fields] of responses) {
       if (fields.some(([n]) => !ident(n))) throw new Error(`${root}: response aliases must be ABAP identifiers`);
       const name = `r_${kind.toLowerCase()}`;
@@ -231,8 +385,13 @@ export function generate(files, dependencies = []) {
     const owner = plans.flatMap(p => p.entities.map(e => ({p, e}))).find(({e}) => upper(e.entity.entity) === upper(name));
     if (!owner) return {view, fields};
     const {entity} = owner.e;
+    // R5: a child is created through its parent's association, so its set
+    // takes a POST (through the navigation) when a parent creates it
+    const created = owner.p.entities.some(x => x.tree.assocs.some(a => a.create && a.target === upper(entity.entity)));
+    const assocs = owner.e.tree.assocs;
+    if (owner.p.projection) return {view, fields, assocs, behavior: {...projectedBehavior(owner.e), create: projectedBehavior(owner.e).create || created}};
     const has = op => entity.operations.some(o => o.kind === op && !o.use);
-    return {view, fields, behavior: {create: has("create"), update: has("update"), delete: has("delete"),
+    return {view, fields, assocs, behavior: {create: has("create") || created, update: has("update"), delete: has("delete"),
       control: fieldControl(entity, fields), actions: entity.actions.map(a => a.name),
       // R4: the `etag master` element is the entity type's ETag
       etag: entity.etag?.kind === "master" ? entity.etag.field : undefined}};

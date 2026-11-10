@@ -87,12 +87,56 @@ export function fieldControl(entity, fields) {
   return control;
 }
 
+// the runtime's name of a field: the CDS element upper case
+function fieldName(e, name) {
+  const f = e.fields.find(x => upper(x.name) === upper(name));
+  if (!f) throw new Error(`${e.entity.entity}: association pair names ${name}, no element of the entity`);
+  return upper(f.name);
+}
+
+// R5: one projection entity as the registry answers it
+function projectionEntry(plan, e) {
+  const {entity, base} = e;
+  const used = op => entity.operations.some(o => o.kind === op);
+  return {
+    entity: upper(entity.entity), alias: entity.alias ?? entity.entity, bdef: upper(plan.root),
+    baseBdef: upper(plan.base.root), baseEntity: upper(base.entity.entity),
+    create: used("create"), update: used("update"), delete: used("delete"),
+    actions: entity.actions.map(a => upper(a.name)),
+    assocs: e.tree.assocs.map(a => ({name: upper(a.name), create: a.create,
+      target: plan.entities.find(x => upper(x.entity.entity) === a.target)})),
+    fields: e.fields.map(f => ({name: upper(f.name), base: upper(f.from)})),
+    readonly: entity.fields.flatMap(g => g.fields).map(upper),
+  };
+}
+
+function projectionCase(x) {
+  return `      WHEN ${lit(x.entity)}.
+        rs_projection-entity = ${lit(x.entity)}.
+        rs_projection-alias = ${lit(x.alias)}.
+        rs_projection-bdef = ${lit(x.bdef)}.
+        rs_projection-base_bdef = ${lit(x.baseBdef)}.
+        rs_projection-base_entity = ${lit(x.baseEntity)}.
+${["create", "update", "delete"].filter(op => x[op]).map(op => `        rs_projection-${op} = abap_true.\n`).join("")}`
+    + x.actions.map(a => `        APPEND ${lit(a)} TO rs_projection-actions.\n`).join("")
+    + x.assocs.map(a => `        APPEND ${lit(a.name)} TO rs_projection-assocs.\n`
+      + (a.create ? `        APPEND ${lit(a.name)} TO rs_projection-creates.\n` : "")).join("")
+    + x.fields.map(f => `        ls_map-name = ${lit(f.name)}.\n        ls_map-base = ${lit(f.base)}.\n        APPEND ls_map TO rs_projection-fields.\n`).join("")
+    + x.readonly.map(f => `        APPEND ${lit(f)} TO rs_projection-readonly.\n`).join("");
+}
+
 /** the generated sources of the runtime: one adapter per plan and the registry */
 export function runtimeOutputs(plans, files) {
   const outputs = {};
   const registry = [];
+  const projections = [];
   for (const plan of plans) {
     const {model, iface, root} = plan;
+    // R5: a projection runs on its base: no adapter, a registry entry
+    if (plan.projection) {
+      for (const e of plan.entities) projections.push(projectionEntry(plan, e));
+      continue;
+    }
     if (model.implementationType !== "managed") throw new Error(`${root}: only managed behavior definitions run (R2)`);
     if (model.withDraft) throw new Error(`${root}: draft is outside R2`);
     if (!model.implementationClass) throw new Error(`${root}: no behavior pool`);
@@ -131,6 +175,27 @@ export function runtimeOutputs(plans, files) {
       for (const op of ["update", "delete"]) if (entity.operations.some(o => o.kind === op && !o.use && featured(o.options))) model_ += `    ls_entity-feat_${op} = abap_true.\n`;
       if (entity.operations.some(o => o.kind === "create" && featured(o.options))) throw new Error(`${entity.entity}: create ( features : instance ) has no instance to ask (global features are outside R4)`);
       if (entity.numbering === "early") model_ += "    ls_entity-numbering = 'E'.\n";
+      // R5: the entity's place in the tree, and its associations
+      const tree = e.tree ?? {assocs: []};
+      let top = e;
+      for (let depth = 0; top.tree?.parent; depth++) {
+        if (depth > 16) throw new Error(`${entity.entity}: the parent chain does not end`);
+        top = plan.entities.find(x => upper(x.entity.entity) === top.tree.parent);
+      }
+      model_ += `    ls_entity-root = ${lit(upper(top.entity.entity))}.\n`;
+      if (tree.parent) model_ += `    ls_entity-parent = ${lit(tree.parent)}.\n    ls_entity-parent_assoc = ${lit(upper(tree.parentAssoc))}.\n`;
+      if (entity.lock?.kind) model_ += `    ls_entity-lock = '${entity.lock.kind === "master" ? "M" : "D"}'.\n`;
+      const createdBy = plan.entities.filter(x => (x.tree?.assocs ?? []).some(a => a.create && a.target === upper(entity.entity)));
+      if (entity.numbering === "early" && !entity.operations.some(o => o.kind === "create" && !o.use) && !createdBy.length) throw new Error(`${entity.entity}: early numbering without create`);
+      for (const a of tree.assocs) {
+        const target = plan.entities.find(x => upper(x.entity.entity) === a.target);
+        model_ += `    CLEAR ls_assoc.\n    ls_assoc-name = ${lit(upper(a.name))}.\n    ls_assoc-target = ${lit(a.target)}.\n    ls_assoc-kind = '${a.kind}'.\n`
+          + (a.create ? "    ls_assoc-create = abap_true.\n" : "")
+          + (a.featCreate ? "    ls_assoc-feat_create = abap_true.\n" : "")
+          + (a.create && target.entity.numbering === "early" ? "    ls_assoc-numbering = 'E'.\n" : "")
+          + a.pairs.map(pr => `    CLEAR ls_pair.\n    ls_pair-source = ${lit(fieldName(e, pr.source))}.\n    ls_pair-target = ${lit(fieldName(target, pr.target))}.\n    APPEND ls_pair TO ls_assoc-pairs.\n`).join("")
+          + "    APPEND ls_assoc TO ls_entity-assocs.\n";
+      }
       for (const f of e.fields) {
         const mapped = mapping?.fields.find(m => upper(m.field) === upper(f.name))?.column;
         const column = mapped ?? (upper(e.source) === upper(table) && f.base ? f.base : f.name);
@@ -232,7 +297,7 @@ export function runtimeOutputs(plans, files) {
         if (found.length) handler = found[0].h.name;
         return found[0];
       };
-      const wantsFeatures = entity.operations.some(o => featured(o.options)) || entity.actions.some(a => featured(a.options));
+      const wantsFeatures = entity.operations.some(o => featured(o.options)) || entity.actions.some(a => featured(a.options)) || tree.assocs.some(a => a.featCreate);
       const feat = special("FEATURES");
       if (wantsFeatures && !feat) throw new Error(`${entity.entity}: features : instance without a FOR INSTANCE FEATURES method in ${pool}`);
       if (feat) {
@@ -243,6 +308,7 @@ export function runtimeOutputs(plans, files) {
         const flags = [
           ...entity.operations.filter(o => !o.use && o.kind !== "create").map(o => `%${o.kind}`),
           ...entity.actions.map(a => `%action-${a.name.toLowerCase()}`),
+          ...tree.assocs.filter(a => a.create).map(a => `%assoc-${a.name.toLowerCase()}`),
         ];
         const body = `    DATA lt_keys TYPE ${iface}=>t_${p}_features_key.\n    DATA ls_key LIKE LINE OF lt_keys.\n    DATA ls_request TYPE ${iface}=>${p}_feat.\n`
           + `    FIELD-SYMBOLS <lt_rows> TYPE ${iface}=>t_${p}_read_result.\n    FIELD-SYMBOLS <ls_row> LIKE LINE OF <lt_rows>.\n`
@@ -257,10 +323,39 @@ export function runtimeOutputs(plans, files) {
         methods += `  METHOD ${method}.\n* instance features: ${feat.h.name}->${feat.m.name}\n${body}  ENDMETHOD.\n\n`;
         tables += `      WHEN ${lit(`${upper(entity.entity)}~FEATURES RESULT~`)}.\n        CREATE DATA rr_table TYPE ${iface}=>t_${p}_features_result.\n`;
       }
-      if (entity.numbering === "early") {
-        const num = special("NUMBERING");
+      // R5: the cba numbering of each child this entity creates by association
+      for (const [k, a] of tree.assocs.entries()) {
+        const target = plan.entities.find(x => upper(x.entity.entity) === a.target);
+        if (!a.create || target.entity.numbering !== "early") continue;
+        const found = handlers.flatMap(h => h.methods.filter(m => m.implicit?.form === "NUMBERING"
+          && m.implicit.clauses.some(x => x.assoc && names.has(upper(x.source)) && upper(x.assoc) === upper(a.name))).map(m => ({h, m})));
+        if (found.length !== 1) throw new Error(`${entity.entity}\\${a.name}: early numbering of ${target.entity.entity} needs one FOR NUMBERING ... FOR CREATE ${entity.alias ?? entity.entity}\\${a.name} method in ${pool} (found ${found.length})`);
+        if (handler && handler !== found[0].h.name) throw new Error(`${entity.entity}: handler methods in two classes (${handler}, ${found[0].h.name})`);
+        handler = found[0].h.name;
+        const method = `${p}_cba${k}`;
+        defs += `    METHODS ${method}\n      IMPORTING\n        io_handler  TYPE REF TO object\n        ir_rows     TYPE REF TO data\n        ir_mapped   TYPE REF TO data\n        ir_failed   TYPE REF TO data\n        ir_reported TYPE REF TO data.\n`;
+        calls += `      WHEN ${lit(`${upper(entity.entity)}~%NUMBERING\\${upper(a.name)}`)}.\n        ${method}( io_handler = io_handler ir_rows = ir_rows ir_mapped = ir_mapped ir_failed = ir_failed ir_reported = ir_reported ).\n`;
+        const x = `${p}_x${k}`;
+        const body = `    FIELD-SYMBOLS <lt_rows> TYPE ${iface}=>t_${x}_create.\n    FIELD-SYMBOLS <ls_mapped> TYPE ${iface}=>r_mapped.\n`
+          + `    FIELD-SYMBOLS <ls_failed> TYPE ${iface}=>r_failed.\n    FIELD-SYMBOLS <ls_reported> TYPE ${iface}=>r_reported.\n\n`
+          + "    ASSIGN ir_rows->* TO <lt_rows>.\n    ASSIGN ir_mapped->* TO <ls_mapped>.\n    ASSIGN ir_failed->* TO <ls_failed>.\n    ASSIGN ir_reported->* TO <ls_reported>.\n"
+          + callMethod(found[0].h, found[0].m, {entities: "<lt_rows>", mapped: "<ls_mapped>", failed: "<ls_failed>", reported: "<ls_reported>"});
+        methods += `  METHOD ${method}.\n* early numbering of a create by association: ${found[0].h.name}->${found[0].m.name}\n${body}  ENDMETHOD.\n\n`;
+      }
+      // the derived tables of the associations (R5), for the bridge and EML
+      for (const [k, a] of tree.assocs.entries()) {
+        const x = `${p}_x${k}`;
+        const target = plan.entities.find(t => upper(t.entity.entity) === a.target);
+        tables += `      WHEN ${lit(`${upper(entity.entity)}~CREATE BY~${upper(a.name)}`)}.\n        CREATE DATA rr_table TYPE ${iface}=>t_${x}_create.\n`
+          + `      WHEN ${lit(`${upper(entity.entity)}~READ BY~${upper(a.name)}`)}.\n        CREATE DATA rr_table TYPE ${iface}=>t_${x}_rimport.\n`
+          + `      WHEN ${lit(`${upper(entity.entity)}~READ BY RESULT~${upper(a.name)}`)}.\n        CREATE DATA rr_table TYPE ${iface}=>t_${target.prefix}_read_result.\n`
+          + `      WHEN ${lit(`${upper(entity.entity)}~LINK~${upper(a.name)}`)}.\n        CREATE DATA rr_table TYPE ${iface}=>t_${x}_link.\n`;
+      }
+      if (entity.numbering === "early" && entity.operations.some(o => o.kind === "create" && !o.use)) {
+        const num = handlers.flatMap(h => h.methods.filter(m => m.implicit?.form === "NUMBERING" && m.implicit.clauses.some(x => !x.assoc && names.has(upper(x.entity)))).map(m => ({h, m})))[0];
         if (!num) throw new Error(`${entity.entity}: early numbering without a FOR NUMBERING ... FOR CREATE method in ${pool}`);
-        if (!entity.operations.some(o => o.kind === "create" && !o.use)) throw new Error(`${entity.entity}: early numbering without create`);
+        if (handler && handler !== num.h.name) throw new Error(`${entity.entity}: handler methods in two classes (${handler}, ${num.h.name})`);
+        handler = num.h.name;
         const method = `${p}_num`;
         defs += `    METHODS ${method}\n      IMPORTING\n        io_handler  TYPE REF TO object\n        ir_rows     TYPE REF TO data\n        ir_mapped   TYPE REF TO data\n        ir_failed   TYPE REF TO data\n        ir_reported TYPE REF TO data.\n`;
         calls += `      WHEN ${lit(`${upper(entity.entity)}~%NUMBERING`)}.\n        ${method}( io_handler = io_handler ir_rows = ir_rows ir_mapped = ir_mapped ir_failed = ir_failed ir_reported = ir_reported ).\n`;
@@ -301,6 +396,8 @@ CLASS ${cls} IMPLEMENTATION.
     DATA ls_entity TYPE zif_osd_rap_bo=>ty_entity.
     DATA ls_field TYPE zif_osd_rap_bo=>ty_field.
     DATA ls_callable TYPE zif_osd_rap_bo=>ty_callable.
+    DATA ls_assoc TYPE zif_osd_rap_bo=>ty_assoc.
+    DATA ls_pair TYPE zif_osd_rap_bo=>ty_pair.
 
 ${model_}  ENDMETHOD.
 
@@ -346,6 +443,7 @@ ${methods}ENDCLASS.
   }
   if (!registry.length) return outputs;
   registry.sort((a, b) => a.bdef.localeCompare(b.bdef));
+  projections.sort((a, b) => a.entity.localeCompare(b.entity));
   outputs["zcl_osd_rap_registry.clas.abap"] = `CLASS zcl_osd_rap_registry DEFINITION PUBLIC FINAL CREATE PUBLIC.
 * generated by tools/rap/rap-runtime-gen.mjs - do not edit
 * the behavior definitions of the tree and their runtime adapters
@@ -362,6 +460,13 @@ ${registry.map(r => `      WHEN ${lit(r.bdef)}.\n        CREATE OBJECT ro_bo TYP
 
   METHOD zif_osd_rap_registry~list.
 ${registry.map(r => `    APPEND ${lit(r.bdef)} TO rt_bdef.\n`).join("")}  ENDMETHOD.
+
+  METHOD zif_osd_rap_registry~projection.
+* R5: the projection entities of the tree, each over its base entity
+    DATA ls_map TYPE zif_osd_rap_registry=>ty_map.
+    CASE to_upper( iv_entity ).
+${projections.map(projectionCase).join("")}    ENDCASE.
+  ENDMETHOD.
 
 ENDCLASS.
 `;
