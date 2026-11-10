@@ -145,8 +145,8 @@ the save sequence); nothing measured on a system.
   and not cleared on update. A refused row changes nothing.
 - **Numbering.** `field ( numbering : managed )` on a key of type `x LENGTH 16`
   draws a UUID on create (early). An existing key is a conflict (409).
-  `early numbering` / `late numbering` through the pool are refused by the
-  generator.
+  `early numbering` draws the key in the pool's `FOR NUMBERING` method (R4,
+  below); `late numbering` is refused by the generator.
 - **Determinations on modify** run after each `modify`/`execute` request for
   the instances whose trigger it touched (`create`, `update`, or a field), each
   once per instance per request; changes they make trigger other
@@ -181,7 +181,8 @@ the save sequence); nothing measured on a system.
   a later failing member undoes a create, update, delete or action that
   had already run (`test/rap-serve.mjs`). Each operation is still its own
   save sequence (validations run per operation, not once at the end).
-- **Locks, ETags, authorization, features** are parsed and ignored.
+- **Locks and authorization** are parsed and ignored; ETags, instance
+  features and early numbering are R4 (below).
 
 ## Handler methods
 
@@ -339,19 +340,107 @@ hands SADL's `execute_action` the context of a function import
 runs, the key and body parameters go through the MaxLength check (400), the
 entity lock is taken (409), and `If-Match` is checked as for a PATCH: 412 on
 a mismatch, 428 without it when the entity type has an ETag. `NoteType` has
-none (the generator does not map `etag master`), so the demo needs no
-`If-Match` and a tag it sends is 412. An action the BDEF does not declare is
+none (its BDEF declares no `etag master`), so the demo needs no
+`If-Match` and a tag it sends is 412; the trip demo of R4 has one. An action the BDEF does not declare is
 no operation of the service (404, `Unknown operation`); a refusal of the
 behavior (FAILED, a validation) is 400 as over V2 (`test/rap-serve.mjs`).
 
 ### Not in R2c
 
-Service bindings, `Edm.Guid` for UUID keys, ETags and `If-Match`, a
+Service bindings, `Edm.Guid` for UUID keys, a
 `$batch` changeset as one RAP transaction (each operation is its own save
 sequence, committed or rolled back with the changeset),
 deep insert through compositions, action parameters, static and factory
 actions, messages as `sap-message` headers (only the error body), a Fiori
 Elements app over the service.
+
+## R4: the flight constructs that need no composition
+
+R4's goal was the managed business objects of the flight reference
+scenario (`packs/rap-flight`) served end to end like the note demo. It is
+not reached, and the measurement says why before anything was built:
+`node tools/rap-flight/constructs.mjs` lists, per behavior definition of
+the scenario, every construct it and its pools use and what this tree does
+with it (runs, ignored, refused), and the first refusal of the generators.
+Every one of the ten BDEFs of the managed scenario and the reuse layer is
+still refused at its first wall after R4 -- projection `use` (5),
+compositions / associations (`/DMO/I_TRAVEL_M`, `/DMO/I_SUPPLEMENT`,
+`/DMO/R_AGENCYTP` at a determine action), an interface BDEF, unparsed
+singleton grammar -- and behind those walls draft (7 of 10).
+
+What R4 makes run are the constructs those BDEFs use that need no
+composition, in the order of how many BDEFs each unblocks, on the trip
+demo of [`src/rap_r4`](../src/rap_r4/README.md) (`ZI_RAP_TRIP`, service
+`ZUI_RAP_TRIP`, `test/rap-r4.mjs`):
+
+| construct | flight BDEFs | before | after |
+| --- | ---: | --- | --- |
+| `etag master <field>` | 4 | parsed, ignored | the entity type's ETag (`etag: true` on the property, `set_as_etag`): V2 and V4 answer it, a PATCH, PUT, DELETE or V4 bound action without `If-Match` is 428, with a stale one 412 |
+| `@Semantics` administrative fields | (all 4 above) | not filled | stamped by the runtime: `createdAt` / `createdBy` on create, `lastChangedAt` / `localInstanceLastChangedAt` / `lastChangedBy` / `localInstanceLastChangedBy` on create and change |
+| `FOR INSTANCE FEATURES` with `update / delete / action ( features : instance )` | 2 | the method refused, the options ignored | an update, delete or action asks the method for the instance and is refused when it answers `if_abap_behv=>fc-o-disabled` |
+| `early numbering` with `FOR NUMBERING ... FOR CREATE ent` | 2 | refused | the method draws the keys of a create before the instances enter the buffer |
+| `association _x { create ( features : instance ); }` | 1 | refused | refused: it controls a create by association, which needs compositions (below) |
+
+**ETag.** `srvd-gen.mjs` marks the `etag master` element `etag: true`, so
+the generated MPC calls `set_as_etag` and the gateway's existing ETag path
+(V2 dispatcher, V4 facade, the bound-action check of #901) does the rest:
+`W/"<value>"`, 428 without `If-Match`, 412 on a mismatch. A field nobody
+writes would make a constant ETag, so the runtime fills the administrative
+fields itself, as the managed framework does on a system: the element's
+`@Semantics` annotation names the field, the time is `GET TIME STAMP`, and
+a new stamp is always later than the field's current value and the last
+one given in the process, also where the clock has not moved. The stamp
+is set when the instance changes in the buffer (create, update, a change
+an action or determination makes), so the ETag a client reads after an
+action is not the one it sent. `etag dependent` is parsed and ignored (an
+entity whose ETag is its master's needs compositions first).
+
+**Instance features.** A BDEF that declares `features : instance` on an
+operation or action must have a `FOR INSTANCE FEATURES` method (the
+generator refuses it otherwise). Before an update, delete or such an action
+of one instance, the runtime calls the method with that instance's key and
+a request with every flag on, and reads `%update`, `%delete` or
+`%action-<a>` of the result row for that key: `fc-o-disabled` refuses the
+operation with `%fail-cause = if_abap_behv=>cause-disabled` and a message
+(`Update of trip is disabled`, `Delete of trip is disabled`, `Action ACCEPT
+of trip is disabled`), which the OData bridge answers 400 like any other
+refusal. **The text is this runtime's, not measured on a system**, and so
+are the values of `if_abap_behv=>fc` (a pool compares and assigns the names
+only). Inside a handler (IN LOCAL MODE) features are not asked, as on a
+system. `create ( features : instance )` is refused (there is no instance to
+ask; global features are not done), `%field` of the result is not read
+(dynamic field control), and the service does not publish operation control
+(`Core.OperationAvailable`, `sap:updatable-path`): a client learns of a
+disabled operation from the 400.
+
+**Early numbering.** A create of an entity with `early numbering` hands its
+rows (a `TABLE FOR CREATE`) to the `FOR NUMBERING` method first, then takes
+the key of each row from the `MAPPED` line with its `%cid` (a row without a
+`%cid` gets a transient one for the call). A row the method fails is
+dropped with the method's FAILED / REPORTED; a row it neither maps nor fails
+keeps the key it came with. Field control still applies afterwards, so a
+`readonly` key is drawn by the method and refused from the client.
+
+### What stays outside, and why each needs a design of its own
+
+- **Compositions** (`association _x { create; }`, `TABLE FOR CREATE
+  ent\_x` with `%target`, `READ ... BY \_x`, `FOR NUMBERING ... FOR CREATE
+  ent\_x`, `lock / authorization / etag dependent by _parent`): the buffer
+  would hold a tree, the child's key extends the parent's, a delete
+  cascades, the save writes several tables in parent order, and the OData
+  side becomes navigation and deep insert. The first wall of the travel and
+  supplement BOs.
+- **Several behavior pools per BDEF** (`/DMO/I_TRAVEL_M` has three): the
+  adapter reads the header's pool only; follows from compositions.
+- **Draft** (7 of the 10 BDEFs): a second buffer with its own tables,
+  `%is_draft` in every key, the draft actions, a total ETag.
+- **Projection and interface BDEFs** (`use create`, `use action`, 6 of 10).
+- **Late numbering** (`/DMO/R_AGENCYTP`): `%pid` as the identity until
+  `adjust_numbers` in the save gives the final key, which then has to reach
+  MAPPED, the OData answer and every `%cid_ref`.
+- **`with additional save` / `with unmanaged save`** (`save_modified`), the
+  **internal** and **factory** actions, **determine actions**, and
+  **global authorization**; each is refused by the generator with its name.
 
 ## Not in R2
 
@@ -361,4 +450,4 @@ EML; draft; unmanaged save, `with additional save`,
 factory and internal actions, action parameters and results other than
 `$self`; functions; delete triggers; feature and authorization control; locks
 and ETags; projections. Each is refused by the generator or ignored as listed
-above.
+above. R4 (above) adds the ETag, instance features and early numbering.

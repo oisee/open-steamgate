@@ -12,6 +12,11 @@ the pack's `src/` layered over the tree as the build layers it), runs
 the tables. A run takes a couple of minutes. The one column it does not
 produce is the BDEF table's "also in it".
 
+`constructs.mjs` is RAP R4's measurement: per behavior definition of the
+managed scenario and the reuse layer, the behavior constructs and handler
+forms it uses and what the generators and runtime do with each (runs,
+ignored, refused), and its first refusal. Seconds, from the same clone.
+
 `seed-capture.mjs` boots the transpiled runtime, runs the pack's seed class
 (`ZCL_OSD_RAPFLIGHT_SEED`, which runs the scenario's own data generator)
 inside one dialog step and writes every table the generator fills into

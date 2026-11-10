@@ -288,7 +288,7 @@ the columns do not add up):
 | 8 | **abaplint parser gaps** on 7.5x syntax: `CLASS ... DEFINITION DEFERRED FOR TESTING` (8 objects), `CORRESPONDING ... DISCARDING DUPLICATES` (7), `CORRESPONDING #( a FROM b USING k = k ... )` (1), `MAPPING %fail = DEFAULT VALUE #( )` (2), `TYPES ... WITH INDICATORS` / `UPDATE ... INDICATORS` (1), a `SWITCH` over `REDUCE ... LET` (1) | 12 | pools and the data generators; the generators are overlaid around them |
 | 9 | **Released DDIC missing from open-abap-core**: `ABP_LOCINST_LASTCHANGE_USER` (7 tables), `SDRAFT_UUID` (2), the views `I_Currency` (24 files name it), `I_Country` / `I_CountryText` (25) | 9 tables + 2 classes | stand-ins in the overlay |
 | 10 | **Number ranges**: `cl_numberrange_intervals` has only a no-op `create`, `cl_numberrange_runtime=>number_get` has no `quantity`; `CL_ABAP_RANDOM_INT8`, `CL_ABAP_RANDOM_FLOAT` absent | 2 | the data generators, overlaid |
-| 11 | **Features / authorization / locks** (`features : instance`, `authorization master`, `lock master`, `etag master`): parsed and ignored by R2 | 4 BDEFs | not a wall yet, because nothing reaches them |
+| 11 | **Features / authorization / locks** (`features : instance`, `authorization master`, `lock master`, `etag master`): parsed and ignored by R2; since R4 `etag master`, instance features and early numbering run ([rap-runtime.md](rap-runtime.md), "R4"), authorization and locks are still ignored | 4 BDEFs | not a wall yet, because nothing reaches them |
 | 12 | **`GET BADI` / `CALL BADI`**, BAdI definitions (ENHS) | 1 | the data generator, overlaid |
 | 13 | **Late numbering** | 1 BDEF | `/DMO/R_AGENCYTP` |
 
@@ -298,6 +298,21 @@ BDEF model for this scenario needs compositions and projections (4-5)
 before draft (6). The test doubles (7) are a separate track and gate
 nothing but the tests. The parser gaps (8) are abaplint issues, each with
 a one-line reproducer in the table.
+
+## Per construct (R4)
+
+`node tools/rap-flight/constructs.mjs` is the finer measurement R4 started
+from: per BDEF of `managed/` and the reuse layer (`--all` adds the
+extension chapter), every behavior construct and every handler form of its
+pools, each with what the tree does with it (runs, ignored, refused; the
+`SUPPORT` table in the script names the test behind each "runs"), and the
+first refusal of `bdef-gen` + `rap-runtime-gen` over the BDEF, the
+scenario's DDIC and the pool. R4 moved `etag master` (4 BDEFs), early
+numbering and `FOR NUMBERING` (2), `features : instance` and `FOR INSTANCE
+FEATURES` (2) from ignored or refused to running; the first wall of every
+BDEF is unchanged, which is the measurement's point: compositions,
+projections and draft are what stands between this tree and the scenario
+([rap-runtime.md](rap-runtime.md), "R4").
 
 ## Not done
 

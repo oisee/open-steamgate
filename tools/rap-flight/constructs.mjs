@@ -52,24 +52,25 @@ export const SUPPORT = {
   "persistent table": ["runs", "test/rap-serve.mjs"],
   "with additional save": ["refused", "rap-runtime-gen: behavior options"],
   "with unmanaged save": ["refused", "rap-runtime-gen: behavior options / no persistent table"],
-  "etag master": ["ignored", "parsed; no ETag in the service"],
+  "etag master": ["runs", "test/rap-r4.mjs: ETag, 428, 412 over V2 and V4"],
   "etag dependent": ["ignored", "parsed; the ETag of a dependent entity is its master's"],
   "total etag": ["ignored", "draft only"],
   "lock master": ["ignored", "the gateway's entity lock (V4) is the only lock"],
   "lock dependent": ["ignored", "as lock master"],
   "authorization master": ["ignored", "no authorization checks"],
   "authorization dependent": ["ignored", "no authorization checks"],
-  "early numbering": ["refused", "rap-runtime-gen: numbering through the pool"],
-  "late numbering": ["refused", "rap-runtime-gen: late numbering (adjust_numbers) needs a design"],
+  "early numbering": ["runs", "test/rap-r4.mjs: FOR NUMBERING draws the key"],
+  "late numbering": ["refused", "rap-runtime-gen: late numbering (adjust_numbers, %pid) is outside R4"],
   "numbering : managed": ["runs", "test/rap-serve.mjs"],
   "create/update/delete": ["runs", "test/rap-serve.mjs"],
-  "update/delete ( features : instance )": ["ignored", "x"],
+  "update/delete ( features : instance )": ["runs", "test/rap-r4.mjs: disabled update and delete are 400"],
   "field ( features : instance )": ["ignored", "dynamic field control: the features result's %field is not read"],
   "field control readonly/mandatory": ["runs", "test/rap-serve.mjs"],
   "association (read)": ["refused", "bdef-gen: associations are outside R1"],
   "association create": ["refused", "bdef-gen: compositions (create by association) need a design"],
   "action": ["runs", "test/rap-serve.mjs"],
-  "action ( features : instance )": ["ignored", "x"],
+  "action ( features : instance )": ["runs", "test/rap-r4.mjs: a disabled action is 400"],
+  "association create ( features : instance )": ["refused", "with the association create it controls"],
   "internal action": ["refused", "rap-runtime-gen: action modifiers"],
   "factory action": ["refused", "rap-runtime-gen: action modifiers"],
   "static action": ["refused", "rap-runtime-gen: action modifiers"],
@@ -88,11 +89,11 @@ export const SUPPORT = {
   "FOR READ": ["runs", "lower-derived (R3)"],
   "FOR READ by association": ["refused", "lower-derived: unsupported clause"],
   "FOR LOCK": ["ignored", "lowered (R3), never called: no locks"],
-  "FOR INSTANCE FEATURES": ["refused", "x"],
+  "FOR INSTANCE FEATURES": ["runs", "test/rap-r4.mjs"],
   "FOR GLOBAL FEATURES": ["refused", "lower-derived: GLOBAL"],
   "FOR INSTANCE AUTHORIZATION": ["refused", "lower-derived: INSTANCE AUTHORIZATION"],
   "FOR GLOBAL AUTHORIZATION": ["refused", "lower-derived: GLOBAL"],
-  "FOR NUMBERING (create)": ["refused", "x"],
+  "FOR NUMBERING (create)": ["runs", "test/rap-r4.mjs"],
   "FOR NUMBERING (create by association)": ["refused", "lower-derived: create by association"],
   "FOR PRECHECK": ["refused", "lower-derived: PRECHECK"],
   "saver save_modified": ["refused", "unmanaged/additional save"],
@@ -134,7 +135,7 @@ export function bdefConstructs(model) {
       const create = a.operations.find(o => o.kind === "create");
       if (create) {
         add("association create", `${n}\\${a.name}`);
-        if (has(create.options, "features", "instance")) add("action ( features : instance )".replace("action", "association create"), `${n}\\${a.name}`);
+        if (has(create.options, "features", "instance")) add("association create ( features : instance )", `${n}\\${a.name}`);
       } else add("association (read)", `${n}\\${a.name}`);
     }
     for (const a of e.actions.filter(x => !x.use)) {
