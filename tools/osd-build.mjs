@@ -36,15 +36,14 @@ import {ensureUrlLibrary, urlLibraryPath} from "./osd-url-lib.mjs";
 import {checkLayerVersions} from "./layer-version/index.mjs";
 import {compareGenerations} from "./osd-generation-diff.mjs";
 import {execFileSync} from "node:child_process";
-import {run} from "./osd-build-command.mjs";
-import {generatorClosureOf, generatorIdentityOf, runGeneratorsOf} from "./osd-build-generators.mjs";
+import {generatorClosureOf, generatorIdentityOf, recordedRun, runGeneratorsOf} from "./osd-build-generators.mjs";
 import {existsSync, lstatSync, mkdirSync, openSync, closeSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync} from "node:fs";
 import {basename, dirname, join, relative, resolve, sep} from "node:path";
 import {fileURLToPath, pathToFileURL} from "node:url";
 import {buildIdentity, assertToolchain, describeBuild} from "./osd-transpiler.mjs";
 import {describeDuplicates, excludePatterns, layers} from "./osd-inputs.mjs";
 import {transpile, selectedModules, isBinaryFilename, listFiles} from "./osd-transpile.mjs";
-import {makeReadRecord, readEntry, READS, sha256} from "./osd-read-record.mjs";
+import {makeReadRecord, markIncomplete, readEntry, readGeneratorLog, READS, sha256, withSeedReads} from "./osd-read-record.mjs";
 import {inputFoldersOf, packsOf, seedsBuilt, userFoldersOf, webappsOf} from "./osd-packs.mjs";
 import {describeUnfetched, unfetched} from "./osd-fetch.mjs";
 import {toolCommand, hosted} from "./osd-host.mjs";
@@ -797,14 +796,13 @@ export async function build(options = {}) {
     completeSourceSnapshot(tmp);
     const objects = made.objects;
 
-    if (existsSync(readsLog)) {
-      for (const line of readFileSync(readsLog, "utf8").split("\n").filter(Boolean)) readEntries.push(JSON.parse(line));
-      rmSync(readsLog);
-    }
+    const generated = readGeneratorLog(readsLog);
+    readEntries.push(...generated.entries);
+    rmSync(readsLog, {force: true});
     // The config is read by hashOf and controls the transpiler's own input
     // list. Keep it in the same record as the source bytes.
     readEntries.push(readEntry(root, inputs.config, readFileSync(inputs.config)));
-    const readRecord = makeReadRecord(root, named, readEntries);
+    const readRecord = markIncomplete(makeReadRecord(root, named, readEntries), generated.incomplete);
     writeFileSync(join(tmp, READS), `${JSON.stringify(readRecord, null, 2)}\n`);
 
     const manifest = {
@@ -952,17 +950,15 @@ async function makePackSeeds(root, inputs, hash, log, named) {
   const [cmd, ...argv] = toolCommand(script, ["--ensure", "--output", join(layout(root).byInput, hash, "output")]);
   const generation = join(layout(root).byInput, hash);
   const readsLog = join(generation, "seed-reads.jsonl");
-  const env = {...process.env, OSD_ROOT: root, OSD_GENERATOR_READS: readsLog,
-    OSD_READ_EXCLUDE_PREFIXES: JSON.stringify([join(root, "packs/rap-flight/data")])};
+  const env = {...process.env, OSD_ROOT: root, OSD_READ_EXCLUDE_PREFIXES: JSON.stringify([join(root, "packs/rap-flight/data")])};
   if (!hosted()) argv.unshift("--import", join(TOOLS, "osd-generator-reads.mjs"));
-  for (const line of run(cmd, argv, root, env).split("\n")) {
+  for (const line of recordedRun(cmd, argv, root, env, readsLog, "seed-capture.mjs").split("\n")) {
     if (line.trim() !== "") log(line);
   }
-  const seedEntries = existsSync(readsLog) ? readFileSync(readsLog, "utf8").split("\n").filter(Boolean).map(JSON.parse) : [];
+  const seed = readGeneratorLog(readsLog);
   rmSync(readsLog, {force: true});
   const old = JSON.parse(readFileSync(join(generation, READS), "utf8"));
-  const record = makeReadRecord(root, named, [...old.reads, ...seedEntries]);
-  if (seedEntries.length === 0) record.incomplete = true;
+  const record = withSeedReads(root, named, old, seed);
   writeFileSync(join(generation, READS), `${JSON.stringify(record, null, 2)}\n`);
   const file = join(generation, "manifest.json");
   const manifest = JSON.parse(readFileSync(file, "utf8"));

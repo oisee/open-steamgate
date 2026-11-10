@@ -1,10 +1,11 @@
 // The source and hosted-binary generator identities, and the child process
 // that records generator reads while it writes gen/.
-import {createHash} from "node:crypto";
-import {existsSync, readFileSync} from "node:fs";
+import {createHash, randomUUID} from "node:crypto";
+import {appendFileSync, existsSync, readFileSync} from "node:fs";
 import {dirname, join, relative, resolve, sep} from "node:path";
 import {toolCommand, hosted} from "./osd-host.mjs";
 import {run} from "./osd-build-command.mjs";
+import {readGeneratorLog} from "./osd-read-record.mjs";
 
 export function generatorClosureOf(toolsDir, generators) {
   const seen = new Set();
@@ -30,7 +31,6 @@ export function runGeneratorsOf(toolsDir, generators, activeOverlay, root, log =
     const view = activeOverlay(overlay);
     const env = {...process.env, OSD_ROOT: root};
     if (readsLog) {
-      env.OSD_GENERATOR_READS = readsLog;
       env.OSD_READ_EXTERNAL = JSON.stringify(external);
       if (!hosted()) argv.unshift("--import", join(toolsDir, "osd-generator-reads.mjs"));
     }
@@ -39,8 +39,21 @@ export function runGeneratorsOf(toolsDir, generators, activeOverlay, root, log =
       env.OSD_ACTIVE_BUILD_OVERLAY = JSON.stringify({...view, exclude: [...view.exclude]});
       if (!hosted()) argv.unshift("--import", join(toolsDir, "osd-generator-view.mjs"));
     }
-    output += run(cmd, argv, root, env);
+    output += recordedRun(cmd, argv, root, env, readsLog, script);
   }
+  return output;
+}
+
+// A child is recorded only if its recorder says so, under a token of this
+// run: one where it was not installed (a host that does not preload it) or
+// could not take effect (a Bun binary) leaves no handshake, and the read
+// record of the generation it feeds is incomplete -- unknown, not public.
+export function recordedRun(cmd, argv, root, env, readsLog, label) {
+  if (!readsLog) return run(cmd, argv, root, env);
+  const token = randomUUID();
+  const output = run(cmd, argv, root, {...env, OSD_GENERATOR_READS: readsLog, OSD_GENERATOR_READS_TOKEN: token});
+  if (!readGeneratorLog(readsLog).tokens.has(token))
+    appendFileSync(readsLog, `${JSON.stringify({incomplete: true, path: `${label}: no recorder handshake`})}\n`);
   return output;
 }
 

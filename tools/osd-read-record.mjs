@@ -44,6 +44,33 @@ export function readEntry(root, file, bytes) {
   return {path: lexical, real, sha256: sha256(bytes), privacy, identities};
 }
 
+// A generator child's log (tools/osd-generator-reads.mjs): source reads,
+// reads it could not attribute, and the handshakes of recorded children.
+export function readGeneratorLog(file) {
+  const log = {entries: [], incomplete: [], tokens: new Set()};
+  if (!existsSync(file)) return log;
+  for (const line of readFileSync(file, "utf8").split("\n").filter(Boolean)) {
+    const item = JSON.parse(line);
+    if (typeof item.recorder === "string") log.tokens.add(item.recorder);
+    else if (item.incomplete === true) log.incomplete.push(String(item.path));
+    else log.entries.push(item);
+  }
+  return log;
+}
+
+// What a record could not see makes it incomplete, and stays so when remade.
+export function markIncomplete(record, paths) {
+  const all = [...new Set([...(record.incompleteReads ?? []), ...paths])].sort();
+  return all.length ? Object.assign(record, {incomplete: true, incompleteReads: all}) : record;
+}
+
+// The seed capture's reads join the build's record: the build's own gaps
+// stay, and a capture that recorded nothing was not recorded at all.
+export function withSeedReads(root, hashed, old, seed) {
+  return markIncomplete(makeReadRecord(root, hashed, [...old.reads, ...seed.entries]),
+    [...old.incomplete ? old.incompleteReads ?? ["build"] : [], ...seed.incomplete, ...seed.entries.length ? [] : ["seed-capture.mjs: no reads"]]);
+}
+
 export function makeReadRecord(root, hashed, entries) {
   const byReal = new Map();
   for (const [file, digest] of hashed) {
@@ -88,7 +115,7 @@ export function inspectReadRecord(root, generation) {
   catch { fail("generation read record is missing or invalid"); }
   if (record.schema !== 1 || typeof record.root !== "string" || !isAbsolute(record.root)
       || !Array.isArray(record.reads) || !Array.isArray(record.uncovered)) fail("generation read record is invalid");
-  if (record.incomplete) fail("generation read record is incomplete", "UNKNOWN_PRIVACY");
+  if (record.incomplete) fail(`generation read record is incomplete${record.incompleteReads?.length ? `: ${record.incompleteReads.join(", ")}` : ""}`, "UNKNOWN_PRIVACY");
   if (record.uncovered.length) fail(`generation has reads outside its declared hash: ${record.uncovered.join(", ")}`, "UNKNOWN_PRIVACY");
   for (const entry of record.reads) {
     if (typeof entry.path !== "string" || entry.path === "" || isAbsolute(entry.path)
