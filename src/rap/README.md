@@ -1,4 +1,4 @@
-# Managed RAP runtime (R2, R2a)
+# Managed RAP runtime (R2, R2a, R3)
 
 Runs a managed behavior definition handler-direct, and the EML statements
 over it:
@@ -7,7 +7,9 @@ control, managed UUID numbering, determinations on modify) and runs the save
 sequence (finalize, check_before_save, save into the persistent table through
 the BDEF mapping, cleanup) inside one LUW.
 
-- `zcl_osd_rap_runtime` - the runtime; `for_bdef( 'ZI_...' )` to start
+- `zcl_osd_rap_runtime` - the runtime; `for_bdef( 'ZI_...' )` to start;
+  `active( )` names the runtime whose handler runs, where EML inside a
+  handler goes (R3, handlers in the system's form)
 - `zcl_osd_rap_eml` - the EML statements' semantics over the session's
   runtimes (MODIFY / READ / COMMIT / ROLLBACK ENTITIES), static
 - `kernel_rap_eml` - the entry the transpiler's EML lowering calls
@@ -24,7 +26,7 @@ the BDEF mapping, cleanup) inside one LUW.
   `if_abap_behv`, `if_abap_behv_message` - clean-room bases and constants a
   behavior pool writes against
 
-Uses `src/luw/` (the delta) and the generated table classes of `gen/cds/`.
+Uses `src/luw/` (the delta, and `ZCL_OSD_LUW_HOLD`: whether a batch holds the LUW) and the generated table classes of `gen/cds/`.
 Tests: `test/unit/zcl_osd_rap_test` (ABAP Unit, over `src/rap_demo/`),
 `test/unit/zcl_osd_rap_eml_test` (the EML facade), `test/rap-runtime-gen.mjs`, `test/rap-serve.mjs` (the OData wire). Contract and limits:
 [docs/rap-runtime.md](../../docs/rap-runtime.md).

@@ -4,13 +4,13 @@ R2 of [the RAP plan](oracle-rap.md): a managed behavior definition runs. Its
 behavior pool's determinations, validations and action are called, its
 instances live in a transactional buffer until the save sequence writes them
 into the persistent table, and the LUW ends in `COMMIT WORK` or
-`ROLLBACK WORK`. It is served over OData V2 and V4 (reads and writes; actions over V2) from a
+`ROLLBACK WORK`. It is served over OData V2 and V4 (reads, writes and actions) from a
 service definition: see [Serving (R2c)](#serving-r2c).
 
 ```
 node tools/rap/bdef-gen.mjs                  # types, adapter, registry -> gen/rap/
 npx mocha test/rap-runtime-gen.mjs           # what is generated and refused
-node tools/osd-unit.mjs CLAS ZCL_OSD_RAP_TEST   # after npm run transpile
+node tools/osd-unit.mjs CLAS ZCL_OSD_RAP_TEST   # after npm run transpile: both pools
 ```
 
 ## Decision: handler-direct, no EML
@@ -29,6 +29,62 @@ place. The runtime takes the changed fields back into the buffer, where they
 trigger what depends on them. When EML arrives the handlers can be written the
 SAP way and this parameter goes.
 
+**R3: handlers in the system's form.** A pool may instead declare its
+methods as on a system (`FOR DETERMINE ON MODIFY IMPORTING keys FOR
+Note~SetStatus`, [rap-derived-types.md](rap-derived-types.md), "Handler
+declarations"). Such a method gets the keys and the response structures and
+no instances; it reads and changes them through EML. Three rules make that
+work, all in `ZCL_OSD_RAP_RUNTIME`:
+
+- **EML inside a handler reaches the calling transaction.** While a handler
+  runs, the runtime is on a stack (`ZCL_OSD_RAP_RUNTIME=>ACTIVE`), and
+  `ZCL_OSD_RAP_EML=>RUNTIME`, which the transpiled statements and direct
+  callers go through, answers that runtime rather than the session's.
+- **It acts as IN LOCAL MODE.** A modification made while a handler of the
+  runtime runs may set a read-only field, and it does not start a request of
+  its own: the determinations it triggers run in the loop of the request
+  that called the handler (on modify) or of the save (on save), each at most
+  once per instance. This is an OSG convention: `IN LOCAL MODE` itself is
+  still accepted and ignored ([rap-eml.md](rap-eml.md)), so an EML call
+  inside a handler is treated as local whether it says so or not.
+- **No take-back.** The runtime copies changed rows back only from a handler
+  with an `entities` table (`ty_callable-entities`, set by the generator); a
+  handler without one has already changed the buffer, and copying its stale
+  rows back would undo that.
+
+The pinned transpiler does not lower EML statements yet, so
+`src/rap_demo/zbp_rap_note_sf` writes each statement as the
+`ZCL_OSD_RAP_EML` call it lowers to, with the statement in a comment above
+it. `test/unit/zcl_osd_rap_test` runs the same eleven-test scenario over
+both pools (`ltcl_explicit`, `ltcl_system_form`); with the stack routing
+removed, nine of the system form's eleven fail.
+
+**The flight sample's determination does not run yet.** The gate set for R3
+was one determination of SAP's public flight reference scenario
+([abap-platform-refscen-flight](https://github.com/SAP-samples/abap-platform-refscen-flight),
+commit `5353cbeb`, managed travel) compiled and run without edits. Its
+handler declarations now lower (`calculatetotalprice FOR DETERMINE ON
+MODIFY`, the six `FOR VALIDATE ON SAVE`, the `FOR MODIFY ... FOR ACTION`
+ones), but the business object never gets that far. What blocks it, in the
+order the build meets it:
+
+1. **The BDEF.** `bdef-gen.mjs` refuses `/DMO/I_Travel_M` at its
+   composition, `association _Booking { create ( features : instance ); }`
+   ("associations/functions/determine actions are outside R1"). Behind it
+   in the same definition:
+   `early numbering`, `factory action`, `internal action`,
+   `features : instance` on actions, `with additional save`, `etag master`.
+2. **The pool.** Beside the determination, the same local class declares
+   `FOR INSTANCE FEATURES` and `FOR NUMBERING` methods, which the lowering
+   refuses by name (no derived request/result types; early numbering).
+3. **The determination's body** is one statement, `MODIFY ENTITIES ... IN
+   LOCAL MODE ENTITY travel EXECUTE recalctotalprice FROM CORRESPONDING #(
+   keys )`: EML, which the pinned transpiler does not lower, executing an
+   `internal action` the generator refuses.
+
+So the proof here is the demo twin; the flight determination needs
+compositions in R1/R2, the two refused handler forms, and the EML pin.
+
 ## The pieces
 
 | Where | What |
@@ -39,6 +95,7 @@ SAP way and this parameter goes.
 | `gen/rap/zcl_osd_rap_registry` | BDEF name to adapter; the runtime creates it by name, so a tree without BDEFs still compiles |
 | `src/rap/cl_abap_behavior_handler`, `cl_abap_behavior_saver`, `cl_abap_behv`, `if_abap_behv`, `if_abap_behv_message` | clean-room bases a pool inherits |
 | `src/luw/zcl_osd_luw` | the delta (create/update/delete collapsed), reused |
+| `src/luw/zcl_osd_luw_hold` | whether an enclosing changeset or V4 group holds the LUW (set by both batches, read by the SADL bridge) |
 
 The model comes from the R0 JSON (`tools/rap/bdef-parse.mjs`) and the CDS
 fields R1 resolves. The adapter is generated because the pool's methods are
@@ -117,6 +174,13 @@ the save sequence); nothing measured on a system.
   ([luw-buffer.md](luw-buffer.md)), and an exception nobody catches is rolled
   back by `tools/osd-dialog-step.mjs` as for any request. A database write
   that fails in the save raises `ZCX_OSD_RAP` after a `ROLLBACK WORK`.
+  `commit( iv_end_luw = abap_false )` saves without ending the LUW: inside
+  a `$batch` changeset (V2) or atomicity group / change set (V4) the batch
+  holds the LUW (`ZCL_OSD_LUW_HOLD=>HELD`), `ZCL_OSD_RAP_SADL` passes that
+  on, and the batch commits or rolls back the RAP save with the group, so
+  a later failing member undoes a create, update, delete or action that
+  had already run (`test/rap-serve.mjs`). Each operation is still its own
+  save sequence (validations run per operation, not once at the end).
 - **Locks, ETags, authorization, features** are parsed and ignored.
 
 ## Handler methods
@@ -256,17 +320,32 @@ service of the registry ([odata-v4.md](odata-v4.md)), and so do V4 writes
 since the V4 write slice (#858): POST, PATCH and DELETE reach the same
 provider and so the same behavior (numbering, determination, validation),
 which needed no change for it (`test/rap-serve.mjs`, "reads and creates the
-same instances over V4"). Bound actions (`POST .../Note('...')/ZUI_RAP_NOTE.Approve`)
-are a path the V4 facade parses, but it runs only the draft actions of sticky
-editing, so a BDEF action answers 501 naming the action; over V2 they work.
+same instances over V4"). A BDEF action is a V4 bound action
+(`<Action Name="Approve" IsBound="true" EntitySetPath="_it">`):
+`POST .../Note('<32 hex>')/ZUI_RAP_NOTE.Approve` with `{}` (or no body) runs
+it through the behavior as the V2 function import does -- `ZCL_OSD_V4_ACTION`
+hands SADL's `execute_action` the context of a function import
+(`mv_function_import`, `mt_parameter`, the set of the action's type), and
+`ZCL_OSD_RAP_SADL` runs one RAP transaction with the action's `FOR MODIFY
+... FOR ACTION` handler -- and answers 200 with the entity
+(`$metadata#Note/$entity`). The V4 rules of a bound action apply
+([odata-v4.md](odata-v4.md)): a key nobody has is 404 before the behavior
+runs, the key and body parameters go through the MaxLength check (400), the
+entity lock is taken (409), and `If-Match` is checked as for a PATCH: 412 on
+a mismatch, 428 without it when the entity type has an ETag. `NoteType` has
+none (the generator does not map `etag master`), so the demo needs no
+`If-Match` and a tag it sends is 412. An action the BDEF does not declare is
+no operation of the service (404, `Unknown operation`); a refusal of the
+behavior (FAILED, a validation) is 400 as over V2 (`test/rap-serve.mjs`).
 
 ### Not in R2c
 
-Service bindings, `Edm.Guid` for UUID keys, ETags and `If-Match`, V2
-`$batch` changesets as one RAP transaction (each operation is its own),
+Service bindings, `Edm.Guid` for UUID keys, ETags and `If-Match`, a
+`$batch` changeset as one RAP transaction (each operation is its own save
+sequence, committed or rolled back with the changeset),
 deep insert through compositions, action parameters, static and factory
-actions, messages as `sap-message` headers (only the error body), V4 bound
-actions, a Fiori Elements app over the service.
+actions, messages as `sap-message` headers (only the error body), a Fiori
+Elements app over the service.
 
 ## Not in R2
 
