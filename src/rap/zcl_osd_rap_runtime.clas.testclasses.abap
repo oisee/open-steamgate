@@ -56,6 +56,7 @@ CLASS ltcl_stamp DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL
       END OF ty_row.
     METHODS later_carries FOR TESTING RAISING cx_static_check.
     METHODS stamp_at_year_end FOR TESTING RAISING cx_static_check.
+    METHODS apart_for_a_double FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 
 CLASS ltcl_stamp IMPLEMENTATION.
@@ -66,6 +67,27 @@ CLASS ltcl_stamp IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( act = zcl_osd_rap_runtime=>later( lv_stamp ) exp = '20261110120000.5000001' ).
     lv_stamp = '20991231235959.9999999'.
     cl_abap_unit_assert=>assert_equals( act = zcl_osd_rap_runtime=>later( lv_stamp ) exp = '21000101000000' ).
+  ENDMETHOD.
+
+  METHOD apart_for_a_double.
+* 100 ns later is a later stamp, but not a different double at this size:
+* stored through a seam that writes a DEC as a double, it is the same value
+    DATA lv_old   TYPE timestampl.
+    DATA lv_new   TYPE timestampl.
+    DATA lv_old_f TYPE f.
+    DATA lv_new_f TYPE f.
+    lv_old = '20261110120000.5'.
+    lv_new = zcl_osd_rap_runtime=>apart( iv_stamp = zcl_osd_rap_runtime=>later( lv_old ) iv_old = lv_old ).
+    lv_old_f = lv_old.
+    lv_new_f = lv_new.
+    cl_abap_unit_assert=>assert_differs( act = lv_new_f exp = lv_old_f ).
+    cl_abap_unit_assert=>assert_equals( act = boolc( lv_new > lv_old AND lv_new < '20261110120000.51' ) exp = abap_true ).
+* a stamp a double already tells apart stays as it is
+    lv_new = '20261110120000.51'.
+    cl_abap_unit_assert=>assert_equals( act = zcl_osd_rap_runtime=>apart( iv_stamp = lv_new iv_old = lv_old ) exp = lv_new ).
+* and the step carries into the next second by the calendar
+    lv_old = '20261231235959.9999999'.
+    cl_abap_unit_assert=>assert_equals( act = zcl_osd_rap_runtime=>apart( iv_stamp = lv_old iv_old = lv_old ) exp = '20270101000000' ).
   ENDMETHOD.
 
   METHOD stamp_at_year_end.
