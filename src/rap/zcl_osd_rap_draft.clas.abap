@@ -5,12 +5,16 @@ CLASS zcl_osd_rap_draft DEFINITION PUBLIC FINAL CREATE PUBLIC.
 * with both reads done: IR_ACTIVE the view's rows, IR_DRAFT the draft
 * table's (columns named as the CDS elements, plus the admin columns),
 * IR_ROWS the served rows (the view's components and ISACTIVEENTITY,
-* HASACTIVEENTITY, HASDRAFTENTITY, DRAFTUUID).
+* HASACTIVEENTITY, HASDRAFTENTITY, DRAFTUUID). IR_KNOWN: every draft of the
+* table, read without the request's condition: an active row has a draft
+* (HasDraftEntity, the latest-version filter) whether or not that draft
+* matches the condition; without it the matching drafts are asked.
   PUBLIC SECTION.
     CLASS-METHODS union
       IMPORTING
         ir_active  TYPE REF TO data
         ir_draft   TYPE REF TO data
+        ir_known   TYPE REF TO data OPTIONAL
         it_keys    TYPE string_table
         it_orderby TYPE string_table
         it_flags   TYPE /iwbep/t_mgw_select_option OPTIONAL
@@ -114,6 +118,7 @@ CLASS zcl_osd_rap_draft IMPLEMENTATION.
     DATA lt_order   TYPE string_table.
     FIELD-SYMBOLS <lt_active> TYPE STANDARD TABLE.
     FIELD-SYMBOLS <lt_draft>  TYPE STANDARD TABLE.
+    FIELD-SYMBOLS <lt_known>  TYPE STANDARD TABLE.
     FIELD-SYMBOLS <lt_rows>   TYPE STANDARD TABLE.
     FIELD-SYMBOLS <ls_in>     TYPE any.
     FIELD-SYMBOLS <ls_row>    TYPE any.
@@ -123,8 +128,13 @@ CLASS zcl_osd_rap_draft IMPLEMENTATION.
     ASSIGN ir_active->* TO <lt_active>.
     ASSIGN ir_draft->* TO <lt_draft>.
     ASSIGN ir_rows->* TO <lt_rows>.
+    IF ir_known IS BOUND.
+      ASSIGN ir_known->* TO <lt_known>.
+    ELSE.
+      ASSIGN ir_draft->* TO <lt_known>.
+    ENDIF.
 
-    LOOP AT <lt_draft> ASSIGNING <ls_in>.
+    LOOP AT <lt_known> ASSIGNING <ls_in>.
       CLEAR ls_drafted.
       ls_drafted-key = key_text( is_row = <ls_in> it_keys = it_keys ).
       ASSIGN COMPONENT 'DRAFTADMINISTRATIVEDATAUUID' OF STRUCTURE <ls_in> TO <lv_from>.

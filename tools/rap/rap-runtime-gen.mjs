@@ -170,6 +170,8 @@ CLASS ${name} IMPLEMENTATION.
   METHOD zif_stg_cds_draft_source~read_versions.
     DATA lt_active TYPE STANDARD TABLE OF ${view.toLowerCase()} WITH DEFAULT KEY.
     DATA lt_draft  TYPE STANDARD TABLE OF ${draft.toLowerCase()} WITH DEFAULT KEY.
+    DATA lt_known  TYPE STANDARD TABLE OF ${draft.toLowerCase()} WITH DEFAULT KEY.
+    DATA lr_known  TYPE REF TO data.
     DATA lt_keys   TYPE string_table.
     DATA lr_active TYPE REF TO data.
     DATA lr_draft  TYPE REF TO data.
@@ -179,11 +181,16 @@ CLASS ${name} IMPLEMENTATION.
     lv_where = iv_where.
     SELECT * FROM ${view.toLowerCase()} INTO TABLE lt_active WHERE (lv_where).
     SELECT * FROM ${draft.toLowerCase()} INTO TABLE lt_draft WHERE (lv_where).
+* HasDraftEntity of an active row does not depend on whether its draft
+* matches the condition: every draft is asked (its key), not the matching ones
+    SELECT * FROM ${draft.toLowerCase()} INTO TABLE lt_known.
 ${keys}    CREATE DATA rr_data TYPE tt_row.
     GET REFERENCE OF lt_active INTO lr_active.
     GET REFERENCE OF lt_draft INTO lr_draft.
+    GET REFERENCE OF lt_known INTO lr_known.
     zcl_osd_rap_draft=>union( ir_active  = lr_active
                               ir_draft   = lr_draft
+                              ir_known   = lr_known
                               it_keys    = lt_keys
                               it_orderby = it_orderby
                               it_flags   = it_flags

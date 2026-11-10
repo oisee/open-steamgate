@@ -66,6 +66,8 @@ CLASS ltcl_draft DEFINITION FOR TESTING DURATION SHORT RISK LEVEL DANGEROUS FINA
     METHODS activation_deletes_a_leg FOR TESTING RAISING cx_static_check.
     METHODS total_etag_conflict FOR TESTING RAISING cx_static_check.
     METHODS resumes_and_prepares FOR TESTING RAISING cx_static_check.
+    METHODS failed_activation_keeps_draft FOR TESTING RAISING cx_static_check.
+    METHODS draft_blocks_active_delete FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 
 CLASS ltcl_draft IMPLEMENTATION.
@@ -434,6 +436,52 @@ CLASS ltcl_draft IMPLEMENTATION.
     CLEAR ms_failed.
     run( iv_action = 'Resume' iv_trip = lv_trip iv_draft = abap_false ).
     cl_abap_unit_assert=>assert_not_initial( ms_failed-trip ).
+  ENDMETHOD.
+
+  METHOD failed_activation_keeps_draft.
+* the critic's P1 on #913: an Activate refused by a mandatory field changes
+* nothing in the buffer, so the COMMIT ENTITIES after it saves nothing --
+* the draft and its leg stay, and no partial active root is written
+    DATA lt_legs  TYPE string_table.
+    DATA lv_trip  TYPE ty_uuid.
+    DATA lv_count TYPE i.
+    APPEND `Rome` TO lt_legs.
+    lv_trip = new_draft( iv_description = '' it_legs = lt_legs ).
+    zcl_osd_rap_eml=>reset( ).
+    run( iv_action = 'Activate' iv_trip = lv_trip iv_draft = abap_true ).
+    cl_abap_unit_assert=>assert_not_initial( act = ms_failed-trip msg = 'Activate is refused' ).
+    commit( ).
+    SELECT COUNT(*) FROM zrap_dtrip_d INTO lv_count.
+    cl_abap_unit_assert=>assert_equals( act = lv_count exp = 1 msg = 'the draft root stays after a refused Activate and COMMIT' ).
+    SELECT COUNT(*) FROM zrap_dleg_d INTO lv_count.
+    cl_abap_unit_assert=>assert_equals( act = lv_count exp = 1 msg = 'the draft leg stays' ).
+    SELECT COUNT(*) FROM zrap_dtrip INTO lv_count.
+    cl_abap_unit_assert=>assert_equals( act = lv_count exp = 0 msg = 'no active root is written' ).
+    SELECT COUNT(*) FROM zosd_draft_adm INTO lv_count.
+    cl_abap_unit_assert=>assert_equals( act = lv_count exp = 1 msg = 'the admin row stays' ).
+  ENDMETHOD.
+
+  METHOD draft_blocks_active_delete.
+* the critic's P3 on #913: the draft holds the active instance against a delete too
+    DATA lv_trip   TYPE ty_uuid.
+    DATA lt_delete TYPE TABLE FOR DELETE zi_rap_dtrip.
+    DATA ls_delete LIKE LINE OF lt_delete.
+    DATA ls_failed LIKE LINE OF ms_failed-trip.
+    DATA lv_count  TYPE i.
+    lv_trip = active_trip( ).
+    zcl_osd_rap_eml=>reset( ).
+    run( iv_action = 'Edit' iv_trip = lv_trip iv_draft = abap_false ).
+    cl_abap_unit_assert=>assert_true( commit( ) ).
+    zcl_osd_rap_eml=>reset( ).
+    ls_delete-trip_uuid = lv_trip.
+    APPEND ls_delete TO lt_delete.
+    zcl_osd_rap_eml=>modify( EXPORTING iv_bdef = co_bdef iv_entity = 'trip' iv_operation = 'DELETE' it_rows = lt_delete
+                             CHANGING cs_mapped = ms_mapped cs_failed = ms_failed cs_reported = ms_reported ).
+    READ TABLE ms_failed-trip INDEX 1 INTO ls_failed.
+    cl_abap_unit_assert=>assert_equals( act = ls_failed-%fail-cause exp = if_abap_behv=>cause-locked ).
+    commit( ).
+    SELECT COUNT(*) FROM zrap_dtrip INTO lv_count WHERE trip_uuid = lv_trip.
+    cl_abap_unit_assert=>assert_equals( act = lv_count exp = 1 msg = 'the active trip stays' ).
   ENDMETHOD.
 
 ENDCLASS.

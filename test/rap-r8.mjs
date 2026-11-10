@@ -17,6 +17,7 @@ const v4 = `${origin}/sap/opu/odata4/sap/ZUI_RAP_DTRIP`;
 const v2 = `${origin}/sap/opu/odata/sap/ZUI_RAP_DTRIP`;
 const write = {"content-type": "application/json", "x-csrf-token": "open-steamgate", accept: "application/json"};
 const LATEST = encodeURIComponent("IsActiveEntity eq false or SiblingEntity/IsActiveEntity eq null");
+const LATEST_AND = rest => encodeURIComponent(`(IsActiveEntity eq false or SiblingEntity/IsActiveEntity eq null) and ${rest}`);
 // the draft tables and the admin table of src/rap the demo's BDEF needs
 const trip = () => [...walk("src/rap_r8"), "src/rap/zosd_draft_adm.tabl.xml"].filter(f => /\.(abap|xml|asbdef|asddls|srvdsrv)$/.test(f))
   .map(f => ({filename: basename(f), contents: readFileSync(f, "utf8")}));
@@ -206,6 +207,34 @@ describe("RAP R8 draft over OData V4", function () {
     assert.equal(res.status, 204, JSON.stringify(res.body));
     res = await get(`${v4}/Trip?$filter=trip_uuid eq '${id}'`);
     assert.deepEqual(res.body.value.map(t => [t.IsActiveEntity, t.HasDraftEntity, t.description]), [[true, false, "Coast"]]);
+  });
+
+  it("knows an active instance has a draft whether or not the draft matches the filter (critic W2 on #913)", async () => {
+    const id = await newDraft("Coast W2");
+    assert.equal((await act(id, false, "Activate")).status, 200);
+    assert.equal((await act(id, true, "Edit", JSON.stringify({PreserveChanges: true}))).status, 200);
+    assert.equal((await call(`${v4}/Trip${key(id, false)}`, {method: "PATCH", headers: {...write, "if-match": "*"},
+      body: JSON.stringify({description: "Coast W2 changed"})})).status, 204);
+    // only the active instance matches; it still has its draft
+    let res = await get(`${v4}/Trip?$filter=${encodeURIComponent("description eq 'Coast W2'")}`);
+    assert.deepEqual(res.body.value.map(t => [t.IsActiveEntity, t.HasDraftEntity]), [[true, true]]);
+    // the list shows the draft in its place, and the draft does not match
+    res = await get(`${v4}/Trip?$filter=${LATEST_AND("description eq 'Coast W2'")}`);
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.deepEqual(res.body.value, []);
+    res = await get(`${v4}/Trip?$filter=${LATEST_AND("description eq 'Coast W2 changed'")}`);
+    assert.deepEqual(res.body.value.map(t => [t.IsActiveEntity, t.description]), [[false, "Coast W2 changed"]]);
+    assert.equal((await call(`${v4}/Trip${key(id, false)}`, {method: "DELETE", headers: {...write, "if-match": "*"}})).status, 204);
+  });
+
+  it("takes the list filter in its own spelling only, and refuses other SiblingEntity filters (501)", async () => {
+    const latest = "IsActiveEntity eq false or SiblingEntity/IsActiveEntity eq null";
+    for (const filter of [latest.replace("SiblingEntity", "siblingentity"), `description ne 'x' and ${latest}`,
+      `(${latest}) or description eq 'x'`, "SiblingEntity/IsActiveEntity eq null"]) {
+      const res = await get(`${v4}/Trip?$filter=${encodeURIComponent(filter)}`);
+      assert.equal(res.status, 501, `${filter}: ${JSON.stringify(res.body)}`);
+    }
+    assert.equal((await get(`${v4}/Trip?$filter=${encodeURIComponent(`description ne 'x' and (${latest})`)}`)).status, 200);
   });
 
   it("edits, changes the draft and activates: the active instance takes the change", async () => {

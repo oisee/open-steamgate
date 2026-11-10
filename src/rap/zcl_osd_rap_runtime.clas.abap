@@ -239,6 +239,9 @@ CLASS zcl_osd_rap_runtime DEFINITION PUBLIC CREATE PRIVATE.
 * the lock arguments (their SHA-256), released when the transaction ends
     DATA mt_locked TYPE string_table.
     DATA mt_lockhash TYPE string_table.
+* R8: Activate takes the lock of the active root while its draft still
+* exists; the draft is the activation's own and does not refuse it
+    DATA mv_activating TYPE abap_bool.
 
     METHODS entity_of
       IMPORTING
@@ -296,6 +299,17 @@ CLASS zcl_osd_rap_runtime DEFINITION PUBLIC CREATE PRIVATE.
         cs_reported TYPE any
       RAISING
         zcx_osd_rap.
+
+* R8: whether every mandatory field of IS_ROW is filled (FAILED if not)
+    METHODS mandatory_ok
+      IMPORTING
+        is_entity   TYPE zif_osd_rap_bo=>ty_entity
+        is_row      TYPE any
+      CHANGING
+        cs_failed   TYPE any
+        cs_reported TYPE any
+      RETURNING
+        VALUE(rv_ok) TYPE abap_bool.
 
 * R8: Activate of the draft root at IV_INDEX
     METHODS activate_draft
@@ -1614,7 +1628,8 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
 * exclusive lock of Edit, kept here by the draft's existence)
     IF ms_model-draft = abap_true.
       ASSIGN ls_inst-row->* TO <ls_row>.
-      IF is_draft( <ls_row> ) = abap_false AND draft_exists( is_root = ls_root is_keys = <ls_row> ) = abap_true.
+      IF is_draft( <ls_row> ) = abap_false AND mv_activating = abap_false
+          AND draft_exists( is_root = ls_root is_keys = <ls_row> ) = abap_true.
         fail( EXPORTING is_entity = is_entity is_input = is_input
                         iv_cause = if_abap_behv=>cause-locked
                         iv_text = |{ ls_root-alias } { key_text( is_entity = ls_root is_row = <ls_row> ) } has a draft: it is edited there|
@@ -3398,14 +3413,32 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
       ls_copy-row = lr_copy.
       APPEND ls_copy TO lt_copies.
     ENDLOOP.
-    delete_tree( is_entity = is_entity iv_index = iv_index ).
+* everything that can refuse the activation is asked before anything in the
+* buffer changes: a refused Activate leaves the draft as it was, so a later
+* COMMIT ENTITIES saves nothing of it (the lock of the active root, while
+* the draft that holds it still exists, and every mandatory field)
     IF lv_active > 0.
+      mv_activating = abap_true.
       lock( EXPORTING is_entity = is_entity iv_index = lv_active is_input = is_key
             IMPORTING ev_ok = lv_ok CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
+      mv_activating = abap_false.
       IF lv_ok = abap_false.
         RETURN.
       ENDIF.
     ENDIF.
+    lv_ok = abap_true.
+    LOOP AT lt_copies INTO ls_copy.
+      ls_node = entity_of( ls_copy-entity ).
+      ASSIGN ls_copy-row->* TO <ls_copy>.
+      IF mandatory_ok( EXPORTING is_entity = ls_node is_row = <ls_copy>
+                       CHANGING cs_failed = cs_failed cs_reported = cs_reported ) = abap_false.
+        lv_ok = abap_false.
+      ENDIF.
+    ENDLOOP.
+    IF lv_ok = abap_false.
+      RETURN.
+    ENDIF.
+    delete_tree( is_entity = is_entity iv_index = iv_index ).
 * each draft instance updates the active instance it came from, or creates it
     CLEAR lv_count.
     LOOP AT lt_copies INTO ls_copy.
@@ -3515,6 +3548,25 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
     ENDLOOP.
   ENDMETHOD.
 
+  METHOD mandatory_ok.
+* the mandatory fields a draft could leave empty must be filled when it
+* becomes active
+    DATA ls_field TYPE zif_osd_rap_bo=>ty_field.
+    FIELD-SYMBOLS <lv_value> TYPE any.
+    rv_ok = abap_true.
+    LOOP AT is_entity-fields INTO ls_field WHERE mandatory IS NOT INITIAL.
+      ASSIGN COMPONENT ls_field-name OF STRUCTURE is_row TO <lv_value>.
+      IF sy-subrc = 0 AND <lv_value> IS INITIAL.
+        fail( EXPORTING is_entity = is_entity is_input = is_row
+                        iv_cause = if_abap_behv=>cause-unspecific
+                        iv_text = |Field { ls_field-name } is mandatory|
+                        iv_field = ls_field-name
+              CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
+        rv_ok = abap_false.
+      ENDIF.
+    ENDLOOP.
+  ENDMETHOD.
+
   METHOD activate_one.
     DATA ls_inst  TYPE ty_inst.
     DATA ls_field TYPE zif_osd_rap_bo=>ty_field.
@@ -3525,18 +3577,6 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
     FIELD-SYMBOLS <lv_from> TYPE any.
     FIELD-SYMBOLS <lv_to>   TYPE any.
 
-* the mandatory fields the draft could leave empty must be filled now
-    LOOP AT is_entity-fields INTO ls_field WHERE mandatory IS NOT INITIAL.
-      ASSIGN COMPONENT ls_field-name OF STRUCTURE is_draft TO <lv_from>.
-      IF sy-subrc = 0 AND <lv_from> IS INITIAL.
-        fail( EXPORTING is_entity = is_entity is_input = is_draft
-                        iv_cause = if_abap_behv=>cause-unspecific
-                        iv_text = |Field { ls_field-name } is mandatory|
-                        iv_field = ls_field-name
-              CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
-        RETURN.
-      ENDIF.
-    ENDLOOP.
 
     rv_index = resolve( is_entity = is_entity is_input = is_draft ).
     IF rv_index = 0.

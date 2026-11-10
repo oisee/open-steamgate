@@ -1221,9 +1221,9 @@ instances:
 | Action | On | What the runtime does |
 | --- | --- | --- |
 | `Edit` | an active root (`%is_draft` off) | refused when a draft of the instance exists (conflict). Otherwise copies the root and its composition tree into draft instances (`HASACTIVEENTITY` X), creates the admin row with the caller in process, and answers the draft root |
-| `Activate` | a draft root | for each instance of the draft's tree: updates the active instance it was made from (every field flagged) or creates it; deletes the active children the draft no longer has; deletes the draft and its admin row. Then the save sequence checks the active instances as for any modify: a validation that fails stops the save, nothing is written, the draft stays. Answers the active root |
-| `Discard` | a draft root | deletes the draft instances of the tree and the admin row |
-| `Resume` | a draft root | answers the draft root (and refuses one that does not exist). On a system it re-acquires the exclusive lock of an expired draft; here no lock expires (below) |
+| `Activate` | a draft root | first everything that can refuse it, with the buffer untouched: the total ETag, the lock of the active root, every mandatory field of the tree (a refused Activate changes nothing, so a `COMMIT ENTITIES` after it saves nothing). Then for each instance of the draft's tree: updates the active instance it was made from (every field flagged) or creates it; deletes the active children the draft no longer has; deletes the draft and its admin row. Then the save sequence checks the active instances as for any modify: a validation that fails stops the save, nothing is written, the draft stays. Answers the active root |
+| `Discard` | a draft root | deletes the draft instances of the tree and the admin row (whether a system answers a result or EML `RESULT` for it is **unmeasured**) |
+| `Resume` | a draft root | answers the draft root (and refuses one that does not exist). On a system it re-acquires the exclusive lock of an expired draft; here no lock expires (below). Its import and result shape is **unmeasured** until the A4H oracle |
 | `Prepare` | a draft root | runs the validations its `draft determine action` lists on the draft instances, with their messages in REPORTED; it changes nothing |
 
 **`total etag`.** Edit copies the root's total ETag field into the draft;
@@ -1249,8 +1249,16 @@ if the active instance is unchanged (total ETag). Here:
   (FAILED, cause `locked`) and a second Edit is refused (cause `conflict`).
   There is no owner check (no user switch in this tree's requests) and no
   expiry, so Resume never has a lock to take back; the expiry and the
-  owner (`INPROCESSBYUSER`) are R9 and **unmeasured**;
+  owner (`INPROCESSBYUSER`) are R9 and **unmeasured**. Said plainly: **the
+  lock is per instance, not per user** -- the draft holds the active
+  instance against every writer, its own creator included, and any client
+  may change, activate or discard any draft;
 - the optimistic part is the total ETag check on Activate (above).
+- over OData a refusal (`conflict` for a second Edit or a stale total ETag,
+  `locked` for a write to a held active instance) is a 400 business error,
+  as every RAP refusal here (R5's follow-up: `/IWBEP/CX_MGW_BUSI_EXCEPTION`
+  carries no status). Whether a system answers 409 / 423 for them is
+  **unmeasured**.
 
 ### EML
 
@@ -1368,11 +1376,15 @@ On the trip demo ([`src/rap_r8`](../src/rap_r8/README.md)):
 - **Serving.** The SADL data provider reads a draft entity through its
   union class: the CDS view's rows and the draft table's, both with the
   request's SQL condition (the CDS elements are columns of both), merged with
-  `IsActiveEntity`, `HasActiveEntity`, `HasDraftEntity`; the flag
+  `IsActiveEntity`, `HasActiveEntity`, `HasDraftEntity` -- an active row's
+  `HasDraftEntity` (and so the list filter) is taken from every draft's key,
+  not from the drafts that match the condition; the flag
   conditions of a `$filter` or key are applied to the merged rows, and the
   Fiori Elements list filter is recognised by the V4 facade
   (`ZCL_OSD_V4_QUERY=>GC_DRAFT_LATEST`) and handed on as "each instance once,
-  its draft when it has one". A V4 key takes `IsActiveEntity=true|false`.
+  its draft when it has one" -- in that spelling only, the whole filter or
+  parenthesized and AND-ed with the rest; any other `SiblingEntity` filter
+  is 501. A V4 key takes `IsActiveEntity=true|false`.
   `ZCL_OSD_RAP_SADL` maps `IsActiveEntity` to `%is_draft` and back, creates
   a draft for a POST to the root's set, discards for a DELETE of a draft
   root, and answers Edit with the draft and Activate with the active

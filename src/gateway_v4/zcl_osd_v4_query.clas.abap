@@ -413,21 +413,33 @@ CLASS zcl_osd_v4_query IMPLEMENTATION.
 * draft when it has one, else the active instance) is a navigation path
 * the select-options cannot hold; it is taken out and handed on as what it
 * means (docs/rap-runtime.md, R8)
-          IF ls_opt-value CS gc_draft_latest.
+* Only that spelling, alone or AND-ed with the rest (FIND and REPLACE are
+* case-sensitive, as OData names are); any other SiblingEntity path is 501
+* (bare inside a longer filter it would bind as A or (B and ...), so only
+* the parenthesized form is taken out of one)
+          IF ls_opt-value = gc_draft_latest.
+            mo_context->mv_draft_latest = abap_true.
+            CLEAR ls_opt-value.
+          ENDIF.
+          FIND |({ gc_draft_latest })| IN ls_opt-value.
+          IF sy-subrc = 0.
             mo_context->mv_draft_latest = abap_true.
             REPLACE ALL OCCURRENCES OF |({ gc_draft_latest })| IN ls_opt-value WITH ``.
-            REPLACE ALL OCCURRENCES OF gc_draft_latest IN ls_opt-value WITH ``.
             CONDENSE ls_opt-value.
-            IF ls_opt-value CP 'and *'.
+            IF strlen( ls_opt-value ) >= 4 AND substring( val = ls_opt-value len = 4 ) = `and `.
               ls_opt-value = substring( val = ls_opt-value off = 4 ).
-            ENDIF.
-            IF ls_opt-value CP '* and'.
+            ELSEIF strlen( ls_opt-value ) >= 4 AND substring( val = ls_opt-value off = strlen( ls_opt-value ) - 4 ) = ` and`.
               ls_opt-value = substring( val = ls_opt-value len = strlen( ls_opt-value ) - 4 ).
+            ELSEIF ls_opt-value IS NOT INITIAL.
+              fail( iv_text = 'The draft list filter is understood alone or AND-ed with the others' iv_status = 501 ).
             ENDIF.
             CONDENSE ls_opt-value.
-            IF ls_opt-value IS INITIAL.
-              CONTINUE.
-            ENDIF.
+          ENDIF.
+          IF to_lower( ls_opt-value ) CS 'siblingentity'.
+            fail( iv_text = 'A SiblingEntity filter other than the draft list filter is not implemented' iv_status = 501 ).
+          ENDIF.
+          IF mo_context->mv_draft_latest = abap_true AND ls_opt-value IS INITIAL.
+            CONTINUE.
           ENDIF.
           mo_context->mv_filter_string = filter( ls_opt-value ).
           validate_literals( is_set = is_set io_model = io_model ).
