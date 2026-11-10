@@ -321,6 +321,160 @@ proof against a cold run): not a small change, so it is not done here. With
 the fast path the cycle is ~47 s, so it is no longer needed for ADR 0010's
 target.
 
+## The incremental front end (2026-11-10)
+
+Measured on the same shared host as above, under the heavy-job lock, the
+same `osgo-cycle.mjs --fast` edits. Code: `tools/gogen/osgo-incr.mjs`,
+`osgo-incr-anon.mjs`, `osgo-incr-deps.mjs`, `osgo-incr-meta.mjs`, `osgo-incr-db.mjs` (README:
+`tools/gogen/osgo-incr.md`).
+
+Why not the runners' whole-tree cache again: it was measured slower on this
+tree (34 s on a hit, 66 s filling it, above) because a hit still pays
+everything that is per file: the registry build, the parse and the syntax
+pass over all ~2 900 files. The design rule that follows: **a hit pays for
+the edited set, not for the tree.** What the cache achieves here: the
+lowering, the largest single cost after the parse, drops to the re-lowered
+set (55 of 1 085 objects for the measured body edit); the parse and the
+syntax pass drop only to the registry the proof needs, 2 669 of 2 852 files,
+so the front end of a hit is 15.8 s against 21.1 s. The registry is what it
+must be: every non-class file the full build loads (below), and the
+reference closure of the re-lowered classes.
+
+A full front end records, per object (classes, interfaces, function groups,
+DDIC -- ~1 080 entries, ~19 MB), under the live generation
+(`build/osgo-incr/<generation>/`): the lowered IRs of the classes it pushed,
+every write its lowering made to the shared program state, the supplied
+parameters and RTTI typedefs, what it read through the registry, the
+classes and interfaces its IR names (its `deps`), and the digests of its
+files. The database statements are attributed per object the same way,
+after proving the reconstruction equals the real `DatabaseSetup` run.
+
+A fast build (the fast proof already says only the content of existing
+classes and interfaces changed) then assembles the program:
+
+1. it re-lowers the edited objects and, transitively, everything whose
+   recorded `deps` include one;
+2. its registry holds every non-class file the full build loads, the
+   classes whose constructor DEFAULTs the emission resolves, and the
+   reference closure of the re-lowered set (their recorded reads **and**
+   deps, and every class any member's text spells);
+3. every other object's recorded writes are replayed into the shared state,
+   its IR comes from the cache, and the fresh lowering runs through
+   `compileProgram` itself, so the fresh IRs come out of the code path a
+   full build uses;
+4. the shared collections are rebuilt in the order the full build wrote
+   them, and the final analyses run over that state (below).
+
+Anything it cannot prove refuses with a reason and the full front end runs
+(`osgo incr: the full front end runs (...)`); the README lists every case.
+
+### Same order, same names: what the real tree taught
+
+The first real-tree proofs named another generation for every edit, with
+conformance identical: `core.go`/`app.go` differed in **order and naming
+only**. Each cause is now a regression test over a small tree that fails on
+the merge before it:
+
+- **Passes, not objects.** compileProgram enters an object more than once:
+  the local discovery, the class pass, then the local classes after
+  *every* class, then the function groups. A merge that grouped an
+  object's writes at its first slot put a local class's types
+  (`LCL_STACK__TY_DATA`, `LCL_JSON_PARSER__TY_NODE`) at their owner's place
+  instead of after all classes. Every `enter` is now a segment of one global
+  sequence, recorded and replayed in that sequence; the global passes keep
+  the slot they ran in, and one that wrote between two objects refuses.
+- **The final analyses see the full build's state.** The interface walk,
+  the dynamic statics and the table pass iterate the program's collections
+  in insertion order and append what they derive; they used to see the
+  cache's pre-seed with the fresh writes after it, which swapped interface
+  declarations in `app.go`. A hook before them (`incr.lowered`) puts the
+  merged classes and collections in place; `interfaceAttrs`, a memo the
+  emitter reads in order, is recorded like the rest.
+- **An anonymous structure is named by its declaration.** abaplint keys
+  them by type instance, and the first lowering to reach one names it. The
+  shape does not say which instance a lowering reached: every exception
+  class has its own `MSGID/MSGNO/ATTR1..4` textid constant, and
+  `ZCL_STG_SADL_DPC` reaches its own and `ZCL_OSD_RAP_SADL`'s. The cache
+  records the name of every instance a global class or interface member
+  owns, by the member's path, and a fresh lowering takes it; an instance no
+  global member owns comes from the object's own syntax run and is named
+  after it both ways.
+- **The registry holds every non-class file.** abaplint enumerates objects
+  in the order a *name* first appeared; the closure had dropped a behaviour
+  definition in `src/`, so `ZI_RAP_NOTE`'s row type (the table pass, in that
+  order) moved behind its neighbours.
+- **The emission resolves constructor DEFAULTs for every class** (CREATE
+  OBJECT by name, `emit-constructors.ts`), cached or not: a cached
+  `CL_GUI_DOCKING_CONTAINER` outside the closure emitted a panic where the
+  full build constructs.
+
+The other two phases the fast path still paid:
+
+- **the generation hash** no longer emits the whole program unlayered to
+  hash it (3.7 s). It is the content digest of the program itself plus the
+  statements it boots from (`tools/gogen/program-digest.mjs`, ~0.26 s).
+  Because it hashes the program content and not the packaging, the same
+  edit names the same generation however the classes were packaged -- the
+  property the unlayered emission bought -- and a battery test checks that
+  the digest changes exactly when the emitted text changes.
+- **a fast save emits package `main` only.** Core and app cannot have
+  changed (the fast proof says only class and interface content moved, and
+  the layer plan is a function of that), and the build proves it instead
+  of trusting it: a layered build records per package below main the digest
+  of its emission inputs with the formatted bytes and symbols it produced
+  (`.out/osgo-pkg.json`); a later build whose inputs match and whose
+  on-disk bytes hash to the record skips the emission.
+
+### Same program, both ways
+
+The three edits of the table above, each built the fast way and the full
+way from the same live generation (the conformance fixture staged, as CI
+stages it), at the branch head merged with `main` (`3133bdfe`):
+
+| edit | re-lowered / registry files | osgo generation, fast = full | generated files | ADT conformance, fast / full |
+| --- | --- | --- | --- | --- |
+| a method body (a literal in `ZCL_ZSTG_DEMO_DPC_EXT`) | 55 / 2 669 of 2 852 | `go:5b66be01d42ee9a8` | byte-identical (11 files; `zz_store.json` by content) | 64 pass / 64 pass, the same verdicts |
+| a new method, defined and implemented | 55 / 2 669 of 2 852 | `go:9d46726a77d58d2a` | same | the same |
+| an interface constant (`ZIF_OSD_ADT_ROUTE`) | 98 / 2 669 of 2 852 | `go:8dedd76c1cac41e8` | same | the same |
+
+"By content" for `zz_store.json` is the rule of the fast path above: the
+same roots, libraries, exclusions and built digests, the same active keys,
+each active path the same file in each build's own snapshot (the edited
+file under `.out/osgo-active/<its digest>`). Script
+`.local/incr-proof-full.mjs` (not tracked).
+
+### Measured
+
+`osgo-cycle.mjs --runs 3 --fast`, warm `GOCACHE`, one run at a time, medians
+of the three edits after the first (ms); before is `main` at `3133bdfe`,
+after is this branch merged with it:
+
+| phase | before | after |
+| --- | ---: | ---: |
+| `osgo.mjs`, all of it | 39 912 | 29 625 |
+| -- fast proof | 876 | 899 |
+| -- stale check | 319 | 355 |
+| -- front end | 21 114 | 15 820 |
+| -- database, media, ICF, store | 1 377 | 1 345 |
+| -- layer plan | 745 | 1 132 |
+| -- emit | 6 419 | 4 423 |
+| -- generation hash emit / program digest | 3 719 | 259 |
+| -- gofmt | 225 | 35 |
+| -- `go build` (compile `main` / link) | 4 251 (1 080 / 2 552) | 4 541 (1 132 / 2 461) |
+| stop + start to `/osd/serving` ready | 55 + 2 578 | 99 + 2 426 |
+| **edit to serving** | **42 603** | **32 085** |
+
+Runs (edit to serving, ms): before 42 876, 42 255, 42 603; after 32 085,
+34 873, 31 978. The first save of a class still moves it into `main`; in
+these runs `app`'s recompile came out of a warm `GOCACHE` on the after side
+(the proofs had built that `app` already), so the "first edit" columns are
+not comparable and are left out. The full build that writes the cache
+costs ~2-3 s more front end than one that does not. What is left: the
+front end of a hit (15.8 s) is the parse and syntax pass of a registry of
+2 669 files -- every non-class file plus the closure -- not the lowering;
+shrinking it needs the parsed registry to outlive the process (the daemon
+of "The front end, measured and left"), not a smaller closure.
+
 ## Limits
 
 
