@@ -11,7 +11,8 @@ import {join} from "node:path";
 import {compileProgram} from "./frontend.mjs";
 import {emitGo} from "./emit-go.mjs";
 import {columnRegistry} from "./frontend.mjs";
-import {incrAssemble, incrRecorder, objectOf, registryFiles} from "./osgo-incr.mjs";
+import {dbCacheWrite, dbContributions, incrAssemble, incrRecorder, objectOf, registryFiles} from "./osgo-incr.mjs";
+import {sealCache} from "./osgo-incr-meta.mjs";
 
 const xml = (body) => `<?xml version="1.0"?><abapGit version="v1.0.0"><asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0"><asx:values>${body}</asx:values></asx:abap></abapGit>`;
 
@@ -199,12 +200,17 @@ const objectNames = (root) => [...registryFiles([join(root, "app")], new Set(), 
 // local discovery then, which is a pass of its own in the write sequence)
 const fullProgram = (root, includeTests = new Set()) => compileProgram({folders: [join(root, "app")], objects: objectNames(root), tolerant: true, includeTests});
 
-/** a cache of the tree as it is now, the way a full build records it */
-const writeCache = (root, gen = "live1", includeTests = new Set()) => {
+/** a cache of the tree as it is now, the way a full build records it: the
+ *  recorder's entries and index, then (osgDatabase's part) the database
+ *  record and the stamp -- `{db: false}` stops after the index, as a build
+ *  interrupted between the two does */
+const writeCache = (root, gen = "live1", includeTests = new Set(), {db = true} = {}) => {
   const folders = [join(root, "app")];
   const recorder = incrRecorder({root, folders, hidden: new Set(), objects: objectNames(root), includeTests});
   const program = compileProgram({folders, objects: objectNames(root), tolerant: true, includeTests, incr: recorder});
-  return {program, written: recorder.finish({gen}), gen};
+  const written = recorder.finish({gen});
+  if (db) dbCacheWrite(written.dir, dbContributions(program.reg));
+  return {program, written, gen};
 };
 
 const emitted = (program) => emitGo(program);
@@ -530,6 +536,7 @@ test("the cache is refused when the front end itself changed (tool identity)", (
     const index = JSON.parse(readFileSync(file, "utf8"));
     index.tool = "something-else";
     writeFileSync(file, JSON.stringify(index));
+    sealCache(join(root, "build", "osgo-incr", "live1"));
     const attempt = incrAssemble({root, folders: [join(root, "app")], objects: objectNames(root), hidden: new Set(), includeTests: new Set(),
       proof: {ok: true, base: "live1", changed: ["app/zcl_incr_hot.clas.abap"]}});
     assert.equal(attempt.ok, false);
@@ -683,8 +690,8 @@ test("every non-class file of the full registry is in the fast one (name order o
   const names = () => [...registryFiles(folders, new Set(), new Set()).values()].map((k) => k.slice(5).toLowerCase());
   try {
     const recorder = incrRecorder({root, folders, hidden: new Set(), objects: names(), includeTests: new Set()});
-    compileProgram({folders, objects: names(), tolerant: true, includeTests: new Set(), incr: recorder});
-    recorder.finish({gen: "live1"});
+    const recorded = compileProgram({folders, objects: names(), tolerant: true, includeTests: new Set(), incr: recorder});
+    dbCacheWrite(recorder.finish({gen: "live1"}).dir, dbContributions(recorded.reg));
     edit(root, "app/zcl_incr_hot.clas.abap", "'Key TravelId missing'", "'Key TravelId missing (edited)'");
     const reference = compileProgram({folders, objects: names(), tolerant: true, includeTests: new Set()});
     const rows = [...reference.structs.keys()].filter((k) => /^ZINCR_T[AZ]$/.test(k));
@@ -694,5 +701,102 @@ test("every non-class file of the full registry is in the fast one (name order o
     assert.equal(attempt.ok, true, attempt.reason);
     assert.deepEqual([...attempt.program.structs.keys()], [...reference.structs.keys()]);
     assert.equal(emitted(attempt.program), emitted(reference));
+  } finally { rmSync(root, {recursive: true, force: true}); }
+});
+
+// A TYPES alias of a primitive lowers to the primitive itself: the user's IR
+// keeps no name of the class or interface that declares it, and its
+// lowering never asks the registry for that object. The dependency is the
+// syntax pass's (osgo-incr-deps.mjs); without it the edit re-lowered the
+// provider only and the cached user kept `x int32` against the full build's
+// `x string`.
+for (const [kind, provider, file] of [
+  ["class", "app/zcl_incr_aliases.clas.abap", `CLASS zcl_incr_aliases DEFINITION PUBLIC. PUBLIC SECTION. TYPES ty_num TYPE i. ENDCLASS.
+CLASS zcl_incr_aliases IMPLEMENTATION. ENDCLASS.`],
+  ["interface", "app/zif_incr_aliases.intf.abap", "INTERFACE zif_incr_aliases PUBLIC. TYPES ty_num TYPE i. ENDINTERFACE."],
+]) {
+  test(`an edit of a ${kind}'s primitive type alias re-lowers the object that uses it`, () => {
+    const name = provider.split("/").at(-1).split(".")[0];
+    const extra = {[provider]: file,
+      "app/zcl_incr_reader.clas.abap": `CLASS zcl_incr_reader DEFINITION PUBLIC. PUBLIC SECTION.
+    METHODS run IMPORTING x TYPE ${name}=>ty_num RETURNING VALUE(r) TYPE ${name}=>ty_num.
+ENDCLASS.
+CLASS zcl_incr_reader IMPLEMENTATION. METHOD run. r = x. ENDMETHOD. ENDCLASS.`};
+    const root = tree(extra);
+    try {
+      writeCache(root);
+      edit(root, provider, "ty_num TYPE i", "ty_num TYPE string");
+      const reference = fullProgram(root);
+      const attempt = incrAssemble({root, folders: [join(root, "app")], objects: objectNames(root), hidden: new Set(), includeTests: new Set(),
+        proof: {ok: true, base: "live1", changed: changedFiles(root, extra)}});
+      assert.equal(attempt.ok, true, attempt.reason);
+      assert.ok(attempt.lowered.includes("CLAS ZCL_INCR_READER"), `the user re-lowers (${attempt.lowered})`);
+      assert.match(emitted(reference), /RUN\(s \*abap\.Session, x string\)/);
+      assert.equal(emitted(attempt.program), emitted(reference));
+    } finally { rmSync(root, {recursive: true, force: true}); }
+  });
+}
+
+test("an edit that makes an earlier object the first reacher of a shared anonymous structure refuses", () => {
+  // a1 named zif_incr_msg=>co_err's structure first; a0, earlier in the full
+  // build's order, now reaches it too, so the full build names it after a0
+  // -- the pinned a1 name would be another generation
+  const extra = {...withAnon, "app/zcl_incr_a0.clas.abap": `CLASS zcl_incr_a0 DEFINITION PUBLIC. PUBLIC SECTION. METHODS m RETURNING VALUE(r) TYPE string. ENDCLASS.
+CLASS zcl_incr_a0 IMPLEMENTATION. METHOD m. r = 'old'. ENDMETHOD. ENDCLASS.`};
+  const root = tree(extra);
+  try {
+    writeCache(root);
+    edit(root, "app/zcl_incr_a0.clas.abap", "r = 'old'.", "DATA e LIKE zif_incr_msg=>co_err. e = zif_incr_msg=>co_err. r = e-msgno.");
+    const reference = fullProgram(root);
+    assert.ok([...reference.structs.keys()].some((k) => k.startsWith("ZCL_INCR_A0__S_MSGID")), "fixture: the full build names it after a0");
+    const attempt = incrAssemble({root, folders: [join(root, "app")], objects: objectNames(root), hidden: new Set(), includeTests: new Set(),
+      proof: {ok: true, base: "live1", changed: changedFiles(root, extra)}});
+    assert.ok(!attempt.ok || emitted(attempt.program) === emitted(reference), "a fast build that differs from the full build");
+    assert.equal(attempt.ok, false);
+    assert.match(attempt.reason, /first object to reach the anonymous structure/);
+  } finally { rmSync(root, {recursive: true, force: true}); }
+});
+
+// Incomplete or damaged metadata is a miss of the whole cache (the full
+// front end runs), never a partial replay or an abort later on.
+for (const [name, damage, reason] of [
+  ["the build stopped before the database record (no stamp)", null, /no completion stamp/],
+  ["db.json is gone", (dir) => rmSync(join(dir, "db.json")), /no database record/],
+  ["db.json does not parse", (dir) => writeFileSync(join(dir, "db.json"), "{"), /stamp does not match/],
+  ["index.json is valid JSON null", (dir) => writeFileSync(join(dir, "index.json"), "null"), /stamp does not match/],
+  ["index.json is null under a matching stamp", (dir) => { writeFileSync(join(dir, "index.json"), "null"); sealCache(dir); }, /index\.json: it is not an object/],
+  ["an entry lost its fields under a matching stamp", (dir) => {
+    const index = JSON.parse(readFileSync(join(dir, "index.json"), "utf8"));
+    index.entries["CLAS ZCL_INCR_TOP"] = {};
+    writeFileSync(join(dir, "index.json"), JSON.stringify(index));
+    sealCache(dir);
+  }, /entries is not of the recorded shape/],
+  ["db.json lost its order under a matching stamp", (dir) => { writeFileSync(join(dir, "db.json"), "{}"); sealCache(dir); }, /db\.json: it is not of the recorded shape/],
+]) {
+  test(`the cache is a miss when its metadata is incomplete: ${name}`, () => {
+    const root = tree();
+    try {
+      const {written} = writeCache(root, "live1", new Set(), {db: damage !== null});
+      if (damage) damage(written.dir);
+      edit(root, "app/zcl_incr_hot.clas.abap", "'Key TravelId missing'", "'x'");
+      const attempt = incrAssemble({root, folders: [join(root, "app")], objects: objectNames(root), hidden: new Set(), includeTests: new Set(),
+        proof: {ok: true, base: "live1", changed: ["app/zcl_incr_hot.clas.abap"]}});
+      assert.equal(attempt.ok, false);
+      assert.match(attempt.reason, reason);
+    } finally { rmSync(root, {recursive: true, force: true}); }
+  });
+}
+
+test("a generation written again is not usable until its database record is", () => {
+  const root = tree();
+  try {
+    const {written} = writeCache(root);
+    writeCache(root, "live1", new Set(), {db: false}); // the stamp of the first write must not certify the second
+    edit(root, "app/zcl_incr_hot.clas.abap", "'Key TravelId missing'", "'x'");
+    const attempt = incrAssemble({root, folders: [join(root, "app")], objects: objectNames(root), hidden: new Set(), includeTests: new Set(),
+      proof: {ok: true, base: "live1", changed: ["app/zcl_incr_hot.clas.abap"]}});
+    assert.equal(attempt.ok, false);
+    assert.match(attempt.reason, /no completion stamp/);
+    assert.ok(written.dir.endsWith("live1"));
   } finally { rmSync(root, {recursive: true, force: true}); }
 });

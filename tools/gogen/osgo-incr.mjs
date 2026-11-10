@@ -31,9 +31,11 @@ import {callsIn, goSymbol} from "./go-layers.mjs";
 import {objectOfFile} from "./osgo-layers.mjs";
 import {portable, toolIdentity} from "./frontend-object-cache.mjs";
 import {prepareDynamicStatics} from "./frontend-dynamic-call.mjs";
-import {AnonShapes, anonOrigins} from "./osgo-incr-anon.mjs";
+import {AnonShapes, anonOrigins, anonFirstMoved} from "./osgo-incr-anon.mjs";
+import {semanticDeps} from "./osgo-incr-deps.mjs";
+import {readSealedCache, unsealCache} from "./osgo-incr-meta.mjs";
 
-export const SCHEMA = "osgo-incr/5";
+export const SCHEMA = "osgo-incr/6";
 const sha = (value) => createHash("sha256").update(value).digest("hex");
 const upper = (text) => String(text).toUpperCase();
 const walk = (d) => readdirSync(d, {withFileTypes: true}).sort((a, b) => a.name.localeCompare(b.name))
@@ -172,6 +174,12 @@ export function incrRecorder({root, folders, hidden, objects, includeTests}) {
   const segments = [];
   const phaseCount = [0, 0];
   const anonNamed = new Map(); // declaration path -> the name its instance got (null: ambiguous)
+  // declaration path -> {object key ("" for a global pass): the first
+  // position in the segment sequence it reached the instance at}; a global
+  // pass sits between two segments (n + 0.5). The full build names an
+  // instance after its FIRST reacher; a fast build checks that the first
+  // reacher did not move (anonFirstMoved, osgo-incr-anon.mjs)
+  const anonReach = new Map();
   let current = null;
   let lowering = false;
   let program;
@@ -212,15 +220,20 @@ export function incrRecorder({root, folders, hidden, objects, includeTests}) {
         // the name each declared instance got, by every path that names it;
         // two names for one path (it cannot happen in one registry) poison it
         origins ??= anonOrigins(reg);
+        const who = current ?? "", at = current === null ? segments.length - 0.5 : segments.length - 1;
         for (const path of origins.get(t) ?? []) {
           if (anonNamed.has(path) && anonNamed.get(path) !== go) anonNamed.set(path, null);
           else anonNamed.set(path, go);
+          if (!anonReach.has(path)) anonReach.set(path, {});
+          if (!Object.hasOwn(anonReach.get(path), who)) anonReach.get(path)[who] = at;
         }
       };
       p.anonStructs = {
         get(t) { const go = anon.get(t); if (go !== undefined) note(t, go); return go; },
         set(t, go) { note(t, go); anon.set(t, go); return this; },
-        has(t) { return anon.has(t); },
+        // a probe that finds a name is a reach too: the read side's has()
+        // answers through get(), and both sides must count the same reaches
+        has(t) { const go = anon.get(t); if (go !== undefined) note(t, go); return go !== undefined; },
       };
       const get = reg.getObject.bind(reg);
       reg.getObject = (type, name) => {
@@ -245,6 +258,10 @@ export function incrRecorder({root, folders, hidden, objects, includeTests}) {
     /** write the cache of generation `gen`; returns what it wrote */
     finish({gen}) {
       const dir = join(root, "build", "osgo-incr", gen);
+      // a generation is usable only once its database record is written and
+      // the stamp over both is (dbCacheWrite, osgo-incr-meta.mjs): an older
+      // stamp of this directory must not certify what is written now
+      unsealCache(dir);
       const reg = program.reg;
       // which bucket pushed each class, off the recorded push ops
       const pushedNames = new Map(); // class name -> bucket key
@@ -265,9 +282,20 @@ export function incrRecorder({root, folders, hidden, objects, includeTests}) {
         filesByObject.get(key).push(file);
       }
       let allPortable = true;
+      const ooKeys = new Set([...filesByObject.keys()].filter((k) => k.startsWith("CLAS ") || k.startsWith("INTF ")));
       for (const [key, b] of buckets) {
         const irs = program.classes.filter((c) => pushedNames.get(c.name) === key);
         const deps = new Set(b.reads);
+        // what the syntax pass resolved through another object (a type alias
+        // the IR keeps no name of, osgo-incr-deps.mjs), and every class or
+        // interface the object's text spells (a dynamic name in a literal):
+        // invalidation edges, not only registry members
+        const semantic = semanticDeps(reg, key, objectOf);
+        for (const dep of semantic ?? []) deps.add(dep);
+        for (const f of filesByObject.get(key) ?? []) {
+          if (!/\.abap$/i.test(f)) continue;
+          for (const w of wordsOf(readFileSync(f, "utf8"))) for (const t of ["CLAS", "INTF"]) if (ooKeys.has(keyOf(t, w))) deps.add(keyOf(t, w));
+        }
         const anonRefs = new Set();
         for (const ir of irs) {
           const names = irNames(ir);
@@ -309,6 +337,7 @@ export function incrRecorder({root, folders, hidden, objects, includeTests}) {
           } catch { ok = false; }
         }
         entry.portable = ok;
+        if (semantic === null) entry.depsKnown = false;
         if (!ok) allPortable = false;
         entries[key] = entry;
       }
@@ -342,6 +371,7 @@ export function incrRecorder({root, folders, hidden, objects, includeTests}) {
       const index = {schema: SCHEMA, tool: toolIdentity(), folders, objects, order, segments, strayLayoutOk,
         ctorDefaults: [...ctorDefaults].sort(),
         anonNamed: Object.fromEntries(anonNamed),
+        anonReach: Object.fromEntries(anonReach),
         straySlots: Object.fromEntries(Object.entries(slots).map(([c, s]) => [c, [...s].sort()])),
         classes: program.classes.map((c) => [pushedNames.get(c.name), c.name]),
         entries, broken, supers, wanted: [...program.wanted],
@@ -394,9 +424,12 @@ function pruneGenerations(root, current) {
 export function incrAssemble({root, folders, objects, hidden, includeTests, proof}) {
   const dir = join(root, "build", "osgo-incr", proof.base);
   const notes = [];
-  let index;
-  try { index = JSON.parse(readFileSync(join(dir, "index.json"), "utf8")); }
-  catch { return {ok: false, reason: `no per-object cache of the live generation ${proof.base}`}; }
+  // the index, the database record and the stamp over both, validated as a
+  // whole (osgo-incr-meta.mjs): a cache a build left half-written, or one
+  // whose metadata does not have the shape this reader walks, is a miss
+  const sealed = readSealedCache(dir, proof.base);
+  if (!sealed.ok) return {ok: false, reason: sealed.reason};
+  const index = sealed.index;
   if (index.schema !== SCHEMA) return {ok: false, reason: `the per-object cache has schema ${index.schema}, not ${SCHEMA}`};
   if (index.tool !== toolIdentity()) return {ok: false, reason: "the front end changed since the cache was written"};
   if (JSON.stringify(index.folders) !== JSON.stringify(folders)) return {ok: false, reason: "the layer folders changed since the cache was written"};
@@ -427,7 +460,7 @@ export function incrAssemble({root, folders, objects, hidden, includeTests, proo
     for (const key of queue) for (const dep of dependents.get(key) ?? []) if (!relower.has(dep)) { relower.add(dep); next.push(dep); }
     queue = next;
   }
-  for (const [key, entry] of Object.entries(index.entries)) if (entry.portable === false) relower.add(key);
+  for (const [key, entry] of Object.entries(index.entries)) if (entry.portable === false || entry.depsKnown === false) relower.add(key);
   notes.push(`re-lowering ${relower.size} of ${Object.keys(index.entries).length} objects (edited: ${[...edited].join(", ")})`);
 
   // the registry of the fast build: every non-class object, plus the
@@ -655,7 +688,9 @@ export function incrAssemble({root, folders, objects, hidden, includeTests, proo
       for (const key of reusedKeys) for (const [k, params] of load(key).supplied ?? []) supplied.set(k, new Set([...(supplied.get(k) ?? []), ...params]));
       p.supplied = supplied;
       let origins;
-      p.anonStructs = anonShapes = new AnonShapes(seeds, () => currentKey, index.anonNamed ?? {}, (t) => (origins ??= anonOrigins(reg)).get(t) ?? []);
+      const segAt = new Map(index.segments.map(([key, occ], i) => [`${key}\0${occ}`, i]));
+      p.anonStructs = anonShapes = new AnonShapes(seeds, () => currentKey, index.anonNamed ?? {}, (t) => (origins ??= anonOrigins(reg)).get(t) ?? [],
+        () => segAt.get(`${currentKey}\0${(freshSegs.get(currentKey)?.length ?? 0) - 1}`));
       // the fresh lowering resolves CDS view types through this map
       // (frontend.mjs), and the mini registry's own is empty -- its walk
       // never reaches the .ddls.asddls sources; the merge restores the
@@ -783,6 +818,11 @@ export function incrAssemble({root, folders, objects, hidden, includeTests, proo
   }
 
   if (anonShapes?.doubt !== undefined) return {ok: false, reason: anonShapes.doubt};
+  // an edit that moves the first reacher of a declared anonymous structure
+  // (an earlier object now reaches it, or the first stops) renames it in the
+  // full build; the pinned name would be the old one
+  const moved = anonFirstMoved(index.anonReach, anonShapes?.reached ?? new Map(), relower);
+  if (moved !== undefined) return {ok: false, reason: `the first object to reach the anonymous structure of ${moved} is another one after the edit`};
   // the full build entered every re-lowered object as often, and in the
   // same phases, as this one did (the discovery, the class pass, the local
   // classes, the function groups); an edit that changed that changes the
@@ -917,7 +957,7 @@ export function incrAssemble({root, folders, objects, hidden, includeTests, proo
   for (const entry of Object.values(index.entries)) for (const [name, file] of Object.entries(entry.regFiles ?? {})) filesOf.set(name, file);
   program2.filesOf = filesOf;
   return {ok: true, program: program2, lowered: [...relower].sort(), reused: reusedKeys.length, notes,
-    incrDb: {dir, relower: [...relower], registryOrder: index.registryOrder}};
+    incrDb: {dir, db: sealed.db, relower: [...relower], registryOrder: index.registryOrder}};
 }
 
 // the database statements of the fast path: osgo-incr-db.mjs (its own file,

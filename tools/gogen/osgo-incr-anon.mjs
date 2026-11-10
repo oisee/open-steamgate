@@ -56,11 +56,23 @@ export class AnonShapes {
   /** @param {Map<string, string>} seed shape -> the one name the write-time build gave it
    *  @param {() => string | null} currentKey the object lowering now
    *  @param {Record<string, string | null>} named declaration path -> the name the full build gave its instance
-   *  @param {(t: any) => string[]} originsOf the declaration paths of an instance in this registry */
-  constructor(seed, currentKey = () => null, named = {}, originsOf = () => []) {
-    Object.assign(this, {seed, currentKey, named, originsOf});
+   *  @param {(t: any) => string[]} originsOf the declaration paths of an instance in this registry
+   *  @param {() => number | undefined} position where the object lowering now sits in the full build's segment sequence */
+  constructor(seed, currentKey = () => null, named = {}, originsOf = () => [], position = () => undefined) {
+    Object.assign(this, {seed, currentKey, named, originsOf, position});
     this.mine = new Map();
     this.doubt = undefined;
+    /** declaration path -> the earliest position a fresh lowering reached it at */
+    this.reached = new Map();
+  }
+  /** a fresh lowering reached instance `t`: where, by every path naming it */
+  reach(t) {
+    if (this.currentKey() === null) return;
+    const at = this.position();
+    for (const p of this.originsOf(t)) {
+      if (at === undefined) { this.doubt ??= `${this.currentKey()} reached the anonymous structure of ${p} outside the live generation's segments`; continue; }
+      if (!this.reached.has(p) || this.reached.get(p) > at) this.reached.set(p, at);
+    }
   }
   /** The full build named every instance after the FIRST object of its
    *  order to reach it; a fresh lowering reaches it in another order (the
@@ -79,6 +91,7 @@ export class AnonShapes {
    *  - outside every object's mark (a global pass) the old answer stands:
    *    the one name the write-time build gave the shape, if it gave one. */
   get(t) {
+    this.reach(t);
     if (this.mine.has(t)) {
       const go = this.mine.get(t);
       for (const p of this.originsOf(t)) {
@@ -101,7 +114,30 @@ export class AnonShapes {
     const shape = shapeOf(t);
     return shape === undefined ? undefined : this.seed.get(shape);
   }
-  set(t, go) { this.mine.set(t, go); }
+  set(t, go) { this.reach(t); this.mine.set(t, go); }
   has(t) { return this.get(t) !== undefined; }
   seededNames() { return new Set(this.seed.values()); }
+}
+
+/** Whether the first reacher of a declared anonymous structure moved: the
+ *  full build names an instance after the FIRST object of its segment
+ *  sequence to reach it (`recorded`: path -> {object key or "" for a global
+ *  pass: first position}). In the fast build the cached objects reach what
+ *  they reached then, the re-lowered ones what `reached` says now; an edit
+ *  that makes an earlier object reach it (or stops the first reacher from
+ *  reaching it) renames it in the full build, and the pinned name would be
+ *  wrong. Returns the first such path, or undefined.
+ *  @param {Record<string, Record<string, number>>} recorded
+ *  @param {Map<string, number>} reached
+ *  @param {Set<string>} relower */
+export function anonFirstMoved(recorded, reached, relower) {
+  for (const [path, by] of Object.entries(recorded)) {
+    const fresh = reached.get(path);
+    const entries = Object.entries(by);
+    if (fresh === undefined && !entries.some(([k]) => k !== "" && relower.has(k))) continue;
+    const was = Math.min(...entries.map(([, at]) => at));
+    const now = Math.min(...entries.filter(([k]) => k === "" || !relower.has(k)).map(([, at]) => at), fresh ?? Infinity);
+    if (now !== was) return path;
+  }
+  return undefined;
 }

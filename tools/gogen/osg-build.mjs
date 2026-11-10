@@ -110,7 +110,11 @@ export function compileOsg({extraFolders = [], includeTests = new Set(), incr} =
   let incrInfo;
   let note = "";
   if (incr?.proof?.ok) {
-    const attempt = incrAssemble({root: home, folders, objects, hidden, includeTests, proof: incr.proof});
+    // a cache that cannot be read or assembled is a miss like any other:
+    // the full front end below runs, never an abort
+    let attempt;
+    try { attempt = incrAssemble({root: home, folders, objects, hidden, includeTests, proof: incr.proof}); }
+    catch (e) { attempt = {ok: false, reason: `the per-object cache could not be used: ${e.message}`}; }
     if (attempt.ok) {
       program = attempt.program;
       incrInfo = {read: attempt, proofBase: incr.proof.base};
@@ -143,7 +147,8 @@ export async function osgDatabase(program, options = {}) {
   // reconstruction is exactly what the real run produced
   /** @type {{schemas: {sqlite: string[]}, insert: string[]}} */ let setup;
   if (options.incr?.read) {
-    const cached = dbCacheRead(options.incr.read.incrDb.dir);
+    // validated with the index before the cache was taken (osgo-incr-meta.mjs)
+    const cached = options.incr.read.incrDb.db ?? dbCacheRead(options.incr.read.incrDb.dir);
     if (cached === undefined) throw new Error(`osgo incr: the cache of generation ${options.incr.proofBase} has no database record`);
     const fresh = dbContributions(program.reg, new Set(options.incr.read.incrDb.relower));
     const flat = dbFlat(cached, fresh);

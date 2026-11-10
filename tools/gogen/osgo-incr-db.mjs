@@ -6,6 +6,7 @@ import {createRequire} from "node:module";
 import {readFileSync, renameSync, writeFileSync} from "node:fs";
 import {join} from "node:path";
 import {core} from "./frontend-inventory.mjs";
+import {sealCache} from "./osgo-incr-meta.mjs";
 
 const upper = (text) => String(text).toUpperCase();
 const keyOf = (type, name) => `${type} ${name}`;
@@ -78,7 +79,8 @@ export function dbFlat(cached, fresh) {
   return {schemas, insert};
 }
 
-/** the database record of a generation's cache: `db.json` beside index.json */
+/** the database record of a generation's cache: `db.json` beside index.json,
+ *  and then the stamp that makes the generation usable (osgo-incr-meta.mjs) */
 export function dbCacheWrite(dir, contributions) {
   const file = join(dir, "db.json"), temp = `${file}.${process.pid}.pending`;
   writeFileSync(temp, JSON.stringify({order: contributions.order,
@@ -86,6 +88,7 @@ export function dbCacheWrite(dir, contributions) {
     cdsViews: Object.fromEntries(contributions.cdsViews),
     inserts: Object.fromEntries([...contributions.inserts].map(([k, v]) => [k, v])), tail: contributions.tail}));
   renameSync(temp, file);
+  sealCache(dir);
 }
 
 /** @returns {object | undefined} the recorded contributions, or undefined */
