@@ -101,7 +101,7 @@ describe("RAP R6 actions (generator)", () => {
       [det, "determine action check { validation missing; }", /validation missing, which ZI_RAP_BILL does not declare/],
       [det, "determine action check { validation Other~checkAmount; }", /validation Other~checkAmount of another entity is outside R6/],
       [det, "determine action check { validation ( foo ) checkAmount; }", /options other than always/],
-      [det, "draft determine action check { validation checkAmount; }", /draft determine actions are outside R6 \(draft\)/],
+      [det, "draft determine action check { validation checkAmount; }", /a draft determine action in a behavior definition without with draft/],
       [det, "determine action ( features : instance ) check { validation checkAmount; }", /determine action options \(features : instance\) are outside R6/],
       [det, "determine action ( authorization : update ) check { validation checkAmount; }", /determine action options \(authorization : update\) are outside R6/],
       ["factory action copyBill [1];", "static action copyBill;", /static actions are outside R6/],

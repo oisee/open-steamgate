@@ -10,14 +10,14 @@ CLASS ltcl_draft DEFINITION FOR TESTING DURATION SHORT RISK LEVEL DANGEROUS FINA
     TYPES tt_leg_del  TYPE TABLE FOR DELETE zi_rap_dleg.
     TYPES tt_read     TYPE TABLE FOR READ IMPORT zi_rap_dtrip.
     TYPES tt_trips    TYPE TABLE FOR READ RESULT zi_rap_dtrip.
-    TYPES tt_edit     TYPE TABLE FOR ACTION IMPORT zi_rap_dtrip~Edit.
-    TYPES tt_edited   TYPE TABLE FOR ACTION RESULT zi_rap_dtrip~Edit.
-    TYPES tt_activate TYPE TABLE FOR ACTION IMPORT zi_rap_dtrip~Activate.
-    TYPES tt_active   TYPE TABLE FOR ACTION RESULT zi_rap_dtrip~Activate.
-    TYPES tt_discard  TYPE TABLE FOR ACTION IMPORT zi_rap_dtrip~Discard.
-    TYPES tt_resume   TYPE TABLE FOR ACTION IMPORT zi_rap_dtrip~Resume.
-    TYPES tt_resumed  TYPE TABLE FOR ACTION RESULT zi_rap_dtrip~Resume.
-    TYPES tt_prepare  TYPE TABLE FOR ACTION IMPORT zi_rap_dtrip~Prepare.
+    TYPES tt_edit     TYPE TABLE FOR ACTION IMPORT zi_rap_dtrip~edit.
+    TYPES tt_edited   TYPE TABLE FOR ACTION RESULT zi_rap_dtrip~edit.
+    TYPES tt_activate TYPE TABLE FOR ACTION IMPORT zi_rap_dtrip~activate.
+    TYPES tt_active   TYPE TABLE FOR ACTION RESULT zi_rap_dtrip~activate.
+    TYPES tt_discard  TYPE TABLE FOR ACTION IMPORT zi_rap_dtrip~discard.
+    TYPES tt_resume   TYPE TABLE FOR ACTION IMPORT zi_rap_dtrip~resume.
+    TYPES tt_resumed  TYPE TABLE FOR ACTION RESULT zi_rap_dtrip~resume.
+    TYPES tt_prepare  TYPE TABLE FOR ACTION IMPORT zi_rap_dtrip~prepare.
     TYPES ty_mapped   TYPE RESPONSE FOR MAPPED EARLY zi_rap_dtrip.
     TYPES ty_failed   TYPE RESPONSE FOR FAILED EARLY zi_rap_dtrip.
     TYPES ty_reported TYPE RESPONSE FOR REPORTED EARLY zi_rap_dtrip.

@@ -297,6 +297,19 @@ CLASS zcl_osd_rap_runtime DEFINITION PUBLIC CREATE PRIVATE.
       RAISING
         zcx_osd_rap.
 
+* R8: Activate of the draft root at IV_INDEX
+    METHODS activate_draft
+      IMPORTING
+        is_entity   TYPE zif_osd_rap_bo=>ty_entity
+        iv_index    TYPE i
+        is_key      TYPE any
+      CHANGING
+        ct_result   TYPE STANDARD TABLE
+        cs_failed   TYPE any
+        cs_reported TYPE any
+      RAISING
+        zcx_osd_rap.
+
 * R8: the instance at IV_INDEX and its composition tree as drafts (Edit)
     METHODS copy_to_draft
       IMPORTING
@@ -3246,34 +3259,8 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
     DATA lv_ok     TYPE abap_bool.
     DATA lv_uuid   TYPE x LENGTH 16.
     DATA lv_index  TYPE i.
-    DATA lv_active TYPE i.
-    DATA lt_tree   TYPE string_table.
-    DATA lv_node   TYPE string.
-    DATA lv_name   TYPE string.
-    DATA lv_at     TYPE string.
-    DATA lv_pos    TYPE i.
-    DATA ls_node   TYPE zif_osd_rap_bo=>ty_entity.
-    DATA lr_keys   TYPE REF TO data.
-    DATA lr_copy   TYPE REF TO data.
-    DATA lv_count  TYPE i.
-    DATA lt_keep   TYPE string_table.
-    DATA ls_assoc  TYPE zif_osd_rap_bo=>ty_assoc.
-    DATA lt_children TYPE int4_table.
-    DATA lv_child    TYPE i.
-    DATA ls_child    TYPE ty_inst.
-    DATA ls_target   TYPE zif_osd_rap_bo=>ty_entity.
-    TYPES:
-      BEGIN OF ty_copy,
-        entity TYPE string,
-        row    TYPE REF TO data,
-      END OF ty_copy.
-    DATA ls_copy   TYPE ty_copy.
-    DATA lt_copies TYPE STANDARD TABLE OF ty_copy WITH DEFAULT KEY.
     FIELD-SYMBOLS <ls_row>    TYPE any.
-    FIELD-SYMBOLS <ls_keys>   TYPE any.
     FIELD-SYMBOLS <ls_copy>   TYPE any.
-    FIELD-SYMBOLS <lv_draft>  TYPE any.
-    FIELD-SYMBOLS <lv_active> TYPE any.
 
     APPEND |DRAFT ACTION { iv_action }| TO mt_trace.
     READ TABLE mt_inst INDEX iv_index INTO ls_inst.
@@ -3333,92 +3320,135 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
         delete_tree( is_entity = is_entity iv_index = iv_index ).
 
       WHEN 'ACTIVATE'.
-* the active instance's total ETag must be the one the draft started from
-        lr_keys = new_row( is_entity ).
-        ASSIGN lr_keys->* TO <ls_keys>.
-        copy_keys( EXPORTING is_entity = is_entity is_from = <ls_row> CHANGING cs_to = <ls_keys> ).
-        set_draft( EXPORTING iv_on = abap_false CHANGING cs_row = <ls_keys> ).
-        lv_active = resolve( is_entity = is_entity is_input = <ls_keys> ).
-        IF lv_active > 0 AND is_entity-total_etag IS NOT INITIAL.
-          READ TABLE mt_inst INDEX lv_active INTO ls_inst.
-          ASSIGN ls_inst-row->* TO <ls_copy>.
-          ASSIGN COMPONENT is_entity-total_etag OF STRUCTURE <ls_copy> TO <lv_active>.
-          ASSIGN COMPONENT is_entity-total_etag OF STRUCTURE <ls_row> TO <lv_draft>.
-          IF <lv_active> IS ASSIGNED AND <lv_draft> IS ASSIGNED AND <lv_active> <> <lv_draft>.
-            fail( EXPORTING is_entity = is_entity is_input = is_key
-                            iv_cause = if_abap_behv=>cause-conflict
-                            iv_text = |{ is_entity-alias } { key_text( is_entity = is_entity is_row = <ls_row> ) } changed after its draft was made|
-                  CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
-            RETURN.
-          ENDIF.
-        ENDIF.
-* the draft tree, copied before it is deleted
-        draft_tree( EXPORTING is_entity = is_entity iv_index = iv_index CHANGING ct_tree = lt_tree ).
-        LOOP AT lt_tree INTO lv_node.
-          SPLIT lv_node AT '|' INTO lv_name lv_at.
-          lv_pos = lv_at.
-          READ TABLE mt_inst INDEX lv_pos INTO ls_inst.
-          ls_node = entity_of( lv_name ).
-          lr_copy = new_row( ls_node ).
-          ASSIGN lr_copy->* TO <ls_copy>.
-          ASSIGN ls_inst-row->* TO <ls_row>.
-          <ls_copy> = <ls_row>.
-          set_draft( EXPORTING iv_on = abap_false CHANGING cs_row = <ls_copy> ).
-          ls_copy-entity = lv_name.
-          ls_copy-row = lr_copy.
-          APPEND ls_copy TO lt_copies.
-        ENDLOOP.
-        delete_tree( is_entity = is_entity iv_index = iv_index ).
-        IF lv_active > 0.
-          lock( EXPORTING is_entity = is_entity iv_index = lv_active is_input = is_key
-                IMPORTING ev_ok = lv_ok CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
-          IF lv_ok = abap_false.
-            RETURN.
-          ENDIF.
-        ENDIF.
-* each draft instance updates the active instance it came from, or creates it
-        CLEAR lv_count.
-        LOOP AT lt_copies INTO ls_copy.
-          lv_count = lv_count + 1.
-          ls_node = entity_of( ls_copy-entity ).
-          ASSIGN ls_copy-row->* TO <ls_copy>.
-          lv_index = activate_one( EXPORTING is_entity = ls_node is_draft = <ls_copy>
-                                   CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
-          IF lv_index = 0.
-* a mandatory field the draft left empty: FAILED, and nothing is saved
-            RETURN.
-          ENDIF.
-          READ TABLE mt_inst INDEX lv_index INTO ls_inst.
-          APPEND |{ ls_copy-entity }\|{ ls_inst-key }| TO lt_keep.
-          IF lv_count = 1.
-            lv_active = lv_index.
-          ENDIF.
-        ENDLOOP.
-* an active child the draft no longer has is deleted with its subtree
-        IF lv_active > 0.
-          LOOP AT lt_copies INTO ls_copy.
-            ls_node = entity_of( ls_copy-entity ).
-            ASSIGN ls_copy-row->* TO <ls_copy>.
-            lv_index = resolve( is_entity = ls_node is_input = <ls_copy> ).
-            CHECK lv_index > 0.
-            LOOP AT ls_node-assocs INTO ls_assoc WHERE kind = 'C'.
-              ls_target = entity_of( ls_assoc-target ).
-              lt_children = targets( is_entity = ls_node is_assoc = ls_assoc iv_index = lv_index ).
-              LOOP AT lt_children INTO lv_child.
-                READ TABLE mt_inst INDEX lv_child INTO ls_child.
-                READ TABLE lt_keep TRANSPORTING NO FIELDS WITH KEY table_line = |{ ls_target-name }\|{ ls_child-key }|.
-                IF sy-subrc <> 0.
-                  delete_tree( is_entity = ls_target iv_index = lv_child ).
-                ENDIF.
-              ENDLOOP.
-            ENDLOOP.
-          ENDLOOP.
-          READ TABLE mt_inst INDEX lv_active INTO ls_inst.
-          ASSIGN ls_inst-row->* TO <ls_copy>.
-          result_row( EXPORTING is_row = <ls_copy> CHANGING ct_result = ct_result ).
-        ENDIF.
+        activate_draft( EXPORTING is_entity = is_entity iv_index = iv_index is_key = is_key
+                        CHANGING ct_result = ct_result cs_failed = cs_failed cs_reported = cs_reported ).
     ENDCASE.
   ENDMETHOD.
+
+  METHOD activate_draft.
+* R8: the draft's tree becomes the active one: each draft instance updates
+* the active instance it came from or creates it, an active child the draft
+* no longer has is deleted, the draft is deleted; the save checks the rest
+    DATA ls_inst   TYPE ty_inst.
+    DATA lv_ok     TYPE abap_bool.
+    DATA lv_index  TYPE i.
+    DATA lv_active TYPE i.
+    DATA lt_tree   TYPE string_table.
+    DATA lv_node   TYPE string.
+    DATA lv_name   TYPE string.
+    DATA lv_at     TYPE string.
+    DATA lv_pos    TYPE i.
+    DATA ls_node   TYPE zif_osd_rap_bo=>ty_entity.
+    DATA lr_keys   TYPE REF TO data.
+    DATA lr_copy   TYPE REF TO data.
+    DATA lv_count  TYPE i.
+    DATA lt_keep   TYPE string_table.
+    DATA ls_assoc  TYPE zif_osd_rap_bo=>ty_assoc.
+    DATA lt_children TYPE int4_table.
+    DATA lv_child    TYPE i.
+    DATA ls_child    TYPE ty_inst.
+    DATA ls_target   TYPE zif_osd_rap_bo=>ty_entity.
+    TYPES:
+      BEGIN OF ty_copy,
+        entity TYPE string,
+        row    TYPE REF TO data,
+      END OF ty_copy.
+    DATA ls_copy   TYPE ty_copy.
+    DATA lt_copies TYPE STANDARD TABLE OF ty_copy WITH DEFAULT KEY.
+    FIELD-SYMBOLS <ls_row>    TYPE any.
+    FIELD-SYMBOLS <ls_keys>   TYPE any.
+    FIELD-SYMBOLS <ls_copy>   TYPE any.
+    FIELD-SYMBOLS <lv_draft>  TYPE any.
+    FIELD-SYMBOLS <lv_active> TYPE any.
+
+    READ TABLE mt_inst INDEX iv_index INTO ls_inst.
+    ASSIGN ls_inst-row->* TO <ls_row>.
+* the active instance's total ETag must be the one the draft started from
+    lr_keys = new_row( is_entity ).
+    ASSIGN lr_keys->* TO <ls_keys>.
+    copy_keys( EXPORTING is_entity = is_entity is_from = <ls_row> CHANGING cs_to = <ls_keys> ).
+    set_draft( EXPORTING iv_on = abap_false CHANGING cs_row = <ls_keys> ).
+    lv_active = resolve( is_entity = is_entity is_input = <ls_keys> ).
+    IF lv_active > 0 AND is_entity-total_etag IS NOT INITIAL.
+      READ TABLE mt_inst INDEX lv_active INTO ls_inst.
+      ASSIGN ls_inst-row->* TO <ls_copy>.
+      ASSIGN COMPONENT is_entity-total_etag OF STRUCTURE <ls_copy> TO <lv_active>.
+      ASSIGN COMPONENT is_entity-total_etag OF STRUCTURE <ls_row> TO <lv_draft>.
+      IF <lv_active> IS ASSIGNED AND <lv_draft> IS ASSIGNED AND <lv_active> <> <lv_draft>.
+        fail( EXPORTING is_entity = is_entity is_input = is_key
+                        iv_cause = if_abap_behv=>cause-conflict
+                        iv_text = |{ is_entity-alias } { key_text( is_entity = is_entity is_row = <ls_row> ) } changed after its draft was made|
+              CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
+        RETURN.
+      ENDIF.
+    ENDIF.
+* the draft tree, copied before it is deleted
+    draft_tree( EXPORTING is_entity = is_entity iv_index = iv_index CHANGING ct_tree = lt_tree ).
+    LOOP AT lt_tree INTO lv_node.
+      SPLIT lv_node AT '|' INTO lv_name lv_at.
+      lv_pos = lv_at.
+      READ TABLE mt_inst INDEX lv_pos INTO ls_inst.
+      ls_node = entity_of( lv_name ).
+      lr_copy = new_row( ls_node ).
+      ASSIGN lr_copy->* TO <ls_copy>.
+      ASSIGN ls_inst-row->* TO <ls_row>.
+      <ls_copy> = <ls_row>.
+      set_draft( EXPORTING iv_on = abap_false CHANGING cs_row = <ls_copy> ).
+      ls_copy-entity = lv_name.
+      ls_copy-row = lr_copy.
+      APPEND ls_copy TO lt_copies.
+    ENDLOOP.
+    delete_tree( is_entity = is_entity iv_index = iv_index ).
+    IF lv_active > 0.
+      lock( EXPORTING is_entity = is_entity iv_index = lv_active is_input = is_key
+            IMPORTING ev_ok = lv_ok CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
+      IF lv_ok = abap_false.
+        RETURN.
+      ENDIF.
+    ENDIF.
+* each draft instance updates the active instance it came from, or creates it
+    CLEAR lv_count.
+    LOOP AT lt_copies INTO ls_copy.
+      lv_count = lv_count + 1.
+      ls_node = entity_of( ls_copy-entity ).
+      ASSIGN ls_copy-row->* TO <ls_copy>.
+      lv_index = activate_one( EXPORTING is_entity = ls_node is_draft = <ls_copy>
+                               CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
+      IF lv_index = 0.
+* a mandatory field the draft left empty: FAILED, and nothing is saved
+        RETURN.
+      ENDIF.
+      READ TABLE mt_inst INDEX lv_index INTO ls_inst.
+      APPEND |{ ls_copy-entity }\|{ ls_inst-key }| TO lt_keep.
+      IF lv_count = 1.
+        lv_active = lv_index.
+      ENDIF.
+    ENDLOOP.
+* an active child the draft no longer has is deleted with its subtree
+    IF lv_active > 0.
+      LOOP AT lt_copies INTO ls_copy.
+        ls_node = entity_of( ls_copy-entity ).
+        ASSIGN ls_copy-row->* TO <ls_copy>.
+        lv_index = resolve( is_entity = ls_node is_input = <ls_copy> ).
+        CHECK lv_index > 0.
+        LOOP AT ls_node-assocs INTO ls_assoc WHERE kind = 'C'.
+          ls_target = entity_of( ls_assoc-target ).
+          lt_children = targets( is_entity = ls_node is_assoc = ls_assoc iv_index = lv_index ).
+          LOOP AT lt_children INTO lv_child.
+            READ TABLE mt_inst INDEX lv_child INTO ls_child.
+            READ TABLE lt_keep TRANSPORTING NO FIELDS WITH KEY table_line = |{ ls_target-name }\|{ ls_child-key }|.
+            IF sy-subrc <> 0.
+              delete_tree( is_entity = ls_target iv_index = lv_child ).
+            ENDIF.
+          ENDLOOP.
+        ENDLOOP.
+      ENDLOOP.
+      READ TABLE mt_inst INDEX lv_active INTO ls_inst.
+      ASSIGN ls_inst-row->* TO <ls_copy>.
+      result_row( EXPORTING is_row = <ls_copy> CHANGING ct_result = ct_result ).
+    ENDIF.
+  ENDMETHOD.
+
 
   METHOD copy_to_draft.
     DATA ls_inst  TYPE ty_inst.

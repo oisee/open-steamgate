@@ -12,13 +12,15 @@ CLASS zcl_stg_sadl_dpc DEFINITION PUBLIC INHERITING FROM /iwbep/cl_mgw_push_abs_
         iv_sadl_xml TYPE string.
   PRIVATE SECTION.
     DATA mo_def TYPE REF TO zcl_stg_sadl_def.
-* R8: the draft entities seen so far and the class serving each (or none)
+* R8: the entities asked so far and the class serving each draft-enabled
+* one (initial for the others); what a generation serves does not change
+* while it runs, so the answer is kept for the process
     TYPES:
       BEGIN OF ty_draft,
         entity TYPE string,
         class  TYPE string,
       END OF ty_draft.
-    DATA mt_draft TYPE HASHED TABLE OF ty_draft WITH UNIQUE KEY entity.
+    CLASS-DATA gt_draft TYPE HASHED TABLE OF ty_draft WITH UNIQUE KEY entity.
 * R8 (docs/rap-runtime.md): the class serving a draft-enabled entity's
 * active and draft rows (zif_stg_cds_draft_source), initial for any other
     METHODS draft_class_of
@@ -220,14 +222,14 @@ CLASS zcl_stg_sadl_dpc IMPLEMENTATION.
     DATA ls_draft    TYPE ty_draft.
     DATA li_behavior TYPE REF TO zif_stg_sadl_behavior.
 
-    READ TABLE mt_draft INTO ls_draft WITH TABLE KEY entity = is_entity-name.
+    READ TABLE gt_draft INTO ls_draft WITH TABLE KEY entity = is_entity-name.
     IF sy-subrc <> 0.
       ls_draft-entity = is_entity-name.
       li_behavior = behavior_of( is_entity ).
       IF li_behavior IS BOUND.
         ls_draft-class = li_behavior->draft_source( is_entity-name ).
       ENDIF.
-      INSERT ls_draft INTO TABLE mt_draft.
+      INSERT ls_draft INTO TABLE gt_draft.
     ENDIF.
     rv_class = ls_draft-class.
   ENDMETHOD.
