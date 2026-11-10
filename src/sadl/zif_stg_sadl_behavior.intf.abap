@@ -52,12 +52,16 @@ INTERFACE zif_stg_sadl_behavior PUBLIC.
       /iwbep/cx_mgw_busi_exception
       /iwbep/cx_mgw_tech_exception.
 
-* run an instance action on the instance IS_ROW names by its keys, and save
+* run an instance action on the instance IS_ROW names by its keys, and save.
+* ES_ROW: the keys of the instance to answer when it is another one (a
+* factory action's new instance, RAP R6); left initial otherwise
   METHODS execute
     IMPORTING
       iv_entity TYPE csequence
       iv_action TYPE csequence
       is_row    TYPE any
+    EXPORTING
+      es_row    TYPE any
     RAISING
       /iwbep/cx_mgw_busi_exception
       /iwbep/cx_mgw_tech_exception.
@@ -80,7 +84,7 @@ INTERFACE zif_stg_sadl_behavior PUBLIC.
       /iwbep/cx_mgw_busi_exception
       /iwbep/cx_mgw_tech_exception.
 
-* the instance actions of IV_ENTITY, upper case
+* the instance actions of IV_ENTITY a client may call, upper case
   METHODS actions
     IMPORTING
       iv_entity         TYPE csequence

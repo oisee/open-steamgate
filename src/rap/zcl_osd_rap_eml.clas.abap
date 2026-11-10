@@ -58,7 +58,8 @@ CLASS zcl_osd_rap_eml DEFINITION PUBLIC FINAL CREATE PRIVATE.
       RAISING
         zcx_osd_rap.
 
-* EXECUTE action FROM rows [RESULT result]
+* EXECUTE action FROM rows [RESULT result]; CS_MAPPED gets the instances a
+* factory action creates (R6)
     CLASS-METHODS execute
       IMPORTING
         iv_bdef     TYPE csequence
@@ -69,6 +70,7 @@ CLASS zcl_osd_rap_eml DEFINITION PUBLIC FINAL CREATE PRIVATE.
         ct_result   TYPE STANDARD TABLE
         cs_failed   TYPE any
         cs_reported TYPE any
+        cs_mapped   TYPE any OPTIONAL
       RAISING
         zcx_osd_rap.
 
@@ -447,8 +449,14 @@ CLASS zcl_osd_rap_eml IMPLEMENTATION.
     lo_runtime = runtime( iv_bdef ).
     lv_before = count_rows( cs_failed ).
     CLEAR ct_result.
-    lo_runtime->execute( EXPORTING iv_entity = iv_entity iv_action = iv_action it_keys = it_rows
-                         CHANGING ct_result = ct_result cs_failed = cs_failed cs_reported = cs_reported ).
+    IF cs_mapped IS SUPPLIED.
+      lo_runtime->execute( EXPORTING iv_entity = iv_entity iv_action = iv_action it_keys = it_rows
+                           CHANGING ct_result = ct_result cs_failed = cs_failed cs_reported = cs_reported
+                                    cs_mapped = cs_mapped ).
+    ELSE.
+      lo_runtime->execute( EXPORTING iv_entity = iv_entity iv_action = iv_action it_keys = it_rows
+                           CHANGING ct_result = ct_result cs_failed = cs_failed cs_reported = cs_reported ).
+    ENDIF.
     subrc( is_failed = cs_failed iv_before = lv_before ).
   ENDMETHOD.
 

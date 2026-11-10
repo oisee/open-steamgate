@@ -610,7 +610,8 @@ CLASS zcl_osd_rap_sadl IMPLEMENTATION.
     ls_model = li_bo->model( ).
     lv_name = to_upper( iv_entity ).
     READ TABLE ls_model-entities INTO ls_entity WITH KEY name = lv_name.
-    LOOP AT ls_entity-callables INTO ls_callable WHERE kind = 'A'.
+* R6: determine actions too; an internal action is the BO's own
+    LOOP AT ls_entity-callables INTO ls_callable WHERE ( kind = 'A' AND internal = abap_false ) OR kind = 'X'.
       APPEND ls_callable-name TO rt_actions.
     ENDLOOP.
   ENDMETHOD.
@@ -883,15 +884,23 @@ CLASS zcl_osd_rap_sadl IMPLEMENTATION.
     DATA lr_reported TYPE REF TO data.
     DATA lx_error    TYPE REF TO zcx_osd_rap.
     DATA lt_none     TYPE string_table.
+    DATA lr_mapped   TYPE REF TO data.
+    DATA ls_callable TYPE zif_osd_rap_bo=>ty_callable.
+    DATA lv_factory  TYPE abap_bool.
     FIELD-SYMBOLS <lt_tab>      TYPE STANDARD TABLE.
     FIELD-SYMBOLS <ls_line>     TYPE any.
     FIELD-SYMBOLS <lt_result>   TYPE STANDARD TABLE.
     FIELD-SYMBOLS <ls_failed>   TYPE any.
     FIELD-SYMBOLS <ls_reported> TYPE any.
+    FIELD-SYMBOLS <ls_mapped>   TYPE any.
+    FIELD-SYMBOLS <lt_mapped>   TYPE STANDARD TABLE.
+    FIELD-SYMBOLS <lv_cid>      TYPE any.
 
     DATA ls_proj TYPE zif_osd_rap_registry=>ty_projection.
     DATA lr_base TYPE REF TO data.
+    DATA lr_new  TYPE REF TO data.
     FIELD-SYMBOLS <ls_base> TYPE any.
+    FIELD-SYMBOLS <ls_new>  TYPE any.
 
     DATA lv_action TYPE string.
     ls_proj = projection_of( iv_entity ).
@@ -904,7 +913,13 @@ CLASS zcl_osd_rap_sadl IMPLEMENTATION.
       lr_base = base_line( ls_proj ).
       ASSIGN lr_base->* TO <ls_base>.
       to_base( EXPORTING is_projection = ls_proj is_row = is_row CHANGING cs_base = <ls_base> ).
-      zif_stg_sadl_behavior~execute( iv_entity = ls_proj-base_entity iv_action = iv_action is_row = <ls_base> ).
+      lr_new = base_line( ls_proj ).
+      ASSIGN lr_new->* TO <ls_new>.
+      zif_stg_sadl_behavior~execute( EXPORTING iv_entity = ls_proj-base_entity iv_action = iv_action is_row = <ls_base>
+                                     IMPORTING es_row = <ls_new> ).
+      IF <ls_new> IS NOT INITIAL AND es_row IS SUPPLIED.
+        from_base( EXPORTING is_projection = ls_proj is_base = <ls_new> CHANGING cs_row = es_row ).
+      ENDIF.
       RETURN.
     ENDIF.
 
@@ -917,6 +932,19 @@ CLASS zcl_osd_rap_sadl IMPLEMENTATION.
     READ TABLE <lt_tab> INDEX 1 ASSIGNING <ls_line>.
     put_keys( EXPORTING is_entity = ls_entity is_from = is_row
               CHANGING  cs_to     = <ls_line> ).
+* R6: a factory action maps its new instance under the %cid of the row
+    lv_action = to_upper( iv_action ).
+    LOOP AT ls_entity-callables INTO ls_callable WHERE kind = 'A' AND name = lv_action AND factory = abap_true.
+      lv_factory = abap_true.
+    ENDLOOP.
+    IF lv_factory = abap_true.
+      ASSIGN COMPONENT '%CID' OF STRUCTURE <ls_line> TO <lv_cid>.
+      IF sy-subrc = 0.
+        <lv_cid> = 'OSD-FACTORY'.
+      ENDIF.
+    ENDIF.
+    lr_mapped = lo_runtime->bo( )->new_response( 'MAPPED' ).
+    ASSIGN lr_mapped->* TO <ls_mapped>.
 * an action without a result still needs a table to answer into
     lr_result = lo_runtime->bo( )->new_table( iv_entity = ls_entity-name
                                               iv_kind   = 'ACTION RESULT'
@@ -936,7 +964,8 @@ CLASS zcl_osd_rap_sadl IMPLEMENTATION.
                                        it_keys     = <lt_tab>
                              CHANGING  ct_result   = <lt_result>
                                        cs_failed   = <ls_failed>
-                                       cs_reported = <ls_reported> ).
+                                       cs_reported = <ls_reported>
+                                       cs_mapped   = <ls_mapped> ).
       CATCH zcx_osd_rap INTO lx_error.
         lo_runtime->rollback( ).
         technical( lx_error ).
@@ -944,6 +973,24 @@ CLASS zcl_osd_rap_sadl IMPLEMENTATION.
     finish( EXPORTING io_runtime  = lo_runtime
             CHANGING  cs_failed   = <ls_failed>
                       cs_reported = <ls_reported> ).
+    IF lv_factory = abap_false OR es_row IS NOT SUPPLIED.
+      RETURN.
+    ENDIF.
+    ASSIGN COMPONENT ls_entity-response OF STRUCTURE <ls_mapped> TO <lt_mapped>.
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+    LOOP AT <lt_mapped> ASSIGNING <ls_line>.
+      ASSIGN COMPONENT '%CID' OF STRUCTURE <ls_line> TO <lv_cid>.
+      IF sy-subrc <> 0.
+        CONTINUE.
+      ENDIF.
+      IF <lv_cid> = 'OSD-FACTORY'.
+        put_keys( EXPORTING is_entity = ls_entity is_from = <ls_line>
+                  CHANGING  cs_to     = es_row ).
+        EXIT.
+      ENDIF.
+    ENDLOOP.
   ENDMETHOD.
 
 ENDCLASS.

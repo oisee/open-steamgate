@@ -32,6 +32,18 @@ INTERFACE zif_osd_rap_bo PUBLIC.
 * place (the explicit form), and not when it uses EML (the system's form).
 * FEATURES: an action declared ( features : instance ) asks the pool's
 * FOR INSTANCE FEATURES method before it runs (R4).
+* R6: KIND X is a determine action: no method, MEMBERS the determinations
+* on save (D) and validations (V) it runs, ALWAYS set for a member declared
+* ( always ). INTERNAL: an internal action, executed only by the BO's own
+* handlers (IN LOCAL MODE). FACTORY: a factory action, which answers the
+* new instances in MAPPED under the %cid of each import row.
+  TYPES:
+    BEGIN OF ty_member,
+      kind   TYPE ty_flag,
+      name   TYPE string,
+      always TYPE abap_bool,
+    END OF ty_member,
+    tt_member TYPE STANDARD TABLE OF ty_member WITH DEFAULT KEY.
   TYPES:
     BEGIN OF ty_callable,
       kind      TYPE ty_flag,
@@ -43,6 +55,9 @@ INTERFACE zif_osd_rap_bo PUBLIC.
       method    TYPE string,
       entities  TYPE abap_bool,
       features  TYPE abap_bool,
+      internal  TYPE abap_bool,
+      factory   TYPE abap_bool,
+      members   TYPE tt_member,
     END OF ty_callable,
     tt_callable TYPE STANDARD TABLE OF ty_callable WITH DEFAULT KEY.
 
@@ -162,7 +177,8 @@ INTERFACE zif_osd_rap_bo PUBLIC.
 * %NUMBERING the FOR NUMBERING method (IR_ROWS a TABLE FOR CREATE, IR_MAPPED
 * the RESPONSE FOR MAPPED it fills). R5: %NUMBERING\<assoc> calls the FOR
 * NUMBERING ... FOR CREATE e\_assoc method (IR_ROWS a TABLE FOR CREATE
-* e\_assoc).
+* e\_assoc). R6: for an action, IR_MAPPED is the caller's RESPONSE FOR
+* MAPPED, given to the handler's MAPPED (a factory action fills it).
   METHODS call
     IMPORTING
       io_handler  TYPE REF TO object

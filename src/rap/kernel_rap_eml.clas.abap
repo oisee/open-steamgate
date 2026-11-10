@@ -221,9 +221,11 @@ CLASS kernel_rap_eml IMPLEMENTATION.
 
   METHOD execute.
     DATA lr_result   TYPE REF TO data.
+    DATA lr_mapped   TYPE REF TO data.
     DATA lr_failed   TYPE REF TO data.
     DATA lr_reported TYPE REF TO data.
     FIELD-SYMBOLS <lt_result>   TYPE STANDARD TABLE.
+    FIELD-SYMBOLS <ls_mapped>   TYPE any.
     FIELD-SYMBOLS <ls_failed>   TYPE any.
     FIELD-SYMBOLS <ls_reported> TYPE any.
 
@@ -237,13 +239,17 @@ CLASS kernel_rap_eml IMPLEMENTATION.
       ENDIF.
       ASSIGN lr_result->* TO <lt_result>.
     ENDIF.
+* R6: a factory action answers its new instances in the statement's MAPPED
+    lr_mapped = target( iv_bdef = bdef iv_kind = 'MAPPED' ).
     lr_failed = target( iv_bdef = bdef iv_kind = 'FAILED' ).
     lr_reported = target( iv_bdef = bdef iv_kind = 'REPORTED' ).
+    ASSIGN lr_mapped->* TO <ls_mapped>.
     ASSIGN lr_failed->* TO <ls_failed>.
     ASSIGN lr_reported->* TO <ls_reported>.
 
     zcl_osd_rap_eml=>execute( EXPORTING iv_bdef = bdef iv_entity = entity iv_action = action it_rows = rows
-                              CHANGING ct_result = <lt_result> cs_failed = <ls_failed> cs_reported = <ls_reported> ).
+                              CHANGING ct_result = <lt_result> cs_failed = <ls_failed> cs_reported = <ls_reported>
+                                       cs_mapped = <ls_mapped> ).
     subrc( lr_failed ).
   ENDMETHOD.
 

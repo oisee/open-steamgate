@@ -83,11 +83,20 @@ export function treeOf(model, entity, view, projection = false) {
         throw new Error(`${entity.entity}: ${clause} dependent by ${mode.association}, which the behavior definition does not declare (association ${mode.association};)`);
     }
     if (entity.lock?.kind === "master" && parent) throw new Error(`${entity.entity}: lock master on a child (it is locked with its root: lock dependent by ${parent.alias})`);
+    const ancestors = [];
     for (const [clause, mode] of [["lock", entity.lock], ["etag", entity.etag], ["authorization", entity.authorization]]) {
       if (mode?.kind !== "dependent") continue;
       if (!parent) throw new Error(`${entity.entity}: ${clause} dependent without a parent (no association to parent in ${view.name})`);
-      if (mode.association && upper(mode.association) !== upper(parent.alias)) throw new Error(`${entity.entity}: ${clause} dependent by ${mode.association}, which is not the association to the parent (${parent.alias})`);
+      // R6: the association names the master, which is the parent or an
+      // ancestor further up (a grandchild's lock dependent by _Root); which
+      // one is checked against the whole tree (rap-runtime-gen.mjs)
+      if (mode.association && upper(mode.association) !== upper(parent.alias)) {
+        const own = assocs.find(a => upper(a.name) === upper(mode.association));
+        if (!own || own.kind !== "A") throw new Error(`${entity.entity}: ${clause} dependent by ${mode.association}, which is not the association to the parent (${parent.alias}) or to an ancestor`);
+        ancestors.push({clause, assoc: own.name, target: own.target});
+      }
     }
+    if (ancestors.length) return {parent: upper(parent.target), parentAssoc: parent.alias, assocs, ancestors};
     if (!parent && entity.lock?.kind === "dependent") throw new Error(`${entity.entity}: lock dependent on a root`);
   }
   return {parent: parent ? upper(parent.target) : undefined, parentAssoc: parent?.alias, assocs};
@@ -113,7 +122,12 @@ function projectionOf(plan, planned, plans) {
   }
   for (const a of entity.actions) {
     if (!a.use) throw new Error(`${entity.entity}~${a.name}: a projection's own actions are outside R5`);
-    if (!b.actions.some(x => upper(x.name) === upper(a.name))) throw new Error(`${entity.entity}: use action ${a.name}, which ${b.entity} does not declare`);
+    const own = b.actions.find(x => upper(x.name) === upper(a.name));
+    if (!own) throw new Error(`${entity.entity}: use action ${a.name}, which ${b.entity} does not declare`);
+    // R6: an internal action is not exposable, so no projection uses it
+    if (own.modifiers.includes("internal")) throw new Error(`${entity.entity}: use action ${a.name}, which is internal to ${b.entity}`);
+    // the projection's derived types are the base action's (factory %cid, result)
+    Object.assign(a, {modifiers: own.modifiers, determine: own.determine, result: own.result, parameter: own.parameter, cardinality: own.cardinality});
   }
   for (const a of planned.tree.assocs) {
     const own = base.e.tree.assocs.find(x => upper(x.name) === upper(a.name));
@@ -143,6 +157,34 @@ export function projectedBehavior(planned) {
   return {create: used("create"), update: used("update"), delete: used("delete"), control,
     actions: entity.actions.map(a => a.name),
     etag: entity.useEtag && baseEtag ? fields.find(f => upper(f.from) === upper(baseEtag))?.name : undefined};
+}
+
+// R6: the action shapes that run -- instance actions, internal, factory and
+// determine actions; anything else is refused by name
+function checkAction(entity, action, projection) {
+  const where = `${entity.entity}~${action.name}`;
+  if (action.use && !projection) throw new Error(`${where}: use action outside a projection`);
+  const mods = action.modifiers ?? [];
+  if (mods.includes("draft")) throw new Error(`${where}: draft ${action.determine ? "determine " : ""}actions are outside R6 (draft)`);
+  if (mods.includes("static")) throw new Error(`${where}: static actions are outside R6`);
+  if (mods.filter(m => m === "internal" || m === "factory").length > 1) throw new Error(`${where}: an internal factory action is outside R6`);
+  // a flat parameter and a result type get their derived types here; the
+  // runtime generator refuses running them (rap-runtime-gen.mjs)
+  if (action.parameter?.deep || action.parameter?.table || action.result?.deep) throw new Error(`${where}: deep action parameters and results are outside R6`);
+  if (mods.includes("factory") && action.result) throw new Error(`${where}: a factory action has no result (the new instance comes back in MAPPED)`);
+  if (mods.includes("factory") && action.cardinality && action.cardinality !== "1") throw new Error(`${where}: a factory action has the cardinality [1]`);
+  if (!action.determine || projection) return;
+  // neither feature control nor authorization is asked for a determine action
+  if ((action.options ?? []).length) throw new Error(`${where}: determine action options (${action.options.map(o => o.value ? `${o.name} : ${o.value}` : o.name).join(", ")}) are outside R6`);
+  for (const t of action.triggers ?? []) {
+    const [owner, name] = t.name.includes("~") ? t.name.split("~") : [undefined, t.name];
+    if (owner && ![entity.entity, entity.alias].filter(Boolean).some(n => upper(n) === upper(owner))) throw new Error(`${where}: ${t.kind} ${t.name} of another entity is outside R6`);
+    if ((t.options ?? []).some(o => o.name !== "always")) throw new Error(`${where}: ${t.kind} ${t.name} with options other than always`);
+    const list = t.kind === "determination" ? entity.determinations : entity.validations;
+    const found = list.find(x => upper(x.name) === upper(name));
+    if (!found) throw new Error(`${where}: ${t.kind} ${name}, which ${entity.entity} does not declare`);
+    if (t.kind === "determination" && found.on !== "save") throw new Error(`${where}: determination ${name} is on modify; a determine action runs determinations on save`);
+  }
 }
 
 // R5: the derived types of the associations of one entity
@@ -248,7 +290,11 @@ export function generate(files, dependencies = []) {
     const plan = {root, iface, model, entities: [], projection};
     plans.push(plan);
     for (const [index, entity] of model.entities.entries()) {
-      if (entity.functions.length || entity.determineActions.length) throw new Error(`${entity.entity}: functions/determine actions are outside R5`);
+      if (entity.functions.length) throw new Error(`${entity.entity}~${entity.functions[0].name}: functions are outside R6`);
+      // R6: a determine action is an action whose body is the runtime's: it
+      // joins the actions (types, %action, the service) marked determine
+      for (const d of entity.determineActions) entity.actions.push({...d, determine: true});
+      entity.determineActions = [];
       const p = `e${index}`;
       const fields = fieldsOf(entity.entity);
       const view = views.get(upper(entity.entity));
@@ -343,13 +389,14 @@ export function generate(files, dependencies = []) {
         poolBind("INSTANCE FEATURES RESULT", ref, `${iface}=>t_${p}_features_result`);
       }
       for (const [a, action] of entity.actions.entries()) {
-        if ((action.use && !projection) || action.modifiers.length || action.parameter?.deep || action.parameter?.table || action.result?.deep) throw new Error(`${entity.entity}~${action.name}: unsupported action modifiers/parameter shape`);
+        checkAction(entity, action, projection);
         const param = action.parameter ? fieldsOf(action.parameter.name) : undefined;
         if (param) body += struct(`${p}_a${a}_param`, pairs(param));
         for (const kind of ["IMPORT", "RESULT"]) {
           if (kind === "RESULT" && !action.result) continue;
           const extra = [];
-          if (kind === "IMPORT") extra.push(["%cid_ref", "c LENGTH 128"], ...(param ? [["%param", `${p}_a${a}_param`]] : []));
+          // R6: a factory action's import carries the %cid the new instance is mapped under
+          if (kind === "IMPORT") extra.push(...(action.modifiers.includes("factory") ? [["%cid", "c LENGTH 128"]] : []), ["%cid_ref", "c LENGTH 128"], ...(param ? [["%param", `${p}_a${a}_param`]] : []));
           else {
             const result = action.result.type === "$self" ? fields : fieldsOf(action.result.type);
             body += struct(`${p}_a${a}_payload`, pairs(result));
@@ -392,7 +439,8 @@ export function generate(files, dependencies = []) {
     if (owner.p.projection) return {view, fields, assocs, behavior: {...projectedBehavior(owner.e), create: projectedBehavior(owner.e).create || created}};
     const has = op => entity.operations.some(o => o.kind === op && !o.use);
     return {view, fields, assocs, behavior: {create: has("create") || created, update: has("update"), delete: has("delete"),
-      control: fieldControl(entity, fields), actions: entity.actions.map(a => a.name),
+      // R6: an internal action is the BO's own, never the service's
+      control: fieldControl(entity, fields), actions: entity.actions.filter(a => !a.modifiers.includes("internal")).map(a => a.name),
       // R4: the `etag master` element is the entity type's ETag
       etag: entity.etag?.kind === "master" ? entity.etag.field : undefined}};
   };

@@ -846,7 +846,9 @@ CLASS zcl_stg_sadl_dpc IMPLEMENTATION.
     DATA lt_actions  TYPE string_table.
     DATA ls_param    TYPE /iwbep/s_mgw_name_value_pair.
     DATA lv_action   TYPE string.
+    DATA lr_new      TYPE REF TO data.
     FIELD-SYMBOLS <ls_row>   TYPE any.
+    FIELD-SYMBOLS <ls_new>   TYPE any.
     FIELD-SYMBOLS <lv_value> TYPE any.
 
     lo_context ?= io_tech_request_context.
@@ -879,9 +881,16 @@ CLASS zcl_stg_sadl_dpc IMPLEMENTATION.
         <lv_value> = ls_param-value.
       ENDIF.
     ENDLOOP.
-    li_behavior->execute( iv_entity = ls_entity-name
-                          iv_action = lv_action
-                          is_row    = <ls_row> ).
+    lr_new = lo_source->create_line( ).
+    ASSIGN lr_new->* TO <ls_new>.
+    li_behavior->execute( EXPORTING iv_entity = ls_entity-name
+                                    iv_action = lv_action
+                                    is_row    = <ls_row>
+                          IMPORTING es_row    = <ls_new> ).
+* a factory action answers the instance it created (RAP R6)
+    IF <ls_new> IS NOT INITIAL.
+      <ls_row> = <ls_new>.
+    ENDIF.
     read_row( EXPORTING is_entity = ls_entity
               CHANGING  cs_row    = <ls_row> ).
   ENDMETHOD.

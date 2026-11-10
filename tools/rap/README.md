@@ -14,6 +14,9 @@ compositions (`treeOf`), writes the derived types of its associations
 (`TABLE FOR CREATE e\_x`, `READ IMPORT/RESULT/LINK e\_x`), and resolves a
 projection BDEF against its base (`projectionOf`); the registry answers the
 projection entities ([R5](../../docs/rap-runtime.md)).
+R6: internal, factory and determine actions (`checkAction` in `bdef-gen.mjs`;
+a determine action joins the actions marked `determine`, its members become
+the model's `members`), and a dependency by an association to an ancestor.
 `srvd-gen.mjs` (called by `bdef-gen.mjs`) reads service definitions
 (`*.srvd.srvdsrv`) into `gen/rap/<srvd>.stg.yaml`, which `stg-compile --all`
 compiles into a service ([R2c](../../docs/rap-runtime.md#serving-r2c)).
