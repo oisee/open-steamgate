@@ -24,6 +24,9 @@ CLASS zcl_osd_rapflight_seed DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CLASS-METHODS counts
       RETURNING VALUE(rv_counts) TYPE string.
 
+  PRIVATE SECTION.
+    CLASS-METHODS fill_currencies.
+
 ENDCLASS.
 
 CLASS zcl_osd_rapflight_seed IMPLEMENTATION.
@@ -34,7 +37,33 @@ CLASS zcl_osd_rapflight_seed IMPLEMENTATION.
     CREATE OBJECT lo_out.
     CREATE OBJECT lo_generator.
     lo_generator->if_oo_adt_classrun~main( lo_out ).
+    fill_currencies( ).
     rt_log = lo_out->mt_lines.
+  ENDMETHOD.
+
+  METHOD fill_currencies.
+* The stand-in for the released view I_Currency (src/ddic) has no rows of
+* its own; on a system it lists every currency. The managed travel's
+* validations look a currency up in it (R7), so it gets the currencies the
+* generated data uses: those of the flights, supplements and travels.
+    DATA lt_codes TYPE SORTED TABLE OF i_currency-currency WITH UNIQUE KEY table_line.
+    DATA lt_more  TYPE STANDARD TABLE OF i_currency-currency WITH DEFAULT KEY.
+    DATA lv_code  TYPE i_currency-currency.
+    DATA ls_row   TYPE i_currency.
+
+    SELECT DISTINCT currency_code FROM /dmo/flight INTO TABLE @lt_more.
+    INSERT LINES OF lt_more INTO TABLE lt_codes.
+    SELECT DISTINCT currency_code FROM /dmo/supplement INTO TABLE @lt_more.
+    INSERT LINES OF lt_more INTO TABLE lt_codes.
+    SELECT DISTINCT currency_code FROM /dmo/travel INTO TABLE @lt_more.
+    INSERT LINES OF lt_more INTO TABLE lt_codes.
+    DELETE FROM i_currency.
+    LOOP AT lt_codes INTO lv_code WHERE table_line IS NOT INITIAL.
+      CLEAR ls_row.
+      ls_row-currency = lv_code.
+      ls_row-decimals = 2.
+      INSERT i_currency FROM @ls_row.
+    ENDLOOP.
   ENDMETHOD.
 
   METHOD counts.

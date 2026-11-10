@@ -4363,6 +4363,15 @@ Not an anomaly, recorded for porting: on 7.58, `FIND ... REGEX` (POSIX) raises a
 - Upstream: none filed. It belongs with implicit RAP handler signatures in
   abaplint; explicit signatures are this project's interim form.
 
+- R7 (2026-11-10): `save_modified` is lowered the same way. Its
+  `METHODS save_modified REDEFINITION.` is rewritten by
+  `tools/rap/lower-derived.mjs` into a declaration of the saver's own
+  (`create` / `update` `TYPE REQUEST FOR CHANGE`, `delete` `TYPE REQUEST FOR
+  DELETE`, `reported` `TYPE RESPONSE FOR REPORTED LATE`, all over the BDEF's
+  generated types), because the voided parameters of the base class cannot
+  be typed by a BDEF; the generated adapter calls it by name.
+  `adjust_numbers` and `save` join the parameterless phases.
+
 ## The RAP flight reference scenario as a pack (packs/rap-flight)
 
 - Status: measured; worked around in the pack's overlay only, nothing
@@ -4508,6 +4517,28 @@ Not an anomaly, recorded for porting: on 7.58, `FIND ... REGEX` (POSIX) raises a
   before any DDL reaches a database, so no error names the cycle's views --
   an upstream type-resolution limitation, measured 2026-11-09.
 - Upstream: abaplint/transpiler, needs an issue.
+
+## RAP R7: the flight travel pools against this transpiler (packs/rap-flight overlay)
+
+- Status: worked around in the pack overlay (`packs/rap-flight/src/#dmo#bp_*_m.clas.locals_imp.abap`, each change marked `OSD overlay`); no upstream issue filed yet.
+- Discovery: RAP R7, building the managed travel BO's three pools, 2026-11-10.
+- Expected (public ABAP documentation): the pools compile and run unchanged.
+- Measured here, in the order the build met them:
+  - abaplint does not parse `CORRESPONDING ... DISCARDING DUPLICATES`, `CORRESPONDING #( k MAPPING %fail = DEFAULT VALUE #( ... ) )`, or `CLASS ... DEFINITION DEFERRED FOR TESTING` (known, R4 pack audit);
+  - the pinned transpiler stops at `CORRESPONDING #( DEEP x )` and `CORRESPONDING #( x EXCEPT f )` (`CorrespondingBodyTranspiler, todo`);
+  - an EML target declared inline (`RESULT DATA(x)`) is void (known, docs/rap-eml.md), and `BY \_assoc` / `LINK` are not lowered (known, R5);
+  - `VALUE #( FOR r IN rows ( %param = r ) )`, a move of a READ RESULT row into an action result's `%param` (a structure of the same fields without the `%data` / `%tky` groups), fails at run time with `value.get is not a function`; `%param = CORRESPONDING #( r )` works.
+- Workaround: the overlay copies of the three pools; every edit is listed in docs/rap-flight-pack.md ("R7: the travel pools").
+- Upstream: candidates for abaplint/transpiler (CORRESPONDING DEEP / EXCEPT; the structure move) -- needs an issue each, with a reproducer, after a critic pass.
+
+## RAP R7: a namespaced service's V2 $metadata (open-abap-odata handler)
+
+- Status: open; the data requests work, `$metadata` over V2 does not.
+- Discovery: RAP R7, serving `/DMO/UI_TRAVEL_PROCESSOR_M`, 2026-11-10.
+- Expected: `GET /sap/opu/odata/sap/%2FDMO%2FUI_TRAVEL_PROCESSOR_M/$metadata` answers the model (this gateway takes the escaped name, `ZCL_STG_URL` unescapes it).
+- Measured: 500 `I:/IWBEP/CM_MGW_RT:032`. The dispatcher hands `$metadata` to `ZCL_OAO_HTTP_HANDLER=>HANDLE( path )` of open-abap-odata, which reads the service with `/sap/opu/odata/sap/([^/]+)` and does not unescape it, so `ZCL_OAO_REGISTRY=>GET` misses `%2FDMO%2F...` and raises `/IWBEP/CX_MGW_TECH_EXCEPTION` without a text. V4 `$metadata` of the same service works (this tree's own writer). The answer's `__metadata` URIs carry the name unescaped (`/sap//DMO/UI_...`), which is not a URL a client can follow back.
+- Workaround: none; `test/rap-flight-travel.mjs` does not read V2 `$metadata`.
+- Upstream: the unescape is a one-line change in open-abap-odata's handler (a PR in the fork staging area, then upstream); the URIs are this gateway's (a system serves a namespaced service at `/sap/opu/odata/<ns>/<name>/`).
 
 ## Class statics outlive the HTTP request (LUW_HELD, PR #901)
 

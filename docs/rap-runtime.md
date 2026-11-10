@@ -1,4 +1,4 @@
-# The managed RAP runtime (R2 .. R6)
+# The managed RAP runtime (R2 .. R7)
 
 R2 of [the RAP plan](oracle-rap.md): a managed behavior definition runs. Its
 behavior pool's determinations, validations and action are called, its
@@ -870,6 +870,234 @@ generated, the runtime and the service do not pass it), results other
 than `$self`, members of a determine action in another entity, draft
 actions (`draft action`, `draft determine action`), `internal create /
 update / delete`, and everything R5 left.
+
+## R7: the saver, additional and unmanaged save, several pools
+
+After R6 the flight travel BO (`/DMO/I_TRAVEL_M`) and its two projections
+stop, in this order, at `with additional save` on the travel, at **several
+behavior pools** (the booking's handlers are in `/DMO/BP_BOOKING_M`, the
+supplement's in `/DMO/BP_BOOKINGSUPPLEMENT_M`) and at `with unmanaged save`
+on the booking supplement (`node tools/rap-flight/constructs.mjs`, the table
+in R6). All three meet in one method of the travel pool: its local saver
+`lcl_save` redefines `save_modified`, writes a change log of the travel into
+`/dmo/log_travel` (the additional save) and writes the supplements itself
+through the function modules `/DMO/FLIGHT_BOOKSUPPL_C/U/D` (the unmanaged
+save). R7 makes that run. Nothing is measured on a system; the semantics
+follow the public RAP documentation (the BDEF reference's "with additional
+save", "with unmanaged save", "implementation in class"; the saver's
+methods in "CL_ABAP_BEHAVIOR_SAVER") and every choice of this runtime is
+named as one below.
+
+| construct | flight BDEFs | where |
+| --- | ---: | --- |
+| `with additional save` | 1 (travel) | the travel entity |
+| several pools (`implementation in class` per entity) | 1 (travel: three pools) | booking, supplement |
+| `with unmanaged save` | 2 (travel's supplement; the carrier singleton, behind its unparsed grammar) | the supplement entity |
+| `with full data`, `and cleanup` | 0 | not used by the ten; parsed, accepted (below) |
+
+### Several pools
+
+`define behavior for e implementation in class P` names the pool of the
+entity; an entity without one uses the header's. Each entity's handlers
+(determinations, validations, actions, features, numbering, the numbering
+of its creates by association) are looked up **in its own pool**: the
+adapter's `handler` of an entity is the absolute name of the local handler
+class in that pool (`\CLASS-POOL=/DMO/BP_BOOKING_M\CLASS=LHC_BOOKING`), and
+the rules of R2..R6 apply per pool (one handler class per entity, a method
+bound by its FOR clause or its name). `bdef-gen.mjs` already bound the
+derived types per pool (R3's `POOL <p> FOR ...` bindings); the build now
+reads every pool the BDEF names, not only the header's, and a pool the BDEF
+names that is not in the tree is refused with its name.
+
+**Savers.** Every pool may have a local saver (a class inheriting
+`CL_ABAP_BEHAVIOR_SAVER`), at most one per pool. The runtime calls all of
+them, in the order the pools first appear in the BDEF (header first), in
+each phase. Which savers a system calls when several pools have one, and in
+which order, is **unmeasured**.
+
+### The save sequence with savers
+
+```
+finalize          determinations on save; each saver's finalize
+check_before_save validations; each saver's check_before_save
+  (a new FAILED row: each saver's cleanup_finalize, ROLLBACK WORK, buffer kept)
+adjust_numbers    each saver's adjust_numbers
+save              the managed write of every entity that has one, then each
+                  saver's save_modified (or save) with the request
+COMMIT WORK
+cleanup           each saver's cleanup; the buffer is reset
+```
+
+- **adjust_numbers** is called without parameters: late numbering (the
+  only reason for its MAPPED LATE) stays refused, so a pool's
+  `adjust_numbers` can only observe.
+- **save_modified** is written on a system as `METHODS save_modified
+  REDEFINITION.` and gets implicit parameters typed by the BDEF: `create`
+  and `update` (`TYPE REQUEST FOR CHANGE <bdef>`), `delete` (`TYPE REQUEST
+  FOR DELETE <bdef>`) and `reported` (`TYPE RESPONSE FOR REPORTED LATE
+  <bdef>`). abaplint voids every parameter of `CL_ABAP_BEHAVIOR_SAVER`'s
+  methods (ANORMALIES, "RAP saver phases"), so, as R3 did for the handler
+  forms, `lower-derived.mjs` rewrites the declaration in a pool's saver into
+  an explicit one over the pool's bindings (`METHODS save_modified
+  IMPORTING create TYPE zif_rap_<h>=>r_change update TYPE ... delete TYPE
+  zif_rap_<h>=>r_delete CHANGING reported TYPE zif_rap_<h>=>r_reported.`),
+  and the adapter calls it by name. `save` (the unmanaged BO's phase) is
+  parameterless here, as `finalize` and the rest are.
+- **The request.** `REQUEST FOR CHANGE` has one component per entity
+  (named by alias), a table of the entity's fields with `%control`, keyed
+  `WITH NON-UNIQUE SORTED KEY entity COMPONENTS <keys>` (the flight saver
+  reads it `WITH TABLE KEY entity COMPONENTS travel_id = ...`); `REQUEST FOR
+  DELETE` the same with the keys only. The runtime fills them from the
+  transactional buffer **for the entities that have an additional or an
+  unmanaged save** -- the components of the others stay empty, since their
+  write is the managed one (unmeasured: whether a system passes them too).
+  A create row carries the instance as saved, `%control` on
+  (`if_abap_behv=>mk-on`) for every field set since it was created; an
+  update row its keys and the fields changed in this transaction, flagged,
+  the others initial; a delete row the keys. An instance created and
+  deleted in the same transaction is in none of them (the delta collapses
+  it, as for the managed write).
+- **with full data** (`with additional save with full data`): update rows
+  carry every field of the instance as it is in the buffer, not only the
+  changed ones; `%control` still flags only the changed ones.
+- **and cleanup** (`with additional save and cleanup`, `with unmanaged save
+  and cleanup`): accepted and without effect -- this runtime calls the
+  savers' `cleanup` after every save anyway (on a system the option is what
+  makes a managed BO call it; unmeasured).
+- **reported** is the caller's REPORTED: the LATE response is the EARLY type
+  (it has a `%cid` a LATE response would not have; a system's LATE type is
+  not reproduced).
+
+### with additional save
+
+The entity is written by the managed save as before, and **after** that
+write, in the same LUW and before `COMMIT WORK`, the savers' `save_modified`
+gets the entity's changes. An exception that leaves a saver is the save's
+error, and the runtime ends the transaction itself:
+
+- `ROLLBACK WORK` undoes the managed write with the saver's;
+- the savers' `cleanup` runs;
+- the buffer is discarded;
+- then `ZCX_OSD_RAP` is raised with `save` set, and with `business` set and the saver's text.
+
+The checks have already passed, so the client could not have corrected
+anything, and a buffer that is half written must not be saved again.
+A refused managed write ends the same way, `technical` and without
+`business`. Over OData a saver's failure is a 400 business error carrying
+its text (`test/rap-r7.mjs`), while a refused write stays a 500. Inside a
+held LUW (a `$batch` changeset or V4 atomicity group) the runtime does not
+roll back; the group does. On a system a failure in the save is a short dump
+(the save phase must not fail; unmeasured here). A behavior definition with an additional save
+and no saver that implements `save_modified` is refused by the generator.
+
+### with unmanaged save
+
+The entity has no persistent table (the flight comments it out:
+`//persistent table /DMO/BOOKSUPPL_M`) and **no managed write**: its
+changes reach the database only through `save_modified`. It still needs
+somewhere to read saved instances from (a read, a read by association, the
+update of an instance not in the buffer): the table of its `mapping for`,
+which the flight declares (`mapping for /dmo/booksuppl_m corresponding`).
+An unmanaged save without a `mapping for` table is refused by the
+generator (reading through the CDS view alone is not in R7). The rest of
+the entity is managed as before -- buffer, field control, numbering,
+determinations, validations, the lock of its root, the cascade of a delete.
+
+### MAPPING FROM ENTITY
+
+The flight saver turns the request into table rows with `CORRESPONDING #(
+create-booksuppl MAPPING FROM ENTITY )`: the BDEF's `mapping for` read
+backwards. `lower-derived.mjs` rewrites it: `MAPPING FROM ENTITY` after a
+source `<x>-<alias>` (a component of a request or response) becomes the
+explicit `MAPPING column = field ...` of that entity's `mapping for` (no
+clause when it is `corresponding` and names no field), and `MAPPING TO
+ENTITY` the other way round. The entity is found by the alias in the pool's
+bindings; a source that names none is refused with its line.
+
+The lowering is a token rewrite, so it has limits:
+
+- **One source shape**: the token before `MAPPING` must be the entity's
+  alias or name, as in `x-alias` (a component of a request or response).
+  A variable of the entity's type, `CORRESPONDING #( lt_rows MAPPING FROM
+  ENTITY )`, names no entity and is refused, though a system takes it.
+- **Keys by parameter name**: `delete-<alias>` maps the keys only because
+  `delete` is save_modified's REQUEST FOR DELETE; a delete request under
+  another name gets the full pair list, and the move fails at syntax check
+  if a pair names a non-key field.
+- **No `USING CONTROL`**: `MAPPING FROM ENTITY USING CONTROL` (move only the
+  fields flagged in `%control`) is not lowered. The `USING CONTROL`
+  tokens are left in place, and the transpile refuses them.
+- **One mapping per entity**: the `mapping for` of the persistent table, or
+  the first one; an entity with several mappings cannot choose.
+
+### OData
+
+Nothing new on the wire: a create, update, delete or action of an entity
+with an additional or unmanaged save is answered as before, after the
+save. What changes is what the save writes.
+
+### Built and proven
+
+On the tour demo of [`src/rap_r7`](../src/rap_r7/README.md) (`ZI_RAP_TOUR`
+with its stops, two pools, served as `ZUI_RAP_TOUR` with the log as a
+read-only set; `test/rap-r7.mjs`, `ZCL_OSD_RAP_R7_TEST`) and on the flight
+travel itself ([rap-flight-pack.md](rap-flight-pack.md), "R7";
+`test/rap-flight-travel.mjs`, `ZCL_OSD_RAPFLIGHT_R7_TEST`).
+
+What the flight needed beyond the three constructs, each small:
+
+- a namespaced BDEF keeps its name (`#dmo#i_travel_m` is `/DMO/I_TRAVEL_M`
+  for the registry, the bindings and EML); `bdef\\entity` (two
+  backslashes, as the pools write it) resolves like `bdef\entity`;
+- the table and CDS classes of a namespaced name use the shared
+  `classNameOf` (`ZCL_STG_TAB_DMO_TRAVEL_M`), in the runtime model and in
+  the service YAML;
+- `%path` in a child's FAILED / REPORTED rows (each ancestor's keys, by
+  alias), and `cl_abap_behv=>flag_changed` / `flag_unchanged`;
+- over V4 a namespaced service comes escaped (`%2FDMO%2FUI_X`) and so does
+  its qualified operation (`%2FDMO%2FUI_X.acceptTravel`), as over V2.
+
+### The measurement: the flight BDEFs before and after
+
+`node tools/rap-flight/constructs.mjs`, first wall per behavior definition:
+
+| BDEF | after R6 | after R7 |
+| --- | --- | --- |
+| `/DMO/I_TRAVEL_M` | `with additional save` (then several pools, `with unmanaged save`) | **accepted**; served: V2 data requests and V4 (V2 `$metadata` of a namespaced service fails, ANORMALIES) |
+| `/DMO/C_TRAVEL_PROCESSOR_M`, `/DMO/C_TRAVEL_APPROVER_M` | the base's `with additional save` | **accepted**, served |
+| `/DMO/I_SUPPLEMENT`, `/DMO/C_SUPPLEMENT` | draft (`association { with draft; }`) | unchanged |
+| `/DMO/R_AGENCYTP`, `/DMO/C_AGENCYTP` | draft (`draft action Resume`) | unchanged |
+| `/DMO/I_CARRIERSLOCKSINGLETON_S`, `/DMO/C_CARRIERSLOCKSINGLETON_S` | unparsed singleton grammar | unchanged |
+| `/DMO/I_AGENCYTP` | interface | unchanged |
+
+Constructs whose verdict changed: `with additional save` (1 BDEF),
+`with unmanaged save` (2), `several pools` (1), `saver save_modified` (2):
+refused -> runs. `saver adjust_numbers` stays refused (late numbering,
+`/DMO/R_AGENCYTP`).
+
+### Unmeasured
+
+Nothing of R7 was checked on a system. In particular: whether a system
+passes the entities without an additional or unmanaged save in
+`save_modified`'s request (here their components stay empty); which
+savers it calls when several pools have one, and in which order (here
+every pool's, the header's first); what a create row's `%control` carries
+for keys drawn by early numbering (here on); that `and cleanup` makes a
+managed BO call `cleanup` (here it is always called); the order of the
+managed write and `save_modified` within the save (here the managed write
+first, as the documentation describes); the flight overlay's two
+stand-ins (the travel number after the highest saved one; nothing added
+for an amount in another currency).
+
+### What R7 does not do
+
+`adjust_numbers` with MAPPED LATE (late numbering), FAILED from a saver
+phase (the phases still take no FAILED; ANORMALIES "RAP saver phases"),
+an unmanaged *BO* (`unmanaged implementation in class`, the `FOR MODIFY`
+of every operation, `FOR READ`), `with unmanaged save` without a mapping
+table, reading an entity through its CDS view in the buffer's place,
+secondary keys `id` / `entity` on the other derived tables, V2 `$metadata`
+of a namespaced service (ANORMALIES), and draft.
 
 ## Not in R2
 

@@ -3,6 +3,10 @@ CLASS cl_abap_behv DEFINITION PUBLIC CREATE PUBLIC.
 * Clean-room (docs/rap-runtime.md): the method names are the public
 * contract; the message is a ZCL_OSD_RAP_MESSAGE.
   PUBLIC SECTION.
+* R7: the %control flag of a field a request changed (the flight saver
+* compares with it), the same value as if_abap_behv=>mk-on
+    CONSTANTS flag_changed TYPE x LENGTH 1 VALUE '01'.
+    CONSTANTS flag_unchanged TYPE x LENGTH 1 VALUE '00'.
   PROTECTED SECTION.
     METHODS new_message_with_text
       IMPORTING

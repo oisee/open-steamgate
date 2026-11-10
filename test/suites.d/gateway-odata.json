@@ -20,6 +20,7 @@
     "test/sapevent.mjs",
     "test/se16.mjs",
     "test/seed-batching.mjs",
+    "test/seed-element-types.mjs",
     "test/sql-trace-buffer.mjs",
     "test/sql-trace.mjs",
     "test/sqlite-file-client.mjs",
@@ -33,11 +34,15 @@
     "test/rap-serve.mjs",
     "test/rap-r4.mjs",
     "test/rap-r5.mjs",
-    "test/rap-r6.mjs"
+    "test/rap-r6.mjs",
+    "test/rap-r7.mjs",
+    "test/rap-flight-travel.mjs"
   ],
   "_odata-v4": "Gateway ownership: V4 wire suite belongs beside V2 wire tests.",
   "_rap-serve": "Gateway ownership: the RAP R2c wire suite needs the transpiled gateway beside the V2 and V4 wire tests.",
   "_rap-r4": "Gateway ownership: the RAP R4 wire suite (ETag, features, numbering) needs the transpiled gateway beside rap-serve.",
   "_rap-r5": "Gateway ownership: the RAP R5 wire suite (compositions, projections, navigation writes) needs the transpiled gateway beside rap-r4.",
-  "_rap-r6": "Gateway ownership: the RAP R6 wire suite (internal, determine and factory actions) needs the transpiled gateway beside rap-r5."
+  "_rap-r6": "Gateway ownership: the RAP R6 wire suite (internal, determine and factory actions) needs the transpiled gateway beside rap-r5.",
+  "_rap-r7": "Gateway ownership: the RAP R7 wire suite (savers, additional and unmanaged save, several pools) needs the transpiled gateway beside rap-r6.",
+  "_rap-flight-travel": "Gateway ownership: RAP R7's flight travel BO served from packs/rap-flight needs the transpiled gateway with the pack beside rap-r7."
 }

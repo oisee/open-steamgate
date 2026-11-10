@@ -17,6 +17,16 @@
 // which the implicit form states and the explicit form names.
 import * as core from "@abaplint/core";
 import {implicitHandlers} from "./lower-derived.mjs";
+import {classNameOf} from "../cds-names.mjs";
+
+/** R7: the behavior pools a BDEF names, the header's first, lower case */
+const poolsOfModel = model => [...new Set([model.implementationClass, ...model.entities.map(e => e.implementationClass)].filter(Boolean).map(p => p.toLowerCase()))];
+
+/** R7: the save of an entity: its own `with ... save`, else the header's */
+export function saveOf(model, entity) {
+  const own = (entity.options ?? []).find(o => /^(additional|unmanaged) save$/.test(o.kind));
+  return own ?? (model.options ?? []).find(o => /^(additional|unmanaged) save$/.test(o.kind));
+}
 
 const upper = s => s.toUpperCase();
 const squash = s => s.toLowerCase().replaceAll("_", "");
@@ -140,31 +150,48 @@ export function runtimeOutputs(plans, files) {
     if (model.implementationType !== "managed") throw new Error(`${root}: only managed behavior definitions run (R2)`);
     if (model.withDraft) throw new Error(`${root}: draft is outside R2`);
     if (!model.implementationClass) throw new Error(`${root}: no behavior pool`);
-    const pool = model.implementationClass.toLowerCase();
-    const classes = poolClasses(pool, files);
-    const absolute = c => `\\CLASS-POOL=${upper(pool)}\\CLASS=${upper(c)}`;
-    const savers = classes.filter(c => c.kind === "saver");
-    if (savers.length > 1) throw new Error(`${pool}: more than one saver class`);
-    const handlers = classes.filter(c => c.kind === "handler");
+    // R7: every pool the BDEF names; each entity's handlers are in its own
+    const header = model.implementationClass.toLowerCase();
+    const classesOf = new Map(poolsOfModel(model).map(p => [p, poolClasses(p, files)]));
+    const absoluteIn = (pool, c) => `\\CLASS-POOL=${upper(pool)}\\CLASS=${upper(c)}`;
     const cls = iface.replace(/^zif_/, "zcl_");
-    let model_ = `    rs_model-bdef = ${lit(upper(root))}.\n    rs_model-pool = ${lit(upper(pool))}.\n`;
-    if (savers.length) model_ += `    rs_model-saver = ${lit(absolute(savers[0].name))}.\n`;
+    let model_ = `    rs_model-bdef = ${lit(upper(root))}.\n    rs_model-pool = ${lit(upper(header))}.\n`;
+    const savers = [];
+    for (const [p, classes] of classesOf) {
+      const found = classes.filter(c => c.kind === "saver");
+      if (found.length > 1) throw new Error(`${p}: more than one saver class`);
+      for (const c of found) savers.push({name: absoluteIn(p, c.name), modified: c.methods.some(m => m.name === "save_modified")});
+    }
+    if (savers.length) model_ += `    rs_model-saver = ${lit(savers[0].name)}.\n`;
+    for (const sv of savers) model_ += `    CLEAR ls_saver.\n    ls_saver-name = ${lit(sv.name)}.\n` + (sv.modified ? "    ls_saver-modified = abap_true.\n" : "") + "    APPEND ls_saver TO rs_model-savers.\n";
     let rows = "", results = "", calls = "", methods = "", defs = "", tables = "";
     for (const e of plan.entities) {
       const {entity, prefix: p} = e;
+      const pool = (entity.implementationClass ?? model.implementationClass).toLowerCase();
+      const handlers = classesOf.get(pool).filter(c => c.kind === "handler");
+      const absolute = c => absoluteIn(pool, c);
       if (entity.numbering === "late") throw new Error(`${entity.entity}: late numbering (adjust_numbers, %pid) is outside R4`);
       if (entity.numbering && entity.numbering !== "early") throw new Error(`${entity.entity}: ${entity.numbering} numbering is outside R4`);
-      if (entity.options?.length && entity.options.some(o => o.name !== "unique")) {
-        throw new Error(`${entity.entity}: behavior options ${entity.options.filter(o => o.name !== "unique").map(o => o.name ?? (o.kind.endsWith(" save") ? `with ${o.kind}` : o.kind)).join(", ")} are outside R6`);
-      }
-      const table = entity.persistentTable;
+      const other = (entity.options ?? []).filter(o => o.name !== "unique" && !/^(additional|unmanaged) save$/.test(o.kind ?? ""));
+      if (other.length) throw new Error(`${entity.entity}: behavior options ${other.map(o => o.name ?? o.kind).join(", ")} are outside R7`);
+      // R7: with additional save writes and then calls save_modified, with
+      // unmanaged save only calls it; it reads saved instances from its mapping table
+      const save = saveOf(model, entity);
+      if (save && !savers.some(sv => sv.modified)) throw new Error(`${entity.entity}: with ${save.kind} needs a saver with save_modified in a pool of ${upper(root)}`);
+      const unmanaged = save?.kind === "unmanaged save";
+      if (unmanaged && entity.persistentTable) throw new Error(`${entity.entity}: with unmanaged save and a persistent table`);
+      if (unmanaged && !entity.mappings.length) throw new Error(`${entity.entity}: with unmanaged save needs a mapping for a table to read saved instances from (reading through the CDS view is outside R7)`);
+      const table = unmanaged ? entity.mappings[0].table : entity.persistentTable;
       if (!table) throw new Error(`${entity.entity}: a managed entity needs a persistent table`);
       const mapping = entity.mappings.find(m => upper(m.table) === upper(table));
       const control = fieldControl(entity, e.fields);
       const response = (entity.alias ?? entity.entity).toLowerCase();
       model_ += `    CLEAR ls_entity.\n    ls_entity-name = ${lit(upper(entity.entity))}.\n    ls_entity-alias = ${lit(entity.alias ?? entity.entity)}.\n`
         + `    ls_entity-response = ${lit(upper(response))}.\n    ls_entity-table = ${lit(upper(table))}.\n`
-        + `    ls_entity-source = ${lit(upper(`zcl_stg_tab_${table.toLowerCase()}`))}.\n`;
+        + `    ls_entity-source = ${lit(upper(classNameOf("zcl_stg_tab_", table)))}.\n`
+        + `    ls_entity-pool = ${lit(upper(pool))}.\n`
+        + (save ? `    ls_entity-save = '${unmanaged ? "U" : "A"}'.\n` : "")
+        + (save?.fullData ? "    ls_entity-full_data = abap_true.\n" : "");
       for (const op of ["create", "update", "delete"]) if (entity.operations.some(o => o.kind === op && !o.use)) model_ += `    ls_entity-${op} = abap_true.\n`;
       // R4: the ETag field, and which operations ask the pool's features
       if (entity.etag?.kind === "master") {
@@ -425,6 +452,7 @@ CLASS ${cls} IMPLEMENTATION.
     DATA ls_assoc TYPE zif_osd_rap_bo=>ty_assoc.
     DATA ls_pair TYPE zif_osd_rap_bo=>ty_pair.
     DATA ls_member TYPE zif_osd_rap_bo=>ty_member.
+    DATA ls_saver TYPE zif_osd_rap_bo=>ty_saver.
 
 ${model_}  ENDMETHOD.
 
@@ -454,6 +482,35 @@ ${tables}    ENDCASE.
       WHEN 'REPORTED'.
         CREATE DATA rr_response TYPE ${iface}=>r_reported.
     ENDCASE.
+  ENDMETHOD.
+
+  METHOD zif_osd_rap_bo~new_request.
+    CASE to_upper( iv_kind ).
+      WHEN 'CHANGE'.
+        CREATE DATA rr_request TYPE ${iface}=>r_change.
+      WHEN 'DELETE'.
+        CREATE DATA rr_request TYPE ${iface}=>r_delete.
+    ENDCASE.
+  ENDMETHOD.
+
+  METHOD zif_osd_rap_bo~save_modified.
+* R7: the saver's save_modified, its parameters lowered from the
+* REDEFINITION (tools/rap/lower-derived.mjs)
+    FIELD-SYMBOLS <ls_create> TYPE ${iface}=>r_change.
+    FIELD-SYMBOLS <ls_update> TYPE ${iface}=>r_change.
+    FIELD-SYMBOLS <ls_delete> TYPE ${iface}=>r_delete.
+    FIELD-SYMBOLS <ls_reported> TYPE ${iface}=>r_reported.
+    ASSIGN ir_create->* TO <ls_create>.
+    ASSIGN ir_update->* TO <ls_update>.
+    ASSIGN ir_delete->* TO <ls_delete>.
+    ASSIGN ir_reported->* TO <ls_reported>.
+    CALL METHOD io_saver->('SAVE_MODIFIED')
+      EXPORTING
+        create   = <ls_create>
+        update   = <ls_update>
+        delete   = <ls_delete>
+      CHANGING
+        reported = <ls_reported>.
   ENDMETHOD.
 
   METHOD zif_osd_rap_bo~call.

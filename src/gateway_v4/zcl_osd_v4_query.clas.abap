@@ -79,6 +79,8 @@ CLASS zcl_osd_v4_query IMPLEMENTATION.
     IF sy-subrc <> 0.
       fail( iv_text = 'Not a V4 service path' iv_status = 404 ).
     ENDIF.
+* a namespaced service (/DMO/UI_X) comes escaped (%2FDMO%2FUI_X), as over V2
+    ms_request-service = cl_http_utility=>unescape_url( ms_request-service ).
     ms_request-options = it_options.
     IF lv_rest IS INITIAL OR lv_rest = '/'.
       ms_request-is_service_root = abap_true.
@@ -90,7 +92,9 @@ CLASS zcl_osd_v4_query IMPLEMENTATION.
 * Set, Set(key), Set(key)/nav, Set(key)/ns.Op, Set(key)/ns.Fn(p=v), Op(p=v):
 * the key predicate is the shortest that lets the rest match, so a bound
 * function's own parentheses are not taken for part of the key
-      FIND REGEX '^/([^/($]+)(?:\((.*?)\))?(?:/([A-Za-z_][A-Za-z0-9_.]*)(?:\((.*)\))?)?(/\$count)?/?$' IN lv_rest
+* a namespaced service's operation is qualified by the escaped name too
+* (%2FDMO%2FUI_X.Op)
+      FIND REGEX '^/([^/($]+)(?:\((.*?)\))?(?:/([A-Za-z_%][A-Za-z0-9_.%]*)(?:\((.*)\))?)?(/\$count)?/?$' IN lv_rest
         SUBMATCHES ms_request-entity_set ms_request-key_string mv_navigation mv_params lv_tail.
       IF sy-subrc <> 0.
         fail( iv_text = 'Unsupported V4 resource path' iv_status = 404 ).
@@ -98,7 +102,7 @@ CLASS zcl_osd_v4_query IMPLEMENTATION.
       ms_request-entity_set = cl_http_utility=>unescape_url( ms_request-entity_set ).
       ms_request-key_string = cl_http_utility=>unescape_url( ms_request-key_string ).
       IF mv_navigation CS '.'.
-        mv_action = mv_navigation.
+        mv_action = cl_http_utility=>unescape_url( mv_navigation ).
         CLEAR mv_navigation.
         IF lv_tail IS NOT INITIAL.
           fail( iv_text = 'Unsupported V4 resource path' iv_status = 404 ).

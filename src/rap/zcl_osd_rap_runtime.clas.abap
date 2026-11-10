@@ -27,7 +27,9 @@ CLASS zcl_osd_rap_runtime DEFINITION PUBLIC CREATE PRIVATE.
 *   validations     on save in check_before_save; a FAILED row stops the
 *                   save, nothing is written and the LUW is rolled back
 *   save            the persistent table written through the BDEF mapping,
-*                   then COMMIT WORK and cleanup
+*                   then the savers' save_modified for the entities with an
+*                   additional or unmanaged save (R7), then COMMIT WORK and
+*                   cleanup; every pool's saver is called in each phase
 *   tree (R5)       create and read by association; a delete takes the
 *                   composition children; an update, delete, action or
 *                   create by association locks the root instance (lock
@@ -212,7 +214,9 @@ CLASS zcl_osd_rap_runtime DEFINITION PUBLIC CREATE PRIVATE.
     DATA mi_luw TYPE REF TO zif_osd_luw.
     DATA mt_inst TYPE tt_inst.
     DATA mt_handler TYPE tt_handler.
-    DATA mo_saver TYPE REF TO cl_abap_behavior_saver.
+* R7: the local savers of every pool of the BDEF, the header's first
+    DATA mt_savers TYPE STANDARD TABLE OF REF TO cl_abap_behavior_saver WITH DEFAULT KEY.
+    DATA mv_savers TYPE abap_bool.
     DATA mt_trace TYPE string_table.
     DATA mt_done TYPE string_table.
 * handlers of this runtime running now: the modifications they make are
@@ -604,11 +608,27 @@ CLASS zcl_osd_rap_runtime DEFINITION PUBLIC CREATE PRIVATE.
       RAISING
         zcx_osd_rap.
 
-    METHODS saver
+    METHODS savers
       RETURNING
-        VALUE(ro_saver) TYPE REF TO cl_abap_behavior_saver
+        VALUE(rt_savers) LIKE mt_savers
       RAISING
         zcx_osd_rap.
+
+* R7: the request of save_modified from the buffer, for the entities with
+* an additional or unmanaged save, then each saver's save_modified (or save)
+    METHODS save_savers
+      CHANGING
+        cs_reported TYPE any
+      RAISING
+        zcx_osd_rap.
+
+    METHODS request_row
+      IMPORTING
+        is_entity  TYPE zif_osd_rap_bo=>ty_entity
+        is_inst    TYPE ty_inst
+        iv_kind    TYPE ty_operation
+      CHANGING
+        ct_rows    TYPE STANDARD TABLE.
 
     METHODS count_failed
       IMPORTING
@@ -2563,15 +2583,30 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
     APPEND ls_handler TO mt_handler.
   ENDMETHOD.
 
-  METHOD saver.
-    IF mo_saver IS INITIAL AND ms_model-saver IS NOT INITIAL.
-      TRY.
-          CREATE OBJECT mo_saver TYPE (ms_model-saver).
-        CATCH cx_sy_create_object_error.
-          RAISE EXCEPTION TYPE zcx_osd_rap EXPORTING iv_reason = |saver { ms_model-saver } not found|.
-      ENDTRY.
+  METHOD savers.
+    DATA lt_names TYPE string_table.
+    DATA lv_name  TYPE string.
+    DATA ls_saver TYPE zif_osd_rap_bo=>ty_saver.
+    DATA lo_saver TYPE REF TO cl_abap_behavior_saver.
+
+    IF mv_savers = abap_false.
+      LOOP AT ms_model-savers INTO ls_saver.
+        APPEND ls_saver-name TO lt_names.
+      ENDLOOP.
+      IF lt_names IS INITIAL AND ms_model-saver IS NOT INITIAL.
+        APPEND ms_model-saver TO lt_names.
+      ENDIF.
+      LOOP AT lt_names INTO lv_name.
+        TRY.
+            CREATE OBJECT lo_saver TYPE (lv_name).
+          CATCH cx_sy_create_object_error.
+            RAISE EXCEPTION TYPE zcx_osd_rap EXPORTING iv_reason = |saver { lv_name } not found|.
+        ENDTRY.
+        APPEND lo_saver TO mt_savers.
+      ENDLOOP.
+      mv_savers = abap_true.
     ENDIF.
-    ro_saver = mo_saver.
+    rt_savers = mt_savers.
   ENDMETHOD.
 
   METHOD count_failed.
@@ -2587,35 +2622,39 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD commit.
+    DATA lt_savers LIKE mt_savers.
     DATA lo_saver  TYPE REF TO cl_abap_behavior_saver.
     DATA lv_before TYPE i.
     DATA lx_error  TYPE REF TO zcx_osd_rap.
+    DATA lx_root   TYPE REF TO cx_root.
+    DATA lv_text   TYPE string.
+    DATA lv_business TYPE abap_bool.
 
     ev_saved = abap_false.
-    lo_saver = saver( ).
+    lt_savers = savers( ).
     lv_before = count_failed( cs_failed ).
     CLEAR mt_done.
 
     APPEND 'FINALIZE' TO mt_trace.
     determine( EXPORTING iv_on = 'S' CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
-    IF lo_saver IS NOT INITIAL.
+    LOOP AT lt_savers INTO lo_saver.
       lo_saver->finalize( ).
-    ENDIF.
+    ENDLOOP.
 
     IF count_failed( cs_failed ) = lv_before.
       APPEND 'CHECK_BEFORE_SAVE' TO mt_trace.
       validate( CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
-      IF lo_saver IS NOT INITIAL.
+      LOOP AT lt_savers INTO lo_saver.
         lo_saver->check_before_save( ).
-      ENDIF.
+      ENDLOOP.
     ENDIF.
 
     IF count_failed( cs_failed ) > lv_before.
 * nothing was written; the buffer stays for the caller to correct
       APPEND 'CLEANUP_FINALIZE' TO mt_trace.
-      IF lo_saver IS NOT INITIAL.
+      LOOP AT lt_savers INTO lo_saver.
         lo_saver->cleanup_finalize( ).
-      ENDIF.
+      ENDLOOP.
       IF iv_end_luw = abap_true.
         ROLLBACK WORK.
         unlock( ).
@@ -2623,25 +2662,59 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
       RETURN.
     ENDIF.
 
+* R7: no late numbering, so adjust_numbers has nothing to map and is
+* called without parameters
+    APPEND 'ADJUST_NUMBERS' TO mt_trace.
+    LOOP AT lt_savers INTO lo_saver.
+      lo_saver->adjust_numbers( ).
+    ENDLOOP.
+
     APPEND 'SAVE' TO mt_trace.
+* R7: a failure in the save ends the transaction here: the LUW is rolled
+* back (when the runtime owns it), the savers' cleanup runs and the buffer is
+* discarded -- the instances were already checked, so there is nothing a
+* caller could correct, and a buffer half written must not be saved again.
+* A saver's failure is the caller's to show (BUSINESS), a refused database
+* write a technical error.
     TRY.
         persist( ).
+        save_savers( CHANGING cs_reported = cs_reported ).
       CATCH zcx_osd_rap INTO lx_error.
-        IF iv_end_luw = abap_true.
-          ROLLBACK WORK.
-          unlock( ).
+        lv_text = lx_error->get_text( ).
+        lv_business = abap_false.
+      CATCH cx_root INTO lx_root.
+        lv_text = |{ lx_root->get_text( ) }|.
+        IF lv_text IS INITIAL.
+          lv_text = |save of { ms_model-bdef } failed in a saver|.
         ENDIF.
-        RAISE EXCEPTION lx_error.
+        lv_business = abap_true.
     ENDTRY.
+    IF lv_text IS NOT INITIAL OR lx_error IS BOUND.
+      IF iv_end_luw = abap_true.
+        ROLLBACK WORK.
+        unlock( ).
+      ENDIF.
+      APPEND 'CLEANUP' TO mt_trace.
+      LOOP AT lt_savers INTO lo_saver.
+        lo_saver->cleanup( ).
+      ENDLOOP.
+      mi_luw->discard( ).
+      CLEAR: mt_inst, mt_done.
+      RAISE EXCEPTION TYPE zcx_osd_rap
+        EXPORTING
+          iv_reason   = lv_text
+          iv_save     = abap_true
+          iv_business = lv_business.
+    ENDIF.
     IF iv_end_luw = abap_true.
       COMMIT WORK.
       unlock( ).
     ENDIF.
 
     APPEND 'CLEANUP' TO mt_trace.
-    IF lo_saver IS NOT INITIAL.
+    LOOP AT lt_savers INTO lo_saver.
       lo_saver->cleanup( ).
-    ENDIF.
+    ENDLOOP.
 * cleanup resets the transactional buffer: the next transaction reads the
 * database again, and a %cid of this one is not a reference any more
     mi_luw->discard( ).
@@ -2667,6 +2740,10 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
     lt_delta = mi_luw->delta( ).
     LOOP AT lt_delta INTO ls_change.
       ls_entity = entity_of( ls_change-entity ).
+* R7: an entity with an unmanaged save is written by its saver only
+      IF ls_entity-save = 'U'.
+        CONTINUE.
+      ENDIF.
       li_source = source_of( ls_entity ).
       ASSIGN ls_change-row->* TO <ls_row>.
 * an update starts from the row in the database, so a column the entity
@@ -2705,16 +2782,128 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
     ENDLOOP.
   ENDMETHOD.
 
-  METHOD rollback.
-    DATA lo_saver TYPE REF TO cl_abap_behavior_saver.
-    TRY.
-        lo_saver = saver( ).
-      CATCH zcx_osd_rap.
-        CLEAR lo_saver.
-    ENDTRY.
-    IF lo_saver IS NOT INITIAL.
-      lo_saver->cleanup( ).
+  METHOD save_savers.
+    DATA lt_savers   LIKE mt_savers.
+    DATA lo_saver    TYPE REF TO cl_abap_behavior_saver.
+    DATA ls_saver    TYPE zif_osd_rap_bo=>ty_saver.
+    DATA ls_entity   TYPE zif_osd_rap_bo=>ty_entity.
+    DATA lt_delta    TYPE zif_osd_luw=>tt_change.
+    DATA ls_change   TYPE zif_osd_luw=>ty_change.
+    DATA ls_inst     TYPE ty_inst.
+    DATA lr_create   TYPE REF TO data.
+    DATA lr_update   TYPE REF TO data.
+    DATA lr_delete   TYPE REF TO data.
+    DATA lr_reported TYPE REF TO data.
+    DATA lv_any      TYPE abap_bool.
+    FIELD-SYMBOLS <ls_request> TYPE any.
+    FIELD-SYMBOLS <lt_rows>    TYPE STANDARD TABLE.
+
+    LOOP AT ms_model-entities INTO ls_entity WHERE save IS NOT INITIAL.
+      lv_any = abap_true.
+    ENDLOOP.
+    lt_savers = savers( ).
+    IF lv_any = abap_false.
+      LOOP AT lt_savers INTO lo_saver.
+        lo_saver->save( ).
+      ENDLOOP.
+      RETURN.
     ENDIF.
+
+    lr_create = mo_bo->new_request( 'CHANGE' ).
+    lr_update = mo_bo->new_request( 'CHANGE' ).
+    lr_delete = mo_bo->new_request( 'DELETE' ).
+    lt_delta = mi_luw->delta( ).
+    LOOP AT lt_delta INTO ls_change.
+      ls_entity = entity_of( ls_change-entity ).
+      IF ls_entity-save IS INITIAL.
+        CONTINUE.
+      ENDIF.
+      READ TABLE mt_inst INTO ls_inst WITH KEY entity = ls_change-entity key = ls_change-key.
+      IF sy-subrc <> 0.
+        CONTINUE.
+      ENDIF.
+      CASE ls_change-operation.
+        WHEN co_operation-create.
+          ASSIGN lr_create->* TO <ls_request>.
+        WHEN co_operation-update.
+          ASSIGN lr_update->* TO <ls_request>.
+        WHEN OTHERS.
+          ASSIGN lr_delete->* TO <ls_request>.
+      ENDCASE.
+      ASSIGN COMPONENT ls_entity-response OF STRUCTURE <ls_request> TO <lt_rows>.
+      request_row( EXPORTING is_entity = ls_entity is_inst = ls_inst iv_kind = ls_change-operation
+                   CHANGING ct_rows = <lt_rows> ).
+    ENDLOOP.
+
+    GET REFERENCE OF cs_reported INTO lr_reported.
+    LOOP AT lt_savers INTO lo_saver.
+      READ TABLE ms_model-savers INTO ls_saver INDEX sy-tabix.
+      IF sy-subrc = 0 AND ls_saver-modified = abap_true.
+        APPEND 'SAVE_MODIFIED' TO mt_trace.
+        mo_bo->save_modified( io_saver = lo_saver ir_create = lr_create ir_update = lr_update
+                              ir_delete = lr_delete ir_reported = lr_reported ).
+      ELSE.
+        lo_saver->save( ).
+      ENDIF.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD request_row.
+* one row of the request: a create the instance with %control on for every
+* field set since it was created; an update its keys and the fields changed
+* in this transaction (all fields WITH FULL DATA), flagged; a delete its keys
+    DATA lr_line  TYPE REF TO data.
+    DATA ls_field TYPE zif_osd_rap_bo=>ty_field.
+    DATA lv_set   TYPE abap_bool.
+    FIELD-SYMBOLS <ls_line>    TYPE any.
+    FIELD-SYMBOLS <ls_row>     TYPE any.
+    FIELD-SYMBOLS <ls_control> TYPE any.
+    FIELD-SYMBOLS <lv_from>    TYPE any.
+    FIELD-SYMBOLS <lv_to>      TYPE any.
+
+    CREATE DATA lr_line LIKE LINE OF ct_rows.
+    ASSIGN lr_line->* TO <ls_line>.
+    ASSIGN is_inst-row->* TO <ls_row>.
+    ASSIGN COMPONENT '%CONTROL' OF STRUCTURE <ls_line> TO <ls_control>.
+    LOOP AT is_entity-fields INTO ls_field.
+      READ TABLE is_inst-fields TRANSPORTING NO FIELDS WITH KEY table_line = ls_field-name.
+      lv_set = boolc( sy-subrc = 0 ).
+      IF iv_kind = co_operation-create AND ls_field-key = abap_true.
+        lv_set = abap_true.
+      ENDIF.
+      IF ls_field-key = abap_false AND iv_kind = co_operation-delete.
+        CONTINUE.
+      ENDIF.
+      IF ls_field-key = abap_false AND iv_kind = co_operation-update
+          AND lv_set = abap_false AND is_entity-full_data = abap_false.
+        CONTINUE.
+      ENDIF.
+      ASSIGN COMPONENT ls_field-name OF STRUCTURE <ls_row> TO <lv_from>.
+      CHECK sy-subrc = 0.
+      ASSIGN COMPONENT ls_field-name OF STRUCTURE <ls_line> TO <lv_to>.
+      CHECK sy-subrc = 0.
+      <lv_to> = <lv_from>.
+      IF lv_set = abap_true AND <ls_control> IS ASSIGNED.
+        ASSIGN COMPONENT ls_field-name OF STRUCTURE <ls_control> TO <lv_to>.
+        IF sy-subrc = 0.
+          <lv_to> = if_abap_behv=>mk-on.
+        ENDIF.
+      ENDIF.
+    ENDLOOP.
+    APPEND <ls_line> TO ct_rows.
+  ENDMETHOD.
+
+  METHOD rollback.
+    DATA lt_savers LIKE mt_savers.
+    DATA lo_saver  TYPE REF TO cl_abap_behavior_saver.
+    TRY.
+        lt_savers = savers( ).
+      CATCH zcx_osd_rap.
+        CLEAR lt_savers.
+    ENDTRY.
+    LOOP AT lt_savers INTO lo_saver.
+      lo_saver->cleanup( ).
+    ENDLOOP.
     APPEND 'ROLLBACK' TO mt_trace.
     mi_luw->discard( ).
     unlock( ).

@@ -42,8 +42,12 @@ describe("packs/rap-flight: the manifest", () => {
   it("keeps the business objects out by pattern: pools, test classes, BDEFs, the other scenarios", () => {
     const patterns = manifest.sources[0].exclude.map((e) => new RegExp(e, "i"));
     const excluded = (path) => patterns.some((p) => p.test(path));
-    expect(excluded("managed/#dmo#bp_travel_m.clas.abap"), "behavior pool").to.equal(true);
-    expect(excluded("managed/#dmo#i_travel_m.bdef.asbdef"), "BDEF").to.equal(true);
+    // R7: the managed travel runs; its pools come whole from the overlay
+    expect(excluded("managed/#dmo#bp_travel_m.clas.abap"), "behavior pool (the overlay's)").to.equal(true);
+    expect(excluded("managed/#dmo#i_travel_m.bdef.asbdef"), "the travel BDEF runs").to.equal(false);
+    expect(excluded("managed/#dmo#c_travel_processor_m.bdef.asbdef"), "its projection runs").to.equal(false);
+    expect(excluded("managed/#dmo#c_travel_processor_m.ddls.asddls"), "its projection view").to.equal(false);
+    expect(excluded("reuse/supplement/#dmo#i_supplement.bdef.asbdef"), "a draft BDEF").to.equal(true);
     expect(excluded("managed/#dmo#tc_travel_m.clas.abap"), "test consumer").to.equal(true);
     expect(excluded("managed/#dmo#bp_travel_m.clas.testclasses.abap"), "ABAP Unit").to.equal(true);
     expect(excluded("draft/#dmo#i_travel_d.ddls.asddls"), "another scenario").to.equal(true);
