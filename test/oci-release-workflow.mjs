@@ -372,7 +372,7 @@ export function stampsWithoutGeneration(name, workflow) {
         if (!built && !unstamped && STAMPS.some(stamp => stamp.test(line)) && !BUILDS.test(line))
           problems.push(`${where}: stamps with no live generation built before it in this job`);
         // writing moved to osd-public-tree.mjs; osd-provenance.mjs only verifies bytes
-        if (/\bosd-provenance\.mjs write\b/.test(line)) problems.push(`${where}: osd-provenance.mjs write is gone; use osd-public-tree.mjs write`);
+        if (/\bosd-provenance\.mjs\s+write\b/.test(line)) problems.push(`${where}: osd-provenance.mjs write is gone; use osd-public-tree.mjs write`);
         if (BUILDS.test(line)) built = true;
       }
     }

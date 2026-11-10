@@ -222,7 +222,9 @@ describe("scripts/release-verify: an artefact by its content", () => {
   // derived when absent and then required (exit 3), so is every live source
   // in the store or in live's snapshot, and a store reached through a link
   // out of the tree is refused
-  it("packs live's fast-path inputs or fails with a distinct exit", async () => {
+  it("packs live's fast-path inputs or fails with a distinct exit", async function () {
+    // Spawns osd-ci-artifact pack several times: past mocha's 2 s default.
+    this.timeout(60000);
     const {genHash} = await import("../tools/osd-build.mjs");
     const {cacheKey} = await import("../tools/osd-xref-seed.mjs");
     const {verifyCiClosure} = await import("../tools/osd-ci-closure.mjs");
