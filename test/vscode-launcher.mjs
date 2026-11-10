@@ -653,9 +653,9 @@ describe("editors/vscode/launcher.js: databases", function () {
   });
 
   it("defaultDedicatedName is stable per osdHome and differs across osdHome", () => {
-    const a = defaultDedicatedName("/home/alice/dev/open-steamgate");
-    const b = defaultDedicatedName("/home/alice/dev/open-steamgate");
-    const c = defaultDedicatedName("/home/alice/dev/another-checkout");
+    const a = defaultDedicatedName("/work/open-steamgate");
+    const b = defaultDedicatedName("/work/open-steamgate");
+    const c = defaultDedicatedName("/work/another-checkout");
     expect(a).to.equal(b);
     expect(a).to.not.equal(c);
     expect(a).to.match(/^[0-9a-f]{8}$/);
