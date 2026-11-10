@@ -241,7 +241,7 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
     program.classes.push(withArtifact(ctx0, g, () => functionGroupIr(ctx0, g)));
     incr?.exit?.();
   }
-  if (discoveryProbe) return program;
+  if (discoveryProbe) return program; incr?.lowered?.(program); // the osgo cache's merged state (osgo-incr.mjs) before the final analyses
   // every interface used as a reference type: its methods whose signature
   // types, which is what a class must provide to satisfy it
   program.interfaceMethods = new Map();

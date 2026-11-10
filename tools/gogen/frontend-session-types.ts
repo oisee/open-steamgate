@@ -161,6 +161,9 @@ export interface CompileOptions {
      * signatures) and after it (interface methods, tables) write the shared
      * state at fixed points the merged program must keep */
     lowering?: () => void;
+    /** the lowering is done, the final analyses are next: the reader puts
+     * the merged classes and collections in place for them */
+    lowered?: (program: import("./frontend-types.ts").FrontendProgram) => void;
     /** the shared program state is seeded here, before anything lowers */
     prepare?: (program: import("./frontend-types.ts").FrontendProgram, reg: Registry) => void;
     suppliedOf?: (owner: string, contributed: [string, string[]][]) => void;

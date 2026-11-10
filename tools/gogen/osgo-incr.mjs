@@ -20,14 +20,12 @@
 // re-lowered object, a changed broken-set, an anonymous structure an edit
 // could have renamed. The cache never guesses.
 import {createHash} from "node:crypto";
-import {createRequire} from "node:module";
 import {existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync} from "node:fs";
 import {join, relative} from "node:path";
 import {deserialize, serialize} from "node:v8";
 import {deflateRawSync, inflateRawSync} from "node:zlib";
 import {compileProgram, defaultValue, aliasTarget} from "./frontend.mjs";
 import {caughtIndex} from "./frontend-hierarchy.mjs";
-import {core} from "./frontend-inventory.mjs";
 import {referencedClasses} from "./emit-go.mjs";
 import {callsIn, goSymbol} from "./go-layers.mjs";
 import {objectOfFile} from "./osgo-layers.mjs";
@@ -102,7 +100,7 @@ function irNames(ir) {
  *  assigned later (locals, functionModules, lockObjects, the final-output
  *  analyses) are rebuilt by the fresh compile, not replayed. */
 const RECORDED = ["structs", "consts", "sigs", "events", "missing", "dynStatics", "excAttrs", "intfOwnAttrs",
-  "badStructs", "ddicOutputLen", "interfaces", "skipped", "partial", "classes"];
+  "badStructs", "ddicOutputLen", "interfaces", "interfaceAttrs", "skipped", "partial", "classes"];
 
 /** every op of one collection an object's lowering made, all its passes in
  *  order (a payload holds them per segment: one segment per `enter`) */
@@ -112,6 +110,16 @@ const flatOps = (payload, coll) => (payload?.segs ?? []).flatMap((seg) => seg[co
  *  name it by (abaplint keys it by type instance, which a new registry
  *  does not share) */
 const shapeOf = (t) => { try { return t.getComponents().map((c) => upper(c.name)).join(","); } catch { return undefined; } };
+
+/** one recorded op, applied to a collection */
+function applyOp(target, op) {
+  const [method, ...args] = op;
+  if (method === "set") target.set(args[0], args[1]);
+  else if (method === "add") target.add(args[0]);
+  else if (method === "delete") target.delete(args[0]);
+  else if (method === "clear") target.clear();
+  else if (method === "push") target.push(args[0]);
+}
 
 /** where a write outside every object's mark (a global pass) sits in the
  *  sequence of segments: "A" before the first segment of the discovery
@@ -602,6 +610,9 @@ export function incrAssemble({root, folders, objects, hidden, includeTests, proo
   let currentKey = null;
   let lowering = 0;
   let orderDoubt;
+  const raws = {}; // coll -> the collection itself, under the recording proxy
+  let freshList; // the classes the fresh lowering pushed
+  let hookDoubt;
   const supers = new Map(Object.entries(index.supers));
   const readIncr = {
     // only the re-lowered objects compile; everything else stays in `wanted`
@@ -643,6 +654,7 @@ export function incrAssemble({root, folders, objects, hidden, includeTests, proo
         // recorded by which side of the lowering it ran on (the rebuild
         // below puts it there).
         // `classes` keeps its own merge off index.classes below.
+        raws[coll] = target;
         if (coll !== "classes") p[coll] = opProxy(coll, target, (op) => {
           if (currentKey === null) { freshStrays.push([coll, op, lowering, freshCount[lowering]]); return; }
           const seg = freshSegs.get(currentKey).at(-1);
@@ -668,9 +680,104 @@ export function incrAssemble({root, folders, objects, hidden, includeTests, proo
       // recorded one below, over what the mini's final analysis answered
       p.cdsViews = index.cdsViews ?? {};
     },
+    // the lowering is done, the final analyses (the interface walk, the
+    // dynamic statics, the table registry, ...) are next: they read the
+    // classes and the shared collections in insertion order, and append
+    // what they derive. They must see the full build's state there, not the
+    // pre-seed's order with the fresh writes after it: the merged class
+    // list, and every recorded collection rebuilt in the segment sequence.
+    lowered(p) {
+      freshList = p.classes;
+      const merged = mergeClasses(freshList);
+      if (!merged.ok) { hookDoubt = merged.reason; return; }
+      const strays = classifyStrays();
+      if (!strays.ok) { hookDoubt = strays.reason; return; }
+      for (const coll of RECORDED) {
+        if (coll === "classes") continue;
+        const raw = raws[coll];
+        const want = mergeColl(coll, strays.bySlot, false);
+        const same = raw instanceof Map ? raw.size === want.size && [...want.keys()].every((k) => raw.has(k))
+          : raw instanceof Set ? raw.size === want.size && [...want].every((k) => raw.has(k))
+            : raw.length === want.length;
+        if (!same) { hookDoubt = `the merged ${coll} holds other entries than the fresh build's`; return; }
+        if (raw instanceof Map) { raw.clear(); for (const [k, v] of want) raw.set(k, v); }
+        else if (raw instanceof Set) { raw.clear(); for (const v of want) raw.add(v); }
+        else raw.splice(0, raw.length, ...want);
+      }
+      p.classes = merged.classes;
+    },
     rttiOf(owner, defs) { freshRtti.push([owner, defs]); },
     ownershipOf(name, value) { freshOwnership.set(upper(name), value); },
   };
+
+  // the merge, in the full build's order: its segment sequence
+  // (index.segments), each segment the fresh writes of an object that
+  // lowered again or the recorded ones of an object taken from the cache,
+  // and the global passes in the slots they ran in. The program digest and
+  // the emitted Go read several of these collections in insertion order;
+  // any other order names another generation. The passes are this build's
+  // own: its registry holds every object they read (every non-class object
+  // is a member).
+  function classifyStrays() {
+    const bySlot = {}; // coll -> slot -> [ops]
+    for (const [coll, op, phase, at] of freshStrays) {
+      let slot = straySlot(phase, at, freshCount[phase]);
+      if (slot === null) return {ok: false, reason: `a global pass wrote ${coll} between two objects`};
+      if (slot === "AB" || slot === "CD") {
+        // this build had no segment in the phase: the slot is the one the
+        // full build used, if it used only one of the two
+        const both = slot.split("");
+        const used = (index.straySlots[coll] ?? []).filter((x) => both.includes(x));
+        if (used.length > 1) return {ok: false, reason: `the global passes of ${coll} ran on both sides of a phase this build has no object in`};
+        slot = used[0] ?? both[0];
+      }
+      ((bySlot[coll] ??= {})[slot] ??= []).push(op);
+    }
+    return {ok: true, bySlot};
+  }
+  function mergeColl(coll, bySlot, withFinal) {
+    const like = raws[coll];
+    const out = like instanceof Map ? new Map() : like instanceof Set ? new Set() : [];
+    const strays = (slot) => { for (const op of bySlot[coll]?.[slot] ?? []) applyOp(out, op); };
+    const segs = (phase) => {
+      for (const [key, occ, p] of index.segments) {
+        if (p !== phase) continue;
+        const ops = relower.has(key) ? freshSegs.get(key)?.[occ]?.[coll] : load(key).segs?.[occ]?.[coll];
+        for (const op of ops ?? []) applyOp(out, op);
+      }
+    };
+    strays("A"); segs(0); strays("B");
+    strays("C"); segs(1);
+    if (withFinal) strays("D");
+    return out;
+  }
+  // the classes in the recorded push order
+  function mergeClasses(fresh) {
+    const freshClasses = new Map(fresh.map((c) => [c.name, c]));
+    const classes = [];
+    for (const [key, name] of index.classes) {
+      if (key === undefined || relower.has(key)) {
+        const ir = freshClasses.get(name);
+        if (ir === undefined) return {ok: false, reason: `${name} of ${key ?? "the fresh compile"} was not lowered fresh as expected`};
+        classes.push(ir);
+        // a fresh IR may not newly name an anonymous structure another object
+        // first used: whether the full build would share it through the same
+        // abaplint instance is exactly what this registry cannot prove
+        for (const type of irNames(ir).types) {
+          if (seededNames.has(type) && !(index.entries[key]?.anonRefs ?? []).includes(type)) {
+            return {ok: false, reason: `${key}: the edit now names the shared anonymous structure ${type}`};
+          }
+        }
+      } else {
+        const ir = load(key)?.ir[name];
+        if (ir === undefined) return {ok: false, reason: `${key}: no lowered ${name} in the cache`};
+        classes.push(ir);
+      }
+    }
+    if (classes.length !== index.classes.length || fresh.length !== new Set(fresh.map((c) => c.name)).size) return {ok: false, reason: "the fresh lowering pushed a class twice"};
+    return {ok: true, classes};
+  }
+
   let anonShapes;
   let mini;
   try {
@@ -706,77 +813,35 @@ export function incrAssemble({root, folders, objects, hidden, includeTests, proo
     }
   }
   if (orderDoubt !== undefined) return {ok: false, reason: orderDoubt};
+  if (hookDoubt !== undefined) return {ok: false, reason: hookDoubt};
+  if (freshList === undefined) return {ok: false, reason: "the front end did not report the end of the lowering"};
 
-  // the merged program's shared collections, in the order the full build
-  // wrote them: its segment sequence (index.segments), each segment the
-  // fresh writes of an object that lowered again or the recorded ones of an
-  // object taken from the cache, and the global passes in the slots they
-  // ran in. The program digest and the emitted Go read several of these
-  // collections in insertion order; any other order names another
-  // generation. The passes are this build's own: its registry holds every
-  // object they read (every non-class object is a member).
-  const strayBySlot = {}; // coll -> slot -> [ops]
-  for (const [coll, op, phase, at] of freshStrays) {
-    let slot = straySlot(phase, at, freshCount[phase]);
-    if (slot === null) return {ok: false, reason: `a global pass wrote ${coll} between two objects`};
-    if (slot === "AB" || slot === "CD") {
-      // this build had no segment in the phase: the slot is the one the
-      // full build used, if it used only one of the two
-      const both = slot.split("");
-      const used = (index.straySlots[coll] ?? []).filter((s) => both.includes(s));
-      if (used.length > 1) return {ok: false, reason: `the global passes of ${coll} ran on both sides of a phase this build has no object in`};
-      slot = used[0] ?? both[0];
-    }
-    ((strayBySlot[coll] ??= {})[slot] ??= []).push(op);
-  }
-  const apply = (target, op) => {
-    const [method, ...args] = op;
-    if (method === "set") target.set(args[0], args[1]);
-    else if (method === "add") target.add(args[0]);
-    else if (method === "delete") target.delete(args[0]);
-    else if (method === "clear") target.clear();
-    else if (method === "push") target.push(args[0]);
-  };
+  const strays = classifyStrays();
+  if (!strays.ok) return {ok: false, reason: strays.reason};
   const program2 = mini;
   for (const coll of RECORDED) {
     if (coll === "classes") continue; // merged below, off index.classes
-    const like = program2[coll];
-    const out = like instanceof Map ? new Map() : like instanceof Set ? new Set() : [];
-    const strays = (slot) => { for (const op of strayBySlot[coll]?.[slot] ?? []) apply(out, op); };
-    const segs = (phase) => {
-      for (const [key, occ, p] of index.segments) {
-        if (p !== phase) continue;
-        const ops = relower.has(key) ? freshSegs.get(key)?.[occ]?.[coll] : load(key).segs?.[occ]?.[coll];
-        for (const op of ops ?? []) apply(out, op);
-      }
-    };
-    strays("A"); segs(0); strays("B");
-    strays("C"); segs(1); strays("D");
+    const out = mergeColl(coll, strays.bySlot, true);
+    // the mini's final pass ran over the full build's state (the lowered
+    // hook), so its own collections are this merge already, order included
+    const raw = raws[coll];
+    const flat = (c) => JSON.stringify(c instanceof Map ? [...c.keys()] : [...c].map((v) => (typeof v === "string" ? v : "")));
+    if (flat(raw) !== flat(out)) return {ok: false, reason: `the merged ${coll} is not in the order the fresh build's final pass left it`};
     program2[coll] = out;
   }
-
-  // the classes in the recorded push order
-  const freshClasses = new Map(mini.classes.map((c) => [c.name, c]));
-  const classes = [];
-  for (const [key, name] of index.classes) {
-    if (key === undefined || relower.has(key)) {
-      const ir = freshClasses.get(name);
-      if (ir === undefined) return {ok: false, reason: `${name} of ${key ?? "the fresh compile"} was not lowered fresh as expected`};
-      classes.push(ir);
-      // a fresh IR may not newly name an anonymous structure another object
-      // first used: whether the full build would share it through the same
-      // abaplint instance is exactly what this registry cannot prove
-      for (const type of irNames(ir).types) {
-        if (seededNames.has(type) && !(index.entries[key]?.anonRefs ?? []).includes(type)) {
-          return {ok: false, reason: `${key}: the edit now names the shared anonymous structure ${type}`};
-        }
-      }
-    } else {
-      const ir = load(key)?.ir[name];
-      if (ir === undefined) return {ok: false, reason: `${key}: no lowered ${name} in the cache`};
-      classes.push(ir);
+  // the interface methods: the final pass walked `interfaces` in the merged
+  // order (the lowered hook), and the emitted Go declares the interfaces
+  // in this map's order -- checked, not trusted
+  {
+    const names = [...program2.interfaces];
+    const have = mini.interfaceMethods ?? new Map();
+    if (names.length !== have.size || names.some((n, k) => [...have.keys()][k] !== n)) {
+      return {ok: false, reason: "the interface methods are not in the merged interfaces' order"};
     }
   }
+  const merged = mergeClasses(freshList);
+  if (!merged.ok) return {ok: false, reason: merged.reason};
+  const classes = merged.classes;
   program2.classes = classes;
   program2.wanted = new Set(index.wanted);
   // the mini's final analysis rebuilt the CDS view map off a registry that
@@ -870,89 +935,6 @@ export function incrAssemble({root, folders, objects, hidden, includeTests, proo
     incrDb: {dir, relower: [...relower], registryOrder: index.registryOrder}};
 }
 
-// ---------------------------------------------------------------------------
-// the database statements of the fast path (osg-build.mjs osgiDatabase)
-// ---------------------------------------------------------------------------
-
-const require2 = createRequire(import.meta.url);
-/** the per-object statement lists DatabaseSetup produces, attributed so a
- *  fast build can splice in the re-lowered objects' rows. The write side
- *  checks the reconstruction against the real run before caching.
- *  `only` builds the contributions of those object keys alone. */
-export function dbContributions(reg, only) {
-  const {SQLiteDatabaseSchema} = require2("@abaplint/transpiler/build/src/db/schema_generation/sqlite_database_schema.js");
-  const {PopulateTables} = require2("@abaplint/transpiler/build/src/db/populate_tables.js");
-  const {CDSDatabaseView} = require2("@abaplint/transpiler/build/src/db/cds_database_view.js");
-  const schema = new SQLiteDatabaseSchema(reg), populate = new PopulateTables(reg), cds = new CDSDatabaseView(reg);
-  const order = [], tabl = new Map(), view = new Map(), cdsViews = new Map(), inserts = new Map();
-  for (const obj of reg.getObjects()) {
-    const key = keyOf(obj.getType(), upper(obj.getName()));
-    if (only !== undefined && !only.has(key)) continue;
-    if (!order.includes(key)) order.push(key);
-    if (!inserts.has(key)) inserts.set(key, []);
-    const add = (statement) => { if (statement.length > 0) inserts.get(key).push(statement); };
-    try {
-      if (obj instanceof core.Objects.Table && obj.getTableCategory() === core.Objects.TableCategory.Transparent) tabl.set(key, schema.buildTABL(obj).trim());
-      else if (obj instanceof core.Objects.View) view.set(key, schema.buildVIEW(obj).trim());
-      else if (obj instanceof core.Objects.DataDefinition) {
-        const built = cds.build(obj);
-        if (built !== undefined) cdsViews.set(key, built);
-      }
-    } catch { /* the real run fails the same way; the write-time check catches a difference */ }
-    try {
-      add(populate.insertTADIR(obj));
-      if (obj instanceof core.Objects.MessageClass) for (const s of populate.insertT100(obj)) add(s);
-      else if (obj instanceof core.Objects.WebMIME) for (const s of populate.insertWWWPARAMS(obj)) add(s);
-      else if (obj instanceof core.Objects.Class || obj instanceof core.Objects.Interface || obj instanceof core.Objects.Program) {
-        add(populate.insertREPOSRC(obj));
-        if (obj instanceof core.Objects.Class || obj instanceof core.Objects.Interface) {
-          for (const s of populate.insertSEOSUBCO(obj)) add(s);
-          for (const s of populate.insertSEOSUBCODF(obj)) add(s);
-          for (const s of populate.insertSEOSUBCOTX(obj)) add(s);
-        }
-      }
-    } catch { /* as above */ }
-  }
-  let tail = "";
-  try { tail = populate.insertT000(); } catch { /* none */ }
-  return {order, tabl, view, cdsViews, inserts, tail};
-}
-
-const at = (store, key) => store instanceof Map ? store.get(key) : store?.[key];
-
-/** the flat statement lists of `run()`, in its order, out of the per-object
- *  contributions, with `fresh` (the contributions of the fresh registry,
- *  which cover the re-lowered objects) substituted per object key */
-export function dbFlat(cached, fresh) {
-  const of = (kind, key) => {
-    const mine = fresh && at(fresh[kind], key);
-    if (mine !== undefined) return mine;
-    return at(cached[kind], key);
-  };
-  const schemas = [];
-  for (const key of cached.order) { const s = of("tabl", key); if (s !== undefined) schemas.push(s); }
-  for (const key of cached.order) { const s = of("view", key); if (s !== undefined) schemas.push(s); }
-  for (const key of cached.order) { const s = of("cdsViews", key); if (s !== undefined) schemas.push(s); }
-  const insert = [];
-  for (const key of cached.order) {
-    const mine = fresh && at(fresh.inserts, key);
-    insert.push(...(mine ?? at(cached.inserts, key) ?? []).filter((s) => s.length > 0));
-  }
-  if (cached.tail && cached.tail.length > 0) insert.push(cached.tail);
-  return {schemas, insert};
-}
-
-/** the database record of a generation's cache: `db.json` beside index.json */
-export function dbCacheWrite(dir, contributions) {
-  const file = join(dir, "db.json"), temp = `${file}.${process.pid}.pending`;
-  writeFileSync(temp, JSON.stringify({order: contributions.order,
-    tabl: Object.fromEntries(contributions.tabl), view: Object.fromEntries(contributions.view),
-    cdsViews: Object.fromEntries(contributions.cdsViews),
-    inserts: Object.fromEntries([...contributions.inserts].map(([k, v]) => [k, v])), tail: contributions.tail}));
-  renameSync(temp, file);
-}
-
-/** @returns {object | undefined} the recorded contributions, or undefined */
-export function dbCacheRead(dir) {
-  try { return JSON.parse(readFileSync(join(dir, "db.json"), "utf8")); } catch { return undefined; }
-}
+// the database statements of the fast path: osgo-incr-db.mjs (its own file,
+// the size rule); re-exported so callers keep one import
+export {dbContributions, dbFlat, dbCacheWrite, dbCacheRead} from "./osgo-incr-db.mjs";

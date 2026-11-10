@@ -495,3 +495,56 @@ test("the cache is refused when the front end itself changed (tool identity)", (
     assert.match(attempt.reason, /front end changed/);
   } finally { rmSync(root, {recursive: true, force: true}); }
 });
+
+// The interfaces used as reference types are declared in the emitted Go in
+// the order the full build's final pass walks them, which is the order the
+// lowering first used them. A fast build's own walk sees the cache's
+// pre-seed first and the fresh lowering's uses after it: an edited class
+// that used an interface BEFORE a cached class used another must still
+// declare it first (the real tree: ZIF_STG_SADL_BEHAVIOR and
+// IF_SADL_EXIT_CALC_ELEMENT_READ swapped in app.go).
+const withRefs = {
+  "app/zif_incr_ia.intf.abap": `INTERFACE zif_incr_ia PUBLIC.
+  METHODS a RETURNING VALUE(r) TYPE i.
+ENDINTERFACE.`,
+  "app/zif_incr_ib.intf.abap": `INTERFACE zif_incr_ib PUBLIC.
+  METHODS b RETURNING VALUE(r) TYPE i.
+ENDINTERFACE.`,
+  "app/zcl_incr_e1.clas.abap": `CLASS zcl_incr_e1 DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    METHODS m IMPORTING io TYPE REF TO zif_incr_ia RETURNING VALUE(r) TYPE i.
+ENDCLASS.
+CLASS zcl_incr_e1 IMPLEMENTATION.
+  METHOD m.
+    r = io->a( ) + 1.
+  ENDMETHOD.
+ENDCLASS.`,
+  "app/zcl_incr_e2.clas.abap": `CLASS zcl_incr_e2 DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    METHODS m IMPORTING io TYPE REF TO zif_incr_ib RETURNING VALUE(r) TYPE i.
+ENDCLASS.
+CLASS zcl_incr_e2 IMPLEMENTATION.
+  METHOD m.
+    r = io->b( ) + 2.
+  ENDMETHOD.
+ENDCLASS.`,
+};
+
+test("the interfaces keep the full build's declaration order when an earlier user is re-lowered", () => {
+  const root = tree(withRefs);
+  try {
+    writeCache(root);
+    edit(root, "app/zcl_incr_e1.clas.abap", "io->a( ) + 1", "io->a( ) + 3");
+    const reference = fullProgram(root);
+    const order = [...reference.interfaceMethods.keys()];
+    assert.ok(order.indexOf("ZIF_INCR_IA") >= 0 && order.indexOf("ZIF_INCR_IA") < order.indexOf("ZIF_INCR_IB"), `fixture order (${order})`);
+    const attempt = incrAssemble({root, folders: [join(root, "app")], objects: objectNames(root), hidden: new Set(), includeTests: new Set(),
+      proof: {ok: true, base: "live1", changed: changedFiles(root, withRefs)}});
+    assert.equal(attempt.ok, true, attempt.reason);
+    assert.ok(attempt.lowered.includes("CLAS ZCL_INCR_E1") && !attempt.lowered.includes("CLAS ZCL_INCR_E2"));
+    assert.deepEqual([...attempt.program.interfaces], [...reference.interfaces]);
+    assert.deepEqual([...attempt.program.interfaceMethods.keys()], order);
+    assert.deepEqual([...attempt.program.interfaceAttrs.keys()], [...reference.interfaceAttrs.keys()]);
+    assert.equal(emitted(attempt.program), emitted(reference));
+  } finally { rmSync(root, {recursive: true, force: true}); }
+});
