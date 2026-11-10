@@ -4,7 +4,7 @@ import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {spawnSync} from "node:child_process";
 
-import {publicationFindings} from '../tools/osd-leak-scan.mjs';
+import {publicationFindings, homePaths} from '../tools/osd-leak-scan.mjs';
 
 describe("leak scanner", () => {
   it('supports publicationFindings as a library with explicit or discovered identifiers', () => {
@@ -48,6 +48,37 @@ describe("leak scanner", () => {
       assert.equal(invalid.status, 2);
       assert.match(invalid.stderr, /needs one list path/);
     }
+  });
+
+  // A real-looking user path is assembled at run time, so this file does not
+  // itself carry one for the tree-wide scan to find.
+  const realHome = (lead, sep) => lead + ["jdoe", "dev", "repo", "x.mjs"].join(sep);
+  it("flags a home directory whose owner is not a generic name", () => {
+    assert.deepEqual(homePaths("at f (" + realHome("/home/", "/") + ":1:1)"), ["/home/jdoe"]);
+    assert.deepEqual(homePaths(realHome("/Users/", "/")), ["/Users/jdoe"]);
+    assert.deepEqual(homePaths(realHome("C:\\Users\\", "\\")), ["C:\\Users\\jdoe"]);
+    // escaped, as inside a JS or JSON string literal
+    assert.deepEqual(homePaths(realHome("C:\\\\Users\\\\", "\\\\")), ["C:\\\\Users\\\\jdoe"]);
+  });
+  it("lets generic and placeholder home directories through", () => {
+    for (const text of [
+      "/home/coder/project", "/home/runner/work/a", "/home/x/y", "/home/example/a",
+      "/home/someone/a", "/home/node/app", "/Users/example/Library", "C:\\Users\\example\\AppData",
+      "/home/<user>/dev", "/home/$USER/dev", "/home/some user/a tree", "~/dev/repo",
+    ]) assert.deepEqual(homePaths(text), [], text);
+  });
+  it("reports a home path through the command line, also in UTF-16LE", () => {
+    const plain = join(folder, "home-plain.txt"), wide = join(folder, "home-wide.bin");
+    writeFileSync(plain, "see " + realHome("/home/", "/") + "\n");
+    writeFileSync(wide, Buffer.from(realHome("/Users/", "/"), "utf16le"));
+    for (const file of [plain, wide]) {
+      const result = scan(file);
+      assert.equal(result.status, 1, result.stderr);
+      assert.match(result.stderr, /домашний каталог/);
+    }
+    const generic = join(folder, "home-generic.txt");
+    writeFileSync(generic, "/home/coder/project and /home/runner/work\n");
+    assert.ok([0, 2].includes(scan(generic).status));
   });
 
   it("treats only declared embedding vector fields as opaque bytes", () => {
