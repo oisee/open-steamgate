@@ -158,6 +158,22 @@ describe("tools/osd-build: the layers, refused before a lock is taken", function
     } finally { rmSync(privateTree, {recursive: true, force: true}); }
   });
 
+  it("records a gen/ link into a private tree that the transpiler reads", async () => {
+    const privateTree = mkdtempSync(join(tmpdir(), "osd-gen-link-"));
+    try {
+      writeFileSync(join(privateTree, ".osd-source.json"), JSON.stringify({private: true}));
+      writeFileSync(join(privateTree, "zlinked.prog.abap"), "REPORT zlinked.\n");
+      write("abap_transpile.json", JSON.stringify({input_folder: ["src", "gen"], output_folder: "output"}));
+      write("src/zplain.prog.abap", "REPORT zplain.\n");
+      mkdirSync(join(root, "gen"), {recursive: true});
+      symlinkSync(join(privateTree, "zlinked.prog.abap"), join(root, "gen/zlinked.prog.abap"));
+      await build({root, generators: false});
+      const record = JSON.parse(readFileSync(join(root, "build/live/reads.json"), "utf8"));
+      expect(record.reads.some(entry => entry.path === "gen/zlinked.prog.abap" && entry.privacy === true)).to.equal(true);
+      expect(() => publicProvenance(root)).to.throw().with.property("code").that.is.oneOf(["PRIVATE_LAYER", "UNKNOWN_PRIVACY"]);
+    } finally { rmSync(privateTree, {recursive: true, force: true}); }
+  });
+
   it("records a URL-only library's private clone identity", async () => {
     const repo = mkdtempSync(join(tmpdir(), "osd-url-lib-"));
     try {

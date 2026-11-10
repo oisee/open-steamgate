@@ -793,11 +793,10 @@ export async function build(options = {}) {
     const made = await transpile({root, modules: loaded, config: own, log: (m) => { output += m + "\n"; },
       onInputs: (files, libs) => keepCompileInputs(root, tmp, own, files, libs, options.overlay),
       onRead: (file, bytes) => {
-        if (normalPath(file).startsWith(normalPath(join(root, "gen")) + "/")) {
-          generatedDigests.set(normalPath(file), createHash("sha256").update(bytes).digest("hex"));
-        } else {
-          readEntries.push(readEntry(root, file, bytes));
-        }
+        const generated = normalPath(file).startsWith(normalPath(join(root, "gen")) + "/");
+        if (generated) generatedDigests.set(normalPath(file), createHash("sha256").update(bytes).digest("hex"));
+        // a link in gen/ to elsewhere is read from elsewhere, and judged there
+        if (!generated || !normalPath(realpathSync(file)).startsWith(normalPath(realpathSync(join(root, "gen"))) + "/")) readEntries.push(readEntry(root, file, bytes));
         const known = digests.get(normalPath(file));
         if (known !== undefined && createHash("sha256").update(bytes).digest("hex") !== known) throw changedError(root, [file]);
       }});
