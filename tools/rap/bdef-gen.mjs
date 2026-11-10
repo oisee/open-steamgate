@@ -6,6 +6,7 @@ import {existsSync, readFileSync, readdirSync, mkdirSync, writeFileSync, rmSync}
 import {parseBdef} from "./bdef-parse.mjs";
 import {parseDDLS} from "../cds2ddic.mjs";
 import {contentFoldersOf, winningByLayer} from "../osd-packs.mjs";
+import {nameOf} from "../osd-store-types.mjs";
 import {libraryPath} from "../osd-lib-path.mjs";
 import {runsAs} from "../osd-main.mjs";
 import {fieldControl, runtimeOutputs} from "./rap-runtime-gen.mjs";
@@ -195,7 +196,9 @@ export function generate(files, dependencies = []) {
   for (const file of srvds) {
     const srvd = parseSrvd(file.contents, file.filename);
     const stem = basename(file.filename).replace(/\.srvd\.srvdsrv$/, "");
-    if (upper(stem) !== srvd.name) throw new Error(`${file.filename}: defines ${srvd.name}`);
+    // abapGit writes the namespace of /DMO/FLIGHT_LEGACY as `#`: the file is
+    // #dmo#flight_legacy (nameOf decodes, osd-store-types.mjs)
+    if (nameOf(stem) !== srvd.name) throw new Error(`${file.filename}: defines ${srvd.name}`);
     outputs[`${stem.toLowerCase()}.stg.yaml`] = serviceYaml(srvd, entityOf, file.filename);
   }
   return {outputs, bindings, plans};

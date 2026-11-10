@@ -133,6 +133,12 @@ export function readinessAnswer(mode, store) {
   return {status: ready ? 200 : 503, body: {ready}};
 }
 
+/** the front's keep-alive, the serving child's (tools/osd-serve.mjs) */
+function keepIdleSockets(server) {
+  server.keepAliveTimeout = 65_000;
+  server.headersTimeout = 66_000;
+}
+
 export function startServer(quiet) {
   const PORT = Number(process.env.STG_PORT ?? 3030);
 
@@ -595,6 +601,12 @@ export function startServer(quiet) {
   // the ADT facade takes any credentials, which is only fine while nothing
   // but this machine reaches it. A container sets OSD_BIND=0.0.0.0.
   const server = listenBound(createHttpServer(app), PORT);
+  // Clients pool keep-alive sockets (fetch does). Node closes an idle one
+  // after 5 s, and a client that blocked longer than that between two
+  // requests (a spawnSync) sends the second into the closed socket: "fetch
+  // failed", other side closed. The serving child waits 65 s for the same
+  // reason (tools/osd-serve.mjs); the front a client talks to waits as long.
+  keepIdleSockets(server);
   server.on("error", (error) => {
     if (error?.code !== "EADDRINUSE" || closing === undefined) throw error;
     void closing.then(() => relisten(server, PORT));
@@ -640,6 +652,7 @@ export function startServer(quiet) {
   let secure;
   if (tls !== undefined) {
     secure = listenBound(createHttpsServer(tls, app), TLS_PORT);
+    keepIdleSockets(secure);
   }
 
   // Open the sockets first. Discovery waits for this same warm-up on both

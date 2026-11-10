@@ -62,6 +62,15 @@ export function markerOf(packDir) {
   }
 }
 
+// A data folder the BUILD writes carries this file (tools/rap-flight/
+// seed-capture.mjs, called by tools/osd-build.mjs after a generation is in
+// place): its rows are made by running that generation, so they are an
+// output of the inputs the generation is named by, like gen/, and never an
+// input to that name -- hashOf leaves such a folder out (inputsOf).
+export const SEEDS_MARKER = ".osd-seed.json";
+
+export const seedsBuilt = (dataDir) => dataDir !== undefined && existsSync(join(dataDir, SEEDS_MARKER));
+
 export function sourceMatches(source, entry) {
   if (!entry || entry.path !== source.path
       || JSON.stringify(entry.exclude) !== JSON.stringify(source.exclude)) return false;

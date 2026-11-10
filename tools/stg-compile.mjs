@@ -844,7 +844,7 @@ const objectFile = (name, ext) => name.toLowerCase().replaceAll("/", "#") + ext;
 const versionedFile = (name, ext) => {
   const width = KEY_WIDTH[ext];
   if (width === undefined) throw new Error(`no key width known for ${ext}`);
-  return name.toLowerCase().padEnd(width, " ") + "0001" + ext;
+  return name.toLowerCase().replaceAll("/", "#").padEnd(width, " ") + "0001" + ext; // namespace -> `#`, as above
 };
 
 // everything the folder gets: the tree, the registration objects, the

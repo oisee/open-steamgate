@@ -166,6 +166,12 @@ const GENERATORS = {
   // not a generator: osabap, for `osd run`; a checkout's tool, so imported
   // by a computed URL the bundler leaves alone rather than carried in it
   "osabap.mjs": () => import(new URL("../tools/gogen/osabap.mjs", import.meta.url).href),
+  // not a generator: a pack's seed capture, started by the build as a child
+  // (tools/osd-build.mjs makePackSeeds). A checkout's tool like osabap, and
+  // doubly so: it hashes its own bytes into the seed digest, so it must be
+  // the tree's copy even inside a binary
+  "seed-capture.mjs": () => import(pathToFileURL(resolve(process.env.OSD_ROOT ?? process.cwd(),
+    "tools", "rap-flight", "seed-capture.mjs")).href),
 };
 
 switch (mode) {

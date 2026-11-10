@@ -254,7 +254,13 @@ An exposed entity without a behavior is a read-only set. Every property is
 labelled (the CDS label, else its name), the title a Fiori client shows.
 The classes are `ZCL_<service>_MPC/_DPC(_EXT)` for a name of up to 18
 characters; a longer one (at most 26) keeps 12 and adds 6 hex characters of
-its hash, so two services sharing a prefix get classes of their own.
+its hash, so two services sharing a prefix get classes of their own. A
+namespaced service keeps its namespace in front of the classes
+(`/DMO/CL_<name>_MPC`, the shape stg-compile's own `cls` gives a project
+that names no classes): the namespace and `CL_` cost 8 of the 30
+characters instead of `ZCL_`'s 4, so 14 of the name, or 8 plus the hash.
+The file the generator reads is abapGit's `#ns#name.srvd.srvdsrv`; the
+stem is decoded before it is compared with the service the text defines.
 
 segw-gen (and its ABAP twin `ZCL_STG_SEGW_GEN`) declared the text element
 container `GC_INCL_NAME` only when a property had a label, while a function

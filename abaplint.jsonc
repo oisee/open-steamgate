@@ -18,6 +18,24 @@
       "files": "/**/*.*"
     },
     {
+      // the fetched RAP flight pack (packs/rap-flight/osd-pack.json): its
+      // DDIC resolves what the views generated out of the pack read
+      // (gen/cds, check_ddic). A dependency, not source: the pack's own
+      // lint verdict is the classify script's measurement
+      // (docs/rap-flight-pack.md), and a checkout that has not fetched the
+      // pack has nothing here (abaplint skips the folder, the build says
+      // UNFETCHED). The overlay's copies of the two data generators are
+      // left to the entry below, which wins them the way the build layers
+      "folder": "/packs/rap-flight/upstream",
+      "files": "/**/!(#dmo#cl_data_generator_managed.clas.*|#dmo#cl_flight_data_generator.clas.*)"
+    },
+    {
+      // the pack's overlay: its DDIC stand-ins resolve what upstream only
+      // names, and its copies of the two data generators win their objects
+      "folder": "/packs/rap-flight/src",
+      "files": "/**/*.{abap,xml}"
+    },
+    {
       // everything but src/tcp: open-abap-apc carries the APC family, with
       // the five methods and the alias chain a real handler needs, and core
       // still has the two-method version. Two of the same file is an error,

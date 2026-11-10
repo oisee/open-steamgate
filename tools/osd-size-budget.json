@@ -367,8 +367,8 @@
    "reason": "2026-10-02, this PR +18 net (+41/-23 against its merge base; the rest of the step from 3102 was already on main): the ABAP sessions adapter awaits Node route calls, handles async failures, and deletes objects with lock release in one dialog step; these routes move to ABAP in later slices"
   },
   "tools/cds2ddic.mjs": {
-   "lines": 1100,
-   "reason": "re-taken after #419 (pins): +3 lines routing library paths through tools/osd-lib-path.mjs"
+   "lines": 1123,
+   "reason": "re-taken after #419 (pins): +3 lines routing library paths through tools/osd-lib-path.mjs; 2026-11-08 +2, the import of tools/cds-names.mjs (namespaced CDS names, packs/rap-flight) and the refusal of a view none of whose fields resolved; 2026-11-08 +21 more, the same pack's tables whose components an append structure names /dmo/... or a draft include names %... update FROM TABLE @lt_rows instead of FROM wa: the transpiler's per-component JS for FROM wa does not parse for such a name, which a green build did not say (six generated modules, test/output-parses.mjs)"
   },
   "tools/dsl-l2-eval.mjs": {
    "lines": 1107,
@@ -695,8 +695,8 @@
    "reason": "baseline 2026-10-01"
   },
   "tools/osd-build.mjs": {
-   "lines": 1006,
-   "reason": "#641 zip layers: user source layers (zip cache + overlay) enter the build inputs and the generation hash"
+   "lines": 1056,
+   "reason": "#641 zip layers: user source layers (zip cache + overlay) enter the build inputs and the generation hash; 2026-11-09 +7, the build makes packs/rap-flight's seed rows after the transpile through tools/rap-flight/seed-capture.mjs (generator output, not tracked), the call itself three lines beside the comment that says why it is imported by URL; +3 more, the import guarded by the pack's presence so a root without it (a store, a served system) never reaches the import; round 2 +29, the call moved out of main() into build() itself so every path that ends in a generation (a first start, a store's activation) makes the rows, cache hits included -- gated on the pack being one of the build's selected inputs (not its directory) and started as a child through osd-host, which boots the generation the build just made rather than the live pointer and keeps a second runtime out of a process that is already serving one; round 3 +6, a comment bullet saying the capture child works on a database of its own (it clears the inherited STG_DB/STG_DB_PATH, so a build inside a process serving a persistent DuckDB file still captures); round 5 +2, inputsOf leaves a data folder the build captured (the seed marker) out of the generation hash, since rows made by running a generation are its output and hashing them renamed the tree right after every build; round 7 +3, the capture script falls back to this checkout's copy when the root is a sources-only scratch tree without tools/ (test/adt-xref-warm.mjs builds one, and the import of the root's copy failed in its before-all hook)"
   },
   "tools/osd-prove-inplace.mjs": {
    "lines": 1058,

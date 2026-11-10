@@ -38,11 +38,11 @@ import {execFileSync} from "node:child_process";
 import {run} from "./osd-build-command.mjs";
 import {existsSync, lstatSync, mkdirSync, openSync, closeSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync} from "node:fs";
 import {basename, dirname, join, relative, resolve, resolve as resolvePath, sep} from "node:path";
-import {fileURLToPath} from "node:url";
+import {fileURLToPath, pathToFileURL} from "node:url";
 import {buildIdentity, assertToolchain, describeBuild} from "./osd-transpiler.mjs";
 import {describeDuplicates, excludePatterns, layers} from "./osd-inputs.mjs";
 import {transpile, selectedModules} from "./osd-transpile.mjs";
-import {inputFoldersOf, packsOf, userFoldersOf, webappsOf} from "./osd-packs.mjs";
+import {inputFoldersOf, packsOf, seedsBuilt, userFoldersOf, webappsOf} from "./osd-packs.mjs";
 import {describeUnfetched, unfetched} from "./osd-fetch.mjs";
 import {toolCommand, hosted} from "./osd-host.mjs";
 import {runsAs} from "./osd-main.mjs";
@@ -175,11 +175,13 @@ export function inputsOf(root, config = loadConfig(root)) {
   // nothing, so it names nothing; the moment it holds an input file (the same
   // rule hashOf applies to a folder: NOT_AN_INPUT files do not count) it is
   // an input. A data, ddic or webapp folder, or a tile, keeps it one anyway.
-  const packs = packsOf(root).filter((pack) => pack.data !== undefined || pack.ddic !== undefined ||
+  // Rows the build captured (seedsBuilt, makePackSeeds) are output, not input.
+  const data = (pack) => seedsBuilt(pack.data) ? undefined : pack.data;
+  const packs = packsOf(root).filter((pack) => data(pack) !== undefined || pack.ddic !== undefined ||
     pack.webapp !== undefined || pack.tiles.length > 0 ||
     pack.abap.some((dir) => existsSync(dir) && walk(dir).some((f) => !NOT_AN_INPUT.test(f))));
   const packFiles = packs.map((pack) => join(pack.dir, "osd-pack.json"));
-  const packFolders = packs.flatMap((pack) => [pack.data, pack.ddic].filter(Boolean));
+  const packFolders = packs.flatMap((pack) => [data(pack), pack.ddic].filter(Boolean));
   const sourceLayers = userLayersOf(root);
   return {folders, libs, bspFolders, packFiles, packFolders, sourceLayers, config: layout(root).config};
 }
@@ -786,12 +788,14 @@ export async function build(options = {}) {
     if (options.switch !== false && liveHash(root) !== hash) {
       switchTo(root, hash, log);
     }
+    await makePackSeeds(root, inputs, hash, log);
     return {ok: true, hash, cached: true, live: liveHash(root) === hash, ms: Date.now() - started, objects: manifest.objects, digests};
   }
 
   const unlock = lock(paths);
   const tmp = join(paths.tmp, `${hash}.${process.pid}`);
   let output = "";
+  let built;
   try {
     rmSync(tmp, {recursive: true, force: true});
     mkdirSync(join(tmp, "output"), {recursive: true});
@@ -944,13 +948,59 @@ export async function build(options = {}) {
     if (options.switch !== false) {
       switchTo(root, hash, log);
     }
-    return {ok: true, hash, cached: false, live: liveHash(root) === hash, ms: manifest.ms, objects, output: options.verbose ? output : undefined, digests};
+    built = {ok: true, hash, cached: false, live: liveHash(root) === hash, ms: manifest.ms, objects, output: options.verbose ? output : undefined, digests};
   } catch (error) {
     rmSync(tmp, {recursive: true, force: true});
     error.output = (error.output ?? "") || output;
     throw error;
   } finally {
     unlock();
+  }
+  // the pack's seed rows are made with the lock given back: the generation
+  // is in place, and the capture is a child process
+  await makePackSeeds(root, inputs, hash, log);
+  return built;
+}
+
+// Packs whose seed rows are generator output make them here, as part of the
+// build itself rather than of one caller of it: the command line is only one
+// of the paths that end in a generation (a first start's ensureSourceBuild
+// and a store's activation build are two more), and every one of them hands
+// the runtime a pack whose rows the start then reads from data/ -- so the
+// build makes them, a cache hit included (the rows are not tracked, and a
+// reused generation is not a seeded one). Not tracked; the licence decision
+// of 2026-11-09.
+//
+// Two things the call site owes the capture:
+//   - the pack has to be one of THIS build's inputs, not a directory that
+//     happens to sit beside them. OSD_WEB_PACKS builds a smaller system on
+//     purpose (the VS Code web build's core+zork), and a pack the selection
+//     left out has no generator in the output: it neither needs nor could
+//     make its rows.
+//   - the capture runs as a child, through osd-host the way every tool a
+//     tool starts does. It boots the runtime of the generation it is handed
+//     (--output, the one this build just made, so a --no-switch build and a
+//     store's non-live one capture their own bytes and not the live
+//     pointer's), and no process that is already serving or fronting a
+//     system has a second runtime installed over it
+//     (tools/adt-abap-kernel.mjs). Synchronous, as the generators above are.
+//   - the child works on a database of its own. The environment it inherits
+//     is the caller's, and the caller may be serving a persistent DuckDB
+//     file that a second process cannot open at all -- seed-capture.mjs
+//     clears STG_DB/STG_DB_PATH before it boots, so a capture is always the
+//     runtime's throwaway in-memory SQLite and never the host's database,
+//     whichever of the three roads started it.
+async function makePackSeeds(root, inputs, hash, log) {
+  if (inputs.packFiles.includes(join(root, "packs", "rap-flight", "osd-pack.json")) === false) return;
+  // the tree's copy (its bytes are in the seed digest); a root that is only
+  // sources (a test's scratch tree) has none, and then this checkout's is it
+  const own = join(root, "tools", "rap-flight", "seed-capture.mjs");
+  const script = existsSync(own) ? own : join(TOOLS, "rap-flight", "seed-capture.mjs");
+  const {seedsDue} = await import(pathToFileURL(script).href);
+  if (seedsDue(root) === false) return;
+  const [cmd, ...argv] = toolCommand(script, ["--ensure", "--output", join(layout(root).byInput, hash, "output")]);
+  for (const line of run(cmd, argv, root, {...process.env, OSD_ROOT: root}).split("\n")) {
+    if (line.trim() !== "") log(line);
   }
 }
 
