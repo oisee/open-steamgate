@@ -62,6 +62,24 @@ INTERFACE zif_stg_sadl_behavior PUBLIC.
       /iwbep/cx_mgw_busi_exception
       /iwbep/cx_mgw_tech_exception.
 
+* R5: create one instance below its parent (POST Parent(...)/to_Child, a
+* create by association, docs/rap-runtime.md). IV_ENTITY the parent's CDS
+* entity, IV_ASSOC its association (the CDS alias, _Items), IS_PARENT a row
+* of the parent's view with the keys filled, IV_TARGET the child's CDS
+* entity; CS_ROW the child's payload in, its keys filled in on the way out
+  METHODS create_by
+    IMPORTING
+      iv_entity TYPE csequence
+      iv_assoc  TYPE csequence
+      is_parent TYPE any
+      iv_target TYPE csequence
+      it_fields TYPE string_table
+    CHANGING
+      cs_row    TYPE any
+    RAISING
+      /iwbep/cx_mgw_busi_exception
+      /iwbep/cx_mgw_tech_exception.
+
 * the instance actions of IV_ENTITY, upper case
   METHODS actions
     IMPORTING

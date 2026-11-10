@@ -22,6 +22,8 @@ import {readFileSync, readdirSync, writeFileSync, mkdirSync, existsSync, rmSync,
 import {createHash} from "node:crypto";
 import {basename, join} from "node:path";
 import {libraryPath} from "./osd-lib-path.mjs";
+import {compositionsOf, namespaced, projectedAssociations, projectionBase, redirectOf, resolveTree} from "./cds-tree.mjs";
+import {castType, edmOf} from "./cds-types.mjs";
 
 const OUT = "gen/cds";
 // **The libraries this generator resolves types against, and they have to be
@@ -57,54 +59,21 @@ function find(node, name) { const out = []; const rec = (n) => { if (nodeName(n)
 function firstDirect(node, name) { return children(node).find((c) => nodeName(c) === name); }
 function normAnno(text) { return text.replace(/\s*\.\s*/g, ".").replace(/\s*:\s*/g, ": ").replace(/@\s+/g, "@").trim(); }
 
-// cast( '' as abap.char( 20 ) ) -> the ABAP type of the virtual element and
-// what it is in OData; the handful of types a calculated element uses
-function castType(text) {
-  const m = /as\s+abap\s*\.\s*(\w+)\s*(?:\(\s*(\d+)\s*(?:,\s*(\d+)\s*)?\))?/i.exec(String(text));
-  if (!m) return undefined;
-  const kind = m[1].toLowerCase();
-  const a = Number(m[2] ?? 0);
-  const b = Number(m[3] ?? 0);
-  switch (kind) {
-    case "char": return {abap: `c LENGTH ${a || 1}`, edm: {edm: "Edm.String", maxlength: a || 1}};
-    case "numc": return {abap: `n LENGTH ${a || 1}`, edm: {edm: "Edm.String", maxlength: a || 1}};
-    case "sstring": case "string": return {abap: "string", edm: {edm: "Edm.String", maxlength: a || 0}};
-    case "int1": case "int2": case "int4": return {abap: "i", edm: {edm: "Edm.Int32"}};
-    case "int8": return {abap: "int8", edm: {edm: "Edm.Int64"}};
-    case "dats": return {abap: "d", edm: {edm: "Edm.DateTime", precision: 0}};
-    case "tims": return {abap: "t", edm: {edm: "Edm.Time"}};
-    case "dec": case "curr": case "quan":
-      return {abap: `p LENGTH ${Math.floor((a || 15) / 2) + 1} DECIMALS ${b}`, edm: {edm: "Edm.Decimal", precision: a || 15, scale: b}};
-    default: return undefined;
-  }
-}
-
-function edmOf(type) {
-  const n = type?.constructor?.name ?? "VoidType";
-  const len = type?.getLength?.() ?? 0;
-  switch (n) {
-    case "CharacterType": return {edm: "Edm.String", maxlength: len};
-    case "NumericType": return {edm: "Edm.String", maxlength: len};
-    case "StringType": return {edm: "Edm.String", maxlength: 0};
-    case "IntegerType": case "Integer8Type": return {edm: "Edm.Int32", maxlength: 0};
-    case "PackedType": return {edm: "Edm.Decimal", precision: len * 2 - 1, scale: type.getDecimals?.() ?? 0};
-    case "FloatType": case "DecFloat16Type": case "DecFloat34Type": return {edm: "Edm.Decimal", precision: 34, scale: 0};
-    case "DateType": return {edm: "Edm.DateTime", precision: 0};
-    case "TimeType": return {edm: "Edm.Time", precision: 0};
-    default: return {edm: "Edm.String", maxlength: len};
-  }
-}
-
-export function parseDDLS(obj, reg) {
+export function parseDDLS(obj, reg, depth = 0) {
   const p = obj.getParsedData();
   const tree = p?.tree;
   if (!tree) return undefined;
   const name = obj.getName();
   const sqlView = (p.sqlViewName ?? name).toUpperCase();
   const viewAnnotations = children(tree).filter((c) => nodeName(c) === "CDSAnnotation").map((c) => normAnno(tokensOf(c)));
-  const select = firstDirect(tree, "CDSSelect");
+  // R5: `as projection on` reads the base view's table (tools/cds-tree.mjs)
+  const isProjection = nodeName(tree) === "CDSDefineProjection";
+  const projected = isProjection ? projectionBase(tree, reg, name, depth, parseDDLS) : undefined;
+  if (projected?.skip) return projected;
+  const select = isProjection ? tree : firstDirect(tree, "CDSSelect");
   if (!select) return {name, skip: "no select"};
-  const sources = find(select, "CDSSource").map((s) => tokensOf(s).replace(/\s+as\s+\w+$/i, "").trim().toUpperCase());
+  const sources = isProjection ? [projected.source]
+    : find(select, "CDSSource").map((s) => tokensOf(s).replace(/\s+as\s+\w+$/i, "").trim().toUpperCase());
   if (find(select, "CDSJoin").length > 0 || sources.length !== 1) return {name, skip: "joins are not supported yet"};
   // **A WHERE was read and thrown away, and that was wrong in both
   // directions.** The generated DDIC view carries `DD26V` (the table) and
@@ -129,6 +98,7 @@ export function parseDDLS(obj, reg) {
   const fields = [];
   const exposedAssociations = [];
   const associationAnnotations = new Map();
+  const redirects = new Map();
   for (const el of find(select, "CDSElement")) {
     const annos = children(el).filter((c) => nodeName(c) === "CDSAnnotation").map((c) => normAnno(tokensOf(c)));
     const isKey = children(el).some((c) => nodeName(c) === "Identifier" && tokensOf(c).toLowerCase() === "key");
@@ -191,21 +161,31 @@ export function parseDDLS(obj, reg) {
       continue;
     }
     if (!srcName) continue;
-    if (srcName.startsWith("_")) { exposedAssociations.push(srcName); associationAnnotations.set(srcName, annos); continue; }
+    if (srcName.startsWith("_")) {
+      exposedAssociations.push(srcName); associationAnnotations.set(srcName, annos);
+      if (redirectOf(tokensOf(el))) redirects.set(srcName, redirectOf(tokensOf(el)));
+      continue;
+    }
     if (/[()+\-*\/]/.test(srcName) || /^'/.test(srcName)) continue; // expressions: not yet
     const fieldName = (alias ?? srcName.split(".").pop()).toUpperCase();
-    const baseField = srcName.split(".").pop().toUpperCase();
+    let baseField = srcName.split(".").pop().toUpperCase();
+    const below = isProjection ? projected.fields.find((f) => f.name === baseField && !f.virtual && f.base) : undefined;
+    if (isProjection && below === undefined) return {name, skip: `${fieldName}: ${baseField} is no column element of ${projected.name}`};
+    if (below) baseField = below.base;
     const t = edmOf(comps.get(baseField));
-    const label = annos.map((a) => /@EndUserText\.label:\s*'([^']*)'/.exec(a)?.[1]).find(Boolean);
-    fields.push({name: fieldName, element: alias ?? srcName.split(".").pop(), base: baseField, key: isKey, ...t, label: label ?? fieldName, annotations: annos});
+    const label = annos.map((a) => /@EndUserText\.label:\s*'([^']*)'/.exec(a)?.[1]).find(Boolean) ?? (below && below.label !== below.name ? below.label : undefined);
+    fields.push({name: fieldName, element: alias ?? srcName.split(".").pop(), base: baseField, key: isKey, ...t, label: label ?? fieldName,
+      annotations: below ? [...annos, ...(below.annotations ?? [])] : annos, ...(below ? {fromElement: below.name} : {})});
   }
 
   const associations = [];
+  associations.push(...compositionsOf(find(select, "CDSComposition").map(tokensOf), exposedAssociations));
   for (const a of find(select, "CDSAssociation")) {
     const card = tokensOf(firstDirect(a, "CDSCardinality")).replace(/\s+/g, "");
     const m = /\[(\d+)\.\.(\d+|\*)\]/.exec(card);
-    const toks = tokensOf(a);
-    const target = /\bto\s+(\S+)/i.exec(toks)?.[1]?.toUpperCase();
+    const toks = namespaced(tokensOf(a));
+    const toParent = /\bto\s+parent\s+/i.test(toks); // R5: `parent` is not the target
+    const target = /\bto\s+(?:parent\s+)?(\S+)/i.exec(toks)?.[1]?.toUpperCase();
     const alias = /\bas\s+(\S+)\s+on\b/i.exec(toks)?.[1] ?? target;
     const cond = tokensOf(firstDirect(a, "CDSCondition")) ?? "";
     const pairs = [];
@@ -218,10 +198,11 @@ export function parseDDLS(obj, reg) {
     // target a part of this entity rather than a thing it points at, which
     // is what lets a delete take the children with it.
     const assocAnnos = associationAnnotations.get(alias) ?? [];
-    const kind = assocAnnos.map((a) => /@ObjectModel\.association\.type:\s*\[?\s*#TO_COMPOSITION_(CHILD|PARENT|ROOT)/i.exec(a)?.[1]).find(Boolean);
-    associations.push({alias, target, min: m?.[1] ?? "0", max: m?.[2] ?? "*", pairs, exposed: exposedAssociations.includes(alias),
+    const kind = toParent ? "PARENT" : assocAnnos.map((a) => /@ObjectModel\.association\.type:\s*\[?\s*#TO_COMPOSITION_(CHILD|PARENT|ROOT)/i.exec(a)?.[1]).find(Boolean);
+    associations.push({alias, target, min: toParent ? "1" : m?.[1] ?? "0", max: toParent ? "1" : m?.[2] ?? "*", pairs, exposed: exposedAssociations.includes(alias),
       composition: kind === undefined ? undefined : kind.toUpperCase()});
   }
+  if (isProjection) associations.push(...projectedAssociations(projected, exposedAssociations, redirects, associations));
   const label = viewAnnotations.map((a) => /@EndUserText\.label:\s*'([^']*)'/.exec(a)?.[1]).find(Boolean) ?? name;
 
   // a writable projection: the view says so (@ObjectModel.writeEnabled, or
@@ -254,7 +235,7 @@ export function parseDDLS(obj, reg) {
   };
   if (fields.length === 0) return {name, skip: `no field of ${source} could be resolved (is the source a view or table of this tree?)`};
   return {name, sqlView, source, fields, associations, exposedAssociations,
-    viewAnnotations, label, write};
+    viewAnnotations, label, write, ...(isProjection ? {projectionOf: projected.name} : {})};
 }
 
 /** The fields of the generated SQL view, in order. A CDS SQL view over a
@@ -1049,6 +1030,7 @@ export function main() {
     views.push(e);
   }
   const byName = new Map(views.map((v) => [v.name.toUpperCase(), v]));
+  resolveTree(views, byName);
   inheritAssociations(views, byName);
   resolveWriteChain(views, byName);
   // A view that still reads another CDS view (not composed down to a table

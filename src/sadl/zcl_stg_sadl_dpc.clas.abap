@@ -33,6 +33,15 @@ CLASS zcl_stg_sadl_dpc DEFINITION PUBLIC INHERITING FROM /iwbep/cl_mgw_push_abs_
       RETURNING
         VALUE(rv_where) TYPE string.
 
+* R5: Set(key)/nav of a write: the source's CDS entity, the association
+* (the CDS alias, upper case) and the source's keys
+    METHODS navigation_of
+      IMPORTING
+        io_context TYPE REF TO zcl_stg_request_context
+      EXPORTING
+        ev_source  TYPE string
+        ev_assoc   TYPE string
+        et_keys    TYPE /iwbep/t_mgw_name_value_pair.
     METHODS key_where
       IMPORTING
         it_key_tab      TYPE /iwbep/t_mgw_name_value_pair
@@ -263,6 +272,37 @@ CLASS zcl_stg_sadl_dpc IMPLEMENTATION.
         ENDIF.
       ENDLOOP.
     ENDLOOP.
+  ENDMETHOD.
+
+  METHOD navigation_of.
+    DATA ls_path   TYPE /iwbep/s_mgw_navigation_path.
+    DATA ls_source TYPE zcl_stg_sadl_def=>ty_structure.
+    DATA ls_assoc  TYPE zcl_stg_sadl_def=>ty_association.
+
+    CLEAR: ev_source, ev_assoc, et_keys.
+    READ TABLE io_context->mt_navigation_path INTO ls_path INDEX 1.
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+    ls_source = mo_def->structure_by_set( io_context->mv_source_entity_set ).
+    IF ls_source-name IS INITIAL.
+      RETURN.
+    ENDIF.
+    READ TABLE ls_source-associations INTO ls_assoc WITH KEY name = ls_path-nav_prop.
+    IF sy-subrc = 0.
+      ev_assoc = to_upper( ls_assoc-binding ).
+    ELSE.
+* the published convention: to_Items is the navigation of the alias _Items
+      ev_assoc = to_upper( ls_path-nav_prop ).
+      IF ev_assoc CP 'TO_*'.
+        ev_assoc = |_{ ev_assoc+3 }|.
+      ELSE.
+        CLEAR ev_assoc.
+        RETURN.
+      ENDIF.
+    ENDIF.
+    ev_source = to_upper( mo_def->binding_of( ls_source-data_source ) ).
+    et_keys = ls_path-key_tab.
   ENDMETHOD.
 
   METHOD orderby_of.
@@ -591,8 +631,18 @@ CLASS zcl_stg_sadl_dpc IMPLEMENTATION.
     DATA lr_line   TYPE REF TO data.
     DATA lv_subrc  TYPE sy-subrc.
     DATA li_behavior TYPE REF TO zif_stg_sadl_behavior.
+    DATA lv_source   TYPE string.
+    DATA lv_assoc    TYPE string.
+    DATA lt_parent_keys TYPE /iwbep/t_mgw_name_value_pair.
+    DATA ls_parent_key  TYPE /iwbep/s_mgw_name_value_pair.
+    DATA ls_parent   TYPE zcl_stg_cds_registry=>ty_entity.
+    DATA lr_parent   TYPE REF TO data.
+    DATA lv_component TYPE string.
+    DATA lo_context  TYPE REF TO zcl_stg_request_context.
     FIELD-SYMBOLS <ls_row>   TYPE any.
     FIELD-SYMBOLS <lv_mandt> TYPE any.
+    FIELD-SYMBOLS <ls_parent> TYPE any.
+    FIELD-SYMBOLS <lv_parent_value> TYPE any.
 
     ls_entity = entity_of( io_tech_request_context->get_entity_set_name( ) ).
     lo_source = source_of( ls_entity ).
@@ -605,6 +655,41 @@ CLASS zcl_stg_sadl_dpc IMPLEMENTATION.
     ENDIF.
 * an entity with a behavior is created by it, keys and all
     li_behavior = behavior_of( ls_entity ).
+* R5: POST Parent(...)/to_Child is a create by association of the parent
+    TRY.
+        lo_context ?= io_tech_request_context.
+      CATCH cx_sy_move_cast_error.
+        CLEAR lo_context.
+    ENDTRY.
+    IF li_behavior IS BOUND AND lo_context IS BOUND AND lo_context->mt_navigation_path IS NOT INITIAL.
+      navigation_of( EXPORTING io_context = lo_context
+                     IMPORTING ev_source  = lv_source
+                               ev_assoc   = lv_assoc
+                               et_keys    = lt_parent_keys ).
+      IF lv_source IS NOT INITIAL AND lv_assoc IS NOT INITIAL.
+        ls_parent = entity_of( lo_context->mv_source_entity_set ).
+        lr_parent = source_of( ls_parent )->create_line( ).
+        ASSIGN lr_parent->* TO <ls_parent>.
+        LOOP AT lt_parent_keys INTO ls_parent_key.
+          lv_component = to_upper( ls_parent_key-name ).
+          ASSIGN COMPONENT lv_component OF STRUCTURE <ls_parent> TO <lv_parent_value>.
+          IF sy-subrc = 0.
+            <lv_parent_value> = ls_parent_key-value.
+          ENDIF.
+        ENDLOOP.
+        li_behavior->create_by( EXPORTING iv_entity = lv_source
+                                          iv_assoc  = lv_assoc
+                                          is_parent = <ls_parent>
+                                          iv_target = ls_entity-name
+                                          it_fields = payload_fields( io_data_provider = io_data_provider
+                                                                      is_entity        = ls_entity )
+                                CHANGING  cs_row    = <ls_row> ).
+        read_row( EXPORTING is_entity = ls_entity
+                  CHANGING  cs_row    = <ls_row> ).
+        es_data = <ls_row>.
+        RETURN.
+      ENDIF.
+    ENDIF.
     IF li_behavior IS BOUND.
       li_behavior->create( EXPORTING iv_entity = ls_entity-name
                                      it_fields = payload_fields( io_data_provider = io_data_provider

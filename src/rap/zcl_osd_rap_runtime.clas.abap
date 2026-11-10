@@ -28,6 +28,11 @@ CLASS zcl_osd_rap_runtime DEFINITION PUBLIC CREATE PRIVATE.
 *                   save, nothing is written and the LUW is rolled back
 *   save            the persistent table written through the BDEF mapping,
 *                   then COMMIT WORK and cleanup
+*   tree (R5)       create and read by association; a delete takes the
+*                   composition children; an update, delete, action or
+*                   create by association locks the root instance (lock
+*                   master / dependent) and a child write stamps the
+*                   root's total change fields
 *
 * The rows of the buffer are the BDEF's derived READ RESULT rows, held as
 * data references and addressed by component name; the delta (create,
@@ -108,6 +113,37 @@ CLASS zcl_osd_rap_runtime DEFINITION PUBLIC CREATE PRIVATE.
       RAISING
         zcx_osd_rap.
 
+* R5: create instances of the target of a composition IV_ASSOC of IV_ENTITY
+* (create by association). IT_ROWS is a TABLE FOR CREATE entity\_assoc: the
+* parent by its key or %cid_ref, the new instances in %target
+    METHODS create_by
+      IMPORTING
+        iv_entity   TYPE csequence
+        iv_assoc    TYPE csequence
+        it_rows     TYPE STANDARD TABLE
+      CHANGING
+        cs_mapped   TYPE any
+        cs_failed   TYPE any
+        cs_reported TYPE any
+      RAISING
+        zcx_osd_rap.
+
+* R5: read by association: for each instance IT_KEYS names (a TABLE FOR
+* READ IMPORT entity\_assoc), the instances the association reaches, into
+* CT_RESULT (TABLE FOR READ RESULT entity\_assoc), and source and target
+* keys into CT_LINK (TABLE FOR READ LINK entity\_assoc)
+    METHODS read_by
+      IMPORTING
+        iv_entity TYPE csequence
+        iv_assoc  TYPE csequence
+        it_keys   TYPE ANY TABLE
+      CHANGING
+        ct_result TYPE STANDARD TABLE
+        ct_link   TYPE STANDARD TABLE
+        cs_failed TYPE any
+      RAISING
+        zcx_osd_rap.
+
 * the save sequence. EV_SAVED is false when finalize or check_before_save
 * failed: then nothing is written, the LUW is rolled back and the buffer is
 * kept, so the caller can correct it or ROLLBACK. IV_END_LUW false: the
@@ -182,6 +218,10 @@ CLASS zcl_osd_rap_runtime DEFINITION PUBLIC CREATE PRIVATE.
 * the last time stamp given to an administrative field: a new one is always
 * later, also where the clock does not move between two writes
     CLASS-DATA gv_stamp TYPE timestampl.
+* R5: the roots this transaction holds the lock of (BDEF|root|key), and
+* the lock arguments (their SHA-256), released when the transaction ends
+    DATA mt_locked TYPE string_table.
+    DATA mt_lockhash TYPE string_table.
 
     METHODS entity_of
       IMPORTING
@@ -351,11 +391,106 @@ CLASS zcl_osd_rap_runtime DEFINITION PUBLIC CREATE PRIVATE.
       IMPORTING
         is_entity TYPE zif_osd_rap_bo=>ty_entity
         iv_index  TYPE i
-        iv_create TYPE abap_bool.
+        iv_create TYPE abap_bool
+        iv_total  TYPE abap_bool DEFAULT abap_false.
+* R5: an association of an entity, by name
+    METHODS assoc_of
+      IMPORTING
+        is_entity       TYPE zif_osd_rap_bo=>ty_entity
+        iv_assoc        TYPE csequence
+      RETURNING
+        VALUE(rs_assoc) TYPE zif_osd_rap_bo=>ty_assoc
+      RAISING
+        zcx_osd_rap.
+* R5: the instances an association reaches from the instance IV_INDEX, from
+* the persistent table and the buffer (the buffer wins), in key order
+    METHODS targets
+      IMPORTING
+        is_entity       TYPE zif_osd_rap_bo=>ty_entity
+        is_assoc        TYPE zif_osd_rap_bo=>ty_assoc
+        iv_index        TYPE i
+      RETURNING
+        VALUE(rt_index) TYPE int4_table
+      RAISING
+        zcx_osd_rap.
+* R5: the parent instance of the instance IV_INDEX (0 when there is none)
+    METHODS parent_of
+      IMPORTING
+        is_entity TYPE zif_osd_rap_bo=>ty_entity
+        iv_index  TYPE i
+      EXPORTING
+        es_parent TYPE zif_osd_rap_bo=>ty_entity
+        ev_index  TYPE i
+      RAISING
+        zcx_osd_rap.
+* R5: the root instance of the instance IV_INDEX (0 when it is gone)
+    METHODS root_of
+      IMPORTING
+        is_entity TYPE zif_osd_rap_bo=>ty_entity
+        iv_index  TYPE i
+      EXPORTING
+        es_root   TYPE zif_osd_rap_bo=>ty_entity
+        ev_index  TYPE i
+      RAISING
+        zcx_osd_rap.
+* R5: lock master / dependent: the exclusive lock on the root instance,
+* once per transaction. False (and FAILED, cause locked) when another owner
+* holds it
+    METHODS lock
+      IMPORTING
+        is_entity   TYPE zif_osd_rap_bo=>ty_entity
+        iv_index    TYPE i
+        is_input    TYPE any
+      EXPORTING
+        ev_ok       TYPE abap_bool
+      CHANGING
+        cs_failed   TYPE any
+        cs_reported TYPE any
+      RAISING
+        zcx_osd_rap.
+* R5: release the root locks of the transaction (the framework's DEQUEUE
+* after the save or the rollback: a COMMIT WORK that queued no update
+* releases nothing, tools/osd-enq.mjs)
+    METHODS unlock.
+* R5: a change below the root stamps the root's total change fields
+    METHODS touch_root
+      IMPORTING
+        is_entity TYPE zif_osd_rap_bo=>ty_entity
+        iv_index  TYPE i
+      RAISING
+        zcx_osd_rap.
+* R5: delete an instance and its composition children, recursively
+    METHODS delete_tree
+      IMPORTING
+        is_entity TYPE zif_osd_rap_bo=>ty_entity
+        iv_index  TYPE i
+      RAISING
+        zcx_osd_rap.
+* R5: the key values of a row, for a message
+    METHODS key_text
+      IMPORTING
+        is_entity      TYPE zif_osd_rap_bo=>ty_entity
+        is_row         TYPE any
+      RETURNING
+        VALUE(rv_text) TYPE string.
+* R5: early numbering of a create by association, as NUMBER for a create
+    METHODS number_by
+      IMPORTING
+        is_entity   TYPE zif_osd_rap_bo=>ty_entity
+        is_assoc    TYPE zif_osd_rap_bo=>ty_assoc
+        ir_rows     TYPE REF TO data
+      CHANGING
+        cs_failed   TYPE any
+        cs_reported TYPE any
+      RAISING
+        zcx_osd_rap.
     METHODS create_one
       IMPORTING
         is_entity   TYPE zif_osd_rap_bo=>ty_entity
         is_input    TYPE any
+* R5: the fields the framework sets (the parent's key in a create by
+* association): copied whatever %control says, key or not
+        it_framework TYPE string_table OPTIONAL
       CHANGING
         cs_mapped   TYPE any
         cs_failed   TYPE any
@@ -876,6 +1011,12 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
       ELSEIF ls_field-key = abap_true OR control_on( is_row = is_input iv_field = ls_field-name ) = abap_true.
         ASSIGN COMPONENT ls_field-name OF STRUCTURE is_input TO <lv_from>.
         <lv_to> = <lv_from>.
+      ELSE.
+        READ TABLE it_framework TRANSPORTING NO FIELDS WITH KEY table_line = ls_field-name.
+        IF sy-subrc = 0.
+          ASSIGN COMPONENT ls_field-name OF STRUCTURE is_input TO <lv_from>.
+          <lv_to> = <lv_from>.
+        ENDIF.
       ENDIF.
     ENDLOOP.
 
@@ -914,13 +1055,15 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
       lv_index = lines( mt_inst ).
     ENDIF.
     LOOP AT is_entity-fields INTO ls_field.
-      IF control_on( is_row = is_input iv_field = ls_field-name ) = abap_true OR ls_field-numbering = abap_true.
+      READ TABLE it_framework TRANSPORTING NO FIELDS WITH KEY table_line = ls_field-name.
+      IF control_on( is_row = is_input iv_field = ls_field-name ) = abap_true OR ls_field-numbering = abap_true OR sy-subrc = 0.
         mark( iv_index = lv_index iv_field = ls_field-name ).
       ENDIF.
     ENDLOOP.
     stamp( is_entity = is_entity iv_index = lv_index iv_create = abap_true ).
     mi_luw->modify( iv_entity = is_entity-name iv_key = ls_inst-key
                     iv_operation = co_operation-create ir_row = lr_row ).
+    touch_root( is_entity = is_entity iv_index = lv_index ).
 
     ASSIGN COMPONENT is_entity-response OF STRUCTURE cs_mapped TO <lt_mapped>.
     IF sy-subrc = 0.
@@ -964,6 +1107,11 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
     IF lv_ok = abap_false.
       RETURN.
     ENDIF.
+    lock( EXPORTING is_entity = is_entity iv_index = lv_index is_input = is_input
+          IMPORTING ev_ok = lv_ok CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
+    IF lv_ok = abap_false.
+      RETURN.
+    ENDIF.
 
     READ TABLE mt_inst INDEX lv_index ASSIGNING <ls_inst>.
     ASSIGN <ls_inst>-row->* TO <ls_row>.
@@ -985,11 +1133,12 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
     stamp( is_entity = is_entity iv_index = lv_index iv_create = abap_false ).
     mi_luw->modify( iv_entity = is_entity-name iv_key = <ls_inst>-key
                     iv_operation = co_operation-update ir_row = <ls_inst>-row ).
+    touch_root( is_entity = is_entity iv_index = lv_index ).
   ENDMETHOD.
 
   METHOD delete_one.
     DATA lv_index TYPE i.
-    FIELD-SYMBOLS <ls_inst> TYPE ty_inst.
+    DATA lv_ok    TYPE abap_bool.
 
     lv_index = resolve( is_entity = is_entity is_input = is_input ).
     IF lv_index = 0.
@@ -1007,10 +1156,580 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
             CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
       RETURN.
     ENDIF.
+    lock( EXPORTING is_entity = is_entity iv_index = lv_index is_input = is_input
+          IMPORTING ev_ok = lv_ok CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
+    IF lv_ok = abap_false.
+      RETURN.
+    ENDIF.
+* the root's stamp moves while the parent chain is still there
+    touch_root( is_entity = is_entity iv_index = lv_index ).
+    delete_tree( is_entity = is_entity iv_index = lv_index ).
+  ENDMETHOD.
+
+  METHOD assoc_of.
+    DATA lv_name TYPE string.
+    lv_name = to_upper( iv_assoc ).
+    READ TABLE is_entity-assocs INTO rs_assoc WITH KEY name = lv_name.
+    IF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE zcx_osd_rap EXPORTING iv_reason = |{ is_entity-alias } has no association { iv_assoc }|.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD key_text.
+    DATA ls_field TYPE zif_osd_rap_bo=>ty_field.
+    LOOP AT is_entity-fields INTO ls_field WHERE key = abap_true.
+      IF rv_text IS INITIAL.
+        rv_text = text_of( is_row = is_row iv_component = ls_field-name ).
+      ELSE.
+        rv_text = rv_text && '/' && text_of( is_row = is_row iv_component = ls_field-name ).
+      ENDIF.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD targets.
+* the saved rows first, each into the buffer unless an instance with its key
+* is there already; then every buffered instance the pairs reach
+    TYPES:
+      BEGIN OF ty_found,
+        key   TYPE string,
+        index TYPE i,
+      END OF ty_found.
+    DATA ls_target TYPE zif_osd_rap_bo=>ty_entity.
+    DATA ls_pair   TYPE zif_osd_rap_bo=>ty_pair.
+    DATA ls_field  TYPE zif_osd_rap_bo=>ty_field.
+    DATA ls_inst   TYPE ty_inst.
+    DATA ls_src    TYPE ty_inst.
+    DATA li_source TYPE REF TO zif_stg_cds_source.
+    DATA lr_data   TYPE REF TO data.
+    DATA lr_row    TYPE REF TO data.
+    DATA lt_order  TYPE string_table.
+    DATA lv_where  TYPE string.
+    DATA lv_value  TYPE string.
+    DATA lv_key    TYPE string.
+    DATA lv_match  TYPE abap_bool.
+    DATA lv_tabix  TYPE i.
+    DATA ls_found  TYPE ty_found.
+    DATA lt_found  TYPE STANDARD TABLE OF ty_found WITH DEFAULT KEY.
+    FIELD-SYMBOLS <ls_src>  TYPE any.
+    FIELD-SYMBOLS <lt_data> TYPE STANDARD TABLE.
+    FIELD-SYMBOLS <ls_data> TYPE any.
+    FIELD-SYMBOLS <ls_row>  TYPE any.
+    FIELD-SYMBOLS <lv_from> TYPE any.
+    FIELD-SYMBOLS <lv_to>   TYPE any.
+
+    ls_target = entity_of( is_assoc-target ).
+    READ TABLE mt_inst INDEX iv_index INTO ls_src.
+    ASSIGN ls_src-row->* TO <ls_src>.
+
+    LOOP AT is_assoc-pairs INTO ls_pair.
+      READ TABLE ls_target-fields INTO ls_field WITH KEY name = ls_pair-target.
+      IF sy-subrc <> 0.
+        RAISE EXCEPTION TYPE zcx_osd_rap EXPORTING iv_reason = |{ ls_target-alias } has no field { ls_pair-target }|.
+      ENDIF.
+      lv_value = text_of( is_row = <ls_src> iv_component = ls_pair-source ).
+      REPLACE ALL OCCURRENCES OF `'` IN lv_value WITH `''`.
+      IF lv_where IS NOT INITIAL.
+        lv_where = lv_where && ` AND `.
+      ENDIF.
+      lv_where = lv_where && ls_field-column && ` = '` && lv_value && `'`.
+    ENDLOOP.
+* an instance created in this transaction has nothing saved below it
+    IF ls_src-created = abap_false.
+      li_source = source_of( ls_target ).
+      lr_data = li_source->read( iv_where = lv_where it_orderby = lt_order ).
+      ASSIGN lr_data->* TO <lt_data>.
+      LOOP AT <lt_data> ASSIGNING <ls_data>.
+        lr_row = new_row( ls_target ).
+        ASSIGN lr_row->* TO <ls_row>.
+        LOOP AT ls_target-fields INTO ls_field.
+          ASSIGN COMPONENT ls_field-column OF STRUCTURE <ls_data> TO <lv_from>.
+          CHECK sy-subrc = 0.
+          ASSIGN COMPONENT ls_field-name OF STRUCTURE <ls_row> TO <lv_to>.
+          CHECK sy-subrc = 0.
+          <lv_to> = <lv_from>.
+        ENDLOOP.
+        lv_key = key_of( is_entity = ls_target is_row = <ls_row> ).
+        IF index_of( iv_entity = ls_target-name iv_key = lv_key ) = 0.
+          CLEAR ls_inst.
+          ls_inst-entity = ls_target-name.
+          ls_inst-key    = lv_key.
+          ls_inst-row    = lr_row.
+          APPEND ls_inst TO mt_inst.
+        ENDIF.
+      ENDLOOP.
+    ENDIF.
+
+    LOOP AT mt_inst INTO ls_inst WHERE entity = ls_target-name.
+      lv_tabix = sy-tabix.
+      IF ls_inst-state = co_operation-delete.
+        CONTINUE.
+      ENDIF.
+      ASSIGN ls_inst-row->* TO <ls_row>.
+      lv_match = abap_true.
+      LOOP AT is_assoc-pairs INTO ls_pair.
+        IF text_of( is_row = <ls_row> iv_component = ls_pair-target ) <> text_of( is_row = <ls_src> iv_component = ls_pair-source ).
+          lv_match = abap_false.
+          EXIT.
+        ENDIF.
+      ENDLOOP.
+      IF lv_match = abap_true.
+        ls_found-key = ls_inst-key.
+        ls_found-index = lv_tabix.
+        APPEND ls_found TO lt_found.
+      ENDIF.
+    ENDLOOP.
+    SORT lt_found BY key.
+    LOOP AT lt_found INTO ls_found.
+      APPEND ls_found-index TO rt_index.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD parent_of.
+    DATA ls_assoc TYPE zif_osd_rap_bo=>ty_assoc.
+    DATA ls_pair  TYPE zif_osd_rap_bo=>ty_pair.
+    DATA ls_inst  TYPE ty_inst.
+    DATA lr_keys  TYPE REF TO data.
+    FIELD-SYMBOLS <ls_row>  TYPE any.
+    FIELD-SYMBOLS <ls_keys> TYPE any.
+    FIELD-SYMBOLS <lv_from> TYPE any.
+    FIELD-SYMBOLS <lv_to>   TYPE any.
+
+    CLEAR: es_parent, ev_index.
+    IF is_entity-parent IS INITIAL.
+      RETURN.
+    ENDIF.
+    es_parent = entity_of( is_entity-parent ).
+    ls_assoc = assoc_of( is_entity = is_entity iv_assoc = is_entity-parent_assoc ).
+    READ TABLE mt_inst INDEX iv_index INTO ls_inst.
+    ASSIGN ls_inst-row->* TO <ls_row>.
+    lr_keys = new_row( es_parent ).
+    ASSIGN lr_keys->* TO <ls_keys>.
+    LOOP AT ls_assoc-pairs INTO ls_pair.
+      ASSIGN COMPONENT ls_pair-source OF STRUCTURE <ls_row> TO <lv_from>.
+      CHECK sy-subrc = 0.
+      ASSIGN COMPONENT ls_pair-target OF STRUCTURE <ls_keys> TO <lv_to>.
+      CHECK sy-subrc = 0.
+      <lv_to> = <lv_from>.
+    ENDLOOP.
+    ev_index = resolve( is_entity = es_parent is_input = <ls_keys> ).
+  ENDMETHOD.
+
+  METHOD root_of.
+    DATA ls_parent TYPE zif_osd_rap_bo=>ty_entity.
+    DATA lv_index  TYPE i.
+    es_root = is_entity.
+    ev_index = iv_index.
+    WHILE es_root-parent IS NOT INITIAL AND ev_index > 0.
+      lv_index = ev_index.
+      parent_of( EXPORTING is_entity = es_root iv_index = lv_index
+                 IMPORTING es_parent = ls_parent ev_index = ev_index ).
+      es_root = ls_parent.
+    ENDWHILE.
+  ENDMETHOD.
+
+  METHOD lock.
+* lock master on the root, lock dependent through it: the lock argument is
+* the SHA-256 of BDEF, root entity and root key (a lock key has at most 120
+* characters), held until the LUW ends (_SCOPE 2). A root created in this
+* transaction is nobody else's to see, and needs none
+    DATA ls_root     TYPE zif_osd_rap_bo=>ty_entity.
+    DATA ls_inst     TYPE ty_inst.
+    DATA lv_index    TYPE i.
+    DATA lv_argument TYPE string.
+    DATA lv_hash     TYPE string.
+    DATA lv_lockhash TYPE c LENGTH 64.
+    DATA lx_hash     TYPE REF TO cx_abap_message_digest.
+    FIELD-SYMBOLS <ls_row> TYPE any.
+
+    ev_ok = abap_true.
+    IF is_entity-lock IS INITIAL.
+      RETURN.
+    ENDIF.
+    root_of( EXPORTING is_entity = is_entity iv_index = iv_index IMPORTING es_root = ls_root ev_index = lv_index ).
+    IF lv_index = 0.
+      RETURN.
+    ENDIF.
+    READ TABLE mt_inst INDEX lv_index INTO ls_inst.
+    IF ls_inst-created = abap_true.
+      RETURN.
+    ENDIF.
+    lv_argument = |{ ms_model-bdef }\|{ ls_root-name }\|{ ls_inst-key }|.
+    READ TABLE mt_locked TRANSPORTING NO FIELDS WITH KEY table_line = lv_argument.
+    IF sy-subrc = 0.
+      RETURN.
+    ENDIF.
+    TRY.
+        cl_abap_message_digest=>calculate_hash_for_char( EXPORTING if_algorithm = 'SHA256' if_data = lv_argument
+          IMPORTING ef_hashstring = lv_hash ).
+      CATCH cx_abap_message_digest INTO lx_hash.
+        RAISE EXCEPTION TYPE zcx_osd_rap EXPORTING iv_reason = |lock of { ls_root-alias }: { lx_hash->get_text( ) }|.
+    ENDTRY.
+    lv_lockhash = lv_hash.
+    CALL FUNCTION 'ENQUEUE_EZOSD_RAP_LOCK'
+      EXPORTING
+        mode_zosd_rap_lock = 'E'
+        lockhash           = lv_lockhash
+      EXCEPTIONS
+        foreign_lock       = 1
+        system_failure     = 2
+        OTHERS             = 3.
+    IF sy-subrc = 1.
+      ASSIGN ls_inst-row->* TO <ls_row>.
+      fail( EXPORTING is_entity = is_entity is_input = is_input
+                      iv_cause = if_abap_behv=>cause-locked
+                      iv_text = |{ ls_root-alias } { key_text( is_entity = ls_root is_row = <ls_row> ) } is locked by another user|
+            CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
+      ev_ok = abap_false.
+      RETURN.
+    ELSEIF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE zcx_osd_rap EXPORTING iv_reason = |the lock server refused the lock of { ls_root-alias }|.
+    ENDIF.
+    APPEND lv_argument TO mt_locked.
+    APPEND lv_hash TO mt_lockhash.
+  ENDMETHOD.
+
+  METHOD unlock.
+    DATA lv_hash     TYPE string.
+    DATA lv_lockhash TYPE c LENGTH 64.
+    LOOP AT mt_lockhash INTO lv_hash.
+      lv_lockhash = lv_hash.
+      CALL FUNCTION 'DEQUEUE_EZOSD_RAP_LOCK'
+        EXPORTING
+          mode_zosd_rap_lock = 'E'
+          lockhash           = lv_lockhash.
+    ENDLOOP.
+    CLEAR: mt_locked, mt_lockhash.
+  ENDMETHOD.
+
+  METHOD touch_root.
+    DATA ls_root  TYPE zif_osd_rap_bo=>ty_entity.
+    DATA lv_index TYPE i.
+    FIELD-SYMBOLS <ls_inst> TYPE ty_inst.
+
+    IF is_entity-parent IS INITIAL.
+      RETURN.
+    ENDIF.
+    root_of( EXPORTING is_entity = is_entity iv_index = iv_index IMPORTING es_root = ls_root ev_index = lv_index ).
+    IF lv_index = 0.
+      RETURN.
+    ENDIF.
+    READ TABLE ls_root-fields TRANSPORTING NO FIELDS WITH KEY admin = 'CHANGED_AT'.
+    IF sy-subrc <> 0.
+      READ TABLE ls_root-fields TRANSPORTING NO FIELDS WITH KEY admin = 'CHANGED_BY'.
+      IF sy-subrc <> 0.
+        RETURN.
+      ENDIF.
+    ENDIF.
+    stamp( is_entity = ls_root iv_index = lv_index iv_create = abap_false iv_total = abap_true ).
     READ TABLE mt_inst INDEX lv_index ASSIGNING <ls_inst>.
+    IF <ls_inst>-state IS INITIAL.
+      <ls_inst>-state = co_operation-update.
+    ENDIF.
+    IF <ls_inst>-state = co_operation-update.
+      mi_luw->modify( iv_entity = ls_root-name iv_key = <ls_inst>-key
+                      iv_operation = co_operation-update ir_row = <ls_inst>-row ).
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD delete_tree.
+* the children first into the delta, then the instance: a part goes with
+* the whole, without asking its features (the framework's delete)
+    DATA ls_assoc TYPE zif_osd_rap_bo=>ty_assoc.
+    DATA ls_child TYPE zif_osd_rap_bo=>ty_entity.
+    DATA lt_index TYPE int4_table.
+    DATA lv_child TYPE i.
+    FIELD-SYMBOLS <ls_inst> TYPE ty_inst.
+
+    LOOP AT is_entity-assocs INTO ls_assoc WHERE kind = 'C'.
+      ls_child = entity_of( ls_assoc-target ).
+      lt_index = targets( is_entity = is_entity is_assoc = ls_assoc iv_index = iv_index ).
+      LOOP AT lt_index INTO lv_child.
+        delete_tree( is_entity = ls_child iv_index = lv_child ).
+      ENDLOOP.
+    ENDLOOP.
+    READ TABLE mt_inst INDEX iv_index ASSIGNING <ls_inst>.
     <ls_inst>-state = co_operation-delete.
     mi_luw->modify( iv_entity = is_entity-name iv_key = <ls_inst>-key
                     iv_operation = co_operation-delete ir_row = <ls_inst>-row ).
+  ENDMETHOD.
+
+  METHOD create_by.
+    DATA ls_entity TYPE zif_osd_rap_bo=>ty_entity.
+    DATA ls_target TYPE zif_osd_rap_bo=>ty_entity.
+    DATA ls_assoc  TYPE zif_osd_rap_bo=>ty_assoc.
+    DATA ls_pair   TYPE zif_osd_rap_bo=>ty_pair.
+    DATA ls_inst   TYPE ty_inst.
+    DATA lr_rows   TYPE REF TO data.
+    DATA lv_index  TYPE i.
+    DATA lt_drop   TYPE int4_table.
+    DATA lv_row    TYPE i.
+    DATA lv_ok     TYPE abap_bool.
+    DATA lt_framework TYPE string_table.
+    FIELD-SYMBOLS <lt_rows>   TYPE STANDARD TABLE.
+    FIELD-SYMBOLS <ls_row>    TYPE any.
+    FIELD-SYMBOLS <ls_parent> TYPE any.
+    FIELD-SYMBOLS <lt_target> TYPE STANDARD TABLE.
+    FIELD-SYMBOLS <ls_new>    TYPE any.
+    FIELD-SYMBOLS <lv_from>   TYPE any.
+    FIELD-SYMBOLS <lv_to>     TYPE any.
+
+    ls_entity = entity_of( iv_entity ).
+    ls_assoc = assoc_of( is_entity = ls_entity iv_assoc = iv_assoc ).
+    IF ls_assoc-create = abap_false.
+      RAISE EXCEPTION TYPE zcx_osd_rap EXPORTING iv_reason = |{ ls_entity-alias } has no create by association { iv_assoc }|.
+    ENDIF.
+    ls_target = entity_of( ls_assoc-target ).
+    IF mv_depth = 0.
+      start_request( ).
+    ENDIF.
+    CREATE DATA lr_rows LIKE it_rows.
+    ASSIGN lr_rows->* TO <lt_rows>.
+    <lt_rows> = it_rows.
+
+* the parent of each row: by key or %cid_ref, enabled, locked; its key
+* goes into the row and into the pair fields of every new instance
+    LOOP AT <lt_rows> ASSIGNING <ls_row>.
+      lv_row = sy-tabix.
+      lv_index = resolve( is_entity = ls_entity is_input = <ls_row> ).
+      IF lv_index = 0.
+        fail( EXPORTING is_entity = ls_entity is_input = <ls_row>
+                        iv_cause = if_abap_behv=>cause-not_found
+                        iv_text = |{ ls_entity-alias } not found|
+              CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
+        INSERT lv_row INTO lt_drop INDEX 1.
+        CONTINUE.
+      ENDIF.
+      IF ls_assoc-feat_create = abap_true
+          AND enabled( is_entity = ls_entity iv_index = lv_index iv_group = '%ASSOC' iv_flag = ls_assoc-name ) = abap_false.
+        fail( EXPORTING is_entity = ls_entity is_input = <ls_row>
+                        iv_cause = if_abap_behv=>cause-disabled
+                        iv_text = |Create by association { ls_assoc-name } of { ls_entity-alias } is disabled|
+              CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
+        INSERT lv_row INTO lt_drop INDEX 1.
+        CONTINUE.
+      ENDIF.
+      lock( EXPORTING is_entity = ls_entity iv_index = lv_index is_input = <ls_row>
+            IMPORTING ev_ok = lv_ok CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
+      IF lv_ok = abap_false.
+        INSERT lv_row INTO lt_drop INDEX 1.
+        CONTINUE.
+      ENDIF.
+      READ TABLE mt_inst INDEX lv_index INTO ls_inst.
+      ASSIGN ls_inst-row->* TO <ls_parent>.
+      copy_keys( EXPORTING is_entity = ls_entity is_from = <ls_parent> CHANGING cs_to = <ls_row> ).
+      ASSIGN COMPONENT '%TARGET' OF STRUCTURE <ls_row> TO <lt_target>.
+      LOOP AT <lt_target> ASSIGNING <ls_new>.
+        LOOP AT ls_assoc-pairs INTO ls_pair.
+          ASSIGN COMPONENT ls_pair-source OF STRUCTURE <ls_parent> TO <lv_from>.
+          CHECK sy-subrc = 0.
+          ASSIGN COMPONENT ls_pair-target OF STRUCTURE <ls_new> TO <lv_to>.
+          CHECK sy-subrc = 0.
+          <lv_to> = <lv_from>.
+        ENDLOOP.
+      ENDLOOP.
+    ENDLOOP.
+    LOOP AT lt_drop INTO lv_row.
+      DELETE <lt_rows> INDEX lv_row.
+    ENDLOOP.
+    IF lines( <lt_rows> ) = 0.
+      RETURN.
+    ENDIF.
+
+* early numbering of the children: the parent's FOR NUMBERING ... FOR
+* CREATE e\_assoc method draws their keys
+    IF ls_assoc-numbering = 'E'.
+      number_by( EXPORTING is_entity = ls_entity is_assoc = ls_assoc ir_rows = lr_rows
+                 CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
+    ENDIF.
+
+* the parent's key fields of the child are the framework's: kept also
+* where they are no key of the child (a UUID child with its parent's UUID)
+    LOOP AT ls_assoc-pairs INTO ls_pair.
+      APPEND ls_pair-target TO lt_framework.
+    ENDLOOP.
+    LOOP AT <lt_rows> ASSIGNING <ls_row>.
+      ASSIGN COMPONENT '%TARGET' OF STRUCTURE <ls_row> TO <lt_target>.
+      LOOP AT <lt_target> ASSIGNING <ls_new>.
+        create_one( EXPORTING is_entity = ls_target is_input = <ls_new> it_framework = lt_framework
+                    CHANGING cs_mapped = cs_mapped cs_failed = cs_failed cs_reported = cs_reported ).
+      ENDLOOP.
+    ENDLOOP.
+
+    IF mv_depth = 0.
+      determine( EXPORTING iv_on = 'M' CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD number_by.
+* as NUMBER: every %target row's key comes from the MAPPED line of the
+* target with its %cid; a row the method neither maps nor fails is failed
+* here, and a failed row is dropped from %target
+    DATA ls_target TYPE zif_osd_rap_bo=>ty_entity.
+    DATA lr_mapped TYPE REF TO data.
+    DATA lv_cid    TYPE string.
+    DATA lv_temp   TYPE string.
+    DATA lv_count  TYPE i.
+    DATA lv_index  TYPE i.
+    DATA lv_found  TYPE abap_bool.
+    DATA lv_failed TYPE abap_bool.
+    DATA lt_drop   TYPE int4_table.
+    DATA lt_cids   TYPE string_table.
+    DATA lt_temp   TYPE string_table.
+    DATA lv_row    TYPE i.
+    DATA lv_try    TYPE i.
+    DATA lv_slot   TYPE string.
+    FIELD-SYMBOLS <lt_rows>   TYPE STANDARD TABLE.
+    FIELD-SYMBOLS <ls_row>    TYPE any.
+    FIELD-SYMBOLS <lt_target> TYPE STANDARD TABLE.
+    FIELD-SYMBOLS <ls_new>    TYPE any.
+    FIELD-SYMBOLS <lv_cid>    TYPE any.
+    FIELD-SYMBOLS <ls_mapped> TYPE any.
+    FIELD-SYMBOLS <lt_mapped> TYPE STANDARD TABLE.
+    FIELD-SYMBOLS <lt_failed> TYPE STANDARD TABLE.
+    FIELD-SYMBOLS <ls_line>   TYPE any.
+
+    ls_target = entity_of( is_assoc-target ).
+    ASSIGN ir_rows->* TO <lt_rows>.
+* a %target row without a content ID gets one for the call, so its key can
+* be told apart: one that no %target row of the call carries, and only
+* those rows lose it again; a caller's %cid, whatever it looks like, is
+* kept and comes back in MAPPED (as NUMBER does for a create)
+    LOOP AT <lt_rows> ASSIGNING <ls_row>.
+      ASSIGN COMPONENT '%TARGET' OF STRUCTURE <ls_row> TO <lt_target>.
+      LOOP AT <lt_target> ASSIGNING <ls_new>.
+        APPEND text_of( is_row = <ls_new> iv_component = '%CID' ) TO lt_cids.
+      ENDLOOP.
+    ENDLOOP.
+    LOOP AT <lt_rows> ASSIGNING <ls_row>.
+      lv_row = sy-tabix.
+      ASSIGN COMPONENT '%TARGET' OF STRUCTURE <ls_row> TO <lt_target>.
+      LOOP AT <lt_target> ASSIGNING <ls_new>.
+        lv_index = sy-tabix.
+        ASSIGN COMPONENT '%CID' OF STRUCTURE <ls_new> TO <lv_cid>.
+        IF sy-subrc <> 0 OR <lv_cid> IS NOT INITIAL.
+          CONTINUE.
+        ENDIF.
+        lv_try = 0.
+        DO.
+          lv_count = lv_count + 1.
+          lv_temp = |%OSD-CBA-{ lv_count }-{ lv_try }|.
+          READ TABLE lt_cids TRANSPORTING NO FIELDS WITH KEY table_line = lv_temp.
+          IF sy-subrc <> 0.
+            EXIT.
+          ENDIF.
+          lv_try = lv_try + 1.
+        ENDDO.
+        <lv_cid> = lv_temp.
+        APPEND lv_temp TO lt_cids.
+        lv_slot = |{ lv_row }/{ lv_index }|.
+        APPEND lv_slot TO lt_temp.
+      ENDLOOP.
+    ENDLOOP.
+    lr_mapped = mo_bo->new_response( 'MAPPED' ).
+    ASSIGN lr_mapped->* TO <ls_mapped>.
+    call_pool( EXPORTING is_entity = is_entity iv_name = |%NUMBERING\\{ is_assoc-name }| ir_rows = ir_rows ir_mapped = lr_mapped
+               CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
+    ASSIGN COMPONENT ls_target-response OF STRUCTURE <ls_mapped> TO <lt_mapped>.
+    ASSIGN COMPONENT ls_target-response OF STRUCTURE cs_failed TO <lt_failed>.
+    LOOP AT <lt_rows> ASSIGNING <ls_row>.
+      lv_row = sy-tabix.
+      ASSIGN COMPONENT '%TARGET' OF STRUCTURE <ls_row> TO <lt_target>.
+      CLEAR lt_drop.
+      LOOP AT <lt_target> ASSIGNING <ls_new>.
+        lv_index = sy-tabix.
+        lv_cid = text_of( is_row = <ls_new> iv_component = '%CID' ).
+        lv_found = abap_false.
+        lv_failed = abap_false.
+        IF <lt_mapped> IS ASSIGNED.
+          LOOP AT <lt_mapped> ASSIGNING <ls_line>.
+            IF text_of( is_row = <ls_line> iv_component = '%CID' ) = lv_cid.
+              copy_keys( EXPORTING is_entity = ls_target is_from = <ls_line> CHANGING cs_to = <ls_new> ).
+              lv_found = abap_true.
+            ENDIF.
+          ENDLOOP.
+        ENDIF.
+        IF lv_found = abap_false AND <lt_failed> IS ASSIGNED.
+          LOOP AT <lt_failed> ASSIGNING <ls_line>.
+            IF text_of( is_row = <ls_line> iv_component = '%CID' ) = lv_cid.
+              lv_failed = abap_true.
+            ENDIF.
+          ENDLOOP.
+        ENDIF.
+        lv_slot = |{ lv_row }/{ lv_index }|.
+        READ TABLE lt_temp TRANSPORTING NO FIELDS WITH KEY table_line = lv_slot.
+        IF sy-subrc = 0.
+          ASSIGN COMPONENT '%CID' OF STRUCTURE <ls_new> TO <lv_cid>.
+          CLEAR <lv_cid>.
+        ENDIF.
+        IF lv_found = abap_false AND lv_failed = abap_false.
+          fail( EXPORTING is_entity = ls_target is_input = <ls_new>
+                          iv_cause = if_abap_behv=>cause-unspecific
+                          iv_text = |Early numbering of { ls_target-alias } gave no key and no failure for an instance|
+                          iv_op = '%CREATE'
+                CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
+          lv_failed = abap_true.
+        ENDIF.
+        IF lv_failed = abap_true.
+          INSERT lv_index INTO lt_drop INDEX 1.
+        ENDIF.
+      ENDLOOP.
+      LOOP AT lt_drop INTO lv_index.
+        DELETE <lt_target> INDEX lv_index.
+      ENDLOOP.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD read_by.
+    DATA ls_entity   TYPE zif_osd_rap_bo=>ty_entity.
+    DATA ls_target   TYPE zif_osd_rap_bo=>ty_entity.
+    DATA ls_assoc    TYPE zif_osd_rap_bo=>ty_assoc.
+    DATA ls_inst     TYPE ty_inst.
+    DATA ls_src      TYPE ty_inst.
+    DATA lv_index    TYPE i.
+    DATA lv_found    TYPE i.
+    DATA lt_index    TYPE int4_table.
+    DATA lr_reported TYPE REF TO data.
+    FIELD-SYMBOLS <ls_key>      TYPE any.
+    FIELD-SYMBOLS <ls_src>      TYPE any.
+    FIELD-SYMBOLS <ls_row>      TYPE any.
+    FIELD-SYMBOLS <ls_out>      TYPE any.
+    FIELD-SYMBOLS <ls_link>     TYPE any.
+    FIELD-SYMBOLS <ls_side>     TYPE any.
+    FIELD-SYMBOLS <ls_reported> TYPE any.
+
+    ls_entity = entity_of( iv_entity ).
+    ls_assoc = assoc_of( is_entity = ls_entity iv_assoc = iv_assoc ).
+    ls_target = entity_of( ls_assoc-target ).
+    lr_reported = mo_bo->new_response( 'REPORTED' ).
+    ASSIGN lr_reported->* TO <ls_reported>.
+    LOOP AT it_keys ASSIGNING <ls_key>.
+      lv_index = resolve( is_entity = ls_entity is_input = <ls_key> ).
+      IF lv_index = 0.
+        fail( EXPORTING is_entity = ls_entity is_input = <ls_key>
+                        iv_cause = if_abap_behv=>cause-not_found
+                        iv_text = |{ ls_entity-alias } not found|
+              CHANGING cs_failed = cs_failed cs_reported = <ls_reported> ).
+        CONTINUE.
+      ENDIF.
+      lt_index = targets( is_entity = ls_entity is_assoc = ls_assoc iv_index = lv_index ).
+      READ TABLE mt_inst INDEX lv_index INTO ls_src.
+      ASSIGN ls_src-row->* TO <ls_src>.
+      LOOP AT lt_index INTO lv_found.
+        READ TABLE mt_inst INDEX lv_found INTO ls_inst.
+        ASSIGN ls_inst-row->* TO <ls_row>.
+        APPEND INITIAL LINE TO ct_result ASSIGNING <ls_out>.
+        MOVE-CORRESPONDING <ls_row> TO <ls_out>.
+        APPEND INITIAL LINE TO ct_link ASSIGNING <ls_link>.
+        ASSIGN COMPONENT 'SOURCE' OF STRUCTURE <ls_link> TO <ls_side>.
+        IF sy-subrc = 0.
+          copy_keys( EXPORTING is_entity = ls_entity is_from = <ls_src> CHANGING cs_to = <ls_side> ).
+        ENDIF.
+        ASSIGN COMPONENT 'TARGET' OF STRUCTURE <ls_link> TO <ls_side>.
+        IF sy-subrc = 0.
+          copy_keys( EXPORTING is_entity = ls_target is_from = <ls_row> CHANGING cs_to = <ls_side> ).
+        ENDIF.
+      ENDLOOP.
+    ENDLOOP.
   ENDMETHOD.
 
   METHOD start_request.
@@ -1120,6 +1839,7 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
     DATA lr_rows     TYPE REF TO data.
     DATA lr_keys     TYPE REF TO data.
     DATA lr_result   TYPE REF TO data.
+    DATA lv_ok       TYPE abap_bool.
     FIELD-SYMBOLS <ls_key>  TYPE any.
     FIELD-SYMBOLS <lt_rows> TYPE STANDARD TABLE.
     FIELD-SYMBOLS <lt_keys> TYPE STANDARD TABLE.
@@ -1157,6 +1877,11 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
                         iv_cause = if_abap_behv=>cause-disabled
                         iv_text = |Action { iv_action } of { ls_entity-alias } is disabled|
               CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
+        CONTINUE.
+      ENDIF.
+      lock( EXPORTING is_entity = ls_entity iv_index = lv_index is_input = <ls_key>
+            IMPORTING ev_ok = lv_ok CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
+      IF lv_ok = abap_false.
         CONTINUE.
       ENDIF.
       READ TABLE mt_inst INDEX lv_index INTO ls_inst.
@@ -1524,6 +2249,10 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
       IF iv_create = abap_false AND ( ls_field-admin = 'CREATED_AT' OR ls_field-admin = 'CREATED_BY' ).
         CONTINUE.
       ENDIF.
+* R5: a change below the root moves the root's total stamp only
+      IF iv_total = abap_true AND ls_field-admin <> 'CHANGED_AT' AND ls_field-admin <> 'CHANGED_BY'.
+        CONTINUE.
+      ENDIF.
       ASSIGN COMPONENT ls_field-name OF STRUCTURE <ls_row> TO <lv_value>.
       CHECK sy-subrc = 0.
       IF ls_field-admin CP '*_BY'.
@@ -1729,6 +2458,7 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
       ENDIF.
       IF iv_end_luw = abap_true.
         ROLLBACK WORK.
+        unlock( ).
       ENDIF.
       RETURN.
     ENDIF.
@@ -1739,11 +2469,13 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
       CATCH zcx_osd_rap INTO lx_error.
         IF iv_end_luw = abap_true.
           ROLLBACK WORK.
+          unlock( ).
         ENDIF.
         RAISE EXCEPTION lx_error.
     ENDTRY.
     IF iv_end_luw = abap_true.
       COMMIT WORK.
+      unlock( ).
     ENDIF.
 
     APPEND 'CLEANUP' TO mt_trace.
@@ -1825,6 +2557,7 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
     ENDIF.
     APPEND 'ROLLBACK' TO mt_trace.
     mi_luw->discard( ).
+    unlock( ).
     CLEAR: mt_inst, mt_done.
   ENDMETHOD.
 

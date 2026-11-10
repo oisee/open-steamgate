@@ -319,10 +319,13 @@ CLASS zcl_osd_v4_http IMPLEMENTATION.
 * Set(key)/<navigation>: the source entity's key, then the target set read
 * the way $expand reads it -- the DPC sees the navigation path and the
 * source key, as on the V2 path
-      IF iv_method <> 'GET'.
+      ls_nav = zcl_stg_model_info=>find_nav( is_set = ls_set iv_name = lo_query->mv_navigation ).
+* a POST to a collection-valued navigation creates the target below its
+* source (OData 4.01 Part 1, 11.4.2.1; a RAP create by association, R5); the
+* DPC sees the navigation path and the source key, as on the V2 path
+      IF iv_method <> 'GET' AND NOT ( iv_method = 'POST' AND ls_nav-to_many = abap_true ).
         zcl_osd_v4_query=>fail( iv_text = 'Writes through a navigation property are not implemented' iv_status = 501 ).
       ENDIF.
-      ls_nav = zcl_stg_model_info=>find_nav( is_set = ls_set iv_name = lo_query->mv_navigation ).
       CREATE OBJECT lo_source EXPORTING
         iv_path = |/sap/opu/odata4/sap/{ lo_model->ms_service-name }/{ ls_set-name }({ lo_query->ms_request-key_string })|
         it_options = lt_none.
