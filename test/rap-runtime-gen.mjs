@@ -114,7 +114,9 @@ describe("RAP managed runtime generator (R2)", () => {
     assert.ok(!adapter.includes("ls_callable-entities"), "no instances table: the handler works through EML");
     assert.equal(explicit.match(/ls_callable-entities = abap_true/g).length, 4, "the explicit pool still takes its table back");
     assert.match(adapter, /io_handler->\('TEXT_LENGTH'\)\s+EXPORTING\s+keys = lt_keys\s+CHANGING\s+failed = <ls_failed>\s+reported = <ls_reported>\./);
-    assert.match(adapter, /io_handler->\('APPROVE_NOTE'\)\s+EXPORTING\s+keys = lt_keys\s+CHANGING\s+result = <lt_result>\s+mapped = ls_mapped\s+failed = <ls_failed>\s+reported = <ls_reported>\./);
+    assert.match(adapter, /io_handler->\('APPROVE_NOTE'\)\s+EXPORTING\s+keys = lt_keys\s+CHANGING\s+result = <lt_result>\s+mapped = <ls_mapped>\s+failed = <ls_failed>\s+reported = <ls_reported>\./);
+    // R6: the caller's MAPPED reaches an action handler (a factory action fills it)
+    assert.match(adapter, /IF ir_mapped IS BOUND\.\n\s+ASSIGN ir_mapped->\* TO <ls_mapped>\.\n\s+ELSE\.\n\s+ASSIGN ls_mapped TO <ls_mapped>\./);
     const classes = poolClasses("zbp_rap_note_sf", pool(files));
     assert.deepEqual(classes[0].methods.find(m => m.name === "default_status").parameters.map(p => `${p.direction} ${p.name}`), ["importing keys", "changing reported"]);
     // a parameter named otherwise keeps its role; a wrong ON and a missing FOR clause are refused
