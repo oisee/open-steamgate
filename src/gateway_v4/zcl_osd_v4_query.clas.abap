@@ -1,5 +1,7 @@
 CLASS zcl_osd_v4_query DEFINITION PUBLIC CREATE PUBLIC.
   PUBLIC SECTION.
+* R8: the list filter Fiori Elements V4 sends over a draft-enabled set
+    CONSTANTS gc_draft_latest TYPE string VALUE `IsActiveEntity eq false or SiblingEntity/IsActiveEntity eq null`.
     DATA ms_request TYPE zcl_stg_url=>ty_request.
     DATA mo_context TYPE REF TO zcl_stg_request_context.
 * $expand=nav(opt;opt;...): the navigation property and the options inside
@@ -407,6 +409,26 @@ CLASS zcl_osd_v4_query IMPLEMENTATION.
             APPEND ls_order TO mo_context->mt_orderby.
           ENDLOOP.
         WHEN '$filter'.
+* R8: the draft list filter of Fiori Elements V4 (each instance once: its
+* draft when it has one, else the active instance) is a navigation path
+* the select-options cannot hold; it is taken out and handed on as what it
+* means (docs/rap-runtime.md, R8)
+          IF ls_opt-value CS gc_draft_latest.
+            mo_context->mv_draft_latest = abap_true.
+            REPLACE ALL OCCURRENCES OF |({ gc_draft_latest })| IN ls_opt-value WITH ``.
+            REPLACE ALL OCCURRENCES OF gc_draft_latest IN ls_opt-value WITH ``.
+            CONDENSE ls_opt-value.
+            IF ls_opt-value CP 'and *'.
+              ls_opt-value = substring( val = ls_opt-value off = 4 ).
+            ENDIF.
+            IF ls_opt-value CP '* and'.
+              ls_opt-value = substring( val = ls_opt-value len = strlen( ls_opt-value ) - 4 ).
+            ENDIF.
+            CONDENSE ls_opt-value.
+            IF ls_opt-value IS INITIAL.
+              CONTINUE.
+            ENDIF.
+          ENDIF.
           mo_context->mv_filter_string = filter( ls_opt-value ).
           validate_literals( is_set = is_set io_model = io_model ).
           CREATE OBJECT lo_parser EXPORTING
@@ -599,6 +621,16 @@ CLASS zcl_osd_v4_query IMPLEMENTATION.
           ENDIF.
           REPLACE ALL OCCURRENCES OF '-' IN lv_value WITH ''.
           ls_key-value = to_upper( lv_value ).
+        WHEN 'Edm.Boolean'.
+* a draft-enabled RAP entity's IsActiveEntity (docs/rap-runtime.md, R8):
+* the internal form is ABAP's, X or initial
+          IF lv_value = 'true'.
+            ls_key-value = abap_true.
+          ELSEIF lv_value = 'false'.
+            CLEAR ls_key-value.
+          ELSE.
+            fail( 'Expected a V4 Boolean literal' ).
+          ENDIF.
         WHEN OTHERS.
           FIND REGEX '^-?[0-9]+(\.[0-9]+)?$' IN lv_value.
           IF sy-subrc <> 0.

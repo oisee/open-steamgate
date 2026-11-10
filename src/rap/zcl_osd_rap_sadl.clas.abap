@@ -221,6 +221,33 @@ CLASS zcl_osd_rap_sadl IMPLEMENTATION.
         <lv_to> = <lv_from>.
       ENDIF.
     ENDLOOP.
+* R8: the version, IsActiveEntity on the wire and %is_draft in the BO
+    IF is_entity-draft_table IS INITIAL.
+      RETURN.
+    ENDIF.
+    ASSIGN COMPONENT 'ISACTIVEENTITY' OF STRUCTURE is_from TO <lv_from>.
+    IF sy-subrc = 0.
+      ASSIGN COMPONENT '%IS_DRAFT' OF STRUCTURE cs_to TO <lv_to>.
+      IF sy-subrc = 0.
+        IF <lv_from> IS INITIAL.
+          <lv_to> = if_abap_behv=>mk-on.
+        ELSE.
+          <lv_to> = if_abap_behv=>mk-off.
+        ENDIF.
+      ENDIF.
+      RETURN.
+    ENDIF.
+    ASSIGN COMPONENT '%IS_DRAFT' OF STRUCTURE is_from TO <lv_from>.
+    IF sy-subrc = 0.
+      ASSIGN COMPONENT 'ISACTIVEENTITY' OF STRUCTURE cs_to TO <lv_to>.
+      IF sy-subrc = 0.
+        IF <lv_from> = if_abap_behv=>mk-on.
+          CLEAR <lv_to>.
+        ELSE.
+          <lv_to> = abap_true.
+        ENDIF.
+      ENDIF.
+    ENDIF.
   ENDMETHOD.
 
   METHOD put_field.
@@ -596,6 +623,25 @@ CLASS zcl_osd_rap_sadl IMPLEMENTATION.
     ENDIF.
   ENDMETHOD.
 
+  METHOD zif_stg_sadl_behavior~draft_source.
+* R8: the generated class that serves a draft entity's active and draft rows
+    DATA li_bo     TYPE REF TO zif_osd_rap_bo.
+    DATA ls_model  TYPE zif_osd_rap_bo=>ty_model.
+    DATA ls_entity TYPE zif_osd_rap_bo=>ty_entity.
+    DATA lv_name   TYPE string.
+
+    li_bo = bo_of( iv_entity ).
+    IF li_bo IS INITIAL.
+      RETURN.
+    ENDIF.
+    ls_model = li_bo->model( ).
+    lv_name = to_upper( iv_entity ).
+    READ TABLE ls_model-entities INTO ls_entity WITH KEY name = lv_name.
+    IF sy-subrc = 0.
+      rv_class = ls_entity-union.
+    ENDIF.
+  ENDMETHOD.
+
   METHOD zif_stg_sadl_behavior~actions.
     DATA li_bo       TYPE REF TO zif_osd_rap_bo.
     DATA ls_model    TYPE zif_osd_rap_bo=>ty_model.
@@ -618,7 +664,7 @@ CLASS zcl_osd_rap_sadl IMPLEMENTATION.
     lv_name = to_upper( iv_entity ).
     READ TABLE ls_model-entities INTO ls_entity WITH KEY name = lv_name.
 * R6: determine actions too; an internal action is the BO's own
-    LOOP AT ls_entity-callables INTO ls_callable WHERE ( kind = 'A' AND internal = abap_false ) OR kind = 'X'.
+    LOOP AT ls_entity-callables INTO ls_callable WHERE ( kind = 'A' AND internal = abap_false ) OR kind = 'X' OR kind = 'E'.
       APPEND ls_callable-name TO rt_actions.
     ENDLOOP.
   ENDMETHOD.
@@ -673,6 +719,14 @@ CLASS zcl_osd_rap_sadl IMPLEMENTATION.
     ASSIGN COMPONENT '%CID' OF STRUCTURE <ls_line> TO <lv_value>.
     IF sy-subrc = 0.
       <lv_value> = 'ODATA'.
+    ENDIF.
+* R8: a POST to the set of a draft-enabled root creates a draft (an active
+* instance is made by Activate)
+    IF ls_entity-draft_table IS NOT INITIAL.
+      ASSIGN COMPONENT '%IS_DRAFT' OF STRUCTURE <ls_line> TO <lv_value>.
+      IF sy-subrc = 0.
+        <lv_value> = if_abap_behv=>mk-on.
+      ENDIF.
     ENDIF.
     LOOP AT ls_entity-fields INTO ls_field.
       READ TABLE it_fields TRANSPORTING NO FIELDS WITH KEY table_line = ls_field-name.
@@ -838,6 +892,7 @@ CLASS zcl_osd_rap_sadl IMPLEMENTATION.
     DATA ls_proj TYPE zif_osd_rap_registry=>ty_projection.
     DATA lr_base TYPE REF TO data.
     FIELD-SYMBOLS <ls_base> TYPE any.
+    FIELD-SYMBOLS <lv_active> TYPE any.
 
     ls_proj = projection_of( iv_entity ).
     IF ls_proj-entity IS NOT INITIAL.
@@ -854,6 +909,15 @@ CLASS zcl_osd_rap_sadl IMPLEMENTATION.
     runtime_of( EXPORTING iv_entity  = iv_entity
                 IMPORTING eo_runtime = lo_runtime
                           es_entity  = ls_entity ).
+* R8: DELETE of a draft root discards the draft (what Fiori Elements V4
+* sends for Discard)
+    IF ls_entity-draft_table IS NOT INITIAL AND ls_entity-parent IS INITIAL.
+      ASSIGN COMPONENT 'ISACTIVEENTITY' OF STRUCTURE is_row TO <lv_active>.
+      IF sy-subrc = 0 AND <lv_active> IS INITIAL.
+        zif_stg_sadl_behavior~execute( iv_entity = iv_entity iv_action = 'DISCARD' is_row = is_row ).
+        RETURN.
+      ENDIF.
+    ENDIF.
     lr_tab = new_line( io_runtime = lo_runtime is_entity = ls_entity iv_kind = 'DELETE' ).
     ASSIGN lr_tab->* TO <lt_tab>.
     READ TABLE <lt_tab> INDEX 1 ASSIGNING <ls_line>.
@@ -980,6 +1044,17 @@ CLASS zcl_osd_rap_sadl IMPLEMENTATION.
     finish( EXPORTING io_runtime  = lo_runtime
             CHANGING  cs_failed   = <ls_failed>
                       cs_reported = <ls_reported> ).
+* R8: Edit answers the draft, Activate the active instance
+    LOOP AT ls_entity-callables INTO ls_callable WHERE kind = 'E' AND name = lv_action.
+      IF es_row IS SUPPLIED.
+        READ TABLE <lt_result> INDEX 1 ASSIGNING <ls_line>.
+        IF sy-subrc = 0.
+          put_keys( EXPORTING is_entity = ls_entity is_from = <ls_line>
+                    CHANGING  cs_to     = es_row ).
+        ENDIF.
+      ENDIF.
+      RETURN.
+    ENDLOOP.
     IF lv_factory = abap_false OR es_row IS NOT SUPPLIED.
       RETURN.
     ENDIF.

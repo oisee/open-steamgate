@@ -12,6 +12,41 @@ CLASS zcl_stg_sadl_dpc DEFINITION PUBLIC INHERITING FROM /iwbep/cl_mgw_push_abs_
         iv_sadl_xml TYPE string.
   PRIVATE SECTION.
     DATA mo_def TYPE REF TO zcl_stg_sadl_def.
+* R8: the draft entities seen so far and the class serving each (or none)
+    TYPES:
+      BEGIN OF ty_draft,
+        entity TYPE string,
+        class  TYPE string,
+      END OF ty_draft.
+    DATA mt_draft TYPE HASHED TABLE OF ty_draft WITH UNIQUE KEY entity.
+* R8 (docs/rap-runtime.md): the class serving a draft-enabled entity's
+* active and draft rows (zif_stg_cds_draft_source), initial for any other
+    METHODS draft_class_of
+      IMPORTING
+        is_entity       TYPE zcl_stg_cds_registry=>ty_entity
+      RETURNING
+        VALUE(rv_class) TYPE string.
+* R8: the flag conditions of key predicates and filters (IsActiveEntity,
+* HasActiveEntity, HasDraftEntity) as select-options on the field names,
+* values 'X' or initial; the other keys / filters pass through
+    METHODS split_flags
+      IMPORTING
+        it_key_tab TYPE /iwbep/t_mgw_name_value_pair OPTIONAL
+        it_filter  TYPE /iwbep/t_mgw_select_option OPTIONAL
+      EXPORTING
+        et_key_tab TYPE /iwbep/t_mgw_name_value_pair
+        et_filter  TYPE /iwbep/t_mgw_select_option
+      CHANGING
+        ct_flags   TYPE /iwbep/t_mgw_select_option.
+    METHODS read_versions
+      IMPORTING
+        is_entity      TYPE zcl_stg_cds_registry=>ty_entity
+        iv_where       TYPE string
+        it_orderby     TYPE string_table
+        it_flags       TYPE /iwbep/t_mgw_select_option
+        iv_latest      TYPE abap_bool DEFAULT abap_false
+      RETURNING
+        VALUE(rr_data) TYPE REF TO data.
 
     METHODS entity_of
       IMPORTING
@@ -174,8 +209,83 @@ CLASS zcl_stg_sadl_dpc IMPLEMENTATION.
   METHOD source_of.
     DATA lv_class TYPE string.
 
-    lv_class = is_entity-source_class.
+    lv_class = draft_class_of( is_entity ).
+    IF lv_class IS INITIAL.
+      lv_class = is_entity-source_class.
+    ENDIF.
     CREATE OBJECT ro_source TYPE (lv_class).
+  ENDMETHOD.
+
+  METHOD draft_class_of.
+    DATA ls_draft    TYPE ty_draft.
+    DATA li_behavior TYPE REF TO zif_stg_sadl_behavior.
+
+    READ TABLE mt_draft INTO ls_draft WITH TABLE KEY entity = is_entity-name.
+    IF sy-subrc <> 0.
+      ls_draft-entity = is_entity-name.
+      li_behavior = behavior_of( is_entity ).
+      IF li_behavior IS BOUND.
+        ls_draft-class = li_behavior->draft_source( is_entity-name ).
+      ENDIF.
+      INSERT ls_draft INTO TABLE mt_draft.
+    ENDIF.
+    rv_class = ls_draft-class.
+  ENDMETHOD.
+
+  METHOD split_flags.
+    DATA ls_key    LIKE LINE OF it_key_tab.
+    DATA ls_filter LIKE LINE OF it_filter.
+    DATA ls_flag   LIKE LINE OF ct_flags.
+    DATA ls_option TYPE /iwbep/s_cod_select_option.
+    DATA lv_name   TYPE string.
+
+    CLEAR: et_key_tab, et_filter.
+    LOOP AT it_key_tab INTO ls_key.
+      lv_name = to_upper( ls_key-name ).
+      IF lv_name <> 'ISACTIVEENTITY' AND lv_name <> 'HASACTIVEENTITY' AND lv_name <> 'HASDRAFTENTITY'.
+        APPEND ls_key TO et_key_tab.
+        CONTINUE.
+      ENDIF.
+      CLEAR: ls_flag, ls_option.
+      ls_flag-property = lv_name.
+      ls_option-sign = 'I'.
+      ls_option-option = 'EQ'.
+      IF ls_key-value = abap_true OR to_lower( ls_key-value ) = 'true'.
+        ls_option-low = abap_true.
+      ENDIF.
+      APPEND ls_option TO ls_flag-select_options.
+      APPEND ls_flag TO ct_flags.
+    ENDLOOP.
+    LOOP AT it_filter INTO ls_filter.
+      lv_name = to_upper( ls_filter-property ).
+      IF lv_name <> 'ISACTIVEENTITY' AND lv_name <> 'HASACTIVEENTITY' AND lv_name <> 'HASDRAFTENTITY'.
+        APPEND ls_filter TO et_filter.
+        CONTINUE.
+      ENDIF.
+      CLEAR ls_flag.
+      ls_flag-property = lv_name.
+      LOOP AT ls_filter-select_options INTO ls_option.
+        IF ls_option-low = abap_true OR to_lower( ls_option-low ) = 'true'.
+          ls_option-low = abap_true.
+        ELSE.
+          CLEAR ls_option-low.
+        ENDIF.
+        APPEND ls_option TO ls_flag-select_options.
+      ENDLOOP.
+      APPEND ls_flag TO ct_flags.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD read_versions.
+    DATA lo_source TYPE REF TO zif_stg_cds_source.
+    DATA lo_draft  TYPE REF TO zif_stg_cds_draft_source.
+
+    lo_source = source_of( is_entity ).
+    lo_draft ?= lo_source.
+    rr_data = lo_draft->read_versions( iv_where   = iv_where
+                                       it_orderby = it_orderby
+                                       it_flags   = it_flags
+                                       iv_latest  = iv_latest ).
   ENDMETHOD.
 
   METHOD sql_literal.
@@ -484,17 +594,62 @@ CLASS zcl_stg_sadl_dpc IMPLEMENTATION.
     DATA lv_top      TYPE i.
     DATA lv_index    TYPE i.
     DATA lv_select   TYPE string.
+    DATA lt_flags   TYPE /iwbep/t_mgw_select_option.
+    DATA lt_filter  TYPE /iwbep/t_mgw_select_option.
+    DATA lt_keep    TYPE /iwbep/t_mgw_select_option.
+    DATA lt_nokeys  TYPE /iwbep/t_mgw_name_value_pair.
+    DATA ls_navpath TYPE /iwbep/s_mgw_navigation_path.
     FIELD-SYMBOLS <lt_data> TYPE STANDARD TABLE.
 
     lo_context ?= io_tech_request_context.
     ls_entity = entity_of( io_tech_request_context->get_entity_set_name( ) ).
     lo_source = source_of( ls_entity ).
 
+    lt_orderby = orderby_of( it_orderby = io_tech_request_context->get_orderby( )
+                             is_set     = lo_context->ms_set ).
+* R8: a draft-enabled entity: the flag conditions are applied to the
+* versions, the rest is SQL; through a navigation the source's version
+    IF draft_class_of( ls_entity ) IS NOT INITIAL.
+      lt_keep = lo_context->mt_filter.
+      split_flags( EXPORTING it_filter = lt_keep IMPORTING et_filter = lt_filter CHANGING ct_flags = lt_flags ).
+      READ TABLE lo_context->mt_navigation_path INTO ls_navpath INDEX 1.
+      IF sy-subrc = 0.
+        split_flags( EXPORTING it_key_tab = ls_navpath-key_tab IMPORTING et_key_tab = lt_nokeys CHANGING ct_flags = lt_flags ).
+      ENDIF.
+      lo_context->mt_filter = lt_filter.
+      lv_where = io_tech_request_context->get_osql_where_clause( ).
+      lo_context->mt_filter = lt_keep.
+      lv_where = and_where( iv_left  = lv_where
+                            iv_right = navigation_where( lo_context ) ).
+      lr_data = read_versions( is_entity = ls_entity iv_where = lv_where it_orderby = lt_orderby
+                               it_flags = lt_flags iv_latest = lo_context->mv_draft_latest ).
+      ASSIGN lr_data->* TO <lt_data>.
+      IF lo_context->mv_inlinecount = abap_true.
+        es_response_context-inlinecount = |{ lines( <lt_data> ) }|.
+        CONDENSE es_response_context-inlinecount NO-GAPS.
+      ENDIF.
+      lv_skip = io_tech_request_context->get_skip( ).
+      lv_top  = io_tech_request_context->get_top( ).
+      IF lo_context->mv_count = abap_false.
+        IF lv_skip > 0.
+          DO lv_skip TIMES.
+            DELETE <lt_data> INDEX 1.
+          ENDDO.
+        ENDIF.
+        IF lv_top > 0.
+          lv_index = lv_top + 1.
+          WHILE lines( <lt_data> ) >= lv_index.
+            DELETE <lt_data> INDEX lv_index.
+          ENDWHILE.
+        ENDIF.
+      ENDIF.
+      et_data = <lt_data>.
+      RETURN.
+    ENDIF.
+
     lv_where = io_tech_request_context->get_osql_where_clause( ).
     lv_where = and_where( iv_left  = lv_where
                           iv_right = navigation_where( lo_context ) ).
-    lt_orderby = orderby_of( it_orderby = io_tech_request_context->get_orderby( )
-                             is_set     = lo_context->ms_set ).
 
     lv_select = lo_context->mv_select.
     IF lv_select IS NOT INITIAL AND lo_context->mv_aggregate = abap_true.
@@ -554,6 +709,9 @@ CLASS zcl_stg_sadl_dpc IMPLEMENTATION.
     DATA lv_where   TYPE string.
     DATA lt_orderby TYPE string_table.
     DATA lr_data    TYPE REF TO data.
+    DATA lt_flags   TYPE /iwbep/t_mgw_select_option.
+    DATA lt_keys    TYPE /iwbep/t_mgw_name_value_pair.
+    DATA ls_navpath TYPE /iwbep/s_mgw_navigation_path.
     FIELD-SYMBOLS <lt_data> TYPE STANDARD TABLE.
     FIELD-SYMBOLS <ls_row>  TYPE any.
 
@@ -563,15 +721,30 @@ CLASS zcl_stg_sadl_dpc IMPLEMENTATION.
 
 * through a navigation the association pairs identify the target; the key
 * tab then still holds the source keys and must not be applied
-    IF lo_context->mt_navigation_path IS NOT INITIAL.
-      lv_where = navigation_where( lo_context ).
+    IF draft_class_of( ls_entity ) IS NOT INITIAL.
+* R8: the version by IsActiveEntity of the key (through a navigation, the
+* source's)
+      IF lo_context->mt_navigation_path IS NOT INITIAL.
+        READ TABLE lo_context->mt_navigation_path INTO ls_navpath INDEX 1.
+        split_flags( EXPORTING it_key_tab = ls_navpath-key_tab IMPORTING et_key_tab = lt_keys CHANGING ct_flags = lt_flags ).
+        lv_where = navigation_where( lo_context ).
+      ELSE.
+        split_flags( EXPORTING it_key_tab = lo_context->mt_key_tab IMPORTING et_key_tab = lt_keys CHANGING ct_flags = lt_flags ).
+        lv_where = key_where( it_key_tab = lt_keys
+                              is_set     = lo_context->ms_set ).
+      ENDIF.
+      lr_data = read_versions( is_entity = ls_entity iv_where = lv_where it_orderby = lt_orderby it_flags = lt_flags ).
     ELSE.
-      lv_where = key_where( it_key_tab = lo_context->mt_key_tab
-                            is_set     = lo_context->ms_set ).
-    ENDIF.
+      IF lo_context->mt_navigation_path IS NOT INITIAL.
+        lv_where = navigation_where( lo_context ).
+      ELSE.
+        lv_where = key_where( it_key_tab = lo_context->mt_key_tab
+                              is_set     = lo_context->ms_set ).
+      ENDIF.
 
-    lr_data = lo_source->read( iv_where   = lv_where
-                               it_orderby = lt_orderby ).
+      lr_data = lo_source->read( iv_where   = lv_where
+                                 it_orderby = lt_orderby ).
+    ENDIF.
     ASSIGN lr_data->* TO <lt_data>.
     calculate_virtual( EXPORTING is_entity = ls_entity
                        CHANGING  ct_data   = <lt_data> ).
@@ -969,6 +1142,8 @@ CLASS zcl_stg_sadl_dpc IMPLEMENTATION.
     DATA ls_key     TYPE /iwbep/s_mgw_name_value_pair.
     DATA lt_orderby TYPE string_table.
     DATA lr_data    TYPE REF TO data.
+    DATA lt_flags   TYPE /iwbep/t_mgw_select_option.
+    DATA lt_flagkey TYPE /iwbep/t_mgw_name_value_pair.
     FIELD-SYMBOLS <lv_value> TYPE any.
     FIELD-SYMBOLS <lt_data>  TYPE STANDARD TABLE.
     FIELD-SYMBOLS <ls_found> TYPE any.
@@ -981,9 +1156,21 @@ CLASS zcl_stg_sadl_dpc IMPLEMENTATION.
         APPEND ls_key TO lt_key.
       ENDIF.
     ENDLOOP.
-    lo_source = source_of( is_entity ).
-    lr_data = lo_source->read( iv_where   = key_where( lt_key )
-                               it_orderby = lt_orderby ).
+    IF draft_class_of( is_entity ) IS NOT INITIAL.
+* R8: the version the row names
+      ASSIGN COMPONENT 'ISACTIVEENTITY' OF STRUCTURE cs_row TO <lv_value>.
+      IF sy-subrc = 0.
+        ls_key-name  = 'ISACTIVEENTITY'.
+        ls_key-value = <lv_value>.
+        APPEND ls_key TO lt_flagkey.
+        split_flags( EXPORTING it_key_tab = lt_flagkey CHANGING ct_flags = lt_flags ).
+      ENDIF.
+      lr_data = read_versions( is_entity = is_entity iv_where = key_where( lt_key ) it_orderby = lt_orderby it_flags = lt_flags ).
+    ELSE.
+      lo_source = source_of( is_entity ).
+      lr_data = lo_source->read( iv_where   = key_where( lt_key )
+                                 it_orderby = lt_orderby ).
+    ENDIF.
     ASSIGN lr_data->* TO <lt_data>.
     calculate_virtual( EXPORTING is_entity = is_entity
                        CHANGING  ct_data   = <lt_data> ).

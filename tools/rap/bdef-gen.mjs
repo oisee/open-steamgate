@@ -62,7 +62,9 @@ export function treeOf(model, entity, view, projection = false) {
   const cds = view.associations ?? [];
   const parent = cds.find(a => a.composition === "PARENT" && names.has(upper(a.target)));
   const assocs = entity.associations.map(a => {
-    if (a.withDraft) throw new Error(`${entity.entity}\\${a.name}: association { with draft; } is outside R5 (draft has a track of its own)`);
+    // R8: `with draft` on an association reaches the target's draft from a
+    // draft source; it belongs to a draft-enabled business object only
+    if (a.withDraft && !model.withDraft) throw new Error(`${entity.entity}\\${a.name}: association { with draft; } in a behavior definition without with draft`);
     if (a.operations.some(o => o.kind !== "create")) throw new Error(`${entity.entity}\\${a.name}: link / unlink actions are outside R5`);
     if (projection !== !!a.use) throw new Error(`${entity.entity}\\${a.name}: ${projection ? "a projection uses an association (use association)" : "use association belongs to a projection"}`);
     const c = cds.find(x => upper(x.alias) === upper(a.name));
@@ -163,11 +165,21 @@ export function projectedBehavior(planned) {
 
 // R6: the action shapes that run -- instance actions, internal, factory and
 // determine actions; anything else is refused by name
-function checkAction(entity, action, projection) {
+// R8: the draft actions a draft-enabled root declares (docs/rap-runtime.md, R8)
+export const DRAFT_ACTIONS = ["EDIT", "ACTIVATE", "DISCARD", "RESUME"];
+function checkAction(entity, action, projection, draft = false, root = false) {
   const where = `${entity.entity}~${action.name}`;
   if (action.use && !projection) throw new Error(`${where}: use action outside a projection`);
   const mods = action.modifiers ?? [];
-  if (mods.includes("draft")) throw new Error(`${where}: draft ${action.determine ? "determine " : ""}actions are outside R6 (draft)`);
+  if (mods.includes("draft")) {
+    if (!draft) throw new Error(`${where}: a draft ${action.determine ? "determine " : ""}action in a behavior definition without with draft`);
+    if (!root) throw new Error(`${where}: draft actions belong to the root entity`);
+    if (action.determine ? upper(action.name) !== "PREPARE" : !DRAFT_ACTIONS.includes(upper(action.name)))
+      throw new Error(`${where}: draft ${action.determine ? "determine action other than Prepare" : "action other than Edit, Activate, Discard, Resume"} is outside R8`);
+    if ((action.options ?? []).length) throw new Error(`${where}: draft action options (${action.options.map(o => o.value ? `${o.name} : ${o.value}` : o.name).join(", ")}) are outside R8`);
+    if (action.additionalImplementation) throw new Error(`${where}: draft action with additional implementation is outside R8`);
+    if (action.parameter || mods.length > 1) throw new Error(`${where}: a draft action with a parameter or other modifiers is outside R8`);
+  }
   if (mods.includes("static")) throw new Error(`${where}: static actions are outside R6`);
   if (mods.filter(m => m === "internal" || m === "factory").length > 1) throw new Error(`${where}: an internal factory action is outside R6`);
   // a flat parameter and a result type get their derived types here; the
@@ -224,6 +236,41 @@ function associationTypes(plan, e, bind) {
     e.assocTypes = [...(e.assocTypes ?? []), {name: a.name, prefix: x, target: t}];
   }
   return out;
+}
+
+// R8: what a draft-enabled behavior definition must have and what this
+// runtime runs of it (docs/rap-runtime.md, R8)
+export const DRAFT_ADMIN_COLUMNS = ["DRAFTENTITYCREATIONDATETIME", "DRAFTENTITYLASTCHANGEDATETIME", "DRAFTADMINISTRATIVEDATAUUID", "DRAFTENTITYOPERATIONCODE", "HASACTIVEENTITY"];
+// The derived types need none of it (%is_draft is all they add), so what the
+// runtime needs is recorded on the plan and refused by rap-runtime-gen.mjs
+function checkDraft(model, entity, planned, fields, reg, projection) {
+  if (projection) throw new Error(`${entity.entity}: a projection of a draft business object (use draft) is outside R8`);
+  try {
+    draftContract(model, entity, planned, fields, reg);
+  } catch (e) {
+    planned.draftRefusal = e.message;
+  }
+}
+function draftContract(model, entity, planned, fields, reg) {
+  if (model.collaborativeDraft) throw new Error(`${entity.entity}: with collaborative draft is outside R8`);
+  if (!entity.draftTable) throw new Error(`${entity.entity}: with draft needs a draft table`);
+  if (entity.draftQuery) throw new Error(`${entity.entity}: draft table ... query is outside R8`);
+  const table = reg.getObject("TABL", entity.draftTable);
+  if (!table) throw new Error(`${entity.entity}: missing draft table ${entity.draftTable}`);
+  const columns = new Set((table.parseType(reg)?.getComponents?.() ?? []).map(c => upper(c.name)));
+  // the draft table has one column per CDS element, named as the element
+  for (const f of fields) if (!columns.has(upper(f.name))) throw new Error(`${entity.entity}: draft table ${entity.draftTable} has no column ${upper(f.name)} (a draft table names its columns after the CDS elements)`);
+  for (const c of DRAFT_ADMIN_COLUMNS) if (!columns.has(c)) throw new Error(`${entity.entity}: draft table ${entity.draftTable} has no admin column ${c}`);
+  const root = !planned.tree.parent;
+  if (entity.totalEtag) {
+    if (!root) throw new Error(`${entity.entity}: total etag belongs to the root`);
+    if (!fields.some(f => upper(f.name) === upper(entity.totalEtag))) throw new Error(`${entity.entity}: total etag ${entity.totalEtag} is no element of the entity`);
+  }
+  const draftActions = [...entity.actions, ...entity.determineActions].filter(a => (a.modifiers ?? []).includes("draft"));
+  if (root) {
+    for (const name of ["Edit", "Activate", "Discard", "Prepare"]) if (!draftActions.some(a => upper(a.name) === upper(name))) throw new Error(`${entity.entity}: a draft root declares draft action ${name}`);
+  }
+  for (const a of entity.associations) if (!a.use && !a.withDraft) throw new Error(`${entity.entity}\\${a.name}: an association of a draft business object is declared { with draft; }`);
 }
 
 /** Input files are already selected by content layer, never test/ or libraries' BDEFs. */
@@ -299,6 +346,11 @@ export function generate(files, dependencies = []) {
       // joins the actions (types, %action, the service) marked determine
       for (const d of entity.determineActions) entity.actions.push({...d, determine: true});
       entity.determineActions = [];
+      // R8: Edit, Activate and Resume answer the instance they lead to (the
+      // draft, the active one, the draft), so they get a $self result
+      // (unmeasured: a system's EML result of a draft action)
+      for (const a of entity.actions) if ((a.modifiers ?? []).includes("draft") && !a.determine && !a.result && upper(a.name) !== "DISCARD")
+        Object.assign(a, {result: {options: [], cardinality: "1", deep: false, type: "$self"}, cardinality: a.cardinality});
       const p = `e${index}`;
       const fields = fieldsOf(entity.entity);
       const view = views.get(upper(entity.entity));
@@ -306,6 +358,7 @@ export function generate(files, dependencies = []) {
       plan.entities.push(planned);
       planned.tree = treeOf(model, entity, view, projection);
       if (projection) projectionOf(plan, planned, plans);
+      if (model.withDraft) checkDraft(model, entity, planned, fields, reg, projection);
       if (entity.persistentTable && !reg.getObject("TABL", entity.persistentTable)) throw new Error(`${entity.entity}: missing persistent table ${entity.persistentTable}`);
       for (const mapping of entity.mappings) {
         const table = reg.getObject("TABL", mapping.table);
@@ -415,7 +468,7 @@ export function generate(files, dependencies = []) {
         poolBind("INSTANCE FEATURES RESULT", ref, `${iface}=>t_${p}_features_result`);
       }
       for (const [a, action] of entity.actions.entries()) {
-        checkAction(entity, action, projection);
+        checkAction(entity, action, projection, model.withDraft, !planned.tree.parent);
         const param = action.parameter ? fieldsOf(action.parameter.name) : undefined;
         if (param) body += struct(`${p}_a${a}_param`, pairs(param));
         for (const kind of ["IMPORT", "RESULT"]) {
@@ -486,7 +539,11 @@ export function generate(files, dependencies = []) {
     const assocs = owner.e.tree.assocs;
     if (owner.p.projection) return {view, fields, assocs, behavior: {...projectedBehavior(owner.e), create: projectedBehavior(owner.e).create || created}};
     const has = op => entity.operations.some(o => o.kind === op && !o.use);
-    return {view, fields, assocs, behavior: {create: has("create") || created, update: has("update"), delete: has("delete"),
+    // R8: a draft-enabled entity is served from its union class (active
+    // and draft rows); the root gets the draft actions and DraftRoot
+    const draft = owner.p.model.withDraft ? {root: !owner.e.tree.parent,
+      union: `${owner.p.iface.replace(/^zif_/, "zcl_")}_d${owner.p.entities.indexOf(owner.e)}`} : undefined;
+    return {view, fields, assocs, draft, behavior: {create: has("create") || created, update: has("update"), delete: has("delete"),
       // R6: an internal action is the BO's own, never the service's
       control: fieldControl(entity, fields), actions: entity.actions.filter(a => !a.modifiers.includes("internal")).map(a => a.name),
       // R4: the `etag master` element is the entity type's ETag

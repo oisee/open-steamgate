@@ -37,6 +37,8 @@ INTERFACE zif_osd_rap_bo PUBLIC.
 * ( always ). INTERNAL: an internal action, executed only by the BO's own
 * handlers (IN LOCAL MODE). FACTORY: a factory action, which answers the
 * new instances in MAPPED under the %cid of each import row.
+* R8: KIND E is a draft action (Edit, Activate, Discard, Resume), the
+* framework's: no method; Prepare is a determine action (X).
   TYPES:
     BEGIN OF ty_member,
       kind   TYPE ty_flag,
@@ -98,6 +100,10 @@ INTERFACE zif_osd_rap_bo PUBLIC.
 * TABLE is the `mapping for` table, read only), initial for the managed
 * write alone. FULL_DATA: `with full data`, update rows of the request carry
 * every field. POOL: the entity's behavior pool (`implementation in class`).
+* R8: DRAFT_TABLE the `draft table` of a draft-enabled BO (its columns are
+* the CDS elements), DRAFT_SOURCE its generated table class, DRAFT_VIEW the
+* CDS view's source class, UNION the generated class serving active and
+* draft rows (zif_stg_cds_draft_source), TOTAL_ETAG the root's `total etag`.
   TYPES:
     BEGIN OF ty_entity,
       name      TYPE string,
@@ -122,6 +128,11 @@ INTERFACE zif_osd_rap_bo PUBLIC.
       save         TYPE ty_flag,
       full_data    TYPE abap_bool,
       pool         TYPE string,
+      draft_table  TYPE string,
+      draft_source TYPE string,
+      draft_view   TYPE string,
+      total_etag   TYPE string,
+      union        TYPE string,
       fields    TYPE tt_field,
       callables TYPE tt_callable,
     END OF ty_entity,
@@ -139,6 +150,7 @@ INTERFACE zif_osd_rap_bo PUBLIC.
   TYPES:
     BEGIN OF ty_model,
       bdef     TYPE string,
+      draft    TYPE abap_bool,
       pool     TYPE string,
       saver    TYPE string,
       savers   TYPE tt_saver,

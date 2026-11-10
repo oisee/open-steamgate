@@ -36,6 +36,13 @@ CLASS zcl_osd_rap_runtime DEFINITION PUBLIC CREATE PRIVATE.
 *                   master / dependent) and a child write stamps the
 *                   root's total change fields
 *
+*   draft (R8)      with draft: %is_draft is part of an instance's
+*                   identity; a draft is read from and saved into the
+*                   draft table, skips determinations on save and
+*                   validations, and the draft actions Edit, Activate,
+*                   Discard and Resume are run here; Prepare is a determine
+*                   action over the draft (docs/rap-runtime.md, R8)
+*
 * The rows of the buffer are the BDEF's derived READ RESULT rows, held as
 * data references and addressed by component name; the delta (create,
 * update, delete, collapsed) is ZCL_OSD_LUW.
@@ -199,6 +206,8 @@ CLASS zcl_osd_rap_runtime DEFINITION PUBLIC CREATE PRIVATE.
         req_created TYPE abap_bool,
         req_updated TYPE abap_bool,
         req_fields  TYPE string_table,
+        admin_uuid  TYPE x LENGTH 16,
+        has_active  TYPE abap_bool,
       END OF ty_inst,
       tt_inst TYPE STANDARD TABLE OF ty_inst WITH DEFAULT KEY.
 
@@ -251,6 +260,98 @@ CLASS zcl_osd_rap_runtime DEFINITION PUBLIC CREATE PRIVATE.
         is_row        TYPE any
       RETURNING
         VALUE(rv_key) TYPE string.
+
+* R8: whether a row names the draft (%is_draft on) of a draft-enabled BO
+    METHODS is_draft
+      IMPORTING
+        is_row         TYPE any
+      RETURNING
+        VALUE(rv_on)   TYPE abap_bool.
+
+    CLASS-METHODS set_draft
+      IMPORTING
+        iv_on  TYPE abap_bool
+      CHANGING
+        cs_row TYPE any.
+
+* R8: whether the root instance IS_ROOT names (its keys) has a draft: in
+* the buffer (and not deleted there), else in the draft table
+    METHODS draft_exists
+      IMPORTING
+        is_root          TYPE zif_osd_rap_bo=>ty_entity
+        is_keys          TYPE any
+      RETURNING
+        VALUE(rv_exists) TYPE abap_bool.
+
+* R8: the draft actions (KIND E) on the instance at IV_INDEX
+    METHODS draft_action
+      IMPORTING
+        is_entity   TYPE zif_osd_rap_bo=>ty_entity
+        iv_action   TYPE string
+        iv_index    TYPE i
+        is_key      TYPE any
+      CHANGING
+        ct_result   TYPE STANDARD TABLE
+        cs_failed   TYPE any
+        cs_reported TYPE any
+      RAISING
+        zcx_osd_rap.
+
+* R8: the instance at IV_INDEX and its composition tree as drafts (Edit)
+    METHODS copy_to_draft
+      IMPORTING
+        is_entity      TYPE zif_osd_rap_bo=>ty_entity
+        iv_index       TYPE i
+        iv_uuid        TYPE xsequence
+      RETURNING
+        VALUE(rv_index) TYPE i
+      RAISING
+        zcx_osd_rap.
+
+* R8: the draft tree below IV_INDEX, as entity|index pairs
+    METHODS draft_tree
+      IMPORTING
+        is_entity TYPE zif_osd_rap_bo=>ty_entity
+        iv_index  TYPE i
+      CHANGING
+        ct_tree   TYPE string_table
+      RAISING
+        zcx_osd_rap.
+
+* R8: the active instance a draft row becomes on Activate; its index
+    METHODS activate_one
+      IMPORTING
+        is_entity       TYPE zif_osd_rap_bo=>ty_entity
+        is_draft        TYPE any
+      CHANGING
+        cs_failed       TYPE any
+        cs_reported     TYPE any
+      RETURNING
+        VALUE(rv_index) TYPE i
+      RAISING
+        zcx_osd_rap.
+
+* R8: the draft's admin UUID (one per draft of a root, shared by its tree)
+    METHODS admin_uuid
+      IMPORTING
+        is_entity     TYPE zif_osd_rap_bo=>ty_entity
+        iv_index      TYPE i
+      RETURNING
+        VALUE(rv_uuid) TYPE zosd_draft_adm-draftuuid
+      RAISING
+        zcx_osd_rap.
+
+    METHODS draft_admin
+      IMPORTING
+        is_entity    TYPE zif_osd_rap_bo=>ty_entity
+        iv_uuid      TYPE xsequence
+        iv_operation TYPE ty_operation.
+
+    METHODS result_row
+      IMPORTING
+        is_row    TYPE any
+      CHANGING
+        ct_result TYPE STANDARD TABLE.
 
     METHODS copy_keys
       IMPORTING
@@ -724,6 +825,34 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
       lv_text = text_of( is_row = is_row iv_component = ls_field-name ).
       rv_key = rv_key && |{ strlen( lv_text ) }:{ lv_text }|.
     ENDLOOP.
+* R8: the draft and the active instance of one key are two instances; a
+* rendering of the key tuple starts with a digit, so the prefix is unique
+    IF is_draft( is_row ) = abap_true.
+      rv_key = |D\|{ rv_key }|.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD is_draft.
+    FIELD-SYMBOLS <lv_flag> TYPE any.
+    IF ms_model-draft = abap_false.
+      RETURN.
+    ENDIF.
+    ASSIGN COMPONENT '%IS_DRAFT' OF STRUCTURE is_row TO <lv_flag>.
+    IF sy-subrc = 0 AND <lv_flag> = if_abap_behv=>mk-on.
+      rv_on = abap_true.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD set_draft.
+    FIELD-SYMBOLS <lv_flag> TYPE any.
+    ASSIGN COMPONENT '%IS_DRAFT' OF STRUCTURE cs_row TO <lv_flag>.
+    IF sy-subrc = 0.
+      IF iv_on = abap_true.
+        <lv_flag> = if_abap_behv=>mk-on.
+      ELSE.
+        <lv_flag> = if_abap_behv=>mk-off.
+      ENDIF.
+    ENDIF.
   ENDMETHOD.
 
   METHOD text_of.
@@ -746,6 +875,14 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
       CHECK sy-subrc = 0.
       <lv_to> = <lv_from>.
     ENDLOOP.
+* R8: %is_draft is part of %tky
+    ASSIGN COMPONENT '%IS_DRAFT' OF STRUCTURE is_from TO <lv_from>.
+    IF sy-subrc = 0.
+      ASSIGN COMPONENT '%IS_DRAFT' OF STRUCTURE cs_to TO <lv_to>.
+      IF sy-subrc = 0.
+        <lv_to> = <lv_from>.
+      ENDIF.
+    ENDIF.
   ENDMETHOD.
 
   METHOD control_on.
@@ -830,16 +967,33 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
     FIELD-SYMBOLS <ls_data> TYPE any.
     FIELD-SYMBOLS <ls_line> TYPE any.
 
+    DATA lv_draft  TYPE abap_bool.
+    DATA lv_column TYPE string.
+
+* R8: a draft is a row of the draft table, its columns the CDS elements
+    lv_draft = is_draft( is_keys ).
     LOOP AT is_entity-fields INTO ls_field WHERE key = abap_true.
       lv_value = text_of( is_row = is_keys iv_component = ls_field-name ).
       REPLACE ALL OCCURRENCES OF `'` IN lv_value WITH `''`.
       IF lv_where IS NOT INITIAL.
         lv_where = lv_where && ` AND `.
       ENDIF.
-      lv_where = lv_where && ls_field-column && ` = '` && lv_value && `'`.
+      lv_column = ls_field-column.
+      IF lv_draft = abap_true.
+        lv_column = ls_field-name.
+      ENDIF.
+      lv_where = lv_where && lv_column && ` = '` && lv_value && `'`.
     ENDLOOP.
 
-    li_source = source_of( is_entity ).
+    IF lv_draft = abap_true.
+      TRY.
+          CREATE OBJECT li_source TYPE (is_entity-draft_source).
+        CATCH cx_sy_create_object_error.
+          RAISE EXCEPTION TYPE zcx_osd_rap EXPORTING iv_reason = |no table class { is_entity-draft_source } for { is_entity-draft_table }|.
+      ENDTRY.
+    ELSE.
+      li_source = source_of( is_entity ).
+    ENDIF.
     lr_data = li_source->read( iv_where = lv_where it_orderby = lt_order ).
     ASSIGN lr_data->* TO <lt_data>.
     READ TABLE <lt_data> INDEX 1 ASSIGNING <ls_data>.
@@ -869,12 +1023,17 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
     rr_row = new_row( is_entity ).
     ASSIGN rr_row->* TO <ls_row>.
     LOOP AT is_entity-fields INTO ls_field.
-      ASSIGN COMPONENT ls_field-column OF STRUCTURE <ls_data> TO <lv_from>.
+      IF is_draft( is_keys ) = abap_true.
+        ASSIGN COMPONENT ls_field-name OF STRUCTURE <ls_data> TO <lv_from>.
+      ELSE.
+        ASSIGN COMPONENT ls_field-column OF STRUCTURE <ls_data> TO <lv_from>.
+      ENDIF.
       CHECK sy-subrc = 0.
       ASSIGN COMPONENT ls_field-name OF STRUCTURE <ls_row> TO <lv_to>.
       CHECK sy-subrc = 0.
       <lv_to> = <lv_from>.
     ENDLOOP.
+    set_draft( EXPORTING iv_on = is_draft( is_keys ) CHANGING cs_row = <ls_row> ).
   ENDMETHOD.
 
   METHOD fail.
@@ -979,8 +1138,10 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
         RETURN.
       ENDIF.
 
-      IF ls_field-mandatory = 'X'
-          OR ( ls_field-mandatory = 'C' AND iv_operation = co_operation-create ).
+* R8: a draft may be incomplete; Activate checks the active instance
+      IF ( ls_field-mandatory = 'X'
+          OR ( ls_field-mandatory = 'C' AND iv_operation = co_operation-create ) )
+          AND is_draft( is_input ) = abap_false.
         IF iv_operation = co_operation-update AND lv_on = abap_false.
           CONTINUE.
         ENDIF.
@@ -1070,6 +1231,7 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
       ENDIF.
     ENDLOOP.
 
+    set_draft( EXPORTING iv_on = is_draft( is_input ) CHANGING cs_row = <ls_row> ).
     ls_inst-entity = is_entity-name.
     ls_inst-key    = key_of( is_entity = is_entity is_row = <ls_row> ).
     lv_index = index_of( iv_entity = is_entity-name iv_key = ls_inst-key ).
@@ -1098,6 +1260,14 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
     ls_inst-state       = co_operation-create.
     ls_inst-created     = abap_true.
     ls_inst-req_created = abap_true.
+* R8: a new draft of a root is a new draft (admin data of its own)
+    IF is_draft( <ls_row> ) = abap_true AND is_entity-parent IS INITIAL.
+      TRY.
+          ls_inst-admin_uuid = cl_system_uuid=>create_uuid_x16_static( ).
+        CATCH cx_uuid_error.
+          RAISE EXCEPTION TYPE zcx_osd_rap EXPORTING iv_reason = |no UUID for the draft of { is_entity-name }|.
+      ENDTRY.
+    ENDIF.
     IF lv_index > 0.
       MODIFY mt_inst INDEX lv_index FROM ls_inst.
     ELSE.
@@ -1267,9 +1437,15 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
     FIELD-SYMBOLS <lv_from> TYPE any.
     FIELD-SYMBOLS <lv_to>   TYPE any.
 
+    DATA lv_draft  TYPE abap_bool.
+    DATA lv_column TYPE string.
+
     ls_target = entity_of( is_assoc-target ).
     READ TABLE mt_inst INDEX iv_index INTO ls_src.
     ASSIGN ls_src-row->* TO <ls_src>.
+* R8: a draft reaches the drafts below it (association { with draft; }),
+* an active instance the active ones
+    lv_draft = is_draft( <ls_src> ).
 
     LOOP AT is_assoc-pairs INTO ls_pair.
       READ TABLE ls_target-fields INTO ls_field WITH KEY name = ls_pair-target.
@@ -1281,23 +1457,40 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
       IF lv_where IS NOT INITIAL.
         lv_where = lv_where && ` AND `.
       ENDIF.
-      lv_where = lv_where && ls_field-column && ` = '` && lv_value && `'`.
+      lv_column = ls_field-column.
+      IF lv_draft = abap_true.
+        lv_column = ls_field-name.
+      ENDIF.
+      lv_where = lv_where && lv_column && ` = '` && lv_value && `'`.
     ENDLOOP.
 * an instance created in this transaction has nothing saved below it
     IF ls_src-created = abap_false.
-      li_source = source_of( ls_target ).
+      IF lv_draft = abap_true.
+        TRY.
+            CREATE OBJECT li_source TYPE (ls_target-draft_source).
+          CATCH cx_sy_create_object_error.
+            RAISE EXCEPTION TYPE zcx_osd_rap EXPORTING iv_reason = |no table class { ls_target-draft_source }|.
+        ENDTRY.
+      ELSE.
+        li_source = source_of( ls_target ).
+      ENDIF.
       lr_data = li_source->read( iv_where = lv_where it_orderby = lt_order ).
       ASSIGN lr_data->* TO <lt_data>.
       LOOP AT <lt_data> ASSIGNING <ls_data>.
         lr_row = new_row( ls_target ).
         ASSIGN lr_row->* TO <ls_row>.
         LOOP AT ls_target-fields INTO ls_field.
-          ASSIGN COMPONENT ls_field-column OF STRUCTURE <ls_data> TO <lv_from>.
+          IF lv_draft = abap_true.
+            ASSIGN COMPONENT ls_field-name OF STRUCTURE <ls_data> TO <lv_from>.
+          ELSE.
+            ASSIGN COMPONENT ls_field-column OF STRUCTURE <ls_data> TO <lv_from>.
+          ENDIF.
           CHECK sy-subrc = 0.
           ASSIGN COMPONENT ls_field-name OF STRUCTURE <ls_row> TO <lv_to>.
           CHECK sy-subrc = 0.
           <lv_to> = <lv_from>.
         ENDLOOP.
+        set_draft( EXPORTING iv_on = lv_draft CHANGING cs_row = <ls_row> ).
         lv_key = key_of( is_entity = ls_target is_row = <ls_row> ).
         IF index_of( iv_entity = ls_target-name iv_key = lv_key ) = 0.
           CLEAR ls_inst.
@@ -1315,6 +1508,9 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
         CONTINUE.
       ENDIF.
       ASSIGN ls_inst-row->* TO <ls_row>.
+      IF is_draft( <ls_row> ) <> lv_draft.
+        CONTINUE.
+      ENDIF.
       lv_match = abap_true.
       LOOP AT is_assoc-pairs INTO ls_pair.
         IF text_of( is_row = <ls_row> iv_component = ls_pair-target ) <> text_of( is_row = <ls_src> iv_component = ls_pair-source ).
@@ -1361,6 +1557,7 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
       CHECK sy-subrc = 0.
       <lv_to> = <lv_from>.
     ENDLOOP.
+    set_draft( EXPORTING iv_on = is_draft( <ls_row> ) CHANGING cs_row = <ls_keys> ).
     ev_index = resolve( is_entity = es_parent is_input = <ls_keys> ).
   ENDMETHOD.
 
@@ -1400,6 +1597,19 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
       RETURN.
     ENDIF.
     READ TABLE mt_inst INDEX lv_index INTO ls_inst.
+* R8: while an active instance has a draft, the draft holds it (the
+* exclusive lock of Edit, kept here by the draft's existence)
+    IF ms_model-draft = abap_true.
+      ASSIGN ls_inst-row->* TO <ls_row>.
+      IF is_draft( <ls_row> ) = abap_false AND draft_exists( is_root = ls_root is_keys = <ls_row> ) = abap_true.
+        fail( EXPORTING is_entity = is_entity is_input = is_input
+                        iv_cause = if_abap_behv=>cause-locked
+                        iv_text = |{ ls_root-alias } { key_text( is_entity = ls_root is_row = <ls_row> ) } has a draft: it is edited there|
+              CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
+        ev_ok = abap_false.
+        RETURN.
+      ENDIF.
+    ENDIF.
     IF ls_inst-created = abap_true.
       RETURN.
     ENDIF.
@@ -1461,6 +1671,11 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
     ENDIF.
     root_of( EXPORTING is_entity = is_entity iv_index = iv_index IMPORTING es_root = ls_root ev_index = lv_index ).
     IF lv_index = 0.
+      RETURN.
+    ENDIF.
+* R8: the total stamp moves with the active instance only (total etag)
+    READ TABLE mt_inst INDEX lv_index ASSIGNING <ls_inst>.
+    IF ms_model-draft = abap_true AND <ls_inst>-key CP 'D|*'.
       RETURN.
     ENDIF.
     READ TABLE ls_root-fields TRANSPORTING NO FIELDS WITH KEY admin = 'CHANGED_AT'.
@@ -1576,6 +1791,8 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
           CHECK sy-subrc = 0.
           <lv_to> = <lv_from>.
         ENDLOOP.
+* R8: a child of a draft is a draft (association { create; with draft; })
+        set_draft( EXPORTING iv_on = is_draft( <ls_parent> ) CHANGING cs_row = <ls_new> ).
       ENDLOOP.
     ENDLOOP.
     LOOP AT lt_drop INTO lv_row.
@@ -1901,7 +2118,7 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
 
     ls_entity = entity_of( iv_entity ).
     lv_name = to_upper( iv_action ).
-    LOOP AT ls_entity-callables INTO ls_callable WHERE ( kind = 'A' OR kind = 'X' ) AND name = lv_name.
+    LOOP AT ls_entity-callables INTO ls_callable WHERE ( kind = 'A' OR kind = 'X' OR kind = 'E' ) AND name = lv_name.
       lv_found = abap_true.
       EXIT.
     ENDLOOP.
@@ -1944,6 +2161,12 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
                         iv_cause = if_abap_behv=>cause-not_found
                         iv_text = |{ ls_entity-alias } not found|
               CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
+        CONTINUE.
+      ENDIF.
+* R8: Edit, Activate, Discard, Resume are the framework's
+      IF ls_callable-kind = 'E'.
+        draft_action( EXPORTING is_entity = ls_entity iv_action = lv_name iv_index = lv_index is_key = <ls_key>
+                      CHANGING ct_result = ct_result cs_failed = cs_failed cs_reported = cs_reported ).
         CONTINUE.
       ENDIF.
       IF ls_callable-features = abap_true
@@ -2028,7 +2251,10 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
           IF sy-subrc <> 0.
             CONTINUE.
           ENDIF.
-          IF ls_member-always = abap_false AND triggered( is_callable = ls_member_c is_inst = ls_inst ) = abap_false.
+* R8: Prepare checks a draft whole (unmeasured: a system tracks the
+* draft's changed fields and may run fewer)
+          IF ls_member-always = abap_false AND NOT ls_inst-key CP 'D|*'
+              AND triggered( is_callable = ls_member_c is_inst = ls_inst ) = abap_false.
             CONTINUE.
           ENDIF.
           ASSIGN ls_inst-row->* TO <ls_row>.
@@ -2144,6 +2370,10 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
           lr_rows = mo_bo->new_rows( ls_entity-name ).
           ASSIGN lr_rows->* TO <lt_rows>.
           LOOP AT mt_inst INTO ls_inst WHERE entity = ls_entity-name.
+* R8: determinations on save run when a draft is activated, not on it
+            IF iv_on = 'S' AND ls_inst-key CP 'D|*'.
+              CONTINUE.
+            ENDIF.
             IF triggered( is_callable = ls_callable is_inst = ls_inst ) = abap_false
                 OR done( |{ iv_on } { ls_callable-name } { ls_inst-key }| ) = abap_true.
               CONTINUE.
@@ -2177,6 +2407,10 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
         lr_rows = mo_bo->new_rows( ls_entity-name ).
         ASSIGN lr_rows->* TO <lt_rows>.
         LOOP AT mt_inst INTO ls_inst WHERE entity = ls_entity-name.
+* R8: a draft is validated on Prepare and when it is activated
+          IF ls_inst-key CP 'D|*'.
+            CONTINUE.
+          ENDIF.
           IF triggered( is_callable = ls_callable is_inst = ls_inst ) = abap_true.
             ASSIGN ls_inst-row->* TO <ls_row>.
             APPEND <ls_row> TO <lt_rows>.
@@ -2431,6 +2665,10 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
       ENDIF.
 * R5: a change below the root moves the root's total stamp only
       IF iv_total = abap_true AND ls_field-admin <> 'CHANGED_AT' AND ls_field-admin <> 'CHANGED_BY'.
+        CONTINUE.
+      ENDIF.
+* R8: a change of a draft leaves the total stamp (Activate compares it)
+      IF ( ls_field-admin = 'CHANGED_AT' OR ls_field-admin = 'CHANGED_BY' ) AND is_draft( <ls_row> ) = abap_true.
         CONTINUE.
       ENDIF.
       ASSIGN COMPONENT ls_field-name OF STRUCTURE <ls_row> TO <lv_value>.
@@ -2737,9 +2975,78 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
     FIELD-SYMBOLS <lv_from> TYPE any.
     FIELD-SYMBOLS <lv_to>   TYPE any.
 
+    DATA lv_index  TYPE i.
+    DATA lv_now    TYPE timestampl.
+    DATA ls_inst   TYPE ty_inst.
+    DATA lv_uuid   TYPE zosd_draft_adm-draftuuid.
+
     lt_delta = mi_luw->delta( ).
     LOOP AT lt_delta INTO ls_change.
       ls_entity = entity_of( ls_change-entity ).
+* R8: a draft goes into the draft table, each CDS element into the column
+* of its name, with the draft's admin columns, and its admin data along
+      IF ls_change-key CP 'D|*'.
+        ASSIGN ls_change-row->* TO <ls_row>.
+        READ TABLE mt_inst WITH KEY entity = ls_change-entity key = ls_change-key TRANSPORTING NO FIELDS.
+        lv_index = sy-tabix.
+        READ TABLE mt_inst INDEX lv_index INTO ls_inst.
+        TRY.
+            CREATE OBJECT li_source TYPE (ls_entity-draft_source).
+          CATCH cx_sy_create_object_error.
+            RAISE EXCEPTION TYPE zcx_osd_rap EXPORTING iv_reason = |no table class { ls_entity-draft_source }|.
+        ENDTRY.
+        CLEAR lr_line.
+        IF ls_change-operation <> co_operation-create.
+          lr_line = table_row( is_entity = ls_entity is_keys = <ls_row> ).
+        ENDIF.
+        IF lr_line IS INITIAL.
+          lr_line = li_source->create_line( ).
+        ENDIF.
+        ASSIGN lr_line->* TO <ls_line>.
+        LOOP AT ls_entity-fields INTO ls_field.
+          ASSIGN COMPONENT ls_field-name OF STRUCTURE <ls_row> TO <lv_from>.
+          CHECK sy-subrc = 0.
+          ASSIGN COMPONENT ls_field-name OF STRUCTURE <ls_line> TO <lv_to>.
+          CHECK sy-subrc = 0.
+          <lv_to> = <lv_from>.
+        ENDLOOP.
+* the root's draft names the admin row, read while its row is still there
+        CLEAR lv_uuid.
+        IF ls_entity-parent IS INITIAL OR ls_change-operation <> co_operation-delete.
+          lv_uuid = admin_uuid( is_entity = ls_entity iv_index = lv_index ).
+        ENDIF.
+        GET TIME STAMP FIELD lv_now.
+        IF ls_change-operation = co_operation-create.
+          ASSIGN COMPONENT 'DRAFTENTITYCREATIONDATETIME' OF STRUCTURE <ls_line> TO <lv_to>.
+          <lv_to> = lv_now.
+          ASSIGN COMPONENT 'HASACTIVEENTITY' OF STRUCTURE <ls_line> TO <lv_to>.
+          <lv_to> = ls_inst-has_active.
+          ASSIGN COMPONENT 'DRAFTENTITYOPERATIONCODE' OF STRUCTURE <ls_line> TO <lv_to>.
+          IF ls_inst-has_active = abap_true.
+            <lv_to> = 'U'.
+          ELSE.
+            <lv_to> = 'C'.
+          ENDIF.
+          ASSIGN COMPONENT 'DRAFTADMINISTRATIVEDATAUUID' OF STRUCTURE <ls_line> TO <lv_to>.
+          <lv_to> = lv_uuid.
+        ENDIF.
+        ASSIGN COMPONENT 'DRAFTENTITYLASTCHANGEDATETIME' OF STRUCTURE <ls_line> TO <lv_to>.
+        <lv_to> = lv_now.
+        CASE ls_change-operation.
+          WHEN co_operation-create.
+            lv_subrc = li_source->insert( <ls_line> ).
+          WHEN co_operation-update.
+            lv_subrc = li_source->update( <ls_line> ).
+          WHEN OTHERS.
+            lv_subrc = li_source->delete( <ls_line> ).
+        ENDCASE.
+        IF lv_subrc <> 0.
+          RAISE EXCEPTION TYPE zcx_osd_rap
+            EXPORTING iv_reason = |save of the draft of { ls_entity-alias } { ls_change-key } ({ ls_change-operation }) failed|.
+        ENDIF.
+        draft_admin( is_entity = ls_entity iv_uuid = lv_uuid iv_operation = ls_change-operation ).
+        CONTINUE.
+      ENDIF.
 * R7: an entity with an unmanaged save is written by its saver only
       IF ls_entity-save = 'U'.
         CONTINUE.
@@ -2822,6 +3129,10 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
       IF sy-subrc <> 0.
         CONTINUE.
       ENDIF.
+* R8: the request names active instances only
+      IF ls_inst-key CP 'D|*'.
+        CONTINUE.
+      ENDIF.
       CASE ls_change-operation.
         WHEN co_operation-create.
           ASSIGN lr_create->* TO <ls_request>.
@@ -2891,6 +3202,421 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
       ENDIF.
     ENDLOOP.
     APPEND <ls_line> TO ct_rows.
+  ENDMETHOD.
+
+  METHOD draft_exists.
+    DATA lr_keys  TYPE REF TO data.
+    DATA lv_key   TYPE string.
+    DATA lv_index TYPE i.
+    DATA ls_inst  TYPE ty_inst.
+    FIELD-SYMBOLS <ls_keys> TYPE any.
+
+    lr_keys = new_row( is_root ).
+    ASSIGN lr_keys->* TO <ls_keys>.
+    copy_keys( EXPORTING is_entity = is_root is_from = is_keys CHANGING cs_to = <ls_keys> ).
+    set_draft( EXPORTING iv_on = abap_true CHANGING cs_row = <ls_keys> ).
+    lv_key = key_of( is_entity = is_root is_row = <ls_keys> ).
+    lv_index = index_of( iv_entity = is_root-name iv_key = lv_key ).
+    IF lv_index > 0.
+      READ TABLE mt_inst INDEX lv_index INTO ls_inst.
+      rv_exists = boolc( ls_inst-state <> co_operation-delete ).
+      RETURN.
+    ENDIF.
+    IF table_row( is_entity = is_root is_keys = <ls_keys> ) IS NOT INITIAL.
+      rv_exists = abap_true.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD result_row.
+    FIELD-SYMBOLS <ls_out>   TYPE any.
+    FIELD-SYMBOLS <ls_param> TYPE any.
+    APPEND INITIAL LINE TO ct_result ASSIGNING <ls_out>.
+    MOVE-CORRESPONDING is_row TO <ls_out>.
+    ASSIGN COMPONENT '%PARAM' OF STRUCTURE <ls_out> TO <ls_param>.
+    IF sy-subrc = 0.
+      MOVE-CORRESPONDING is_row TO <ls_param>.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD draft_action.
+* R8 (docs/rap-runtime.md, "The draft actions"): on the root only, which is
+* where the BDEF declares them
+    DATA ls_inst   TYPE ty_inst.
+    DATA lv_draft  TYPE abap_bool.
+    DATA lv_ok     TYPE abap_bool.
+    DATA lv_uuid   TYPE x LENGTH 16.
+    DATA lv_index  TYPE i.
+    DATA lv_active TYPE i.
+    DATA lt_tree   TYPE string_table.
+    DATA lv_node   TYPE string.
+    DATA lv_name   TYPE string.
+    DATA lv_at     TYPE string.
+    DATA lv_pos    TYPE i.
+    DATA ls_node   TYPE zif_osd_rap_bo=>ty_entity.
+    DATA lr_keys   TYPE REF TO data.
+    DATA lr_copy   TYPE REF TO data.
+    DATA lv_count  TYPE i.
+    DATA lt_keep   TYPE string_table.
+    DATA ls_assoc  TYPE zif_osd_rap_bo=>ty_assoc.
+    DATA lt_children TYPE int4_table.
+    DATA lv_child    TYPE i.
+    DATA ls_child    TYPE ty_inst.
+    DATA ls_target   TYPE zif_osd_rap_bo=>ty_entity.
+    TYPES:
+      BEGIN OF ty_copy,
+        entity TYPE string,
+        row    TYPE REF TO data,
+      END OF ty_copy.
+    DATA ls_copy   TYPE ty_copy.
+    DATA lt_copies TYPE STANDARD TABLE OF ty_copy WITH DEFAULT KEY.
+    FIELD-SYMBOLS <ls_row>    TYPE any.
+    FIELD-SYMBOLS <ls_keys>   TYPE any.
+    FIELD-SYMBOLS <ls_copy>   TYPE any.
+    FIELD-SYMBOLS <lv_draft>  TYPE any.
+    FIELD-SYMBOLS <lv_active> TYPE any.
+
+    APPEND |DRAFT ACTION { iv_action }| TO mt_trace.
+    READ TABLE mt_inst INDEX iv_index INTO ls_inst.
+    ASSIGN ls_inst-row->* TO <ls_row>.
+    lv_draft = is_draft( <ls_row> ).
+    IF is_entity-parent IS NOT INITIAL.
+      fail( EXPORTING is_entity = is_entity is_input = is_key
+                      iv_cause = if_abap_behv=>cause-unspecific
+                      iv_text = |{ iv_action } is a draft action of the root, not of { is_entity-alias }|
+            CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
+      RETURN.
+    ENDIF.
+    IF iv_action = 'EDIT' AND lv_draft = abap_true.
+      fail( EXPORTING is_entity = is_entity is_input = is_key
+                      iv_cause = if_abap_behv=>cause-unspecific
+                      iv_text = |Edit of { is_entity-alias } needs the active instance|
+            CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
+      RETURN.
+    ELSEIF iv_action <> 'EDIT' AND lv_draft = abap_false.
+      fail( EXPORTING is_entity = is_entity is_input = is_key
+                      iv_cause = if_abap_behv=>cause-unspecific
+                      iv_text = |{ iv_action } of { is_entity-alias } needs its draft|
+            CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
+      RETURN.
+    ENDIF.
+
+    CASE iv_action.
+      WHEN 'EDIT'.
+* one draft per instance: a second Edit is a conflict
+        IF draft_exists( is_root = is_entity is_keys = <ls_row> ) = abap_true.
+          fail( EXPORTING is_entity = is_entity is_input = is_key
+                          iv_cause = if_abap_behv=>cause-conflict
+                          iv_text = |{ is_entity-alias } { key_text( is_entity = is_entity is_row = <ls_row> ) } has a draft already|
+                CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
+          RETURN.
+        ENDIF.
+        lock( EXPORTING is_entity = is_entity iv_index = iv_index is_input = is_key
+              IMPORTING ev_ok = lv_ok CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
+        IF lv_ok = abap_false.
+          RETURN.
+        ENDIF.
+        TRY.
+            lv_uuid = cl_system_uuid=>create_uuid_x16_static( ).
+          CATCH cx_uuid_error.
+            RAISE EXCEPTION TYPE zcx_osd_rap EXPORTING iv_reason = |no UUID for the draft of { is_entity-alias }|.
+        ENDTRY.
+        lv_index = copy_to_draft( is_entity = is_entity iv_index = iv_index iv_uuid = lv_uuid ).
+        READ TABLE mt_inst INDEX lv_index INTO ls_inst.
+        ASSIGN ls_inst-row->* TO <ls_copy>.
+        result_row( EXPORTING is_row = <ls_copy> CHANGING ct_result = ct_result ).
+
+      WHEN 'RESUME'.
+* the draft is there and nothing holds it but itself (no expiry here)
+        result_row( EXPORTING is_row = <ls_row> CHANGING ct_result = ct_result ).
+
+      WHEN 'DISCARD'.
+        delete_tree( is_entity = is_entity iv_index = iv_index ).
+
+      WHEN 'ACTIVATE'.
+* the active instance's total ETag must be the one the draft started from
+        lr_keys = new_row( is_entity ).
+        ASSIGN lr_keys->* TO <ls_keys>.
+        copy_keys( EXPORTING is_entity = is_entity is_from = <ls_row> CHANGING cs_to = <ls_keys> ).
+        set_draft( EXPORTING iv_on = abap_false CHANGING cs_row = <ls_keys> ).
+        lv_active = resolve( is_entity = is_entity is_input = <ls_keys> ).
+        IF lv_active > 0 AND is_entity-total_etag IS NOT INITIAL.
+          READ TABLE mt_inst INDEX lv_active INTO ls_inst.
+          ASSIGN ls_inst-row->* TO <ls_copy>.
+          ASSIGN COMPONENT is_entity-total_etag OF STRUCTURE <ls_copy> TO <lv_active>.
+          ASSIGN COMPONENT is_entity-total_etag OF STRUCTURE <ls_row> TO <lv_draft>.
+          IF <lv_active> IS ASSIGNED AND <lv_draft> IS ASSIGNED AND <lv_active> <> <lv_draft>.
+            fail( EXPORTING is_entity = is_entity is_input = is_key
+                            iv_cause = if_abap_behv=>cause-conflict
+                            iv_text = |{ is_entity-alias } { key_text( is_entity = is_entity is_row = <ls_row> ) } changed after its draft was made|
+                  CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
+            RETURN.
+          ENDIF.
+        ENDIF.
+* the draft tree, copied before it is deleted
+        draft_tree( EXPORTING is_entity = is_entity iv_index = iv_index CHANGING ct_tree = lt_tree ).
+        LOOP AT lt_tree INTO lv_node.
+          SPLIT lv_node AT '|' INTO lv_name lv_at.
+          lv_pos = lv_at.
+          READ TABLE mt_inst INDEX lv_pos INTO ls_inst.
+          ls_node = entity_of( lv_name ).
+          lr_copy = new_row( ls_node ).
+          ASSIGN lr_copy->* TO <ls_copy>.
+          ASSIGN ls_inst-row->* TO <ls_row>.
+          <ls_copy> = <ls_row>.
+          set_draft( EXPORTING iv_on = abap_false CHANGING cs_row = <ls_copy> ).
+          ls_copy-entity = lv_name.
+          ls_copy-row = lr_copy.
+          APPEND ls_copy TO lt_copies.
+        ENDLOOP.
+        delete_tree( is_entity = is_entity iv_index = iv_index ).
+        IF lv_active > 0.
+          lock( EXPORTING is_entity = is_entity iv_index = lv_active is_input = is_key
+                IMPORTING ev_ok = lv_ok CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
+          IF lv_ok = abap_false.
+            RETURN.
+          ENDIF.
+        ENDIF.
+* each draft instance updates the active instance it came from, or creates it
+        CLEAR lv_count.
+        LOOP AT lt_copies INTO ls_copy.
+          lv_count = lv_count + 1.
+          ls_node = entity_of( ls_copy-entity ).
+          ASSIGN ls_copy-row->* TO <ls_copy>.
+          lv_index = activate_one( EXPORTING is_entity = ls_node is_draft = <ls_copy>
+                                   CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
+          IF lv_index = 0.
+* a mandatory field the draft left empty: FAILED, and nothing is saved
+            RETURN.
+          ENDIF.
+          READ TABLE mt_inst INDEX lv_index INTO ls_inst.
+          APPEND |{ ls_copy-entity }\|{ ls_inst-key }| TO lt_keep.
+          IF lv_count = 1.
+            lv_active = lv_index.
+          ENDIF.
+        ENDLOOP.
+* an active child the draft no longer has is deleted with its subtree
+        IF lv_active > 0.
+          LOOP AT lt_copies INTO ls_copy.
+            ls_node = entity_of( ls_copy-entity ).
+            ASSIGN ls_copy-row->* TO <ls_copy>.
+            lv_index = resolve( is_entity = ls_node is_input = <ls_copy> ).
+            CHECK lv_index > 0.
+            LOOP AT ls_node-assocs INTO ls_assoc WHERE kind = 'C'.
+              ls_target = entity_of( ls_assoc-target ).
+              lt_children = targets( is_entity = ls_node is_assoc = ls_assoc iv_index = lv_index ).
+              LOOP AT lt_children INTO lv_child.
+                READ TABLE mt_inst INDEX lv_child INTO ls_child.
+                READ TABLE lt_keep TRANSPORTING NO FIELDS WITH KEY table_line = |{ ls_target-name }\|{ ls_child-key }|.
+                IF sy-subrc <> 0.
+                  delete_tree( is_entity = ls_target iv_index = lv_child ).
+                ENDIF.
+              ENDLOOP.
+            ENDLOOP.
+          ENDLOOP.
+          READ TABLE mt_inst INDEX lv_active INTO ls_inst.
+          ASSIGN ls_inst-row->* TO <ls_copy>.
+          result_row( EXPORTING is_row = <ls_copy> CHANGING ct_result = ct_result ).
+        ENDIF.
+    ENDCASE.
+  ENDMETHOD.
+
+  METHOD copy_to_draft.
+    DATA ls_inst  TYPE ty_inst.
+    DATA ls_new   TYPE ty_inst.
+    DATA lr_row   TYPE REF TO data.
+    DATA ls_field TYPE zif_osd_rap_bo=>ty_field.
+    DATA ls_assoc TYPE zif_osd_rap_bo=>ty_assoc.
+    DATA ls_child TYPE zif_osd_rap_bo=>ty_entity.
+    DATA lt_index TYPE int4_table.
+    DATA lv_child TYPE i.
+    DATA lv_index TYPE i.
+    FIELD-SYMBOLS <ls_from> TYPE any.
+    FIELD-SYMBOLS <ls_to>   TYPE any.
+
+    READ TABLE mt_inst INDEX iv_index INTO ls_inst.
+    ASSIGN ls_inst-row->* TO <ls_from>.
+    lr_row = new_row( is_entity ).
+    ASSIGN lr_row->* TO <ls_to>.
+    <ls_to> = <ls_from>.
+    set_draft( EXPORTING iv_on = abap_true CHANGING cs_row = <ls_to> ).
+    ls_new-entity      = is_entity-name.
+    ls_new-key         = key_of( is_entity = is_entity is_row = <ls_to> ).
+    ls_new-row         = lr_row.
+    ls_new-state       = co_operation-create.
+    ls_new-created     = abap_true.
+    ls_new-has_active  = abap_true.
+    ls_new-admin_uuid  = iv_uuid.
+    LOOP AT is_entity-fields INTO ls_field.
+      APPEND ls_field-name TO ls_new-fields.
+    ENDLOOP.
+    lv_index = index_of( iv_entity = is_entity-name iv_key = ls_new-key ).
+    IF lv_index > 0.
+      MODIFY mt_inst INDEX lv_index FROM ls_new.
+    ELSE.
+      APPEND ls_new TO mt_inst.
+      lv_index = lines( mt_inst ).
+    ENDIF.
+    rv_index = lv_index.
+    mi_luw->modify( iv_entity = is_entity-name iv_key = ls_new-key
+                    iv_operation = co_operation-create ir_row = lr_row ).
+* the composition tree below it, read from the active side
+    LOOP AT is_entity-assocs INTO ls_assoc WHERE kind = 'C'.
+      ls_child = entity_of( ls_assoc-target ).
+      lt_index = targets( is_entity = is_entity is_assoc = ls_assoc iv_index = iv_index ).
+      LOOP AT lt_index INTO lv_child.
+        copy_to_draft( is_entity = ls_child iv_index = lv_child iv_uuid = iv_uuid ).
+      ENDLOOP.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD draft_tree.
+    DATA ls_assoc TYPE zif_osd_rap_bo=>ty_assoc.
+    DATA ls_child TYPE zif_osd_rap_bo=>ty_entity.
+    DATA lt_index TYPE int4_table.
+    DATA lv_child TYPE i.
+
+    APPEND |{ is_entity-name }\|{ iv_index }| TO ct_tree.
+    LOOP AT is_entity-assocs INTO ls_assoc WHERE kind = 'C'.
+      ls_child = entity_of( ls_assoc-target ).
+      lt_index = targets( is_entity = is_entity is_assoc = ls_assoc iv_index = iv_index ).
+      LOOP AT lt_index INTO lv_child.
+        draft_tree( EXPORTING is_entity = ls_child iv_index = lv_child CHANGING ct_tree = ct_tree ).
+      ENDLOOP.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD activate_one.
+    DATA ls_inst  TYPE ty_inst.
+    DATA ls_field TYPE zif_osd_rap_bo=>ty_field.
+    DATA lr_row   TYPE REF TO data.
+    DATA lv_create TYPE abap_bool.
+    FIELD-SYMBOLS <ls_inst> TYPE ty_inst.
+    FIELD-SYMBOLS <ls_row>  TYPE any.
+    FIELD-SYMBOLS <lv_from> TYPE any.
+    FIELD-SYMBOLS <lv_to>   TYPE any.
+
+* the mandatory fields the draft could leave empty must be filled now
+    LOOP AT is_entity-fields INTO ls_field WHERE mandatory IS NOT INITIAL.
+      ASSIGN COMPONENT ls_field-name OF STRUCTURE is_draft TO <lv_from>.
+      IF sy-subrc = 0 AND <lv_from> IS INITIAL.
+        fail( EXPORTING is_entity = is_entity is_input = is_draft
+                        iv_cause = if_abap_behv=>cause-unspecific
+                        iv_text = |Field { ls_field-name } is mandatory|
+                        iv_field = ls_field-name
+              CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
+        RETURN.
+      ENDIF.
+    ENDLOOP.
+
+    rv_index = resolve( is_entity = is_entity is_input = is_draft ).
+    IF rv_index = 0.
+      lv_create = abap_true.
+      lr_row = new_row( is_entity ).
+      ASSIGN lr_row->* TO <ls_row>.
+      <ls_row> = is_draft.
+      CLEAR ls_inst.
+      ls_inst-entity      = is_entity-name.
+      ls_inst-key         = key_of( is_entity = is_entity is_row = <ls_row> ).
+      ls_inst-row         = lr_row.
+      ls_inst-state       = co_operation-create.
+      ls_inst-created     = abap_true.
+      ls_inst-req_created = abap_true.
+      rv_index = index_of( iv_entity = is_entity-name iv_key = ls_inst-key ).
+      IF rv_index > 0.
+        MODIFY mt_inst INDEX rv_index FROM ls_inst.
+      ELSE.
+        APPEND ls_inst TO mt_inst.
+        rv_index = lines( mt_inst ).
+      ENDIF.
+    ELSE.
+      READ TABLE mt_inst INDEX rv_index ASSIGNING <ls_inst>.
+      ASSIGN <ls_inst>-row->* TO <ls_row>.
+      LOOP AT is_entity-fields INTO ls_field WHERE key = abap_false.
+        ASSIGN COMPONENT ls_field-name OF STRUCTURE is_draft TO <lv_from>.
+        CHECK sy-subrc = 0.
+        ASSIGN COMPONENT ls_field-name OF STRUCTURE <ls_row> TO <lv_to>.
+        CHECK sy-subrc = 0.
+        <lv_to> = <lv_from>.
+      ENDLOOP.
+      IF <ls_inst>-state IS INITIAL.
+        <ls_inst>-state = co_operation-update.
+      ENDIF.
+      <ls_inst>-updated = abap_true.
+      <ls_inst>-req_updated = abap_true.
+    ENDIF.
+    LOOP AT is_entity-fields INTO ls_field.
+      mark( iv_index = rv_index iv_field = ls_field-name ).
+    ENDLOOP.
+    stamp( is_entity = is_entity iv_index = rv_index iv_create = lv_create ).
+    READ TABLE mt_inst INDEX rv_index ASSIGNING <ls_inst>.
+    IF lv_create = abap_true.
+      mi_luw->modify( iv_entity = is_entity-name iv_key = <ls_inst>-key
+                      iv_operation = co_operation-create ir_row = <ls_inst>-row ).
+    ELSE.
+      mi_luw->modify( iv_entity = is_entity-name iv_key = <ls_inst>-key
+                      iv_operation = co_operation-update ir_row = <ls_inst>-row ).
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD admin_uuid.
+    DATA ls_root  TYPE zif_osd_rap_bo=>ty_entity.
+    DATA lv_index TYPE i.
+    DATA lr_line  TYPE REF TO data.
+    FIELD-SYMBOLS <ls_inst> TYPE ty_inst.
+    FIELD-SYMBOLS <ls_row>  TYPE any.
+    FIELD-SYMBOLS <lv_uuid> TYPE any.
+
+    root_of( EXPORTING is_entity = is_entity iv_index = iv_index IMPORTING es_root = ls_root ev_index = lv_index ).
+    IF lv_index = 0.
+      lv_index = iv_index.
+    ENDIF.
+    READ TABLE mt_inst INDEX lv_index ASSIGNING <ls_inst>.
+    IF <ls_inst>-admin_uuid IS INITIAL.
+      ASSIGN <ls_inst>-row->* TO <ls_row>.
+      lr_line = table_row( is_entity = ls_root is_keys = <ls_row> ).
+      IF lr_line IS NOT INITIAL.
+        ASSIGN lr_line->* TO <ls_row>.
+        ASSIGN COMPONENT 'DRAFTADMINISTRATIVEDATAUUID' OF STRUCTURE <ls_row> TO <lv_uuid>.
+        IF sy-subrc = 0.
+          <ls_inst>-admin_uuid = <lv_uuid>.
+        ENDIF.
+      ENDIF.
+    ENDIF.
+    rv_uuid = <ls_inst>-admin_uuid.
+  ENDMETHOD.
+
+  METHOD draft_admin.
+* the draft's administrative data: created with the root's draft, its last
+* change moved by any change of the draft, deleted with the root's draft
+    DATA ls_adm  TYPE zosd_draft_adm.
+    DATA lv_now  TYPE timestampl.
+    DATA lv_uuid TYPE zosd_draft_adm-draftuuid.
+
+    lv_uuid = iv_uuid.
+    IF lv_uuid IS INITIAL.
+      RETURN.
+    ENDIF.
+    GET TIME STAMP FIELD lv_now.
+    IF is_entity-parent IS INITIAL AND iv_operation = co_operation-delete.
+      DELETE FROM zosd_draft_adm WHERE draftuuid = lv_uuid.
+      RETURN.
+    ENDIF.
+    SELECT SINGLE * FROM zosd_draft_adm INTO ls_adm WHERE draftuuid = lv_uuid.
+    IF sy-subrc <> 0.
+      CLEAR ls_adm.
+      ls_adm-draftuuid        = lv_uuid.
+      ls_adm-draftentitytype  = ms_model-bdef.
+      ls_adm-createdbyuser    = sy-uname.
+      ls_adm-creationdatetime = lv_now.
+      ls_adm-inprocessbyuser  = sy-uname.
+      ls_adm-lastchangedbyuser  = sy-uname.
+      ls_adm-lastchangedatetime = lv_now.
+      INSERT zosd_draft_adm FROM ls_adm.
+    ELSE.
+      ls_adm-lastchangedbyuser  = sy-uname.
+      ls_adm-lastchangedatetime = lv_now.
+      UPDATE zosd_draft_adm FROM ls_adm.
+    ENDIF.
   ENDMETHOD.
 
   METHOD rollback.

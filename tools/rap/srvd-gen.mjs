@@ -132,10 +132,11 @@ export function serviceYaml(srvd, entityOf, file = "srvd") {
   const functionNames = new Set();
   const aliases = new Set();
   const resolved = [];
+  const annotations = [];
   for (const x of srvd.exposed) {
     if (aliases.has(upper(x.alias))) throw new Error(`${file}: ${x.alias} is exposed twice`);
     aliases.add(upper(x.alias));
-    const {view, fields, behavior} = entityOf(x.entity);
+    const {view, fields, behavior, draft} = entityOf(x.entity);
     const type = `${x.alias}Type`;
     resolved.push({x, view, type});
     const b = behavior ?? {create: false, update: false, delete: false, control: new Map(), actions: []};
@@ -149,8 +150,11 @@ export function serviceYaml(srvd, entityOf, file = "srvd") {
     const prop = f => nameOf.get(upper(f.name))?.element ?? nameOf.get(upper(f.name))?.name ?? f.name;
     lines.push(`  ${type}:`);
     lines.push(`    set: ${x.alias}`);
-    lines.push(`    source: {cds: ${x.entity}, struct: "${upper(classNameOf("zcl_stg_cds_", view.sqlView))}=>TY_ROW"}`);
-    lines.push(`    keys: [${fields.filter(f => f.key).map(prop).join(", ")}]`);
+    // R8: a draft entity's rows are its union class's (IsActiveEntity and
+    // the two flags beside the CDS elements), keyed also by IsActiveEntity
+    const struct = draft ? upper(draft.union) : upper(classNameOf("zcl_stg_cds_", view.sqlView));
+    lines.push(`    source: {cds: ${x.entity}, struct: "${struct}=>TY_ROW"}`);
+    lines.push(`    keys: [${[...fields.filter(f => f.key).map(prop), ...(draft ? ["IsActiveEntity"] : [])].join(", ")}]`);
     lines.push(`    creatable: ${b.create}`);
     lines.push(`    updatable: ${b.update}`);
     lines.push(`    deletable: ${b.delete}`);
@@ -168,11 +172,25 @@ export function serviceYaml(srvd, entityOf, file = "srvd") {
       const etag = b.etag && upper(b.etag) === upper(f.name) ? ", etag: true" : "";
       lines.push(`      ${prop(f)}: {type: ${edm(f.type, `${x.entity}.${f.name}`)}, field: ${upper(f.name)}${flags}${etag}, label: ${yamlString(String(label && upper(label) !== upper(f.name) ? label : prop(f)).slice(0, 60))}}`);
     }
+    if (draft) {
+      lines.push("      IsActiveEntity: {type: Boolean, field: ISACTIVEENTITY, readonly: true, label: \"IsActiveEntity\"}");
+      lines.push("      HasActiveEntity: {type: Boolean, field: HASACTIVEENTITY, readonly: true, label: \"HasActiveEntity\"}");
+      lines.push("      HasDraftEntity: {type: Boolean, field: HASDRAFTENTITY, readonly: true, label: \"HasDraftEntity\"}");
+      // the actions Fiori Elements V4 calls by the names Common.DraftRoot
+      // gives; Discard is the DELETE of the draft root (docs/rap-runtime.md, R8)
+      if (draft.root) annotations.push(`  ${type}:`, `    draftRoot: {set: ${x.alias}, activation: ${service}.Activate, edit: ${service}.Edit, prepare: ${service}.Prepare}`);
+      else annotations.push(`  ${type}:`, `    draftNode: {set: ${x.alias}}`);
+    }
     for (const a of b.actions) {
+      // R8: Discard is DELETE of the draft root over OData
+      if (draft && upper(a) === "DISCARD") continue;
       if (functionNames.has(upper(a))) throw new Error(`${file}: two exposed entities have an action ${a}; a V2 function import needs one name`);
       functionNames.add(upper(a));
+      const params = fields.filter(f => f.key).map(f => `${prop(f)}: ${edm(f.type, `${x.entity}.${f.name}`)}`);
+      if (draft) params.push("IsActiveEntity: Boolean");
+      if (draft && upper(a) === "EDIT") params.push("PreserveChanges: Boolean");
       functions.push(`  ${a}:`, "    method: POST", `    returns: {entity: ${type}, set: ${x.alias}, multiplicity: "1"}`, `    for: ${type}`,
-        `    parameters: {${fields.filter(f => f.key).map(f => `${prop(f)}: ${edm(f.type, `${x.entity}.${f.name}`)}`).join(", ")}}`);
+        `    parameters: {${params.join(", ")}}`);
     }
   }
   // R5: the associations of an exposed entity to another exposed entity are
@@ -200,5 +218,6 @@ export function serviceYaml(srvd, entityOf, file = "srvd") {
   }
   if (assocLines.length) lines.push("associations:", ...assocLines);
   if (functions.length) lines.push("functions:", ...functions);
+  if (annotations.length) lines.push("annotations:", ...annotations);
   return lines.join("\n") + "\n";
 }

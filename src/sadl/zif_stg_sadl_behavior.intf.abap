@@ -84,6 +84,15 @@ INTERFACE zif_stg_sadl_behavior PUBLIC.
       /iwbep/cx_mgw_busi_exception
       /iwbep/cx_mgw_tech_exception.
 
+* R8: the class serving IV_ENTITY's active and draft rows
+* (zif_stg_cds_draft_source) when its business object is draft-enabled,
+* initial otherwise
+  METHODS draft_source
+    IMPORTING
+      iv_entity       TYPE csequence
+    RETURNING
+      VALUE(rv_class) TYPE string.
+
 * the instance actions of IV_ENTITY a client may call, upper case
   METHODS actions
     IMPORTING
