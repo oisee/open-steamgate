@@ -83,7 +83,7 @@ import {packagedVersion, writeVersionMarker} from "../tools/layer-version/index.
 import {readLock} from "../tools/osd-lock.mjs";
 import {writeThirdPartyNotices} from "./third-party-notices.mjs";
 import {forPublishing, generationTmpProblem} from "../tools/osd-tmp.mjs";
-import {assertExtensionSources} from "../tools/osd-extension-sources.mjs";
+import {assertExtensionSources, assertPublicExtensionIdentity} from "../tools/osd-extension-sources.mjs";
 import {verifyPublicArtefact} from "../tools/osd-provenance.mjs";
 import {assertPublicSystem} from "../tools/osd-system.mjs";
 
@@ -710,7 +710,9 @@ function webEntry(profile) {
 export function verifiedWebBundle(extension) {
   const bundle = join(extension, "dist", "web", "extension.js");
   if (!existsSync(bundle)) throw new Error(`build-vsix: OSD_VSIX_WEB=1 but ${bundle} is missing; run npm run web:vscode first`);
-  return verifyPublicArtefact(join(extension, "dist", "web"));
+  const record = verifyPublicArtefact(join(extension, "dist", "web"));
+  assertPublicExtensionIdentity(extension, "dist/web");
+  return record;
 }
 
 function copyExtensionFiles(extensionDir, profile) {
@@ -726,7 +728,7 @@ function copyExtensionFiles(extensionDir, profile) {
     if (entry.name === "dist") {
       if (!webEntry(profile)) continue;
       if (readdirSync(join(EXT_DIR, "dist")).some(name => name !== "web")) throw new Error("build-vsix: unverified dist entry");
-      verifyPublicArtefact(join(EXT_DIR, "dist/web"));
+      verifiedWebBundle(EXT_DIR);
     }
     copyReal(join(EXT_DIR, entry.name), join(extensionDir, entry.name));
   }

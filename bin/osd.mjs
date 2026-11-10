@@ -203,6 +203,7 @@ switch (mode) {
   case "gen": {
     const {installGeneratorView} = await import("../tools/osd-generator-view.mjs");
     installGeneratorView();
+    await import("../tools/osd-generator-reads.mjs");
     const [name, ...args] = rest;
     if (GENERATORS[name] === undefined) {
       console.error(`osd gen: not a generator: ${name}`);

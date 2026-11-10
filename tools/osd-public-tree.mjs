@@ -15,6 +15,9 @@
 // verifies with osd-provenance.mjs alone.
 import {assertPublicSystem, generationSystem, unknownPrivacy} from "./osd-system.mjs";
 import {hashOf, inputsOf} from "./osd-build.mjs";
+import {readFileSync} from "node:fs";
+import {join} from "node:path";
+import {sha256, verifyReadRecord} from "./osd-read-record.mjs";
 import {resolve} from "node:path";
 import {liveGenerationRecord, verifyPublicArtefact, writeArtefactProvenance} from "./osd-provenance.mjs";
 
@@ -25,14 +28,17 @@ export function publicProvenance(root) {
   assertPublicSystem(root);
   const record = liveGenerationRecord(root);
   const inputs = inputsOf(root);
-  const current = generationSystem(root, inputs);
+  const named = new Map();
+  const tree = hashOf(root, inputs, {digests: named});
+  named.set(inputs.config, sha256(readFileSync(inputs.config)));
+  const reads = verifyReadRecord(root, join(root, "build/live"), named);
+  const current = generationSystem(root, inputs, reads.reads, reads);
   const secret = current.provenance.find(input => input.private === true);
   if (secret) fail("PRIVATE_LAYER", `private input ${secret.path} is in the tree, so it cannot be published to a public destination`);
   const unknown = current.provenance.find(input => input.private !== false);
   if (unknown) fail("PRIVATE_LAYER", unknownPrivacy(unknown.path));
   if (current.systemDigest !== record.systemDigest)
     fail("BAD_PROVENANCE", "the installed system is not the one the live generation was built from; rebuild with node tools/osd-build.mjs");
-  const tree = hashOf(root, inputs);
   if (tree !== record.generation)
     fail("BAD_PROVENANCE", `the working tree (${tree}) is not the live generation (${record.generation}); rebuild with node tools/osd-build.mjs`);
   return {...record, systemPrivate: false, inputs: current.provenance};

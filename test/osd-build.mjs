@@ -8,6 +8,8 @@ import {packsOf} from "../tools/osd-packs.mjs";
 import {CLOSURE, ciClosure} from "../tools/osd-ci-closure.mjs";
 import {publicProvenance} from "../tools/osd-public-tree.mjs";
 import {transpile} from "../tools/osd-transpile.mjs";
+import {syntheticCiTranspiler, syntheticReads} from "./helpers/fix7-fixtures.mjs";
+import {makeReadRecord, sha256} from "../tools/osd-read-record.mjs";
 
 // The builder over a tree of its own. What is cheap to check here is what
 // it refuses before it does anything: a full generation takes the real
@@ -61,6 +63,30 @@ describe("tools/osd-build: the layers, refused before a lock is taken", function
     expect(liveHash(root)).to.equal(built.hash);
   });
 
+  it("records generator source reads and flags bytes outside the declared hash", () => {
+    write("src/zrecord.prog.abap", "REPORT zrecord.\n");
+    const file = join(root, "src/zrecord.prog.abap");
+    const log = join(root, "reads.jsonl");
+    const child = spawnSync(process.execPath, ["--import", resolve("tools/osd-generator-reads.mjs"), "--input-type=module", "-e",
+      "import {readFileSync} from 'node:fs'; readFileSync(process.env.OSD_TEST_READ);"],
+    {cwd: root, env: {...process.env, OSD_ROOT: root, OSD_GENERATOR_READS: log, OSD_TEST_READ: file}, encoding: "utf8"});
+    expect(child.status, child.stderr).to.equal(0);
+    const entries = readFileSync(log, "utf8").trim().split("\n").map(JSON.parse);
+    expect(entries.map(entry => entry.path)).to.deep.equal(["src/zrecord.prog.abap"]);
+    expect(makeReadRecord(root, new Map([[file, sha256(readFileSync(file))]]), entries).uncovered).to.deep.equal([]);
+    expect(makeReadRecord(root, new Map(), entries).uncovered).to.deep.equal(["src/zrecord.prog.abap"]);
+    write("build/inactive/active/src/zrecord.prog.abap", "REPORT active.\n");
+    const overlayLog = join(root, "overlay-reads.jsonl");
+    const overlay = {exclude: [file], folder: "build/inactive/active"};
+    const projected = spawnSync(process.execPath, ["--import", resolve("tools/osd-generator-view.mjs"),
+      "--import", resolve("tools/osd-generator-reads.mjs"), "--input-type=module", "-e",
+      "import {readFileSync} from 'node:fs'; readFileSync(process.env.OSD_TEST_READ);"],
+    {cwd: root, env: {...process.env, OSD_ROOT: root, OSD_GENERATOR_READS: overlayLog,
+      OSD_ACTIVE_BUILD_OVERLAY: JSON.stringify(overlay), OSD_TEST_READ: file}, encoding: "utf8"});
+    expect(projected.status, projected.stderr).to.equal(0);
+    expect(JSON.parse(readFileSync(overlayLog, "utf8").trim()).path).to.equal("build/inactive/active/src/zrecord.prog.abap");
+  });
+
   // P2-4: a checkout fetched before privacy was recorded still builds; only
   // publishing refuses it, and says to rerun osd-fetch
   it("builds over a fetched identity without recorded privacy and refuses to publish it", async () => {
@@ -78,6 +104,72 @@ describe("tools/osd-build: the layers, refused before a lock is taken", function
     expect(() => publicProvenance(root)).to.throw(/rerun node tools\/osd-fetch.mjs/);
   });
 
+  it("records a private W3MI media link even when its extension is normally skipped", async () => {
+    const privateTree = mkdtempSync(join(tmpdir(), "osd-media-private-"));
+    try {
+      write("src/zmedia.prog.abap", "REPORT zmedia.\n");
+      mkdirSync(join(privateTree, "media"));
+      writeFileSync(join(privateTree, ".osd-source.json"), JSON.stringify({private: true}));
+      writeFileSync(join(privateTree, "media/zmedia.w3mi.data.txt"), "synthetic media");
+      write("packs/media/osd-pack.json", JSON.stringify({abap: ["src"]}));
+      mkdirSync(join(root, "packs/media/src"), {recursive: true});
+      symlinkSync(join(privateTree, "media/zmedia.w3mi.data.txt"), join(root, "packs/media/src/zmedia.w3mi.data.txt"));
+      const inputs = inputsOf(root);
+      const named = new Map();
+      hashOf(root, inputs, {digests: named});
+      expect(named.has(join(root, "packs/media/src/zmedia.w3mi.data.txt"))).to.equal(true);
+      const built = await build({root, generators: false});
+      const manifest = JSON.parse(readFileSync(join(root, "build/live/manifest.json"), "utf8"));
+      expect(manifest.systemPrivate).to.equal(true);
+      expect(JSON.parse(readFileSync(join(root, "build/live/reads.json"), "utf8")).reads.some(entry => entry.privacy === true)).to.equal(true);
+      expect(() => publicProvenance(root)).to.throw().with.property("code", "PRIVATE_LAYER");
+      expect(built.hash).to.match(/^[0-9a-f]{16}$/);
+    } finally { rmSync(privateTree, {recursive: true, force: true}); }
+  });
+
+  it("records a URL-only library's private clone identity", async () => {
+    const repo = mkdtempSync(join(tmpdir(), "osd-url-lib-"));
+    try {
+      mkdirSync(join(repo, "src"));
+      writeFileSync(join(repo, ".osd-source.json"), JSON.stringify({private: true}));
+      writeFileSync(join(repo, "src/zcl_synthetic.clas.abap"), "CLASS zcl_synthetic DEFINITION PUBLIC. ENDCLASS. CLASS zcl_synthetic IMPLEMENTATION. ENDCLASS.\n");
+      execFileSync("git", ["init", "-q", repo]);
+      execFileSync("git", ["-C", repo, "add", "."]);
+      execFileSync("git", ["-C", repo, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "fixture"]);
+      const commit = execFileSync("git", ["-C", repo, "rev-parse", "HEAD"], {encoding: "utf8"}).trim();
+      write("abap_transpile.json", JSON.stringify({input_folder: ["src"], output_folder: "output", libs: [{url: `file://${repo}`, commit}]}));
+      write("src/zurl.prog.abap", "REPORT zurl.\n");
+      await build({root, generators: false});
+      const manifest = JSON.parse(readFileSync(join(root, "build/live/manifest.json"), "utf8"));
+      expect(manifest.systemPrivate).to.equal(true);
+      expect(manifest.provenance.some(entry => entry.kind === "source-real" && entry.private === true)).to.equal(true);
+      expect(() => publicProvenance(root)).to.throw().with.property("code", "PRIVATE_LAYER");
+      rmSync(join(repo, ".osd-source.json"));
+      execFileSync("git", ["-C", repo, "add", "-u"]);
+      execFileSync("git", ["-C", repo, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "public fixture"]);
+      const next = execFileSync("git", ["-C", repo, "rev-parse", "HEAD"], {encoding: "utf8"}).trim();
+      write("abap_transpile.json", JSON.stringify({input_folder: ["src"], output_folder: "output", libs: [{url: `file://${repo}`, commit: next}]}));
+      await build({root, generators: false});
+      const unknown = JSON.parse(readFileSync(join(root, "build/live/manifest.json"), "utf8"));
+      expect(unknown.systemPrivate).to.equal(null);
+      expect(() => publicProvenance(root)).to.throw();
+      writeFileSync(join(repo, ".osd-source.json"), JSON.stringify({private: false}));
+      execFileSync("git", ["-C", repo, "add", ".osd-source.json"]);
+      execFileSync("git", ["-C", repo, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "public identity"]);
+      const publicCommit = execFileSync("git", ["-C", repo, "rev-parse", "HEAD"], {encoding: "utf8"}).trim();
+      write("abap_transpile.json", JSON.stringify({input_folder: ["src"], output_folder: "output", libs: [{url: `file://${repo}`, commit: publicCommit}]}));
+      await build({root, generators: false});
+      const publicRecord = JSON.parse(readFileSync(join(root, "build/live/reads.json"), "utf8"));
+      expect(publicRecord.uncovered).to.deep.equal([]);
+      expect(() => publicProvenance(root)).not.to.throw();
+      const cache = inputsOf(root).libs[0];
+      writeFileSync(join(cache, "src/unlisted.prog.abap"), "REPORT unlisted.\n");
+      let rejected;
+      try { await build({root, generators: false}); } catch (error) { rejected = error; }
+      expect(rejected?.message).to.include("outside its pinned commit");
+    } finally { rmSync(repo, {recursive: true, force: true}); }
+  });
+
   it("hardening 1: CI pack and tar restore retain fetched source markers", () => {
     const oci = `ghcr.io/example/pack@sha256:${"a".repeat(64)}`;
     write("packs/test/osd-pack.json", JSON.stringify({abap: ["upstream"], sources: [{folder: "upstream", oci}]}));
@@ -86,11 +178,13 @@ describe("tools/osd-build: the layers, refused before a lock is taken", function
     write("packs/test/.osd-fetched.json", marker);
     write("packs/test/upstream/.osd-source.json", JSON.stringify(JSON.parse(marker).upstream));
     for (const path of ["gen", "build", ".local/lars", ".local/ci-artifact/transpiler"]) mkdirSync(join(root, path), {recursive: true});
+    syntheticCiTranspiler(root);
     // osd-ci-artifact derives live's cross-reference rows from the tree's own config
     write("abaplint.jsonc", readFileSync(resolve("abaplint.jsonc")));
     const hash = hashOf(root, inputsOf(root));
     write(`build/by-input/${hash}/manifest.json`, JSON.stringify({hash, systemDigest: null, systemPrivate: false,
       provenance: [{kind: "pack-oci", path: "packs/test/upstream", private: false}], gen: genHash(root)}));
+    syntheticReads(root, hash);
     write(`build/by-input/${hash}/source-inputs.json`, "{}");
     mkdirSync(join(root, `build/by-input/${hash}/output`));
     symlinkSync(`by-input/${hash}`, join(root, "build/live"));
@@ -105,9 +199,10 @@ describe("tools/osd-build: the layers, refused before a lock is taken", function
     expect(JSON.parse(readFileSync(join(root, "packs/test/upstream/.osd-source.json")))).to.deep.equal(JSON.parse(marker).upstream);
     expect(readFileSync(join(root, "packs/test/.osd-fetched.json"), "utf8")).to.equal(marker);
     expect(packsOf(root, {})[0].missing).to.deep.equal([]);
-    // A pack without a marker remains archivable for compatibility.
+    // Removing a marker changes the declared input closure; the old
+    // generation cannot be relabelled as the new tree.
     rmSync(join(root, "packs/test/.osd-fetched.json"));
-    expect(spawnSync(process.execPath, [resolve("tools/osd-ci-artifact.mjs"), "pack", archive], {cwd: root}).status).to.equal(0);
+    expect(spawnSync(process.execPath, [resolve("tools/osd-ci-artifact.mjs"), "pack", archive], {cwd: root}).status).not.to.equal(0);
   });
 
   it("refuses to pack a CI artifact from a private live generation", () => {
@@ -124,9 +219,11 @@ describe("tools/osd-build: the layers, refused before a lock is taken", function
   // The archive carries only the live generation. Older cache entries stay out.
   it("packs only the live generation beside older private or unrecorded cache entries", () => {
     for (const path of ["gen", "packs", ".local/lars", ".local/ci-artifact/transpiler", "build/by-input/older"]) mkdirSync(join(root, path), {recursive: true});
+    syntheticCiTranspiler(root);
     write("abaplint.jsonc", readFileSync(resolve("abaplint.jsonc")));
     const hash = hashOf(root, inputsOf(root));
     write(`build/by-input/${hash}/manifest.json`, JSON.stringify({hash, systemDigest: null, systemPrivate: false, provenance: [], gen: genHash(root)}));
+    syntheticReads(root, hash);
     write(`build/by-input/${hash}/source-inputs.json`, "{}");
     mkdirSync(join(root, `build/by-input/${hash}/output`));
     symlinkSync(`by-input/${hash}`, join(root, "build/live"));

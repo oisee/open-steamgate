@@ -13,6 +13,7 @@ import {libraryPath} from "../tools/osd-lib-path.mjs";
 import {inputFoldersOf, packsOf, dataDirsOf, ddicDirsOf, webappsOf, tilesOf, contentFoldersOf} from "../tools/osd-packs.mjs";
 import {layers, libraryFiles, excludePatterns} from "../tools/osd-inputs.mjs";
 import {hashOf, inputsOf, prepare} from "../tools/osd-build.mjs";
+import {makeReadRecord, readEntry, sha256 as digestRead, verifyReadRecord} from "../tools/osd-read-record.mjs";
 import {loadLibs, loadFiles} from "../tools/osd-transpile.mjs";
 import fs from "node:fs";
 import {syncBuiltinESMExports} from "node:module";
@@ -23,11 +24,29 @@ import {resolveFrame, abapFrames, dumpOf} from "../tools/osd-where.mjs";
 import {seedStatements} from "./seed.mjs";
 import {abapgitXml, zipFiles} from "../tools/osd-abapgit-zip.mjs";
 const write = (file, bytes) => { mkdirSync(join(file, ".."), {recursive: true}); writeFileSync(file, bytes); };
-const json = (file, value) => write(file, JSON.stringify(value));
+const json = (file, value) => {
+  write(file, JSON.stringify(value));
+  if (/\/build\/by-input\/[^/]+\/manifest\.json$/.test(file)) write(join(file, "..", "reads.json"), JSON.stringify({schema: 1, root: file.slice(0, file.indexOf("/build/by-input/")), reads: [], uncovered: []}));
+};
 const rejects = async (fn, code) => { let e; try { await fn(); } catch (error) { e = error; } expect(e?.code, e?.message).to.equal(code); };
 
 describe("osd-system: one digest supplies the system", function () {
   this.timeout(60000);
+  it("verifies a public read record after a tree is relocated", () => {
+    const from = mkdtempSync(join(tmpdir(), "osd-reads-from-"));
+    const to = mkdtempSync(join(tmpdir(), "osd-reads-to-"));
+    try {
+      const source = "REPORT zsynthetic.\n";
+      json(join(from, ".osd-source.json"), {private: false});
+      write(join(from, "src/zsynthetic.prog.abap"), source);
+      const file = join(from, "src/zsynthetic.prog.abap");
+      const record = makeReadRecord(from, new Map([[file, digestRead(Buffer.from(source))]]), [readEntry(from, file, Buffer.from(source))]);
+      json(join(to, ".osd-source.json"), {private: false});
+      write(join(to, "src/zsynthetic.prog.abap"), source);
+      json(join(to, "build/live/reads.json"), record);
+      expect(verifyReadRecord(to, join(to, "build/live"), new Map([[join(to, "src/zsynthetic.prog.abap"), digestRead(Buffer.from(source))]])).reads).to.have.length(1);
+    } finally { rmSync(from, {recursive: true, force: true}); rmSync(to, {recursive: true, force: true}); }
+  });
   it("refuses a stale live generation compiled from a private system", () => {
     const scratch = mkdtempSync(join(tmpdir(), "osd-private-generation-"));
     try {
@@ -60,9 +79,10 @@ describe("osd-system: one digest supplies the system", function () {
   describe("the public tree (tools/osd-public-tree.mjs)", () => {
     let scratch;
     const oci = `localhost:5000/synthetic/demo@sha256:${"a".repeat(64)}`;
-    const live = (provenance = []) => {
+    const live = (provenance = [], reads = []) => {
       const hash = hashOf(scratch, inputsOf(scratch));
       json(join(scratch, `build/by-input/${hash}/manifest.json`), {hash, systemDigest: null, systemPrivate: false, provenance});
+      json(join(scratch, `build/by-input/${hash}/reads.json`), {schema: 1, root: scratch, reads, uncovered: []});
       rmSync(join(scratch, "build/live"), {force: true});
       symlinkSync(`by-input/${hash}`, join(scratch, "build/live"));
       return hash;
@@ -151,6 +171,15 @@ describe("osd-system: one digest supplies the system", function () {
       expect(() => publicProvenance(scratch)).to.throw(/working tree .* is not the live generation/).with.property("code", "BAD_PROVENANCE");
     });
 
+    it("requires a complete read record before public stamping", () => {
+      const hash = live();
+      const file = join(scratch, `build/by-input/${hash}/reads.json`);
+      rmSync(file);
+      expect(() => publicProvenance(scratch)).to.throw().with.property("code", "READ_RECORD");
+      json(file, {schema: 1, root: scratch, reads: [], uncovered: ["src/unaccounted.txt"]});
+      expect(() => publicProvenance(scratch)).to.throw().with.property("code", "UNKNOWN_PRIVACY");
+    });
+
     it("re-stamps an artefact changed in place only while the tree is the generation it was verified as", () => {
       live();
       const artefact = join(scratch, "preview");
@@ -204,8 +233,10 @@ describe("osd-system: one digest supplies the system", function () {
         rmSync(join(scratch, "src"), {recursive: true, force: true});
         setup();
         const inputs = {folders: [join(scratch, "src")]};
-        expect(generationSystem(scratch, inputs).systemPrivate).to.equal(true);
-        live([]); // simulate the old lexical record that labelled the generation public
+        const source = [join(scratch, "src/zsynthetic.prog.abap"), join(scratch, "src/vendor/zsynthetic.prog.abap")].find(fs.existsSync);
+        const reads = [readEntry(scratch, source, readFileSync(source))];
+        expect(generationSystem(scratch, inputs, reads).systemPrivate).to.equal(true);
+        live([], reads); // simulate the old lexical manifest, with the actual read recorded
         expect(() => publicProvenance(scratch)).to.throw().with.property("code", "PRIVATE_LAYER");
         const packed = spawnSync(process.execPath, [new URL("../tools/osd-ci-artifact.mjs", import.meta.url).pathname, "pack", join(scratch, "synthetic.tar")],
           {cwd: scratch, encoding: "utf8"});

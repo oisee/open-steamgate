@@ -48,7 +48,7 @@ export function treeDigest(files) {
 
 /** host/repository[:tag][@sha256:hex] as its parts; the host is required */
 export function parseRef(ref) {
-  if (/^[^/]+\/[A-Z]/.test(ref) || /^[^/]+\/[^:@]*[A-Z]/.test(ref))
+  if (/^[^/]+\/[^:@]*[A-Z]/.test(ref))
     throw new OciError("BAD_REF", `${ref}: repository path must be lowercase`);
   ref = ref.replace(/^([^/]+)\//, (_, host) => `${host.toLowerCase()}/`);
   const m = /^([a-z0-9.-]+(?::\d+)?)\/([a-z0-9._\/-]+?)(?::([\w][\w.-]{0,127}))?(?:@(sha256:[0-9a-f]{64}))?$/.exec(ref);

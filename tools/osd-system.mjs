@@ -1,8 +1,9 @@
 import {layerEnvironment} from './osd-layer-env.mjs';
 // One installed index supplies the complete source closure. No Git or network here.
-import {existsSync, readFileSync, readdirSync, realpathSync, statSync} from "node:fs";
+import {existsSync, readFileSync, readdirSync} from "node:fs";
 import {dirname, isAbsolute, join, relative, resolve} from "node:path";
 import {repositoryConfig, sourceFolder} from "./osd-abapgit-config.mjs";
+import {inspectReadRecord} from "./osd-read-record.mjs";
 
 export const SYSTEM_ID = ".osd-system.json";
 export const LAYER_ID = ".osd-layer.json";
@@ -61,6 +62,12 @@ export function assertPublicSystem(root) {
       error.code = "PRIVATE_LAYER";
       throw error;
     }
+    if (!existsSync(join(root, "build/live/reads.json"))) {
+      const error = new Error("live generation read record is missing; rebuild with node tools/osd-build.mjs");
+      error.code = "READ_RECORD";
+      throw error;
+    }
+    inspectReadRecord(root, join(root, "build/live"));
     const unknown = generation?.provenance?.find?.(input => input.private === null);
     if (unknown) fail(unknownPrivacy(unknown.path));
     if (generation?.systemPrivate !== false || !Array.isArray(generation.provenance)
@@ -81,7 +88,7 @@ export function assertPublicSystem(root) {
 }
 
 // What a generation records about the system it was compiled from.
-export function generationSystem(root, inputs = {}) {
+export function generationSystem(root, inputs = {}, reads = [], readRecord = undefined) {
   const system = activeSystem(root);
   // An installed layer is private only when marked (absent = public, the
   // byte-identical old format); activeSystem checked each identity.
@@ -117,38 +124,13 @@ export function generationSystem(root, inputs = {}) {
       private: privacy});
   };
   folders.forEach(path => inspect(path, "source"));
-  // A lexical input root is not the complete source closure: the build follows
-  // directory and file links, and identity files below a root are skipped as
-  // source bytes. Both still govern the privacy of the bytes it consumes.
-  const visited = new Set();
-  const scan = (path, mode) => {
-    let real, type;
-    try { real = realpathSync(path); type = statSync(path); } catch { return; }
-    if (type.isDirectory()) {
-      if (visited.has(`${mode}:${real}`)) return;
-      visited.add(`${mode}:${real}`);
-      for (const entry of readdirSync(path, {withFileTypes: true})) {
-        if (entry.name === ".git" || entry.name === "node_modules") continue;
-        scan(join(path, entry.name), mode);
-      }
-    } else if (type.isFile()) {
-      const identity = [".osd-source.json", LAYER_ID].includes(path.split(/[\\/]/).at(-1))
-        || [".osd-source.json", LAYER_ID].includes(real.split(/[\\/]/).at(-1));
-      if (!identity && mode === "abap" && /\.(mjs|cjs|js|ts|py|md|txt|log|lock|snap|trace\.meta\.json)$/i.test(path)) return;
-      if (!identity && mode !== "abap" && /\.trace\.meta\.json$/i.test(path)) return;
-      // Inspect the real ancestry, including a private identity next to a
-      // symlink target. A source identity itself also counts when found.
-      inspect(real, "source-real", true);
-      if ([".osd-source.json", LAYER_ID].includes(real.split(/[\\/]/).at(-1))) inspect(dirname(real), "source-identity", true);
-      if ([".osd-source.json", LAYER_ID].includes(path.split(/[\\/]/).at(-1))) inspect(dirname(path), "source-identity", true);
-    }
-  };
-  for (const folder of [...(inputs.folders ?? []), ...(inputs.libs ?? [])]) {
-    if (relative(root, resolve(root, folder)) !== "gen") scan(folder, "abap");
+  // The build supplies the exact real files its readers consumed. A symlink
+  // target's identity is taken from that real ancestry, including URL clones
+  // that have since been removed from their temporary checkout.
+  for (const entry of reads) {
+    if (entry.privacy === false) continue;
+    provenance.push({kind: "source-real", path: entry.path, private: entry.privacy});
   }
-  for (const folder of [...(inputs.bspFolders ?? []), ...(inputs.packFolders ?? [])]) scan(folder, "other");
-  for (const file of inputs.packFiles ?? []) scan(file, "other");
-  for (const layer of inputs.sourceLayers ?? []) scan(resolve(root, layer.path), "other");
   const packDirs = new Set([...(inputs.packFiles ?? []).map(file => dirname(resolve(root, file)))]);
   for (const pack of (existsSync(join(root, "packs")) ? readdirSync(join(root, "packs"), {withFileTypes: true}) : []).filter(entry => entry.isDirectory()))
     packDirs.add(join(root, "packs", pack.name));
@@ -158,7 +140,9 @@ export function generationSystem(root, inputs = {}) {
       if (entry.isDirectory() && existsSync(join(dir, entry.name, ".osd-source.json"))) inspect(join(dir, entry.name), "pack-oci");
     }
   }
-  return {systemDigest: system?.digest ?? null, systemPrivate: provenance.some(input => input.private), provenance};
+  const systemPrivate = provenance.some(input => input.private === true) ? true
+    : readRecord?.incomplete || readRecord?.uncovered?.length || provenance.some(input => input.private === null) ? null : false;
+  return {systemDigest: system?.digest ?? null, systemPrivate, provenance};
 }
 
 // Everything under build/ for an archive of the whole store: every kept
@@ -173,7 +157,10 @@ export function assertPublicGenerations(root) {
     if (!entry.isDirectory()) continue;
     let generation;
     try { generation = JSON.parse(readFileSync(join(byInput, entry.name, "manifest.json"), "utf8")); } catch { generation = undefined; }
-    if (generation?.systemPrivate === false) continue;
+    if (generation?.systemPrivate === false) {
+      inspectReadRecord(root, join(byInput, entry.name));
+      continue;
+    }
     const error = new Error(`generation ${entry.name} is ${generation?.systemPrivate === true ? "from a private system" : "not recorded public"}; remove it or rebuild before publishing build/`);
     error.code = "PRIVATE_LAYER";
     throw error;
@@ -184,7 +171,7 @@ export function assertPublicGenerations(root) {
 export function unrecordedGeneration(dir) {
   const file = join(dir, "manifest.json");
   if (!existsSync(file)) return false;
-  try { const record = JSON.parse(readFileSync(file, "utf8")); return typeof record.systemPrivate !== "boolean" || !Array.isArray(record.provenance); } catch { return true; }
+  try { const record = JSON.parse(readFileSync(file, "utf8")); return !existsSync(join(dir, "reads.json")) || typeof record.systemPrivate !== "boolean" || !Array.isArray(record.provenance); } catch { return true; }
 }
 
 export const layerDir = (root, layer) => join(root, ".local/system", layer.path);

@@ -11,7 +11,7 @@ import {cp, mkdir, readFile, rm, stat, writeFile} from "node:fs/promises";
 import {existsSync} from "node:fs";
 import {dirname, join, resolve} from "node:path";
 import {verifyPublicArtefact, writeArtefactProvenance} from "../tools/osd-provenance.mjs";
-import {assertExtensionSources} from "../tools/osd-extension-sources.mjs";
+import {assertExtensionSources, assertPublicExtensionIdentity} from "../tools/osd-extension-sources.mjs";
 
 export async function stageVscodeWeb(extension, out) {
 const bundle = join(extension, "dist/web/extension.js");
@@ -19,6 +19,7 @@ await stat(bundle).catch(() => {
   throw new Error("editors/vscode/dist/web/extension.js is missing; run npm run web:vscode first");
 });
 const bundleProvenance = verifyPublicArtefact(join(extension, "dist/web"));
+assertPublicExtensionIdentity(extension, "dist/web");
 assertExtensionSources(extension, ["resources", "walkthrough", "media", "README.md", "CHANGELOG.md", "package.json"]);
 const parent = dirname(out);
 const parentProvenance = existsSync(join(parent, ".osd-provenance.json")) ? verifyPublicArtefact(parent) : undefined;

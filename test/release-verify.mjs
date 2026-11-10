@@ -14,6 +14,8 @@ import {hashOf, inputsOf} from "../tools/osd-build.mjs";
 import {stageVscodeWeb} from "../scripts/stage-vscode-web.mjs";
 import {assertExtensionSources} from "../tools/osd-extension-sources.mjs";
 import {verifiedWebBundle} from "../scripts/build-vsix.mjs";
+import {syntheticCiTranspiler, syntheticReads} from "./helpers/fix7-fixtures.mjs";
+import {verifyCiTranspiler} from "../tools/osd-ci-transpiler.mjs";
 
 const elf = (machine) => {
   const b = Buffer.alloc(64);
@@ -78,7 +80,10 @@ describe("scripts/release-verify: an artefact by its content", () => {
     const source = join(dir, "private-source");
     mkdirSync(join(source, "build/by-input/fixture"), {recursive: true});
     writeFileSync(join(source, "abap_transpile.json"), JSON.stringify({input_folder: [], libs: []}));
-    const generation = (record) => writeFileSync(join(source, "build/by-input/fixture/manifest.json"), JSON.stringify(record));
+    const generation = (record) => {
+      writeFileSync(join(source, "build/by-input/fixture/manifest.json"), JSON.stringify(record));
+      syntheticReads(source, "fixture");
+    };
     symlinkSync("by-input/fixture", join(source, "build/live"));
     const binary = write("osgo-private", elf(0x3e));
     writeArtefactProvenance(binary, {generation: "old-private", systemDigest: null, systemPrivate: true, inputs: [{kind: "input", private: true}]});
@@ -182,9 +187,42 @@ describe("scripts/release-verify: an artefact by its content", () => {
     writeFileSync(join(extension, "package.json"), "{}");
     execFileSync("git", ["init", "-q", extension]);
     execFileSync("git", ["-C", extension, "add", "package.json"]);
+    execFileSync("git", ["-C", extension, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "fixture"]);
     expect(() => assertExtensionSources(extension, ["package.json"])).not.to.throw();
     writeFileSync(join(extension, "private.txt"), "synthetic private marker");
     expect(() => assertExtensionSources(extension, ["private.txt"])).to.throw().with.property("code", "BAD_PROVENANCE");
+    writeFileSync(join(extension, "staged.txt"), "staged only");
+    execFileSync("git", ["-C", extension, "add", "staged.txt"]);
+    expect(() => assertExtensionSources(extension, ["staged.txt"])).to.throw().with.property("code", "BAD_PROVENANCE");
+    writeFileSync(join(extension, "package.json"), "{\"changed\":true}");
+    expect(() => assertExtensionSources(extension, ["package.json"])).to.throw().with.property("code", "BAD_PROVENANCE");
+    execFileSync("git", ["-C", extension, "checkout", "--", "package.json"]);
+    writeFileSync(join(extension, ".gitignore"), "ignored.txt\n");
+    writeFileSync(join(extension, "ignored.txt"), "ignored");
+    expect(() => assertExtensionSources(extension, ["ignored.txt"])).to.throw().with.property("code", "BAD_PROVENANCE");
+    writeFileSync(join(extension, ".osd-source.json"), JSON.stringify({private: true}));
+    expect(() => assertExtensionSources(extension, ["package.json"])).to.throw().with.property("code", "BAD_PROVENANCE");
+  });
+
+  it("checks every byte of an extension with a root provenance sidecar", () => {
+    const extension = join(dir, "stamped-extension");
+    mkdirSync(extension);
+    writeFileSync(join(extension, "package.json"), "{}");
+    writeArtefactProvenance(extension, {generation: "synthetic", systemDigest: null, systemPrivate: false, inputs: []});
+    expect(() => assertExtensionSources(extension, ["package.json"])).not.to.throw();
+    writeFileSync(join(extension, "extra.txt"), "unrecorded");
+    expect(() => assertExtensionSources(extension, ["package.json"])).to.throw().with.property("code", "BAD_PROVENANCE");
+  });
+
+  it("binds CI transpiler files to its pinned commit and refuses additions or source markers", () => {
+    const root = join(dir, "ci-transpiler-record");
+    syntheticCiTranspiler(root);
+    expect(() => verifyCiTranspiler(root)).not.to.throw();
+    writeFileSync(join(root, ".local/ci-artifact/transpiler/unlisted.txt"), "extra");
+    expect(() => verifyCiTranspiler(root)).to.throw().with.property("code", "CI_TRANSPILER");
+    unlinkSync(join(root, ".local/ci-artifact/transpiler/unlisted.txt"));
+    writeFileSync(join(root, ".local/ci-artifact/transpiler/.osd-source.json"), JSON.stringify({private: true}));
+    expect(() => verifyCiTranspiler(root)).to.throw().with.property("code", "CI_TRANSPILER");
   });
 
   it("refuses a prebuilt VSIX web bundle whose bytes lack verified public provenance", () => {
@@ -196,6 +234,9 @@ describe("scripts/release-verify: an artefact by its content", () => {
     expect(() => verifiedWebBundle(extension)).not.to.throw();
     writeFileSync(join(extension, "dist/web/extension.js"), "changed synthetic bundle");
     expect(() => verifiedWebBundle(extension)).to.throw().with.property("code", "BAD_PROVENANCE");
+    writeFileSync(join(extension, "dist/web/.osd-source.json"), JSON.stringify({private: true}));
+    writeArtefactProvenance(join(extension, "dist/web"), {generation: "synthetic", systemDigest: null, systemPrivate: false, inputs: []});
+    expect(() => verifiedWebBundle(extension)).to.throw().with.property("code", "BAD_PROVENANCE");
   });
 
   // FIX5: the shared caches travel when the public live generation reaches
@@ -204,6 +245,7 @@ describe("scripts/release-verify: an artefact by its content", () => {
     const root = join(dir, "ci-tree");
     for (const path of ["build/tmp", "build/source-by-digest", "build/xref", "gen", "packs", ".local/lars", ".local/ci-artifact/transpiler"])
       mkdirSync(join(root, path), {recursive: true});
+    syntheticCiTranspiler(root);
     writeFileSync(join(root, "abap_transpile.json"), JSON.stringify({input_folder: [], libs: []}));
     const {genHash} = await import("../tools/osd-build.mjs");
     const {cacheKey} = await import("../tools/osd-xref-seed.mjs");
@@ -214,6 +256,7 @@ describe("scripts/release-verify: an artefact by its content", () => {
     const generation = (hash, record, inputs) => {
       mkdirSync(join(root, "build/by-input", hash, "output"), {recursive: true});
       writeFileSync(join(root, "build/by-input", hash, "manifest.json"), JSON.stringify({hash, ...record}));
+      syntheticReads(root, hash);
       writeFileSync(join(root, "build/by-input", hash, "source-inputs.json"), JSON.stringify(inputs));
     };
     generation(currentHash, {systemDigest: null, systemPrivate: false, provenance: [], gen: genHash(root)}, {"src/zpublic.prog.abap": sha(publicSource)});
@@ -273,11 +316,13 @@ describe("scripts/release-verify: an artefact by its content", () => {
     const tree = (name, {config = true} = {}) => {
       const root = join(dir, name);
       for (const path of ["build/source-by-digest", "gen", "packs", ".local/lars", ".local/ci-artifact/transpiler"]) mkdirSync(join(root, path), {recursive: true});
+      syntheticCiTranspiler(root);
       writeFileSync(join(root, "abap_transpile.json"), JSON.stringify({input_folder: [], libs: []}));
       if (config) writeFileSync(join(root, "abaplint.jsonc"), readFileSync(resolve("abaplint.jsonc")));
       const hash = hashOf(root, inputsOf(root));
       mkdirSync(join(root, "build/by-input", hash, "output"), {recursive: true});
       writeFileSync(join(root, "build/by-input", hash, "manifest.json"), JSON.stringify({hash, systemDigest: null, systemPrivate: false, provenance: [], gen: genHash(root)}));
+      syntheticReads(root, hash);
       writeFileSync(join(root, "build/by-input", hash, "source-inputs.json"), JSON.stringify({"src/zfast.prog.abap": sha(source)}));
       writeFileSync(join(root, "build/source-by-digest", sha(source)), source);
       symlinkSync(`by-input/${hash}`, join(root, "build/live"));

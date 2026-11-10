@@ -6,6 +6,7 @@ import {join} from "node:path";
 import {verifyPublicArtefact, writeArtefactProvenance} from "./osd-provenance.mjs";
 import {publicProvenance} from "./osd-public-tree.mjs";
 import {CLOSURE, ciClosure, verifyCiClosure} from "./osd-ci-closure.mjs";
+import {verifyCiTranspiler} from "./osd-ci-transpiler.mjs";
 
 if (process.argv[2] === "verify") {
   const {generationStateSnapshot} = await import("./osd-build.mjs");
@@ -29,6 +30,7 @@ if (!archive) {
 }
 // the tree is archived, so the tree must be the public live generation
 const provenance = publicProvenance(process.cwd());
+verifyCiTranspiler(process.cwd());
 const live = readlinkSync("build/live");
 if (!/^by-input\/[0-9a-f]{16}$/.test(live) || live !== `by-input/${provenance.generation}`) throw new Error("invalid live generation link");
 if (!lstatSync("output").isSymbolicLink() || readlinkSync("output") !== "build/live/output"
@@ -38,9 +40,10 @@ const generation = JSON.parse(readFileSync(`build/${live}/manifest.json`, "utf8"
 const {genHash} = await import("./osd-build.mjs");
 if (typeof generation.gen !== "string" || generation.gen !== genHash(process.cwd()))
   throw new Error("generated sources differ from the public live generation");
-const paths = ["gen", "output", "build/live", `build/${live}`, ".local/ci-artifact/transpiler"];
+const paths = ["gen", "output", "build/live", `build/${live}`, ".local/ci-artifact/transpiler", ".local/ci-artifact/transpiler-digests.json"];
 for (const lib of generation.inputs?.libs ?? []) {
-  if (!/^\.local\/lars\/[a-zA-Z0-9._-]+$/.test(lib)) throw new Error(`library path is outside the public archive closure: ${lib}`);
+  if (!/^\.local\/lars\/[a-zA-Z0-9._-]+$/.test(lib) && !/^\.local\/url-libs\/[0-9a-f]{24}$/.test(lib))
+    throw new Error(`library path is outside the public archive closure: ${lib}`);
   paths.push(lib);
 }
 for (const pack of readdirSync("packs")) {
