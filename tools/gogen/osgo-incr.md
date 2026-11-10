@@ -1,5 +1,9 @@
 # osgo-incr.mjs — the per-object front-end cache of the osgo fast path
 
+Files: `osgo-incr.mjs` (the recorder and the assembly), `osgo-incr-anon.mjs`
+(which declaration owns an anonymous structure), `osgo-incr-db.mjs` (the
+database statements per object), `osgo-incr.test.mjs`.
+
 Measured and designed in `docs/osgo-fast-rebuild.md`, "The incremental front
 end". This is the README of the module the house rule asks a self-contained
 module for; the code comments here repeat only what a reader of the module
@@ -21,15 +25,20 @@ every other object's lowered IR from the cache.
 build/osgo-incr/<generation>/        one directory per live generation,
   index.json                          small, read first: schema, tool identity,
                                       folders, objects, ABAP Unit owners, the
-                                      lowering order, the class push order, the
-                                      superclass map, wanted, diagnostics, the
-                                      broken set, rtti, ownership, aliases, and
-                                      per entry: file digests, deps, reads,
-                                      pushed classes, anonymous-struct refs,
-                                      portability, the entry digest
+                                      segment sequence (below), where the
+                                      global passes wrote, the class push
+                                      order, the superclass map, wanted,
+                                      diagnostics, the broken set, rtti,
+                                      ownership, aliases, the name of every
+                                      declared anonymous structure, the
+                                      classes whose constructor DEFAULTs the
+                                      emission resolves, and per entry: file
+                                      digests, deps, reads, pushed classes,
+                                      anonymous-struct refs, portability, the
+                                      entry digest
   e/<sha(key)>.bin                    per object: the lowered class IRs, the
-                                      ordered writes its lowering made to the
-                                      shared program state, the supplied
+                                      writes its lowering made to the shared
+                                      program state, per segment, the supplied
                                       contributions, the rtti typedefs (v8
                                       serialized, deflated, digest-checked)
   db.json                             the database statements per registry
@@ -50,7 +59,13 @@ layer folders / object list / Unit owners differ.
    IR names, and the owner of every generated type name it spells (a
    structure a class first used is named after it). Entries whose IR did not
    serialize are always re-lowered.
-2. **The registry**: every non-class object, plus the reference closure of
+2. **The registry**: every non-class file `compileProgram` loads (all of
+   them: abaplint enumerates objects in the order a *name* first appeared,
+   and a behaviour definition in `src/` put `ZI_RAP_NOTE` ahead of its view
+   in `gen/`, which the table pass's row types follow), the classes whose
+   constructor DEFAULTs the emission resolves for CREATE OBJECT by name
+   (`emit-constructors.ts`, every class of the program), plus the reference
+   closure of
    the classes re-lowered -- their recorded reads **and deps** (the syntax
    pass resolves a type the lowering never asks the registry for: the model
    class behind a redefined method's signature) and every class whose name
@@ -59,7 +74,7 @@ layer folders / object list / Unit owners differ.
    registry, because abaplint's syntax pass checks them all. The parse, the
    syntax pass and the fresh lowering all shrink with that set.
 3. **The shared state**: every re-used entry's recorded writes are replayed
-   in the original lowering order into the collections the lowering reads
+   in the full build's segment order into the collections the lowering reads
    (structures, constants, signatures, events, ...), `supplied` is merged
    from the per-class contributions, and the caught index (which CATCH takes
    the raised objects of which classes) answers from the recorded superclass
@@ -74,13 +89,24 @@ layer folders / object list / Unit owners differ.
    the shared collections are recorded per object (the same op proxy the
    write side uses).
 5. **The merge**: classes in the recorded push order, every shared
-   collection **in the order the full build's lowering wrote it** -- per
-   object of the recorded sequence, the fresh writes of one that lowered
-   again and the recorded writes of one taken from the cache, the global
-   passes appended, as in a full build -- because the program digest
-   (program-digest.mjs) and the emitted Go read several of them in
-   insertion order; "reused first, fresh after it" names another
-   generation. The rtti table is rebuilt over the recorded registry
+   collection **in the order the full build wrote it**. compileProgram
+   enters an object more than once -- the local discovery, the class pass,
+   the local classes after *every* class, the function groups -- and each
+   `enter` is a segment of one global sequence (`index.segments`); the
+   merge replays segments in that sequence, each the fresh writes of an
+   object that lowered again or the recorded writes of one from the cache,
+   and the global passes in the slot they ran in (before or after the
+   discovery, before or after the lowering; a pass that wrote anywhere else
+   refuses). Grouping an object's writes at its first slot moved a local
+   class's types (`LCL_STACK__TY_DATA`) ahead of every later class's. The
+   program digest (program-digest.mjs) and the emitted Go read several of
+   these collections in insertion order; any other order names another
+   generation. Before the final analyses (`incr.lowered`, frontend.mjs)
+   the fresh program gets the merged class list and every recorded
+   collection rebuilt in that order, so the interface walk, the dynamic
+   statics and the table pass append what they derive in the full build's
+   order (the interface declarations of `app.go`); the merge after them is
+   checked against what they left. The rtti table is rebuilt over the recorded registry
    enumeration order (the dictionary interleaves with the class typedefs,
    and every registry class gets a superclass entry, null included); the
    ownership table over the recorded collection order. The final analyses
@@ -101,26 +127,42 @@ Anything the cache cannot prove, each with a reason printed as
 - a syntax error in a re-lowered object (the full front end drops such an
   object from the program; that answer is not this edit's);
 - an object outside the re-lowered set turning broken (the edit broke it);
-- a fresh IR newly naming a shared anonymous structure (whether the full
-  build would share it through the same abaplint type instance is exactly
-  what a partial registry cannot prove);
+- a fresh IR newly naming a shared anonymous structure under a shape-only
+  seed (global passes only), or a declared anonymous structure whose name
+  here is not the one the live generation gave its declaration;
+- a re-lowered object entered in other passes than the live generation's
+  (an edit that adds the first local class, say), a fresh lowering that
+  first writes a key another object first wrote, a global pass writing
+  between two objects;
 - a class with interface aliases outside the fresh registry (its dynamic
   dispatch would resolve differently);
 - the database statements not attributing per object (recorded at write time
   by comparing the reconstruction with the real `DatabaseSetup` run).
 
-## The anonymous-structure substitute
+## The anonymous-structure substitute (osgo-incr-anon.mjs)
 
 abaplint keys anonymous structures (the row of a `RANGE OF`, an inline
-`BEGIN OF` in a signature) by *type instance*, shared through the registry:
-the first lowering to reach one names it, later users keep that name. A new
-registry has new instances, so the cache answers the lookup by the component
-names instead -- the same answer whenever the instance was shared, because
-the recorded name is what the write-time build named that shape. A shape two
-independent structures already share is not answered at all (a miss lowers
-as the full build would, naming the structure after the class that reached
-it), and a shape whose owner was re-lowered is not seeded either, because
-its dependents were re-lowered with it.
+`BEGIN OF` constant) by *type instance*: the first lowering to reach one
+names it after its own class, later users keep that name. A fast build
+reaches instances in another order (the first reacher may be cached), and
+the shape alone does not say which instance it is: every exception class has
+its own `MSGID/MSGNO/ATTR1..4` textid constant, and `ZCL_STG_SADL_DPC`
+reaches its own and `ZCL_OSD_RAP_SADL`'s under two names. The declaration
+does. `anonOrigins` maps every anonymous instance a global class or
+interface member owns (attribute, constant, type, method parameter, and the
+components and rows below them) to its paths; both registries parse the same
+declarations, and the write side records the name each path's instance got.
+A fresh lowering then:
+
+- takes the recorded name for a declared instance; with none recorded no
+  object of the full build reached it, a cached object reaches what it
+  reached then, so the first re-lowered reacher names it here as there;
+- mints the name for an instance no global member owns, which comes from
+  the lowering object's own syntax run (its own definition, a method's local
+  type): only it reaches that instance, and it names it after itself both
+  ways;
+- outside every object's mark (a global pass) answers by the shape when the
+  write-time build gave that shape exactly one name.
 
 ## Cost
 
@@ -140,5 +182,12 @@ method gained with its implementation, the assembled program equals the full
 one (classes, structures, constants, interface signatures, events, exception
 supers, rtti, the table registry and the emitted Go); the doubtful cases
 (wrong generation, unreadable entry, a syntax error in the edited object, a
-changed front end) refuse. The real-tree proof (same generation, byte
+changed front end) refuse. One test per ordering and naming case the real
+tree hit, each failing on the merge before it: the local classes' pass
+(owner cached, owner re-lowered), the interface declaration order, a later
+reacher of a declared anonymous structure, an object that reaches its own
+and another class's structure of one shape, an edit that newly reaches a
+declared structure, a cached class's skipped methods, a cached class with
+constructor DEFAULTs, and a non-class file that orders the table pass.
+The real-tree proof (same generation, byte
 identical files, fast against full) is recorded in the doc.
