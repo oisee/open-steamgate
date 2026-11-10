@@ -235,6 +235,12 @@ export function incrRecorder({root, folders, hidden, objects, includeTests}) {
       for (const name of broken) if (!entries[keyOf("CLAS", name)] && !entries[keyOf("INTF", name)]) entries[keyOf("CLAS", name)] = {deps: [], reads: [], pushed: [], anonRefs: [], broken: true, super: supers[name] ?? null, files: {}, portable: true};
       const index = {schema: SCHEMA, tool: toolIdentity(), folders, objects, order, classes: program.classes.map((c) => [pushedNames.get(c.name), c.name]),
         entries, broken, supers, wanted: [...program.wanted],
+        // the CDS views are read off the .ddls.asddls sources, which the
+        // closure registry never holds (registryFiles takes .abap/.xml
+        // only), so the fast build's own registry cannot rebuild them -- and
+        // a CDS source is not a class or interface, so on the fast path it
+        // cannot have changed either; the recorded map is the answer
+        cdsViews: {...program.cdsViews},
         diagnostics: program.diagnostics.map((d) => `${upper(d.object)}\0${d.message}`),
         rtti: {structs: [...program.rtti.structs], known: [...program.rtti.known], classSupers: [...program.rtti.classSupers]},
         ownership: [...ownership],
@@ -492,6 +498,11 @@ export function incrAssemble({root, folders, objects, hidden, includeTests, proo
       for (const key of reusedKeys) for (const [k, params] of load(key).supplied ?? []) supplied.set(k, new Set([...(supplied.get(k) ?? []), ...params]));
       p.supplied = supplied;
       p.anonStructs = new AnonShapes(seeds);
+      // the fresh lowering resolves CDS view types through this map
+      // (frontend.mjs), and the mini registry's own is empty -- its walk
+      // never reaches the .ddls.asddls sources; the merge restores the
+      // recorded one below, over what the mini's final analysis answered
+      p.cdsViews = index.cdsViews ?? {};
     },
     rttiOf(owner, defs) { freshRtti.push([owner, defs]); },
     ownershipOf(name, value) { freshOwnership.set(upper(name), value); },
@@ -568,6 +579,10 @@ export function incrAssemble({root, folders, objects, hidden, includeTests, proo
   }
   program2.classes = classes;
   program2.wanted = new Set(index.wanted);
+  // the mini's final analysis rebuilt the CDS view map off a registry that
+  // holds no .ddls source; the recorded map is the fast path's answer (a
+  // CDS edit is not a class or interface edit and refuses before this)
+  program2.cdsViews = index.cdsViews ?? {};
   const cachedDiag = index.diagnostics.map((d) => d.split("\0")).map(([object, message]) => ({object, message}))
     .filter((d) => !reloweredObjects.has(upper(d.object)));
   program2.diagnostics = [...cachedDiag, ...mini.diagnostics];

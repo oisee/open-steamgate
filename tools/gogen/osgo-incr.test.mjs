@@ -14,6 +14,12 @@ import {columnRegistry} from "./frontend.mjs";
 import {incrAssemble, incrRecorder, objectOf, registryFiles} from "./osgo-incr.mjs";
 
 const sources = {
+  // a CDS view source: its entity name and its SQL view name reach the
+  // program's cdsViews map, which the closure registry cannot rebuild (its
+  // walk takes .abap/.xml files only) -- the cache must replay the map
+  "app/zv_incr_src.ddls.asddls": `@AbapCatalog.sqlViewName: 'ZVINCRV'
+@AccessControl.authorizationCheck: #NOT_REQUIRED
+define view Zv_Incr_Src as select from zcl_incr_hot { key travelid as Id }`,
   "app/zif_incr_types.intf.abap": `INTERFACE zif_incr_types PUBLIC.
   TYPES: BEGIN OF ty_pair, a TYPE i, b TYPE i, END OF ty_pair.
   TYPES ty_nr TYPE i.
@@ -229,6 +235,9 @@ for (const [name, change] of [
       assert.equal(text(attempt.program.exceptionSupers), text(reference.exceptionSupers));
       assert.equal(text([...attempt.program.rtti.structs]), text([...reference.rtti.structs]));
       assert.equal(JSON.stringify(columnRegistry(attempt.program)), JSON.stringify(columnRegistry(reference)));
+      // the CDS view map of the record, not of the closure registry (empty)
+      assert.deepEqual({...attempt.program.cdsViews}, {...reference.cdsViews});
+      assert.ok(Object.keys(reference.cdsViews).length > 0, "the fixture must carry a CDS view");
       assert.equal(emitted(attempt.program), emitted(reference));
     } finally { rmSync(root, {recursive: true, force: true}); }
   });
