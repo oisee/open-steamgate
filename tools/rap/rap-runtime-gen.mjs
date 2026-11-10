@@ -212,12 +212,25 @@ export function runtimeOutputs(plans, files) {
       const callables = [
         ...entity.determinations.map(d => ({...d, kind: "D"})),
         ...entity.validations.map(v => ({...v, kind: "V", on: "save"})),
-        ...entity.actions.map((a, index) => ({...a, kind: "A", on: "", triggers: [], index})),
+        ...entity.actions.map((a, index) => ({...a, kind: a.determine ? "X" : "A", on: "", triggers: a.determine ? a.triggers : [], index})),
       ];
       let handler;
       for (const [n, c] of callables.entries()) {
-        if (c.kind === "A" && (c.use || c.modifiers.length || c.parameter || (c.result && c.result.type !== "$self"))) {
-          throw new Error(`${entity.entity}~${c.name}: only instance actions without parameter and with no or a $self result run (R2)`);
+        if (c.kind === "A" && (c.use || c.modifiers.some(m => m !== "internal" && m !== "factory") || c.parameter || (c.result && c.result.type !== "$self"))) {
+          throw new Error(`${entity.entity}~${c.name}: only instance actions (also internal or factory) without parameter and with no or a $self result run (R6)`);
+        }
+        // R6: a determine action has no method of its own; the runtime runs
+        // its members, determinations on save and validations of the entity
+        if (c.kind === "X") {
+          model_ += `    CLEAR ls_callable.\n    ls_callable-kind = 'X'.\n    ls_callable-name = ${lit(upper(c.name))}.\n`
+            + (c.triggers ?? []).map(t => {
+              const name = t.name.includes("~") ? t.name.split("~")[1] : t.name;
+              return `    CLEAR ls_member.\n    ls_member-kind = '${t.kind === "determination" ? "D" : "V"}'.\n    ls_member-name = ${lit(upper(name))}.\n`
+                + ((t.options ?? []).some(o => o.name === "always") ? "    ls_member-always = abap_true.\n" : "")
+                + "    APPEND ls_member TO ls_callable-members.\n";
+            }).join("")
+            + "    APPEND ls_callable TO ls_entity-callables.\n";
+          continue;
         }
         // the declaration's FOR clause binds first; a method named after it, written explicitly, second
         const names = new Set([upper(entity.entity), upper(entity.alias ?? entity.entity)]);
@@ -244,6 +257,8 @@ export function runtimeOutputs(plans, files) {
           + `    ls_callable-method = ${lit(upper(m.name))}.\n`
           + (m.parameters.some(x => x.role === "entities") ? "    ls_callable-entities = abap_true.\n" : "")
           + (c.kind === "A" && featured(c.options) ? "    ls_callable-features = abap_true.\n" : "")
+          + (c.kind === "A" && c.modifiers.includes("internal") ? "    ls_callable-internal = abap_true.\n" : "")
+          + (c.kind === "A" && c.modifiers.includes("factory") ? "    ls_callable-factory = abap_true.\n" : "")
           + (c.on ? `    ls_callable-on = '${c.on === "modify" ? "M" : "S"}'.\n` : "")
           + (trig.some(t => t.kind === "create") ? "    ls_callable-on_create = abap_true.\n" : "")
           + (trig.some(t => t.kind === "update") ? "    ls_callable-on_update = abap_true.\n" : "")
@@ -254,16 +269,18 @@ export function runtimeOutputs(plans, files) {
           + "    APPEND ls_callable TO ls_entity-callables.\n";
         // the typed call: keys built from the rows, or the caller's import table for an action
         const method = `${p}_c${n}`;
-        defs += `    METHODS ${method}\n      IMPORTING\n        io_handler  TYPE REF TO object\n        ir_rows     TYPE REF TO data\n        ir_keys     TYPE REF TO data\n        ir_result   TYPE REF TO data\n        ir_failed   TYPE REF TO data\n        ir_reported TYPE REF TO data.\n`;
-        calls += `      WHEN ${lit(`${upper(entity.entity)}~${upper(c.name)}`)}.\n        ${method}( io_handler = io_handler ir_rows = ir_rows ir_keys = ir_keys ir_result = ir_result ir_failed = ir_failed ir_reported = ir_reported ).\n`;
+        defs += `    METHODS ${method}\n      IMPORTING\n        io_handler  TYPE REF TO object\n        ir_rows     TYPE REF TO data\n        ir_keys     TYPE REF TO data\n        ir_result   TYPE REF TO data\n        ir_failed   TYPE REF TO data\n        ir_reported TYPE REF TO data\n        ir_mapped   TYPE REF TO data OPTIONAL.\n`;
+        calls += `      WHEN ${lit(`${upper(entity.entity)}~${upper(c.name)}`)}.\n        ${method}( io_handler = io_handler ir_rows = ir_rows ir_keys = ir_keys ir_result = ir_result ir_failed = ir_failed ir_reported = ir_reported ir_mapped = ir_mapped ).\n`;
         const keyType = c.kind === "A" ? `${iface}=>t_${p}_a${c.index}_import` : `${iface}=>t_${p}_${c.kind === "D" ? "determination" : "validation"}`;
         let body = `    DATA lt_keys TYPE ${keyType}.\n    DATA ls_key LIKE LINE OF lt_keys.\n`
           + `    FIELD-SYMBOLS <lt_rows> TYPE ${iface}=>t_${p}_read_result.\n    FIELD-SYMBOLS <ls_row> LIKE LINE OF <lt_rows>.\n`
           + `    FIELD-SYMBOLS <ls_failed> TYPE ${iface}=>r_failed.\n    FIELD-SYMBOLS <ls_reported> TYPE ${iface}=>r_reported.\n`
-          + (m.parameters.some(x => x.role === "mapped") ? `    DATA ls_mapped TYPE ${iface}=>r_mapped.\n` : "");
+          + (m.parameters.some(x => x.role === "mapped") ? `    DATA ls_mapped TYPE ${iface}=>r_mapped.\n    FIELD-SYMBOLS <ls_mapped> TYPE ${iface}=>r_mapped.\n` : "");
         if (c.kind === "A") body += `    FIELD-SYMBOLS <lt_keys> TYPE ${keyType}.\n`;
         if (c.kind === "A" && c.result) body += `    FIELD-SYMBOLS <lt_result> TYPE ${iface}=>t_${p}_a${c.index}_result.\n`;
         body += "\n    ASSIGN ir_rows->* TO <lt_rows>.\n    ASSIGN ir_failed->* TO <ls_failed>.\n    ASSIGN ir_reported->* TO <ls_reported>.\n";
+        // R6: the caller's MAPPED reaches the handler (a factory action fills it)
+        if (m.parameters.some(x => x.role === "mapped")) body += "    IF ir_mapped IS BOUND.\n      ASSIGN ir_mapped->* TO <ls_mapped>.\n    ELSE.\n      ASSIGN ls_mapped TO <ls_mapped>.\n    ENDIF.\n";
         if (c.kind === "A") {
           body += "    ASSIGN ir_keys->* TO <lt_keys>.\n    lt_keys = <lt_keys>.\n";
           if (c.result) body += "    ASSIGN ir_result->* TO <lt_result>.\n";
@@ -272,7 +289,7 @@ export function runtimeOutputs(plans, files) {
             + e.fields.filter(f => f.key).map(f => `      ls_key-${f.name} = <ls_row>-${f.name}.\n`).join("")
             + "      APPEND ls_key TO lt_keys.\n    ENDLOOP.\n";
         }
-        const actual = {keys: "lt_keys", entities: "<lt_rows>", failed: "<ls_failed>", reported: "<ls_reported>", result: "<lt_result>", mapped: "ls_mapped"};
+        const actual = {keys: "lt_keys", entities: "<lt_rows>", failed: "<ls_failed>", reported: "<ls_reported>", result: "<lt_result>", mapped: "<ls_mapped>"};
         if (m.parameters.some(x => x.role === "result") && !(c.kind === "A" && c.result)) throw new Error(`${h.name}->${m.name}: a result parameter without a result`);
         const groups = {importing: [], changing: [], exporting: []};
         for (const x of m.parameters) {
@@ -398,6 +415,7 @@ CLASS ${cls} IMPLEMENTATION.
     DATA ls_callable TYPE zif_osd_rap_bo=>ty_callable.
     DATA ls_assoc TYPE zif_osd_rap_bo=>ty_assoc.
     DATA ls_pair TYPE zif_osd_rap_bo=>ty_pair.
+    DATA ls_member TYPE zif_osd_rap_bo=>ty_member.
 
 ${model_}  ENDMETHOD.
 

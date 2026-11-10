@@ -270,7 +270,9 @@ class Parser {
         const kind = this.name().toLowerCase();
         if (determine) {
           if (!['validation', 'determination'].includes(kind)) throw new Error('Unknown determine trigger');
-          const name = this.qualifiedName(); this.need(';'); triggers.push({kind, name});
+          // R6: determination ( always ) d; runs whatever its triggers say
+          const options = this.options();
+          const name = this.qualifiedName(); this.need(';'); triggers.push({kind, name, options});
         } else if (kind === 'field') { const fields = this.list(); this.need(';'); triggers.push({kind, fields}); }
         else if (['create', 'update', 'delete'].includes(kind)) { this.need(';'); triggers.push({kind}); }
         else throw new Error('Unknown trigger');

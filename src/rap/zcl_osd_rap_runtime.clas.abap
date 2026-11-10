@@ -100,7 +100,10 @@ CLASS zcl_osd_rap_runtime DEFINITION PUBLIC CREATE PRIVATE.
         zcx_osd_rap.
 
 * execute an instance action. IT_KEYS: a TABLE FOR ACTION IMPORT;
-* CT_RESULT: a TABLE FOR ACTION RESULT
+* CT_RESULT: a TABLE FOR ACTION RESULT. R6: an internal action only from a
+* handler of this runtime (IN LOCAL MODE), else ZCX_OSD_RAP; a determine
+* action runs its members; a factory action answers the new instances in
+* CS_MAPPED (RESPONSE FOR MAPPED), under the %cid of each import row
     METHODS execute
       IMPORTING
         iv_entity   TYPE csequence
@@ -110,6 +113,7 @@ CLASS zcl_osd_rap_runtime DEFINITION PUBLIC CREATE PRIVATE.
         ct_result   TYPE STANDARD TABLE
         cs_failed   TYPE any
         cs_reported TYPE any
+        cs_mapped   TYPE any OPTIONAL
       RAISING
         zcx_osd_rap.
 
@@ -544,11 +548,37 @@ CLASS zcl_osd_rap_runtime DEFINITION PUBLIC CREATE PRIVATE.
         ir_rows     TYPE REF TO data
         ir_keys     TYPE REF TO data OPTIONAL
         ir_result   TYPE REF TO data OPTIONAL
+        ir_mapped   TYPE REF TO data OPTIONAL
       CHANGING
         cs_failed   TYPE any
         cs_reported TYPE any
       RAISING
         zcx_osd_rap.
+
+* R6: the members of a determine action, for the instances IT_KEYS names
+* (the buffer's instance keys)
+    METHODS determine_action
+      IMPORTING
+        is_entity   TYPE zif_osd_rap_bo=>ty_entity
+        is_callable TYPE zif_osd_rap_bo=>ty_callable
+        it_keys     TYPE string_table
+      CHANGING
+        cs_failed   TYPE any
+        cs_reported TYPE any
+      RAISING
+        zcx_osd_rap.
+
+* R6: a factory action's contract, every import row's %cid in MAPPED or
+* the row in FAILED; a row that is in neither is failed
+    METHODS check_factory
+      IMPORTING
+        is_entity   TYPE zif_osd_rap_bo=>ty_entity
+        is_callable TYPE zif_osd_rap_bo=>ty_callable
+        it_keys     TYPE STANDARD TABLE
+      CHANGING
+        cs_mapped   TYPE any
+        cs_failed   TYPE any
+        cs_reported TYPE any.
 
     METHODS take_back
       IMPORTING
@@ -1828,21 +1858,37 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
     DATA lr_rows     TYPE REF TO data.
     DATA lr_keys     TYPE REF TO data.
     DATA lr_result   TYPE REF TO data.
+    DATA lr_mapped   TYPE REF TO data.
     DATA lv_ok       TYPE abap_bool.
+    DATA lt_inst     TYPE string_table.
     FIELD-SYMBOLS <ls_key>  TYPE any.
     FIELD-SYMBOLS <lt_rows> TYPE STANDARD TABLE.
     FIELD-SYMBOLS <lt_keys> TYPE STANDARD TABLE.
     FIELD-SYMBOLS <ls_new>  TYPE any.
     FIELD-SYMBOLS <ls_row>  TYPE any.
+    FIELD-SYMBOLS <ls_mapped> TYPE any.
 
     ls_entity = entity_of( iv_entity ).
     lv_name = to_upper( iv_action ).
-    LOOP AT ls_entity-callables INTO ls_callable WHERE kind = 'A' AND name = lv_name.
+    LOOP AT ls_entity-callables INTO ls_callable WHERE ( kind = 'A' OR kind = 'X' ) AND name = lv_name.
       lv_found = abap_true.
+      EXIT.
     ENDLOOP.
     IF lv_found = abap_false.
       RAISE EXCEPTION TYPE zcx_osd_rap EXPORTING iv_reason = |{ ls_entity-alias } has no action { iv_action }|.
     ENDIF.
+* R6: an internal action is the business object's own: only its handlers,
+* running now in this runtime (IN LOCAL MODE), execute it
+    IF ls_callable-internal = abap_true AND mv_depth = 0.
+      RAISE EXCEPTION TYPE zcx_osd_rap EXPORTING iv_reason =
+        |Action { iv_action } of { ls_entity-alias } is internal: only the business object's own handlers execute it, IN LOCAL MODE|.
+    ENDIF.
+    IF cs_mapped IS SUPPLIED.
+      GET REFERENCE OF cs_mapped INTO lr_mapped.
+    ELSE.
+      lr_mapped = mo_bo->new_response( 'MAPPED' ).
+    ENDIF.
+    ASSIGN lr_mapped->* TO <ls_mapped>.
 
     IF mv_depth = 0.
       start_request( ).
@@ -1876,6 +1922,7 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
       READ TABLE mt_inst INDEX lv_index INTO ls_inst.
       ASSIGN ls_inst-row->* TO <ls_row>.
       APPEND <ls_row> TO <lt_rows>.
+      APPEND ls_inst-key TO lt_inst.
 * the handler sees the key also where the caller gave a %cid_ref
       APPEND <ls_key> TO <lt_keys> ASSIGNING <ls_new>.
       copy_keys( EXPORTING is_entity = ls_entity is_from = <ls_row> CHANGING cs_to = <ls_new> ).
@@ -1884,13 +1931,117 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    GET REFERENCE OF ct_result INTO lr_result.
-    invoke( EXPORTING is_entity = ls_entity is_callable = ls_callable
-                      ir_rows = lr_rows ir_keys = lr_keys ir_result = lr_result
-            CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
+    IF ls_callable-kind = 'X'.
+      determine_action( EXPORTING is_entity = ls_entity is_callable = ls_callable it_keys = lt_inst
+                        CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
+    ELSE.
+      GET REFERENCE OF ct_result INTO lr_result.
+      invoke( EXPORTING is_entity = ls_entity is_callable = ls_callable
+                        ir_rows = lr_rows ir_keys = lr_keys ir_result = lr_result ir_mapped = lr_mapped
+              CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
+      IF ls_callable-factory = abap_true.
+        check_factory( EXPORTING is_entity = ls_entity is_callable = ls_callable it_keys = <lt_keys>
+                       CHANGING cs_mapped = <ls_mapped> cs_failed = cs_failed cs_reported = cs_reported ).
+      ENDIF.
+    ENDIF.
     IF mv_depth = 0.
       determine( EXPORTING iv_on = 'M' CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
     ENDIF.
+  ENDMETHOD.
+
+  METHOD determine_action.
+* R6: determinations on save first, then validations, each in the order
+* declared (the save sequence's order, this runtime's choice); a member runs
+* for the instances whose triggers hold since the last save, a member
+* declared ( always ) for all of them. Triggers are not consumed: the save
+* runs a determination again if they still hold
+    DATA ls_member   TYPE zif_osd_rap_bo=>ty_member.
+    DATA ls_member_c TYPE zif_osd_rap_bo=>ty_callable.
+    DATA ls_inst     TYPE ty_inst.
+    DATA lr_rows     TYPE REF TO data.
+    DATA lv_kind     TYPE zif_osd_rap_bo=>ty_flag.
+    DATA lv_found    TYPE abap_bool.
+    FIELD-SYMBOLS <lt_rows> TYPE STANDARD TABLE.
+    FIELD-SYMBOLS <ls_row>  TYPE any.
+
+    APPEND |DETERMINE ACTION { is_callable-name }| TO mt_trace.
+    DO 2 TIMES.
+      IF sy-index = 1.
+        lv_kind = 'D'.
+      ELSE.
+        lv_kind = 'V'.
+      ENDIF.
+      LOOP AT is_callable-members INTO ls_member WHERE kind = lv_kind.
+        lv_found = abap_false.
+        LOOP AT is_entity-callables INTO ls_member_c WHERE kind = lv_kind AND name = ls_member-name.
+          lv_found = abap_true.
+          EXIT.
+        ENDLOOP.
+        IF lv_found = abap_false.
+          RAISE EXCEPTION TYPE zcx_osd_rap EXPORTING iv_reason =
+            |{ is_entity-alias }~{ is_callable-name }: no member { ls_member-name }|.
+        ENDIF.
+        lr_rows = mo_bo->new_rows( is_entity-name ).
+        ASSIGN lr_rows->* TO <lt_rows>.
+        LOOP AT mt_inst INTO ls_inst WHERE entity = is_entity-name.
+          READ TABLE it_keys TRANSPORTING NO FIELDS WITH KEY table_line = ls_inst-key.
+          IF sy-subrc <> 0.
+            CONTINUE.
+          ENDIF.
+          IF ls_member-always = abap_false AND triggered( is_callable = ls_member_c is_inst = ls_inst ) = abap_false.
+            CONTINUE.
+          ENDIF.
+          ASSIGN ls_inst-row->* TO <ls_row>.
+          APPEND <ls_row> TO <lt_rows>.
+        ENDLOOP.
+        IF lines( <lt_rows> ) > 0.
+          invoke( EXPORTING is_entity = is_entity is_callable = ls_member_c ir_rows = lr_rows
+                  CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
+        ENDIF.
+      ENDLOOP.
+    ENDDO.
+  ENDMETHOD.
+
+  METHOD check_factory.
+    DATA lv_cid  TYPE string.
+    DATA lv_key  TYPE string.
+    DATA lv_done TYPE abap_bool.
+    FIELD-SYMBOLS <ls_key>    TYPE any.
+    FIELD-SYMBOLS <lt_mapped> TYPE STANDARD TABLE.
+    FIELD-SYMBOLS <lt_failed> TYPE STANDARD TABLE.
+    FIELD-SYMBOLS <ls_line>   TYPE any.
+
+    ASSIGN COMPONENT is_entity-response OF STRUCTURE cs_mapped TO <lt_mapped>.
+    ASSIGN COMPONENT is_entity-response OF STRUCTURE cs_failed TO <lt_failed>.
+    IF <lt_mapped> IS NOT ASSIGNED OR <lt_failed> IS NOT ASSIGNED.
+      RETURN.
+    ENDIF.
+    LOOP AT it_keys ASSIGNING <ls_key>.
+      lv_cid = text_of( is_row = <ls_key> iv_component = '%CID' ).
+      lv_key = key_of( is_entity = is_entity is_row = <ls_key> ).
+      lv_done = abap_false.
+      LOOP AT <lt_mapped> ASSIGNING <ls_line>.
+        IF lv_cid IS NOT INITIAL AND text_of( is_row = <ls_line> iv_component = '%CID' ) = lv_cid.
+          lv_done = abap_true.
+          EXIT.
+        ENDIF.
+      ENDLOOP.
+      LOOP AT <lt_failed> ASSIGNING <ls_line>.
+        IF lv_done = abap_true.
+          EXIT.
+        ENDIF.
+        IF ( lv_cid IS NOT INITIAL AND text_of( is_row = <ls_line> iv_component = '%CID' ) = lv_cid )
+            OR key_of( is_entity = is_entity is_row = <ls_line> ) = lv_key.
+          lv_done = abap_true.
+        ENDIF.
+      ENDLOOP.
+      IF lv_done = abap_false.
+        fail( EXPORTING is_entity = is_entity is_input = <ls_key>
+                        iv_cause = if_abap_behv=>cause-unspecific
+                        iv_text = |Factory action { is_callable-name } of { is_entity-alias } gave no instance and no failure|
+              CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
+      ENDIF.
+    ENDLOOP.
   ENDMETHOD.
 
   METHOD triggered.
@@ -2026,7 +2177,7 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
     TRY.
         mo_bo->call( io_handler = lo_handler iv_entity = is_entity-name iv_name = is_callable-name
                      ir_rows = ir_rows ir_keys = ir_keys ir_result = ir_result
-                     ir_failed = lr_failed ir_reported = lr_reported ).
+                     ir_failed = lr_failed ir_reported = lr_reported ir_mapped = ir_mapped ).
       CATCH cx_root INTO lx_error.
         mv_depth = mv_depth - 1.
         lv_top = lines( gt_active ).
