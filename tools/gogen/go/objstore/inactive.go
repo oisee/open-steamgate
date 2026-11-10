@@ -9,8 +9,8 @@ import (
 // by "TYPE NAME" (osd-store-versions.mjs inactiveObjects). A key whose object
 // is no longer indexed keeps its type and name with an empty package.
 func Inactive() []Row {
-	storeState.mu.Lock()
-	defer storeState.mu.Unlock()
+	storeState.mu.RLock()
+	defer storeState.mu.RUnlock()
 	keys := make([]string, 0, len(storeState.written))
 	for key := range storeState.written {
 		keys = append(keys, key)
