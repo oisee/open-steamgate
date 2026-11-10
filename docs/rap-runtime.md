@@ -483,7 +483,8 @@ and the to-parent association one of kind `PARENT`. The parent of an entity
 is the target of its `PARENT` association, its children the targets of its
 `CHILD` ones; a BDEF entity's `lock dependent by _x`, `etag dependent by
 _x` and `authorization dependent by _x` must name that association (the
-generator refuses another). One root per BDEF, any depth.
+generator refuses another; R6 also accepts an association to an ancestor,
+see "Dependencies on an ancestor" below). One root per BDEF, any depth.
 
 **The key of a child extends its parent's.** The pairs of the to-parent
 association say which child fields carry the parent key; the runtime fills
@@ -701,8 +702,8 @@ each one before building it:
 | `static` actions, action parameters, results other than `$self` | 0 of the ten (a parameter only in a draft BDEF) | not hit: still refused by name |
 
 Proven on the bill demo of [`src/rap_r6`](../src/rap_r6/README.md)
-(`ZI_RAP_BILL`, served as `ZUI_RAP_BILL`, `test/rap-r6.mjs`,
-`ZCL_OSD_RAP_R6_TEST`). Nothing is measured on a system; the semantics
+(`ZI_RAP_BILL`, served as `ZUI_RAP_BILL`, its projection `ZC_RAP_BILL` as
+`ZUI_RAP_BILLC`, `test/rap-r6.mjs`, `ZCL_OSD_RAP_R6_TEST`). Nothing is measured on a system; the semantics
 follow the public RAP documentation (the BDEF reference's "action",
 "determine action" and "factory action") and each choice of this runtime
 is written down.
@@ -797,6 +798,53 @@ the content ID the new instance is mapped under -- beside `%tky` and
   one in the URL.
 - `static factory action` and the `[1]` cardinality's alternatives are
   refused (static actions are not in R6).
+
+### Dependencies on an ancestor
+
+Behind the actions the travel BO met an R5 rule that was too narrow: its
+booking supplement says `lock dependent by _Travel` and `authorization
+dependent by _Travel`, an association to its **root**, while R5 accepted
+only the association to the parent (`_Booking`). The BDEF reference names
+the association to the lock (etag, authorization) master, which need not be
+the parent. So a dependency may now name the parent's association or an
+association of the entity's own (`association _Travel;`, kind A) whose
+target is an ancestor; a lock's must reach the lock master (the root, the
+instance the runtime locks anyway), else the generator refuses it (`lock
+dependent by _x, whose target Y is not the lock master Z`). Nothing in the
+runtime changes: it always locked the root through the parent chain.
+Tested on R5's order with a third level built in the test
+(`test/rap-r6.mjs`, "dependencies on an ancestor").
+
+### The measurement: the flight BDEFs before and after
+
+`node tools/rap-flight/constructs.mjs` on the same ten BDEFs. The first
+wall per behavior definition:
+
+| BDEF | after R5 | after R6 |
+| --- | --- | --- |
+| `/DMO/I_TRAVEL_M` | `internal action ReCalcTotalPrice` | **past the internal and the factory action and the supplement's lock by `_Travel`**; stops at `with additional save` (then: several pools -- the booking's handlers are in `/DMO/BP_BOOKING_M` -- and the supplement's `with unmanaged save`) |
+| `/DMO/C_TRAVEL_PROCESSOR_M`, `/DMO/C_TRAVEL_APPROVER_M` | the base's `ReCalcTotalPrice` | the base's `with additional save` |
+| `/DMO/I_SUPPLEMENT` | `determine action Prepare` | draft: `association _SupplementText { create; with draft; }` |
+| `/DMO/R_AGENCYTP` | `determine action Prepare` | draft: `draft action Resume` |
+| `/DMO/C_SUPPLEMENT`, `/DMO/C_AGENCYTP` | the base's `determine action` | the base's draft wall |
+| `/DMO/I_CARRIERSLOCKSINGLETON_S`, `/DMO/C_CARRIERSLOCKSINGLETON_S` | unparsed singleton grammar | unchanged |
+| `/DMO/I_AGENCYTP` | interface | unchanged |
+
+Constructs whose verdict changed:
+
+| construct | BDEFs | after R5 | after R6 |
+| --- | ---: | --- | --- |
+| `internal action` | 1 | refused | runs |
+| `factory action` | 1 | refused | runs |
+| `determine action` | 3 | refused | split: a plain `determine action` runs (none of the ten has one), the three are `draft determine action`, refused as draft |
+| `lock dependent` | 3 | runs by the parent's association only | runs by the parent's or an association to the lock master |
+
+The determine actions of the supplement and the agency are both `draft
+determine action Prepare`, so R6 does not move those two BOs past draft:
+their walls are now draft's own, named as draft. The travel BO is three
+walls from running: `with additional save` (the saver's `save_modified`
+beside the managed save), several pools, and `with unmanaged save`; each is
+a track of its own.
 
 ### Not in R6
 
