@@ -95,7 +95,10 @@ type storeEntry struct {
 }
 
 var storeState struct {
-	mu            sync.Mutex
+	// shared by the commands that only read (READ, LIST, OBJECT, ...),
+	// exclusive for everything that changes the store or its answers'
+	// inputs and for the compiler's capture (runCompiler drops and retakes it)
+	mu            sync.RWMutex
 	revision      uint64
 	root          string
 	cfg           *Config
@@ -225,9 +228,6 @@ var systemKinds = map[string]bool{
 // Call answers one call of ZOSD_STORE. in holds the importing values
 // that were passed (IV_*), present or absent the way the caller passed them.
 func Call(in map[string]*string) Answer {
-	storeState.mu.Lock()
-	defer storeState.mu.Unlock()
-	a := storeEmpty()
 	text := func(k, fallback string) string {
 		if v, ok := in[k]; ok && v != nil {
 			return strings.TrimSpace(*v)
@@ -235,6 +235,15 @@ func Call(in map[string]*string) Answer {
 		return fallback
 	}
 	command := strings.ToUpper(text("IV_COMMAND", "LIST"))
+	switch command {
+	case "WRITE", "CHECK", "CHECKRUN", "PARSE":
+		storeState.mu.Lock()
+		defer storeState.mu.Unlock()
+	default:
+		storeState.mu.RLock()
+		defer storeState.mu.RUnlock()
+	}
+	a := storeEmpty()
 
 	switch command {
 	case "LIST", "READ", "WRITE", "CHECK", "CHECKRUN", "ACTIVATE", "TOKENS", "HISTORY", "REVISION", "OBJECT", "PACKAGE", "PACKAGES", "SEARCH", "PARSE":

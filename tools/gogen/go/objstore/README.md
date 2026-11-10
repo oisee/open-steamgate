@@ -41,7 +41,25 @@ API: `SetStore(root string, cfg []byte, reason string) error`;
 `Config`/`Root`, `Answer` with `Row`, `Issue`, `Tally`, `Revision`;
 `Identity`; `Capabilities`.
 
-Invariants: the files are the truth and git the history, no second copy; the index is freshly resolved per call (targeted for saved ABAP CHECKRUN); a
+Concurrency and the index: the store's mutex is a `sync.RWMutex`. The commands
+that only read (LIST, READ, OBJECT, PACKAGE, PACKAGES, SEARCH, HISTORY,
+REVISION, ACTIVATE/TOKENS refusals, discovery) and `Inactive`, `Live`,
+`CaptureLint` share it; WRITE, CHECK, CHECKRUN and PARSE (the compiler's
+capture) and every mutation (`SetStore`, `SetCompiler`, `CreateSource`,
+`DeleteSource`, `ActivateAll`, `RestorePublished`) hold it exclusively. The
+full index is cached (`indexcache.go`): built once, immutable, reused while
+the store's revision, root and configuration are the same and every stamp it
+recorded still holds -- each walked folder (stamped before it is read), each
+symlink's target, each library file's folder, every `package.devc.xml` read or
+looked for and `local/tmp/tadir.json`, by device, inode, size, mode, mtime and
+ctime. So a file an editor or a git pull adds, removes or renames is seen on
+the next call, as before; a content edit needs no walk, since the index holds
+no content and READ reads the file. Stamps younger than the walk's start minus
+two seconds (racy, as LintCache) or on a filesystem LintCache does not trust,
+and every platform without a change-time identity, keep the old behaviour: a
+walk per call. Targeted CHECKRUN/CHECK/PARSE walks are not cached.
+
+Invariants: the files are the truth and git the history, no second copy; the index answers what the files say at the time of the call (cached as above, targeted for saved ABAP CHECKRUN); a
 WRITE touches only a file inside a writable root; answers and their order match the Node destination field
 for field (localeCompare order, JSON property order, and the scalar/table envelopes). The frozen proof is
 `test/fixtures/osgo-store/destination-golden.json`: `tools/osgo-store-goldens.mjs` records the Node
