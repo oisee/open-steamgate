@@ -48,14 +48,19 @@ export const SUPPORT = {
   "managed": ["runs", "test/rap-serve.mjs"],
   "projection": ["runs", "test/rap-r5.mjs: the order projection served over V2 and V4"],
   "interface": ["refused", "bdef-gen: interface BDEF"],
-  "with draft": ["refused", "rap-runtime-gen: draft is outside R2"],
+  "with draft": ["runs", "test/rap-r8.mjs, ZCL_OSD_RAP_R8_TEST: drafts kept in the draft tables, Edit / Activate / Discard over V4"],
+  "use draft": ["refused", "bdef-gen: a projection of a draft business object is outside R8"],
+  "draft table": ["runs", "ZCL_OSD_RAP_R8_TEST: the draft's rows and admin columns"],
+  "draft action": ["runs", "ZCL_OSD_RAP_R8_TEST, test/rap-r8.mjs: Edit, Activate, Discard, Resume"],
+  "draft action with additional implementation": ["refused", "bdef-gen: draft action with additional implementation is outside R8"],
+  "association with draft": ["runs", "test/rap-r8.mjs: a child of a draft is a draft, read and activated with it"],
   "several pools": ["runs", "test/rap-r7.mjs, ZCL_OSD_RAP_R7_TEST: each entity's handlers in its own pool, every pool's saver called"],
   "persistent table": ["runs", "test/rap-serve.mjs"],
   "with additional save": ["runs", "test/rap-r7.mjs, ZCL_OSD_RAP_R7_TEST, ZCL_OSD_RAPFLIGHT_R7_TEST: the managed write, then the savers' save_modified (the flight travel's change log)"],
   "with unmanaged save": ["runs", "test/rap-r7.mjs, ZCL_OSD_RAP_R7_TEST: no managed write, save_modified writes; read from the mapping table"],
   "etag master": ["runs", "test/rap-r4.mjs: ETag, 428, 412 over V2 and V4"],
   "etag dependent": ["ignored", "checked against the parent association (R5), not served: the child type gets no ETag"],
-  "total etag": ["ignored", "draft only"],
+  "total etag": ["runs", "ZCL_OSD_RAP_R8_TEST: Activate refuses a draft whose active instance changed"],
   "lock master": ["runs", "test/rap-r5.mjs, ZCL_OSD_RAP_R5_TEST: the root instance is locked (EZOSD_RAP_LOCK)"],
   "lock dependent": ["runs", "test/rap-r5.mjs: a child write locks its root; R6: by the parent's association or one to the lock master (test/rap-r6.mjs)"],
   "authorization master": ["ignored", "no authorization checks"],
@@ -78,7 +83,7 @@ export const SUPPORT = {
   "action parameter": ["refused", "rap-runtime-gen: action parameters"],
   "action result not $self": ["refused", "rap-runtime-gen: only $self results"],
   "determine action": ["runs", "test/rap-r6.mjs, ZCL_OSD_RAP_R6_TEST: members where their triggers hold, ( always ) always"],
-  "draft determine action": ["refused", "bdef-gen: draft actions are outside R6 (draft)"],
+  "draft determine action": ["runs", "ZCL_OSD_RAP_R8_TEST, test/rap-r8.mjs: Prepare runs its validations on the draft (members of another entity are refused, R9)"],
   "function": ["refused", "bdef-gen: functions are outside R6"],
   "side effects": ["ignored", "parsed, nothing reads them"],
   "determination/validation": ["runs", "test/rap-serve.mjs"],
@@ -111,12 +116,13 @@ export function bdefConstructs(model) {
   if (model.unparsed.length) add("unparsed grammar", `${model.unparsed.length} statement(s)`);
   if (["managed", "projection", "interface"].includes(model.implementationType)) add(model.implementationType, "header");
   else if (model.implementationType) add(model.implementationType, "header");
-  if (model.withDraft) add("with draft", "header");
+  if (model.withDraft) add(model.implementationType === "projection" ? "use draft" : "with draft", "header");
   const pools = new Set(model.entities.map(e => (e.implementationClass ?? model.implementationClass ?? "").toUpperCase()).filter(Boolean));
   if (pools.size > 1) add("several pools", [...pools].join(", "));
   for (const e of model.entities) {
     const n = e.alias ?? e.entity;
     if (e.persistentTable) add("persistent table", n);
+    if (e.draftTable) add("draft table", n);
     for (const o of e.options ?? []) if (o.kind === "additional save") add("with additional save", n);
       else if (o.kind === "unmanaged save") add("with unmanaged save", n);
     if (e.etag) add(`etag ${e.etag.kind}`, n);
@@ -135,6 +141,7 @@ export function bdefConstructs(model) {
     }
     for (const a of e.associations) {
       const create = a.operations.find(o => o.kind === "create");
+      if (a.withDraft) add("association with draft", `${n}\\${a.name}`);
       if (create) {
         add("association create", `${n}\\${a.name}`);
         if (has(create.options, "features", "instance")) add("association create ( features : instance )", `${n}\\${a.name}`);
@@ -142,7 +149,10 @@ export function bdefConstructs(model) {
     }
     for (const a of e.actions.filter(x => !x.use)) {
       const mods = a.modifiers.filter(m => m !== "draft");
-      if (a.modifiers.includes("draft")) continue;
+      if (a.modifiers.includes("draft")) {
+        add(a.additionalImplementation ? "draft action with additional implementation" : "draft action", `${n}~${a.name}`);
+        continue;
+      }
       if (!mods.length) add("action", `${n}~${a.name}`);
       for (const m of mods) add(`${m} action`, `${n}~${a.name}`);
       if (has(a.options, "features", "instance")) add("action ( features : instance )", `${n}~${a.name}`);
