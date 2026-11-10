@@ -37,8 +37,9 @@ import {checkLayerVersions} from "./layer-version/index.mjs";
 import {compareGenerations} from "./osd-generation-diff.mjs";
 import {execFileSync} from "node:child_process";
 import {run} from "./osd-build-command.mjs";
+import {generatorClosureOf, generatorIdentityOf, runGeneratorsOf} from "./osd-build-generators.mjs";
 import {existsSync, lstatSync, mkdirSync, openSync, closeSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync} from "node:fs";
-import {basename, dirname, join, relative, resolve, resolve as resolvePath, sep} from "node:path";
+import {basename, dirname, join, relative, resolve, sep} from "node:path";
 import {fileURLToPath, pathToFileURL} from "node:url";
 import {buildIdentity, assertToolchain, describeBuild} from "./osd-transpiler.mjs";
 import {describeDuplicates, excludePatterns, layers} from "./osd-inputs.mjs";
@@ -205,107 +206,10 @@ export function inputsOf(root, config = loadConfig(root)) {
 const TRACE_METADATA = /\.trace\.meta\.json$/i;
 const NOT_AN_INPUT = /\.(mjs|cjs|js|ts|py|md|txt|log|lock|snap|trace\.meta\.json)$/i;
 
-/**
- * The modules that decide what `gen/` will contain: the generators and
- * everything they import, transitively.
- *
- * **`gen/` used to be in the hash as a stand-in for these, and a stand-in
- * written by the build is a self-reference.** `NOT_AN_INPUT` excludes
- * `.mjs`, so a generator's own code was not an input while its output was --
- * the hash watched the representative and not the thing represented. The
- * cost was visible: two builds of a fresh tree, with no edit between them,
- * produced two different generation names, because the first wrote `gen/`
- * and the second hashed it (measured 2026-09-19, and osg-osd-i7 measured the
- * same from the other side).
- *
- * So the representative goes and the thing represented arrives. 27 of the 92
- * modules in `tools/` are in the closure, which is why it is computed rather
- * than approximated by "all of them": editing a tool that no generator
- * reaches should not rename every generation.
- */
-export function generatorClosure(toolsDir = TOOLS, generators = GENERATORS) {
-  const seen = new Set();
-  const walk = (file) => {
-    const abs = resolvePath(file);
-    if (seen.has(abs) || !existsSync(abs)) return;
-    seen.add(abs);
-    const text = readFileSync(abs, "utf8");
-    for (const m of text.matchAll(/from\s+"(\.[^"]+)"/g)) walk(join(dirname(abs), m[1]));
-    for (const m of text.matchAll(/import\("(\.[^"]+)"\)/g)) walk(join(dirname(abs), m[1]));
-  };
-  for (const [script] of generators) walk(join(toolsDir, script));
-  walk(join(toolsDir, "rap-flight/seed-capture.mjs"));
-  walk(join(toolsDir, "osd-generator-view.mjs"));
-  return [...seen].sort();
-}
-
-/** the generators, in order, writing into the working `gen/` as they always do */
-export function runGenerators(root, log = () => {}, overlay = undefined, readsLog = undefined, external = []) {
-  let output = "";
-  for (const [script, ...args] of GENERATORS) {
-    log(`${script} ${args.join(" ")}`.trim());
-    const [cmd, ...argv] = toolCommand(join(TOOLS, script), args);
-    const view = activeOverlay(overlay);
-    const env = {...process.env, OSD_ROOT: root};
-    if (readsLog) {
-      env.OSD_GENERATOR_READS = readsLog;
-      env.OSD_READ_EXTERNAL = JSON.stringify(external);
-      if (!hosted()) argv.unshift("--import", join(TOOLS, "osd-generator-reads.mjs"));
-    }
-    delete env.OSD_ACTIVE_BUILD_OVERLAY;
-    if (view) {
-      env.OSD_ACTIVE_BUILD_OVERLAY = JSON.stringify({...view, exclude: [...view.exclude]});
-      // Hosted executables install this view in their gen dispatch.
-      if (!hosted()) argv.unshift("--import", join(TOOLS, "osd-generator-view.mjs"));
-    }
-    output += run(cmd, argv, root, env);
-  }
-  return output;
-}
-
-/**
- * What identifies the generators that will actually RUN.
- *
- * Hashing the files under `tools/` is right under node and wrong in the
- * binary, and the difference is not cosmetic: `toolCommand()` turns a
- * generator into `osd gen <name>`, so a compiled binary executes its **own
- * embedded copies** and never reads `tools/*.mjs`. Hashing the tree's files
- * there would hash code that will not run -- the representative instead of
- * the thing represented, which is the mistake this hash was just repaired
- * for (osg-osd-i7 measured it: edit a generator and node's hash moves while
- * the binary's does not, because `TOOLS` is `/$bunfs/root/` inside the
- * bundle).
- *
- * So each host names what it will run: node the contents of the closure, the
- * binary itself. **And that means the two hosts legitimately name different
- * generations**, unless the binary was compiled from the very generators the
- * tree holds. That is a true statement about the system rather than a defect
- * to paper over, and the test that asserted equality now asserts what is
- * actually required -- that the two produce the same objects.
- *
- * The binary is 85 MB and hashes in 159 ms, so the answer is kept for the
- * life of the process: a cache check must not pay it twice.
- */
-let binaryIdentity;
-export function generatorIdentity(root = process.cwd()) {
-  // Source dispatch hashes tools; embedded dispatch (including Node bundles) hashes its entry.
-  const dispatch = hosted() ? JSON.parse(process.env.OSD_SELF) : undefined;
-  const embedded = typeof __OSD_TOOLCHAIN_IDENTITY__ !== "undefined";
-  if (dispatch && (embedded || dispatch.length === 1)) {
-    if (binaryIdentity === undefined) {
-      const executable = dispatch.length === 1 ? dispatch[0] : dispatch[1];
-      binaryIdentity = "binary:" + createHash("sha256").update(readFileSync(executable)).digest("hex").slice(0, 16);
-    }
-    return binaryIdentity;
-  }
-  const h = createHash("sha256");
-  const closure = generatorClosure();
-  h.update(`generators ${closure.length}\0`);
-  for (const f of closure) {
-    h.update(relative(TOOLS, f).split(sep).join("/")).update("\0").update(readFileSync(f)).update("\0");
-  }
-  return "tools:" + h.digest("hex").slice(0, 16);
-}
+export const generatorClosure = (toolsDir = TOOLS, generators = GENERATORS) => generatorClosureOf(toolsDir, generators);
+export const runGenerators = (root, log = () => {}, overlay, readsLog, external) =>
+  runGeneratorsOf(TOOLS, GENERATORS, activeOverlay, root, log, overlay, readsLog, external);
+export const generatorIdentity = () => generatorIdentityOf(TOOLS, GENERATORS);
 
 /** what `gen/` holds right now, by content: 196 files, milliseconds */
 export function genHash(root) {
