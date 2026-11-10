@@ -17,6 +17,7 @@
 // which the implicit form states and the explicit form names.
 import * as core from "@abaplint/core";
 import {implicitHandlers} from "./lower-derived.mjs";
+import {classNameOf} from "../cds-names.mjs";
 
 /** R7: the behavior pools a BDEF names, the header's first, lower case */
 const poolsOfModel = model => [...new Set([model.implementationClass, ...model.entities.map(e => e.implementationClass)].filter(Boolean).map(p => p.toLowerCase()))];
@@ -187,7 +188,7 @@ export function runtimeOutputs(plans, files) {
       const response = (entity.alias ?? entity.entity).toLowerCase();
       model_ += `    CLEAR ls_entity.\n    ls_entity-name = ${lit(upper(entity.entity))}.\n    ls_entity-alias = ${lit(entity.alias ?? entity.entity)}.\n`
         + `    ls_entity-response = ${lit(upper(response))}.\n    ls_entity-table = ${lit(upper(table))}.\n`
-        + `    ls_entity-source = ${lit(upper(`zcl_stg_tab_${table.toLowerCase()}`))}.\n`
+        + `    ls_entity-source = ${lit(upper(classNameOf("zcl_stg_tab_", table)))}.\n`
         + `    ls_entity-pool = ${lit(upper(pool))}.\n`
         + (save ? `    ls_entity-save = '${unmanaged ? "U" : "A"}'.\n` : "")
         + (save?.fullData ? "    ls_entity-full_data = abap_true.\n" : "");

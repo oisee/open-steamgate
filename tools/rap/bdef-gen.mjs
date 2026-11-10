@@ -285,7 +285,8 @@ export function generate(files, dependencies = []) {
     if (model.unparsed.length) throw new Error(`${file.filename}: unparsed BDEF grammar`);
     const projection = model.implementationType === "projection";
     if (model.implementationType !== "managed" && model.implementationType !== "unmanaged" && !projection) throw new Error(`${file.filename}: unsupported ${model.implementationType} BDEF (interface BDEFs are outside R5)`);
-    const root = basename(file.filename).replace(/\.bdef\.asbdef$/, "");
+    // abapGit writes /DMO/I_X as #dmo#i_x: the name, not the file, is the root
+    const root = nameOf(basename(file.filename).replace(/\.bdef\.asbdef$/, ""));
     const iface = `zif_rap_${digest(upper(root))}`;
     let body = `INTERFACE ${iface} PUBLIC.\n`;
     const responses = new Map();
@@ -348,6 +349,16 @@ export function generate(files, dependencies = []) {
       const pool = upper(entity.implementationClass ?? model.implementationClass ?? "");
       const local = [...new Set([entity.alias ?? entity.entity, entity.entity])];
       const poolBind = (kind, ref, type) => { if (pool) bind(`POOL ${pool}`, kind, ref, type); };
+      // R7: %path of a child's FAILED / REPORTED row: the keys of each
+      // ancestor, by alias (the flight booking's `%path-travel-travel_id`)
+      const ancestors = [];
+      for (let t = planned.tree; t?.parent;) {
+        const a = plan.entities.find(x => upper(x.entity.entity) === t.parent);
+        if (!a || ancestors.includes(a)) break;
+        ancestors.push(a); t = a.tree;
+      }
+      const path = ancestors.length && ancestors.every(a => ident(a.entity.alias ?? a.entity.entity));
+      if (path) body += struct(`${p}_path`, ancestors.map(a => [(a.entity.alias ?? a.entity.entity).toLowerCase(), `${a.prefix}_tky`]));
       for (const kind of ["CREATE", "UPDATE", "DELETE", "READ IMPORT", "READ RESULT", "MAPPED", "FAILED", "REPORTED", "LOCK", "KEY OF", "DETERMINATION", "VALIDATION"]) {
         if (["CREATE", "UPDATE", "DELETE"].includes(kind) && !entity.operations.some(o => upper(o.kind) === kind)) continue;
         const name = `${p}_${kind.toLowerCase().replaceAll(" ", "_")}`;
@@ -358,6 +369,7 @@ export function generate(files, dependencies = []) {
         if (["CREATE", "UPDATE", "READ IMPORT"].includes(kind)) extra.push(["%control", `${p}_control`]);
         if (kind === "FAILED") extra.push(["%fail", `${p}_fail`], ...(opFields.length ? [["%op", `${p}_op`]] : []));
         if (kind === "REPORTED") extra.push(["%msg", "REF TO object"], ["%element", `${p}_control`], ["%state_area", "c LENGTH 128"], ["%global", "x LENGTH 1"]);
+        if (path && ["FAILED", "REPORTED"].includes(kind)) extra.push(["%path", `${p}_path`]);
         body += included(name, `${p}_${fullData ? "data" : "tky"}`, fullData ? "%data" : "%tky", extra);
         body += `  TYPES t_${name} TYPE STANDARD TABLE OF ${name} WITH DEFAULT KEY.\n`;
         for (const ref of local) poolBind(kind, ref, `${iface}=>t_${name}`);

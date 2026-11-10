@@ -267,7 +267,8 @@ export function lowerDerived(source, filename, bindings) {
     // Longest binding first: qualified entity/action names consist of several tokens.
     for (let end = i + 3; end < tokens.length && end < i + 18; end++) {
       const slice = tokens.slice(i + 1, end + 1);
-      const key = slice.map(t => t.getStr()).join(" ").replace(/\s*([\\~])\s*/g, "$1").toUpperCase();
+      // `bdef\\entity` (the entity of a BDEF, written with two backslashes) is bound as bdef\entity
+      const key = slice.map(t => t.getStr()).join(" ").replace(/\s*([\\~])\s*/g, "$1").replace(/\\\\/g, "\\").toUpperCase();
       if (bindings[key]) found = {end, type: bindings[key]};
       if ([".", ","].includes(word(end))) break;
     }

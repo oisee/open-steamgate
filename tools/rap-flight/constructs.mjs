@@ -49,10 +49,10 @@ export const SUPPORT = {
   "projection": ["runs", "test/rap-r5.mjs: the order projection served over V2 and V4"],
   "interface": ["refused", "bdef-gen: interface BDEF"],
   "with draft": ["refused", "rap-runtime-gen: draft is outside R2"],
-  "several pools": ["refused", "rap-runtime-gen reads the pool of the BDEF header only"],
+  "several pools": ["runs", "test/rap-r7.mjs, ZCL_OSD_RAP_R7_TEST: each entity's handlers in its own pool, every pool's saver called"],
   "persistent table": ["runs", "test/rap-serve.mjs"],
-  "with additional save": ["refused", "rap-runtime-gen: behavior options with additional save"],
-  "with unmanaged save": ["refused", "rap-runtime-gen: behavior options / no persistent table"],
+  "with additional save": ["runs", "test/rap-r7.mjs, ZCL_OSD_RAP_R7_TEST: the managed write, then the savers' save_modified"],
+  "with unmanaged save": ["runs", "test/rap-r7.mjs, ZCL_OSD_RAP_R7_TEST: no managed write, save_modified writes; read from the mapping table"],
   "etag master": ["runs", "test/rap-r4.mjs: ETag, 428, 412 over V2 and V4"],
   "etag dependent": ["ignored", "checked against the parent association (R5), not served: the child type gets no ETag"],
   "total etag": ["ignored", "draft only"],
@@ -98,8 +98,8 @@ export const SUPPORT = {
   "FOR NUMBERING (create)": ["runs", "test/rap-r4.mjs"],
   "FOR NUMBERING (create by association)": ["runs", "test/rap-r5.mjs, ZCL_OSD_RAP_R5_TEST: the items numbered 10, 20"],
   "FOR PRECHECK": ["refused", "lower-derived: PRECHECK"],
-  "saver save_modified": ["refused", "unmanaged/additional save"],
-  "saver adjust_numbers": ["refused", "late numbering"],
+  "saver save_modified": ["runs", "test/rap-r7.mjs, ZCL_OSD_RAP_R7_TEST: lowered from REDEFINITION, called after the managed write"],
+  "saver adjust_numbers": ["refused", "late numbering (the phase is called, parameterless: R7)"],
 };
 
 const has = (opts, name, value) => (opts ?? []).some(o => o.name === name && (value === undefined || o.value === value));

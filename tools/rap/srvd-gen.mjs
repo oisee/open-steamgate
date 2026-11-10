@@ -18,6 +18,7 @@
 // definition, version 0001, and is served over V2 and V4 alike.
 import {createHash} from "node:crypto";
 import {tokenize} from "./tokenize.mjs";
+import {classNameOf} from "../cds-names.mjs";
 
 const upper = s => String(s).toUpperCase();
 
@@ -148,7 +149,7 @@ export function serviceYaml(srvd, entityOf, file = "srvd") {
     const prop = f => nameOf.get(upper(f.name))?.element ?? nameOf.get(upper(f.name))?.name ?? f.name;
     lines.push(`  ${type}:`);
     lines.push(`    set: ${x.alias}`);
-    lines.push(`    source: {cds: ${x.entity}, struct: "ZCL_STG_CDS_${upper(view.sqlView)}=>TY_ROW"}`);
+    lines.push(`    source: {cds: ${x.entity}, struct: "${upper(classNameOf("zcl_stg_cds_", view.sqlView))}=>TY_ROW"}`);
     lines.push(`    keys: [${fields.filter(f => f.key).map(prop).join(", ")}]`);
     lines.push(`    creatable: ${b.create}`);
     lines.push(`    updatable: ${b.update}`);
