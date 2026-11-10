@@ -55,6 +55,7 @@ export async function fetchSystem(root, ref, options = {}) {
       const layer = await load(d), files = validateLayer(layer), c = layer.config;
       if (layer.manifest.bytes.length !== d.size) fail("SIZE_MISMATCH", "index layer size differs");
       if (c.name !== d.annotations["org.osd.layer.name"] || c.kind !== d.annotations["org.osd.layer.kind"]) fail("BAD_LAYER", "index identity differs from layer config");
+      if (d.annotations["org.osd.layer.private"] !== (c.private === true ? "true" : undefined)) fail("BAD_LAYER", "index private marker differs from layer config");
       if (c.closure !== undefined) { hasClosure = true; unresolved += c.closure.unresolved; log(`layer ${c.name}: unresolved ${c.closure.unresolved}`); }
       const path = systemPath(c.kind, c.name);
       if (paths.has(path)) fail("BAD_SYSTEM", `duplicate layer destination ${path}`);
@@ -71,6 +72,8 @@ export async function fetchSystem(root, ref, options = {}) {
       writeFileSync(join(dir, LAYER_ID), JSON.stringify(entry));
       layers.push(entry);
     }
+    if (hasClosure && (!Number.isSafeInteger(unresolved) || index.json.annotations?.["org.osd.system.unresolved"] !== String(unresolved))
+      || !hasClosure && index.json.annotations?.["org.osd.system.unresolved"] !== undefined) fail("BAD_SYSTEM", "system unresolved annotation differs from layer closures");
     const identity = {digest: index.digest, annotations: index.json.annotations ?? {}, layers};
     writeFileSync(join(stage, SYSTEM_ID), JSON.stringify(identity, null, 2) + "\n");
     let moved = false;

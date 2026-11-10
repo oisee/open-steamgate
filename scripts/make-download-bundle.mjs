@@ -5,10 +5,13 @@ import {createHash} from "node:crypto";
 import {execFileSync} from "node:child_process";
 import {chmodSync, cpSync, existsSync, mkdirSync, readFileSync, readlinkSync, statSync, symlinkSync, writeFileSync} from "node:fs";
 import {basename, dirname, join, relative, resolve} from "node:path";
+import {fileURLToPath} from "node:url";
 import {libraryFiles} from "../tools/osd-inputs.mjs";
 import {unfetched, describeUnfetched} from "../tools/osd-fetch.mjs";
+import {assertPublicSystem} from "../tools/osd-system.mjs";
 
-const root = resolve(import.meta.dirname, "..");
+const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+assertPublicSystem(root);
 const targets = {
   "linux-amd64": {bun: "osd", archive: ".tar.gz"},
   "linux-arm64": {bun: "osd", archive: ".tar.gz"},

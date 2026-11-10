@@ -87,16 +87,19 @@ not apply to a published layer: a folder whose content is only allowed in this
 repository (`packs/lsd`, `packs/zvdb`'s vectors) cannot be published as is.
 A layer brings its own exceptions instead: `osd-layer push … --leak-allow
 <file>` and `osd-layer system push … --leak-allow <file>` take a file in the
-publication exception format. Every entry requires `layer`, archive `file`,
+publication exception format. Every entry requires archive `file`,
 `fileSha256` (SHA-256 of the entire staged file), `category`, exact positive
-`count`, and a reviewed `reason`. Identifier categories use numbered category
+`count`, and a reviewed `reason`. `layer` may scope an entry to one named
+layer; an entry without it retains its original scope. Identifier categories use numbered category
 IDs; entries never contain matched text or a hash of matched text. Changed
 bytes, missing paths, ambiguous layers and changed category counts are
 `BAD_ALLOW`. Metadata documents are never excepted. The flag repeats.
-Public scanner output contains categorys and paths only.
+Public scanner output contains categories and paths only.
 For private layers the same gate uses `--private-layer`: it ignores only
 entries in the identifier-list category `sap-corpus-names`. Put SAP object
-and corpus names in that category in `.local/leak-identifiers.json`; hosts,
+and corpus names in that category in `.local/leak-identifiers.json`. Existing
+identifier lists must move their SAP corpus entries to `sap-corpus-names`;
+the owner migrates the private list. Hosts,
 users, credentials, tokens, addresses and binary IPv4 views remain checked.
 
 `treeDigest` uses `tools/osd-oci.mjs`'s shared helper: SHA-256 of concatenated

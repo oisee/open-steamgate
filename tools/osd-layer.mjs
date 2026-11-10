@@ -9,7 +9,7 @@ import {basename, dirname, join, resolve} from "node:path";
 import {abapgitXml} from "./osd-abapgit-xml.mjs";
 import {zipFiles} from "./osd-zip.mjs";
 import {archiveFiles} from "./osd-source-zip.mjs";
-import {MEDIA, OciError, client, formatRef, manifest, parseRef, pull, push, pushBlob, pushManifest, sha256, treeDigest} from "./osd-oci.mjs";
+import {MEDIA, JSON_LIMIT, OciError, assertPrivateTarget, client, formatRef, manifest, parseRef, pull, push, pushBlob, pushManifest, sha256, treeDigest} from "./osd-oci.mjs";
 import {hostedLeakScanner, toolCommandIn} from "./osd-host.mjs";
 import {runsAs} from "./osd-main.mjs";
 import {CAPTURE, MAX_SCAN_BYTES} from "./osd-leak-scan.mjs";
@@ -50,7 +50,7 @@ function folderFiles(folder) {
 export function readClosure(file) {
   let bytes;
   try { bytes = readFileSync(file); } catch { fail("BAD_CLOSURE", `${file}: cannot read closure`); }
-  if (bytes.length > 4 * 1024 * 1024) fail("BAD_CLOSURE", `${file}: closure exceeds 4 MiB`);
+  if (bytes.length > JSON_LIMIT) fail("BAD_CLOSURE", `${file}: closure exceeds 4 MiB`);
   let value;
   try { value = JSON.parse(bytes); } catch { fail("BAD_CLOSURE", `${file}: invalid JSON`); }
   validateClosure(value);
@@ -59,18 +59,11 @@ export function readClosure(file) {
 
 function validateClosure(value) {
   if (!value || typeof value !== "object" || Array.isArray(value) || !Number.isSafeInteger(value.unresolved) || value.unresolved < 0
+    || Object.keys(value).some(key => !["unresolved", "items"].includes(key))
     || !Array.isArray(value.items) || value.items.some(item => !item || typeof item !== "object" || Array.isArray(item))
-    || Buffer.byteLength(JSON.stringify(value)) > 4 * 1024 * 1024) fail("BAD_CLOSURE", "closure needs nonnegative integer unresolved and an array of objects within 4 MiB");
+    || Buffer.byteLength(JSON.stringify(value)) > JSON_LIMIT) fail("BAD_CLOSURE", "closure needs nonnegative integer unresolved and an array of objects within 4 MiB");
 }
-
-export function assertPrivateTarget(target, layers, env = process.env) {
-  const registry = parseRef(target).registry;
-  const privateLayer = layers.find(layer => layer.config?.private === true);
-  if (!privateLayer) return;
-  const allowed = (env.OSD_PRIVATE_REGISTRIES ?? "").split(/[\s,]+/).filter(Boolean);
-  if (registry === "ghcr.io" || registry.endsWith(".github.io") || !allowed.includes(registry))
-    fail("PRIVATE_LAYER", `private layer ${privateLayer.config.name} cannot be published to ${registry}`);
-}
+export {assertPrivateTarget} from "./osd-oci.mjs";
 
 export function build(folder, {name, kind, source, annotations: extraAnnotations, private: isPrivate = false, closure} = {}) {
   if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(name ?? "")) fail("BAD_NAME", "--name must be a simple filename");
@@ -83,7 +76,7 @@ export function build(folder, {name, kind, source, annotations: extraAnnotations
   }
   const config = {schema: 1, name, kind, treeDigest: treeDigest(files.map(({path, bytes}) => [path, bytes]))};
   const annotations = {[NAME]: name, [KIND]: kind};
-  if (isPrivate) { config.private = true; annotations[PRIVATE] = "true"; }
+  if (isPrivate) { config.private = true; annotations["org.osd.layer.private"] = "true"; }
   if (closure !== undefined) { validateClosure(closure); config.closure = closure; }
   if (source) {
     const m = /^(.+)@([^@:]+):(.+)$/.exec(source);
@@ -92,10 +85,11 @@ export function build(folder, {name, kind, source, annotations: extraAnnotations
     annotations["org.opencontainers.image.source"] = m[1];
   }
   Object.assign(annotations, extraAnnotations, {[NAME]: name, [KIND]: kind});
-  if (isPrivate) annotations[PRIVATE] = "true";
-  else if (annotations[PRIVATE] !== undefined) fail("BAD_LAYER", "private annotation requires --private");
+  if (isPrivate) annotations["org.osd.layer.private"] = "true";
+  else if (annotations["org.osd.layer.private"] !== undefined) fail("BAD_LAYER", "private annotation requires --private");
   files.sort((a, b) => Buffer.compare(Buffer.from(a.path), Buffer.from(b.path)));
   const zip = layerZip(files), configBytes = jsonBytes(config);
+  if (configBytes.length > JSON_LIMIT) fail("BAD_CLOSURE", "layer config exceeds 4 MiB including closure");
   // Apply the pull reader's path, collision and size rules before publishing.
   archiveFiles(zip);
   const manifest = {schemaVersion: 2, mediaType: MEDIA.manifest, artifactType: LAYER,
@@ -125,11 +119,12 @@ export function readLeakAllow(file) {
   for (const [i, entry] of allow.entries()) {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) fail("BAD_ALLOW", `${file}: entry ${i} is not an object`);
     for (const key of Object.keys(entry)) if (!["file", "fileSha256", "category", "count", "reason", "layer"].includes(key)) fail("BAD_ALLOW", `${file}: entry ${i} has unknown key ${JSON.stringify(key)}`);
-    for (const key of ["file", "fileSha256", "category", "reason", "layer"]) {
+    for (const key of ["file", "fileSha256", "category", "reason"]) {
       const value = Object.entries(entry).find(([name]) => name === key)?.at(1);
       if (typeof value !== "string" || !value.trim()) fail("BAD_ALLOW", `${file}: entry ${i} needs a non-empty ${key}`);
     }
     if (!/^sha256:[0-9a-f]{64}$/.test(entry.fileSha256)) fail("BAD_ALLOW", `${file}: entry ${i} needs a full lowercase SHA-256 file digest`);
+    if (entry.layer !== undefined && (typeof entry.layer !== "string" || !entry.layer.trim())) fail("BAD_ALLOW", `${file}: entry ${i} needs a non-empty layer`);
     if (!Number.isSafeInteger(entry.count) || entry.count < 1) fail("BAD_ALLOW", `${file}: entry ${i} needs a positive match count`);
   }
   return allow;
@@ -175,9 +170,8 @@ export function leakGate(trees, metadata, documents = [], allow = [], layerNames
     // system may carry the same one; a scope naming such a name is ambiguous
     const repeated = new Set(layerNames.filter((name, i) => layerNames.indexOf(name) !== i));
     const translated = allow.flatMap((entry) => {
-      // allow files are concatenated, so in a system an unscoped entry reviewed
-      // for one layer would excuse the same path and value in every other
-      if (entry.layer === undefined && trees.length > 1) fail("BAD_ALLOW", `allow entry for ${entry.file}: a system needs "layer" on every entry`);
+      // An optional layer name narrows the exception; unscoped entries keep
+      // the format's original matching behavior for existing allow files.
       if (entry.layer !== undefined && repeated.has(entry.layer)) fail("BAD_ALLOW", `allow entry for ${entry.layer}:${entry.file}: more than one layer is called ${entry.layer}`);
       const hits = archive.filter(({path, layer}) => path === entry.file && (entry.layer === undefined || layer === entry.layer));
       if (!hits.length) fail("BAD_ALLOW", `allow entry for ${entry.layer ? `${entry.layer}:` : ""}${entry.file}: no such file in the layer`);
@@ -209,7 +203,7 @@ export function validateLayer(layer) {
     || !["lib", "input", "pack", "customer"].includes(c.kind) || typeof c.name !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(c.name)
     || m.annotations?.["org.osd.layer.name"] !== c.name || m.annotations?.["org.osd.layer.kind"] !== c.kind
     || m.layers[0].annotations?.["org.opencontainers.image.title"] !== `${c.name}.zip`) fail("BAD_LAYER", "invalid OSD layer");
-  if (c.private !== undefined && c.private !== true || m.annotations?.[PRIVATE] !== (c.private === true ? "true" : undefined)) fail("BAD_LAYER", "private marker differs from layer config");
+  if (c.private !== undefined && c.private !== true || m.annotations?.["org.osd.layer.private"] !== (c.private === true ? "true" : undefined)) fail("BAD_LAYER", "private marker differs from layer config");
   if (c.closure !== undefined) validateClosure(c.closure);
   const files = [...archiveFiles(layer.layers[0].bytes)].map(([path, bytes]) => ({path, bytes}));
   if (!files.some(f => f.path === ".abapgit.xml")) fail("BAD_LAYER", "a layer needs root .abapgit.xml");
@@ -247,7 +241,6 @@ function systemAnnotations(root, release = false) {
 export function prepareSystem(target, layers, options = {}) {
   assertPrivateTarget(target, layers.map(({layer}) => layer), options.env);
   if (options.annotations?.["org.osd.system.unresolved"] !== undefined) fail("BAD_SYSTEM", "system unresolved annotation is computed from layer closures");
-  if (layers.length > 1 && options.allow?.some(entry => entry.layer === undefined)) fail("BAD_ALLOW", "a system needs layer on every allow entry");
   const names = layers.map(({layer}) => layer.config.name);
   if (options.allow?.some(entry => names.filter(name => name === entry.layer).length > 1)) fail("BAD_ALLOW", "an allow entry names more than one system layer");
   for (const entry of options.allow ?? []) if (entry.layer !== undefined && !layers.some(({layer}) => layer.config.name === entry.layer)) fail("BAD_ALLOW", `allow entry names no system layer: ${entry.layer}`);
@@ -304,9 +297,12 @@ export async function inspect(ref, options = {}) {
   for (const d of systemLayers(m.json)) {
     const summary = await layerSummary(formatRef({...parseRef(ref), digest: d.digest}), d.size);
     if (summary.name !== d.annotations["org.osd.layer.name"] || summary.kind !== d.annotations["org.osd.layer.kind"]) fail("BAD_LAYER", "index identity differs from layer config");
-    if (d.annotations[PRIVATE] !== (summary.private ? "true" : undefined)) fail("BAD_LAYER", "index private marker differs from layer config");
+    if (d.annotations["org.osd.layer.private"] !== (summary.private ? "true" : undefined)) fail("BAD_LAYER", "index private marker differs from layer config");
     layers.push(summary);
   }
+  const closures = layers.filter(layer => layer.closure !== undefined);
+  const total = closures.reduce((sum, layer) => sum + layer.closure.unresolved, 0);
+  if (!Number.isSafeInteger(total) || m.json.annotations?.["org.osd.system.unresolved"] !== (closures.length ? String(total) : undefined)) fail("BAD_SYSTEM", "system unresolved annotation differs from layer closures");
   return {digest: m.digest, artifactType: SYSTEM, annotations: m.json.annotations, layers};
 }
 

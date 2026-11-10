@@ -25,10 +25,12 @@
 import {cpSync, existsSync, mkdirSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync} from "node:fs";
 import {execFileSync} from "node:child_process";
 import {basename, dirname, join, relative, resolve} from "node:path";
-import {pathToFileURL} from "node:url";
+import {fileURLToPath, pathToFileURL} from "node:url";
+import {assertPublicSystem} from "../tools/osd-system.mjs";
 
-const root = resolve(import.meta.dir ?? process.cwd(), "..");
+const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const out = resolve(process.argv[2] ?? join(root, ".local", "release"));
+assertPublicSystem(root);
 const say = (m) => console.log(`  ${m}`);
 
 rmSync(out, {recursive: true, force: true});

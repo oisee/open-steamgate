@@ -1,13 +1,13 @@
 import {syncBuiltinESMExports} from 'node:module';
 import {expect} from "chai";
 import childProcess, {execFileSync, spawn, spawnSync} from "node:child_process";
-import {mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
+import {copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {load as parseYaml} from "js-yaml";
 import {abapgitXml, zipFiles} from "../tools/osd-abapgit-zip.mjs";
 import {build, inspect, leakGate, main, pushSystem, readLeakAllow, systemLayers, unresolvedLines} from "../tools/osd-layer.mjs";
-import {manifest, pull, push, pushBlob, pushManifest, sha256, treeDigest} from "../tools/osd-oci.mjs";
+import {JSON_LIMIT, assertPrivateTarget, manifest, pull, push, pushBlob, pushManifest, sha256, treeDigest} from "../tools/osd-oci.mjs";
 import {archiveFiles} from "../tools/osd-source-zip.mjs";
 import {fetchAll} from "../tools/osd-fetch.mjs";
 import {fetchSystem} from "../tools/osd-system-fetch.mjs";
@@ -15,6 +15,7 @@ import {assertPublicSystem} from "../tools/osd-system.mjs";
 import {registry, listening} from "./helpers/oci-registry.mjs";
 
 import {toolCommand, setHostedLeakScanner} from "../tools/osd-host.mjs";
+import {installHostedLeakScanner} from "../tools/osd-hosted-leak-scanner.mjs";
 
 const options = {name: "smoke", kind: "input"};
 const refusal = async (run, code) => {
@@ -88,6 +89,55 @@ describe("osd-layer: reproducible publishing", function () {
     expect(JSON.parse(readFileSync(join(root, "closure-build/config.json"))).closure).to.deep.equal(closure);
     expect(() => build(folder, {...options, closure: {unresolved: -1, items: []}})).to.throw(/closure/);
     expect(() => build(folder, {...options, closure: {unresolved: 1, items: ["bad"]}})).to.throw(/closure/);
+    expect(() => build(folder, {...options, closure: {unresolved: 1, items: [], extra: true}})).to.throw(/closure/);
+    const nearlyFull = {unresolved: 1, items: [{text: "x".repeat(JSON_LIMIT - 105)}]};
+    expect(Buffer.byteLength(JSON.stringify(nearlyFull))).to.be.lessThan(JSON_LIMIT);
+    expect(() => build(folder, {...options, closure: nearlyFull})).to.throw(/config exceeds 4 MiB/);
+  });
+
+  it("passes private mode through the hosted scanner used by compiled hosts", () => {
+    write(join(root, "identifiers.json"), JSON.stringify({"sap-corpus-names": ["Z_SYNTHETIC_CORPUS_OBJECT"], host: ["local-test-host"]}));
+    write(join(folder, "probe.txt"), "Z_SYNTHETIC_CORPUS_OBJECT");
+    installHostedLeakScanner();
+    const layer = build(folder, {...options, private: true});
+    expect(() => leakGate([layer.files], {}, [], [], ["smoke"], true)).not.to.throw();
+    expect(() => leakGate([layer.files], {}, [], [], ["smoke"], false)).to.throw(/publish refused/);
+    write(join(folder, "probe.txt"), "local-test-host");
+    expect(() => leakGate([build(folder, {...options, private: true}).files], {}, [], [], ["smoke"], true)).to.throw(/publish refused/);
+  });
+
+  it("normalizes private registry hosts and ports at both push entry points", async () => {
+    const layer = build(folder, {...options, private: true});
+    const r = registry(), local = await listening(r);
+    try {
+      const digest = await push(`${local}/source/layer:v1`, layer, {env: {OSD_PRIVATE_REGISTRIES: local}});
+      for (const host of ["ghcr.io:443", "ghcr.io.", "x.github.io:443", "x.github.io.", "github.io"]) {
+        const ref = `${host}/test/layer:v1`, env = {OSD_PRIVATE_REGISTRIES: host};
+        await refusal(() => push(ref, layer, {env}), "PRIVATE_LAYER");
+        await refusal(() => pushSystem(ref, [`${local}/source/layer@${digest}`], {env}), "PRIVATE_LAYER");
+        expect(() => assertPrivateTarget(ref, [layer], env)).to.throw().with.property("code", "PRIVATE_LAYER");
+      }
+    } finally { await new Promise(done => r.server.close(done)); }
+    expect(() => assertPrivateTarget("localhost:1234/test/layer:v1", [layer], {OSD_PRIVATE_REGISTRIES: "LOCALHOST"})).not.to.throw();
+    expect(() => assertPrivateTarget("localhost:1234/test/layer:v1", [layer], {OSD_PRIVATE_REGISTRIES: "localhost:5678"})).to.throw().with.property("code", "PRIVATE_LAYER");
+  });
+
+  it("refuses private installed systems before release and download archives are made", () => {
+    const fixture = join(root, "artifact-root"), identity = {
+      order: 0, name: "smoke", kind: "input", private: true,
+      digest: `sha256:${"1".repeat(64)}`, treeDigest: `sha256:${"2".repeat(64)}`, path: "inputs/smoke",
+    };
+    write(join(fixture, ".local/system/.osd-system.json"), JSON.stringify({digest: `sha256:${"3".repeat(64)}`, layers: [identity]}));
+    write(join(fixture, ".local/system/inputs/smoke/.osd-layer.json"), JSON.stringify(identity));
+    mkdirSync(join(fixture, "scripts"), {recursive: true});
+    symlinkSync(join(oldCwd, "tools"), join(fixture, "tools"), "dir");
+    for (const script of ["make-release.mjs", "make-download-bundle.mjs"]) {
+      copyFileSync(join(oldCwd, "scripts", script), join(fixture, "scripts", script));
+      const args = script === "make-release.mjs" ? [join(fixture, ".local/release")] : ["linux-amd64"];
+      const result = spawnSync(process.execPath, [join(fixture, "scripts", script), ...args], {cwd: fixture, encoding: "utf8"});
+      expect(result.status, result.stderr).not.to.equal(0);
+      expect(result.stderr).to.include("private layer smoke");
+    }
   });
 
   it("passes private leak mode only for private layers", () => {
@@ -273,6 +323,16 @@ describe("osd-layer: reproducible publishing", function () {
       const log = [];
       await fetchSystem(root, `${host}/system/all@${digest}`, {log: line => log.push(line)});
       expect(log.filter(line => line.includes("unresolved"))).to.deep.equal(unresolvedLines(summary));
+      const wrongCount = structuredClone(index.json);
+      wrongCount.annotations["org.osd.system.unresolved"] = "4";
+      const wrongCountDigest = await pushManifest(`${host}/system/all:wrong-count`, Buffer.from(JSON.stringify(wrongCount)));
+      await refusal(() => inspect(`${host}/system/all@${wrongCountDigest}`), "BAD_SYSTEM");
+      await refusal(() => fetchSystem(join(root, "wrong-count"), `${host}/system/all@${wrongCountDigest}`), "BAD_SYSTEM");
+      const wrongPrivate = structuredClone(index.json);
+      delete wrongPrivate.manifests[0].annotations["org.osd.layer.private"];
+      const wrongPrivateDigest = await pushManifest(`${host}/system/all:wrong-private`, Buffer.from(JSON.stringify(wrongPrivate)));
+      await refusal(() => inspect(`${host}/system/all@${wrongPrivateDigest}`), "BAD_LAYER");
+      await refusal(() => fetchSystem(join(root, "wrong-private"), `${host}/system/all@${wrongPrivateDigest}`), "BAD_LAYER");
       expect(() => assertPublicSystem(root)).to.throw(/private layer smoke/);
       const stripped = structuredClone(privateLayer);
       delete stripped.manifest.annotations["org.osd.layer.private"];
@@ -428,8 +488,8 @@ describe("osd-layer: reproducible publishing", function () {
     expect(() => leakGate(trees, {}, [], [{...entry, layer: "one"}, {...entry, layer: "two"}], ["one", "two"])).not.to.throw();
     expect(() => leakGate(trees, {}, [], [{...entry, layer: "three"}], ["one", "two"])).to.throw(/BAD_ALLOW|no such file/);
     expect(() => leakGate(trees, {}, [], [{...entry, layer: "one"}], ["one", "one"])).to.throw(/more than one layer/);
-    // an unscoped entry in a system is refused rather than applied to every layer
-    expect(() => leakGate(trees, {}, [], [entry], ["one", "two"])).to.throw(/needs "layer"/);
+    // Existing publication allow files without a layer still apply to matching files.
+    expect(() => leakGate(trees, {}, [], [entry], ["one", "two"])).not.to.throw();
     expect(() => leakGate([trees[0]], {}, [], [entry], ["one"])).not.to.throw();
   });
 
@@ -441,6 +501,8 @@ describe("osd-layer: reproducible publishing", function () {
     expect(() => readLeakAllow(file)).to.throw(/allow/);
     writeFileSync(file, JSON.stringify({allow: [{file: "src/a.clas.abap", fileSha256: sha256(Buffer.from("safe")), layer: "one", category: "uuid", count: 1, reason: "upstream vector"}]}));
     expect(readLeakAllow(file)).to.have.length(1);
+    writeFileSync(file, JSON.stringify({allow: [{file: "src/a.clas.abap", fileSha256: sha256(Buffer.from("safe")), category: "uuid", count: 1, reason: "existing exception"}]}));
+    expect(readLeakAllow(file)[0]).not.to.have.property("layer");
     writeFileSync(file, JSON.stringify({allow: [{file: "a", fileSha256: sha256(Buffer.from("safe")), category: "uuid", count: 1, reason: "r", layer: ""}]}));
     expect(() => readLeakAllow(file)).to.throw(/layer/);
     for (const bad of [{allow: [{file: "a", value: "v", reason: "r", Layer: "x"}]}, {allow: [], extra: 1}, {allow: ["x"]}, {allow: [[]]}]) {

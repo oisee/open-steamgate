@@ -11,6 +11,7 @@ import {runsAs} from '../tools/osd-main.mjs';
 import {fullCommit} from '../tools/osd-release-git.mjs';
 import {suggestedTag} from './release-version-source.mjs';
 import {assertPrivateTarget, build, leakGate, prepareSystem, readLeakAllow} from '../tools/osd-layer.mjs';
+import {assertPublicSystem} from '../tools/osd-system.mjs';
 
 export const OMITTED = {
   lsd: 'Repository-only content requires leak exceptions unavailable to public layers; whole pack omitted.',
@@ -41,6 +42,7 @@ export function assertTestedRelease(root, tag, sha) {
   return assertRelease(root, tag, sha);
 }
 export function publishPlan(root, temp, {tag, repository, sha}) {
+  assertPublicSystem(root);
   const commit = sha === undefined ? assertRelease(root, tag) : assertTestedRelease(root, tag, sha);
   for (const key of Object.keys(layerEnvironment(root))) if (['OSD_PACKS', 'OSD_WEB_PACKS', 'OSD_LAYERS'].includes(key) || key.startsWith('OSD_LIB_')) throw new Error(`release refuses ${key}`);
   const staged = stageSystem(root, temp), omitted = [], layers = [];
