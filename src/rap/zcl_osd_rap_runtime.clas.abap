@@ -477,6 +477,9 @@ CLASS zcl_osd_rap_runtime DEFINITION PUBLIC CREATE PRIVATE.
       IMPORTING
         is_entity   TYPE zif_osd_rap_bo=>ty_entity
         is_input    TYPE any
+* R5: the fields the framework sets (the parent's key in a create by
+* association): copied whatever %control says, key or not
+        it_framework TYPE string_table OPTIONAL
       CHANGING
         cs_mapped   TYPE any
         cs_failed   TYPE any
@@ -997,6 +1000,12 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
       ELSEIF ls_field-key = abap_true OR control_on( is_row = is_input iv_field = ls_field-name ) = abap_true.
         ASSIGN COMPONENT ls_field-name OF STRUCTURE is_input TO <lv_from>.
         <lv_to> = <lv_from>.
+      ELSE.
+        READ TABLE it_framework TRANSPORTING NO FIELDS WITH KEY table_line = ls_field-name.
+        IF sy-subrc = 0.
+          ASSIGN COMPONENT ls_field-name OF STRUCTURE is_input TO <lv_from>.
+          <lv_to> = <lv_from>.
+        ENDIF.
       ENDIF.
     ENDLOOP.
 
@@ -1035,7 +1044,8 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
       lv_index = lines( mt_inst ).
     ENDIF.
     LOOP AT is_entity-fields INTO ls_field.
-      IF control_on( is_row = is_input iv_field = ls_field-name ) = abap_true OR ls_field-numbering = abap_true.
+      READ TABLE it_framework TRANSPORTING NO FIELDS WITH KEY table_line = ls_field-name.
+      IF control_on( is_row = is_input iv_field = ls_field-name ) = abap_true OR ls_field-numbering = abap_true OR sy-subrc = 0.
         mark( iv_index = lv_index iv_field = ls_field-name ).
       ENDIF.
     ENDLOOP.
@@ -1443,6 +1453,7 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
     DATA lt_drop   TYPE int4_table.
     DATA lv_row    TYPE i.
     DATA lv_ok     TYPE abap_bool.
+    DATA lt_framework TYPE string_table.
     FIELD-SYMBOLS <lt_rows>   TYPE STANDARD TABLE.
     FIELD-SYMBOLS <ls_row>    TYPE any.
     FIELD-SYMBOLS <ls_parent> TYPE any.
@@ -1520,10 +1531,15 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
                  CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
     ENDIF.
 
+* the parent's key fields of the child are the framework's: kept also
+* where they are no key of the child (a UUID child with its parent's UUID)
+    LOOP AT ls_assoc-pairs INTO ls_pair.
+      APPEND ls_pair-target TO lt_framework.
+    ENDLOOP.
     LOOP AT <lt_rows> ASSIGNING <ls_row>.
       ASSIGN COMPONENT '%TARGET' OF STRUCTURE <ls_row> TO <lt_target>.
       LOOP AT <lt_target> ASSIGNING <ls_new>.
-        create_one( EXPORTING is_entity = ls_target is_input = <ls_new>
+        create_one( EXPORTING is_entity = ls_target is_input = <ls_new> it_framework = lt_framework
                     CHANGING cs_mapped = cs_mapped cs_failed = cs_failed cs_reported = cs_reported ).
       ENDLOOP.
     ENDLOOP.
@@ -1546,6 +1562,11 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
     DATA lv_found  TYPE abap_bool.
     DATA lv_failed TYPE abap_bool.
     DATA lt_drop   TYPE int4_table.
+    DATA lt_cids   TYPE string_table.
+    DATA lt_temp   TYPE string_table.
+    DATA lv_row    TYPE i.
+    DATA lv_try    TYPE i.
+    DATA lv_slot   TYPE string.
     FIELD-SYMBOLS <lt_rows>   TYPE STANDARD TABLE.
     FIELD-SYMBOLS <ls_row>    TYPE any.
     FIELD-SYMBOLS <lt_target> TYPE STANDARD TABLE.
@@ -1558,16 +1579,39 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
 
     ls_target = entity_of( is_assoc-target ).
     ASSIGN ir_rows->* TO <lt_rows>.
-* a row without a content ID gets one for the call (the namespace is the
-* runtime's, never a caller's: %OSD-CBA-<n>), and loses it again
+* a %target row without a content ID gets one for the call, so its key can
+* be told apart: one that no %target row of the call carries, and only
+* those rows lose it again; a caller's %cid, whatever it looks like, is
+* kept and comes back in MAPPED (as NUMBER does for a create)
     LOOP AT <lt_rows> ASSIGNING <ls_row>.
       ASSIGN COMPONENT '%TARGET' OF STRUCTURE <ls_row> TO <lt_target>.
       LOOP AT <lt_target> ASSIGNING <ls_new>.
+        APPEND text_of( is_row = <ls_new> iv_component = '%CID' ) TO lt_cids.
+      ENDLOOP.
+    ENDLOOP.
+    LOOP AT <lt_rows> ASSIGNING <ls_row>.
+      lv_row = sy-tabix.
+      ASSIGN COMPONENT '%TARGET' OF STRUCTURE <ls_row> TO <lt_target>.
+      LOOP AT <lt_target> ASSIGNING <ls_new>.
+        lv_index = sy-tabix.
         ASSIGN COMPONENT '%CID' OF STRUCTURE <ls_new> TO <lv_cid>.
-        IF <lv_cid> IS INITIAL.
-          lv_count = lv_count + 1.
-          <lv_cid> = |%OSD-CBA-{ lv_count }|.
+        IF sy-subrc <> 0 OR <lv_cid> IS NOT INITIAL.
+          CONTINUE.
         ENDIF.
+        lv_try = 0.
+        DO.
+          lv_count = lv_count + 1.
+          lv_temp = |%OSD-CBA-{ lv_count }-{ lv_try }|.
+          READ TABLE lt_cids TRANSPORTING NO FIELDS WITH KEY table_line = lv_temp.
+          IF sy-subrc <> 0.
+            EXIT.
+          ENDIF.
+          lv_try = lv_try + 1.
+        ENDDO.
+        <lv_cid> = lv_temp.
+        APPEND lv_temp TO lt_cids.
+        lv_slot = |{ lv_row }/{ lv_index }|.
+        APPEND lv_slot TO lt_temp.
       ENDLOOP.
     ENDLOOP.
     lr_mapped = mo_bo->new_response( 'MAPPED' ).
@@ -1577,6 +1621,7 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
     ASSIGN COMPONENT ls_target-response OF STRUCTURE <ls_mapped> TO <lt_mapped>.
     ASSIGN COMPONENT ls_target-response OF STRUCTURE cs_failed TO <lt_failed>.
     LOOP AT <lt_rows> ASSIGNING <ls_row>.
+      lv_row = sy-tabix.
       ASSIGN COMPONENT '%TARGET' OF STRUCTURE <ls_row> TO <lt_target>.
       CLEAR lt_drop.
       LOOP AT <lt_target> ASSIGNING <ls_new>.
@@ -1599,7 +1644,9 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
             ENDIF.
           ENDLOOP.
         ENDIF.
-        IF lv_cid CP '%OSD-CBA-*'.
+        lv_slot = |{ lv_row }/{ lv_index }|.
+        READ TABLE lt_temp TRANSPORTING NO FIELDS WITH KEY table_line = lv_slot.
+        IF sy-subrc = 0.
           ASSIGN COMPONENT '%CID' OF STRUCTURE <ls_new> TO <lv_cid>.
           CLEAR <lv_cid>.
         ENDIF.

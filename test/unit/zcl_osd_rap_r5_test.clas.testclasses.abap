@@ -1,3 +1,57 @@
+CLASS lcl_fk DEFINITION FINAL.
+* The order BO with the item's ORDER_ID no key of the item: the parent's
+* key is then a plain foreign key of the child (as a UUID child carries its
+* parent's UUID). Everything else is the generated adapter.
+  PUBLIC SECTION.
+    INTERFACES zif_osd_rap_bo.
+    METHODS constructor RAISING cx_static_check.
+  PRIVATE SECTION.
+    DATA mi_bo TYPE REF TO zif_osd_rap_bo.
+ENDCLASS.
+
+CLASS lcl_fk IMPLEMENTATION.
+
+  METHOD constructor.
+    DATA li_registry TYPE REF TO zif_osd_rap_registry.
+    CREATE OBJECT li_registry TYPE ('ZCL_OSD_RAP_REGISTRY').
+    mi_bo = li_registry->get( 'ZI_RAP_ORDER' ).
+  ENDMETHOD.
+
+  METHOD zif_osd_rap_bo~model.
+    FIELD-SYMBOLS <ls_entity> TYPE zif_osd_rap_bo=>ty_entity.
+    FIELD-SYMBOLS <ls_field>  TYPE zif_osd_rap_bo=>ty_field.
+    rs_model = mi_bo->model( ).
+    LOOP AT rs_model-entities ASSIGNING <ls_entity> WHERE name = 'ZI_RAP_ORDITEM'.
+      LOOP AT <ls_entity>-fields ASSIGNING <ls_field> WHERE name = 'ORDER_ID'.
+        <ls_field>-key = abap_false.
+      ENDLOOP.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD zif_osd_rap_bo~new_rows.
+    rr_rows = mi_bo->new_rows( iv_entity ).
+  ENDMETHOD.
+
+  METHOD zif_osd_rap_bo~new_table.
+    rr_table = mi_bo->new_table( iv_entity = iv_entity iv_kind = iv_kind iv_action = iv_action ).
+  ENDMETHOD.
+
+  METHOD zif_osd_rap_bo~new_response.
+    rr_response = mi_bo->new_response( iv_kind ).
+  ENDMETHOD.
+
+  METHOD zif_osd_rap_bo~new_result.
+    rr_result = mi_bo->new_result( iv_entity = iv_entity iv_action = iv_action ).
+  ENDMETHOD.
+
+  METHOD zif_osd_rap_bo~call.
+    mi_bo->call( io_handler = io_handler iv_entity = iv_entity iv_name = iv_name
+                 ir_rows = ir_rows ir_keys = ir_keys ir_result = ir_result
+                 ir_failed = ir_failed ir_reported = ir_reported ir_mapped = ir_mapped ).
+  ENDMETHOD.
+
+ENDCLASS.
+
 CLASS ltcl_tree DEFINITION FOR TESTING DURATION SHORT RISK LEVEL DANGEROUS FINAL.
   PRIVATE SECTION.
     TYPES tt_create   TYPE TABLE FOR CREATE zi_rap_order.
@@ -38,6 +92,8 @@ CLASS ltcl_tree DEFINITION FOR TESTING DURATION SHORT RISK LEVEL DANGEROUS FINAL
     METHODS child_write_moves_root_stamp FOR TESTING RAISING cx_static_check.
     METHODS child_write_locks_the_root FOR TESTING RAISING cx_static_check.
     METHODS child_validation_in_the_save FOR TESTING RAISING cx_static_check.
+    METHODS keeps_caller_cids_in_numbering FOR TESTING RAISING cx_static_check.
+    METHODS keeps_a_non_key_parent_field FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 
 CLASS ltcl_tree IMPLEMENTATION.
@@ -323,6 +379,98 @@ CLASS ltcl_tree IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( act = lines( ls_failed-item ) exp = 1 ).
     SELECT COUNT(*) FROM zrap_order INTO lv_count.
     cl_abap_unit_assert=>assert_equals( act = lv_count exp = 0 ).
+  ENDMETHOD.
+
+  METHOD keeps_caller_cids_in_numbering.
+* a caller's %cid that looks like the runtime's temporary ones, beside a
+* blank one: both created, the caller's comes back in MAPPED
+    DATA lt_create   TYPE tt_create.
+    DATA ls_create   LIKE LINE OF lt_create.
+    DATA lt_cba      TYPE tt_cba.
+    DATA ls_cba      LIKE LINE OF lt_cba.
+    DATA ls_target   LIKE LINE OF ls_cba-%target.
+    DATA ls_mapped   TYPE ty_mapped.
+    DATA ls_failed   TYPE ty_failed.
+    DATA ls_reported TYPE ty_reported.
+    DATA ls_item     LIKE LINE OF ls_mapped-item.
+
+    ls_create-%cid = 'O1'.
+    ls_create-description = 'order'.
+    ls_create-%control-description = if_abap_behv=>mk-on.
+    APPEND ls_create TO lt_create.
+    mo_rap->modify( EXPORTING iv_entity = 'order' iv_operation = zcl_osd_rap_runtime=>co_operation-create it_rows = lt_create
+                    CHANGING cs_mapped = ls_mapped cs_failed = ls_failed cs_reported = ls_reported ).
+    ls_cba-%cid_ref = 'O1'.
+    ls_target-%cid = '%OSD-CBA-1-0'.
+    ls_target-product = 'tricky'.
+    ls_target-quantity = 1.
+    ls_target-%control-product = if_abap_behv=>mk-on.
+    ls_target-%control-quantity = if_abap_behv=>mk-on.
+    APPEND ls_target TO ls_cba-%target.
+    CLEAR ls_target-%cid.
+    ls_target-product = 'blank'.
+    APPEND ls_target TO ls_cba-%target.
+    APPEND ls_cba TO lt_cba.
+    mo_rap->create_by( EXPORTING iv_entity = 'order' iv_assoc = '_items' it_rows = lt_cba
+                       CHANGING cs_mapped = ls_mapped cs_failed = ls_failed cs_reported = ls_reported ).
+    cl_abap_unit_assert=>assert_initial( ls_failed-item ).
+    cl_abap_unit_assert=>assert_equals( act = lines( ls_mapped-item ) exp = 2 ).
+    READ TABLE ls_mapped-item INTO ls_item INDEX 1.
+    cl_abap_unit_assert=>assert_equals( act = ls_item-%cid exp = '%OSD-CBA-1-0' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_item-item_no exp = '0010' ).
+    READ TABLE ls_mapped-item INTO ls_item INDEX 2.
+    cl_abap_unit_assert=>assert_initial( ls_item-%cid ).
+    cl_abap_unit_assert=>assert_equals( act = ls_item-item_no exp = '0020' ).
+  ENDMETHOD.
+
+  METHOD keeps_a_non_key_parent_field.
+* the parent's key is the framework's to set, also where it is no key of
+* the child: the item keeps its order
+    DATA li_bo       TYPE REF TO zif_osd_rap_bo.
+    DATA lo_rap      TYPE REF TO zcl_osd_rap_runtime.
+    DATA lt_create   TYPE tt_create.
+    DATA ls_create   LIKE LINE OF lt_create.
+    DATA lt_cba      TYPE tt_cba.
+    DATA ls_cba      LIKE LINE OF lt_cba.
+    DATA ls_target   LIKE LINE OF ls_cba-%target.
+    DATA ls_mapped   TYPE ty_mapped.
+    DATA ls_failed   TYPE ty_failed.
+    DATA ls_reported TYPE ty_reported.
+    DATA ls_order    LIKE LINE OF ls_mapped-order.
+    DATA lt_keys     TYPE tt_rimport.
+    DATA ls_key      LIKE LINE OF lt_keys.
+    DATA lt_items    TYPE tt_items.
+    DATA ls_item     LIKE LINE OF lt_items.
+    DATA lt_link     TYPE tt_link.
+
+    CREATE OBJECT li_bo TYPE lcl_fk.
+    lo_rap = zcl_osd_rap_runtime=>for_bo( li_bo ).
+    ls_create-%cid = 'O1'.
+    ls_create-description = 'order'.
+    ls_create-%control-description = if_abap_behv=>mk-on.
+    APPEND ls_create TO lt_create.
+    lo_rap->modify( EXPORTING iv_entity = 'order' iv_operation = zcl_osd_rap_runtime=>co_operation-create it_rows = lt_create
+                    CHANGING cs_mapped = ls_mapped cs_failed = ls_failed cs_reported = ls_reported ).
+    READ TABLE ls_mapped-order INDEX 1 INTO ls_order.
+    ls_cba-%cid_ref = 'O1'.
+    ls_target-%cid = 'I1'.
+    ls_target-product = 'fk'.
+    ls_target-quantity = 1.
+    ls_target-%control-product = if_abap_behv=>mk-on.
+    ls_target-%control-quantity = if_abap_behv=>mk-on.
+    APPEND ls_target TO ls_cba-%target.
+    APPEND ls_cba TO lt_cba.
+    lo_rap->create_by( EXPORTING iv_entity = 'order' iv_assoc = '_items' it_rows = lt_cba
+                       CHANGING cs_mapped = ls_mapped cs_failed = ls_failed cs_reported = ls_reported ).
+    cl_abap_unit_assert=>assert_initial( ls_failed-item ).
+    ls_key-order_id = ls_order-order_id.
+    APPEND ls_key TO lt_keys.
+    lo_rap->read_by( EXPORTING iv_entity = 'order' iv_assoc = '_items' it_keys = lt_keys
+                     CHANGING ct_result = lt_items ct_link = lt_link cs_failed = ls_failed ).
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_items ) exp = 1 ).
+    READ TABLE lt_items INDEX 1 INTO ls_item.
+    cl_abap_unit_assert=>assert_equals( act = ls_item-order_id exp = ls_order-order_id ).
+    lo_rap->rollback( ).
   ENDMETHOD.
 
 ENDCLASS.

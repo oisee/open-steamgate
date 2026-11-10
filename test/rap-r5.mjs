@@ -113,7 +113,9 @@ describe("RAP R5 compositions and projections (generator)", () => {
     assert.equal(refusal(files), "accepted");
     assert.match(refusal(swap(files, "zi_rap_order.bdef.asbdef", "association _Order;", "association _Order { with draft; }")), /with draft; \} is outside R5/);
     assert.match(refusal(swap(files, "zi_rap_order.bdef.asbdef", "lock dependent by _Order", "lock master")), /lock master on a child/);
-    assert.match(refusal(swap(files, "zi_rap_order.bdef.asbdef", "lock dependent by _Order", "lock dependent by _Other")), /not the association to the parent/);
+    assert.match(refusal(swap(files, "zi_rap_order.bdef.asbdef", "lock dependent by _Order", "lock dependent by _Other")), /which the behavior definition does not declare/);
+    assert.match(refusal(swap(files, "zi_rap_order.bdef.asbdef", "  association _Order;\n", "")), /lock dependent by _Order, which the behavior definition does not declare/);
+    assert.match(refusal(swap(files, "zc_rap_order.bdef.asbdef", "define behavior for ZC_RAP_ORDER alias Order\n", "define behavior for ZC_RAP_ORDER alias Order\nlock master\n")), /lock master in a projection/);
     assert.match(refusal(swap(files, "zc_rap_order.bdef.asbdef", "  use update;\n  use delete;\n  use association _Order;", "  use create;\n  use association _Order;")), /use create, which ZI_RAP_ORDITEM does not declare/);
     assert.match(refusal(swap(files, "zbp_rap_order.clas.locals_imp.abap", /METHODS earlynumbering_cba_items FOR NUMBERING\n\s+IMPORTING entities FOR CREATE order\\_items\./, "")), /needs one FOR NUMBERING \.\.\. FOR CREATE order\\_Items method/);
   });
@@ -194,8 +196,21 @@ describe("RAP R5 over OData", function () {
     assert.notEqual(after.headers.get("etag"), rootTag, "the root's lastChangedAt is the BO's total stamp");
     res = await call(`${v2}/Order('${id}')`, {method: "PATCH", headers: {...write, "if-match": rootTag}, body: JSON.stringify({Description: "stale"})});
     assert.equal(res.status, 412);
+    // the boundary, said directly: a child write is guarded by the child's
+    // own etag master, not by the root's tag (etag dependent is not served,
+    // docs/rap-runtime.md R5): the root's tag on a child PATCH is stale for
+    // the child (412), and a POST through the navigation takes no If-Match
+    // of the root at all (201 with a stale root tag)
+    const childNow = (await get(`${v2}/Item(OrderId='${id}',ItemNo='0010')?$format=json`)).headers.get("etag");
+    res = await call(`${v2}/Item(OrderId='${id}',ItemNo='0010')`, {method: "PATCH", headers: {...write, "if-match": rootTag}, body: JSON.stringify({Quantity: 5})});
+    assert.equal(res.status, 412, "the root's tag is not the child's");
+    res = await call(`${v2}/Item(OrderId='${id}',ItemNo='0010')`, {method: "PATCH", headers: {...write, "if-match": childNow}, body: JSON.stringify({Quantity: 5})});
+    assert.equal(res.status, 204);
+    res = await call(`${v2}/Order('${id}')/to_Items`, {method: "POST", headers: {...write, "if-match": rootTag}, body: JSON.stringify({Product: "z", Quantity: 1})});
+    assert.equal(res.status, 201, "a create below the root is not checked against the root's tag");
     // the projection's own read-only fields stay the base's: a status sent is refused
-    res = await call(`${v2}/Order('${id}')`, {method: "PATCH", headers: {...write, "if-match": after.headers.get("etag")}, body: JSON.stringify({Status: "X"})});
+    const fresh = (await get(`${v2}/Order('${id}')?$format=json`)).headers.get("etag");
+    res = await call(`${v2}/Order('${id}')`, {method: "PATCH", headers: {...write, "if-match": fresh}, body: JSON.stringify({Status: "X"})});
     assert.equal(res.status, 400);
     assert.match(res.body.error.message.value, /STATUS is read-only/);
   });

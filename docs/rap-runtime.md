@@ -490,6 +490,9 @@ association say which child fields carry the parent key; the runtime fills
 them from the parent on a create by association, and a client cannot
 (a create by association that names another parent's key in them is
 overwritten, not refused: the parent in the URL or the `%tky` decides).
+They are the framework's fields: set on the child whether or not they are
+part of its key (a UUID child carries its parent's UUID as a plain field),
+whatever its `%control` and field control say.
 
 ### The model the runtime gets
 
@@ -516,6 +519,9 @@ the types a pool and EML use (`TYPE TABLE FOR ... e\_x`):
   instance )`;
 - `FOR NUMBERING IMPORTING entities FOR CREATE e\_x` gets `TABLE FOR
   CREATE e\_x` and the BDEF's `RESPONSE FOR MAPPED EARLY`, as on a system.
+  A `%target` row without a `%cid` gets a temporary one for the call
+  that no row of the call carries, and only those rows lose it again; a
+  caller's `%cid` always comes back in MAPPED.
 
 ### Runtime
 
@@ -559,8 +565,9 @@ the types a pool and EML use (`TYPE TABLE FOR ... e\_x`):
   instance with 409, but `/IWBEP/CX_MGW_BUSI_EXCEPTION` of this tree
   carries no HTTP status yet, so the bridge cannot say so (a gateway
   change of its own). A new root is not locked (nobody else can
-  see it); `lock master` on a child or `lock dependent` without a parent is
-  refused by the generator. The pool's `FOR LOCK` method (unmanaged lock)
+  see it); `lock master` on a child, `lock dependent` without a parent or by an
+  association the BDEF does not declare, and any lock, etag or
+  authorization clause in a projection are refused by the generator. The pool's `FOR LOCK` method (unmanaged lock)
   is not called: managed only.
 - **ETag of the root.** A field annotated
   `@Semantics.systemDateTime.lastChangedAt` (or `@Semantics.user.lastChangedBy`)
@@ -568,7 +575,11 @@ the types a pool and EML use (`TYPE TABLE FOR ... e\_x`):
   update or delete of any instance of the tree stamps the root instance's
   fields too (the `localInstanceLastChanged*` fields stay per instance).
   So the root's `etag master` moves with every child write and a client
-  holding the old ETag of the root gets 412. Each entity's own `etag
+  holding the old ETag of the root gets 412 **on the root**. The
+  boundary: a write of a child is checked against the child's own `etag
+  master` only. The root's tag is not the child's (412 if sent on a child
+  PATCH), and a POST through the navigation (a create by association) takes
+  no If-Match of the root at all (`test/rap-r5.mjs`). Each entity's own `etag
   master` works as in R4; `etag dependent by _parent` (the child's ETag is
   its master's) is accepted and not served (the child type gets no ETag).
 - **Save order.** The delta keeps the order of the changes, and a parent

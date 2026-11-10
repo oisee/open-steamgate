@@ -182,7 +182,7 @@ describe("RAP derived type generator (R1)", () => {
     for (const [from, to, error] of [
       ["  create;", "  mystery;", /unparsed/],
       ["ZI_RAP_NOTE alias", "ZI_MISSING alias", /Unresolved CDS/],
-      ["managed implementation in class zbp_rap_note unique;", "projection;", /needs a projection view/],
+      ["managed implementation in class zbp_rap_note unique;", "projection;", /lock master in a projection/],
       ["  create;", "  association _Items { create; }", /association _Items is no association of the CDS entity/],
       ["persistent table zrap_note", "persistent table zmissing", /missing persistent table/],
       ["NoteText = note_text", "Missing = note_text", /unknown mapping field/],

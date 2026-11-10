@@ -72,7 +72,16 @@ export function treeOf(model, entity, view, projection = false) {
     return {name: a.name, target: upper(c.target), kind: c.composition === "CHILD" ? "C" : c.composition === "PARENT" ? "P" : "A",
       create: !!create, featCreate: !!create && featuredOpts(create.options), pairs: c.pairs};
   });
-  if (!projection) {
+  if (projection) {
+    // locking belongs to the interface layer; a projection that declares it
+    // would say something nothing runs
+    for (const clause of ["lock", "etag", "authorization"]) if (entity[clause]) throw new Error(`${entity.entity}: ${clause} ${entity[clause].kind} in a projection (it is the base's, R5)`);
+  } else {
+    // the association a dependency names must be one the BDEF declares
+    for (const [clause, mode] of [["lock", entity.lock], ["etag", entity.etag], ["authorization", entity.authorization]]) {
+      if (mode?.kind === "dependent" && mode.association && !entity.associations.some(a => upper(a.name) === upper(mode.association)))
+        throw new Error(`${entity.entity}: ${clause} dependent by ${mode.association}, which the behavior definition does not declare (association ${mode.association};)`);
+    }
     if (entity.lock?.kind === "master" && parent) throw new Error(`${entity.entity}: lock master on a child (it is locked with its root: lock dependent by ${parent.alias})`);
     for (const [clause, mode] of [["lock", entity.lock], ["etag", entity.etag], ["authorization", entity.authorization]]) {
       if (mode?.kind !== "dependent") continue;
