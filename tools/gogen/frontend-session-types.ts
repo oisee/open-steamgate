@@ -157,6 +157,10 @@ export interface CompileOptions {
     compiles?: (key: string) => boolean;
     enter?: (key: string) => void;
     exit?: () => void;
+    /** the lowering starts: the global passes before it (function group
+     * signatures) and after it (interface methods, tables) write the shared
+     * state at fixed points the merged program must keep */
+    lowering?: () => void;
     /** the shared program state is seeded here, before anything lowers */
     prepare?: (program: import("./frontend-types.ts").FrontendProgram, reg: Registry) => void;
     suppliedOf?: (owner: string, contributed: [string, string[]][]) => void;

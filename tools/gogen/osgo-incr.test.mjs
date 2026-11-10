@@ -13,6 +13,8 @@ import {emitGo} from "./emit-go.mjs";
 import {columnRegistry} from "./frontend.mjs";
 import {incrAssemble, incrRecorder, objectOf, registryFiles} from "./osgo-incr.mjs";
 
+const xml = (body) => `<?xml version="1.0"?><abapGit version="v1.0.0"><asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0"><asx:values>${body}</asx:values></asx:abap></abapGit>`;
+
 const sources = {
   // a CDS view source: its entity name and its SQL view name reach the
   // program's cdsViews map, which the closure registry cannot rebuild (its
@@ -20,6 +22,18 @@ const sources = {
   "app/zv_incr_src.ddls.asddls": `@AbapCatalog.sqlViewName: 'ZVINCRV'
 @AccessControl.authorizationCheck: #NOT_REQUIRED
 define view Zv_Incr_Src as select from zcl_incr_hot { key travelid as Id }`,
+  // a function group whose module is typed with a dictionary structure:
+  // compileProgram reads the signature before any class lowers, so the
+  // structure is the first one the full build writes -- a merge that put
+  // the global passes after every object moved it behind the classes' own
+  "app/zincr_line.tabl.xml": xml(`<DD02V><TABNAME>ZINCR_LINE</TABNAME><TABCLASS>INTTAB</TABCLASS></DD02V><DD03P_TABLE>
+<DD03P><FIELDNAME>TDFORMAT</FIELDNAME><DATATYPE>CHAR</DATATYPE><LENG>000002</LENG></DD03P>
+<DD03P><FIELDNAME>TDLINE</FIELDNAME><DATATYPE>CHAR</DATATYPE><LENG>000072</LENG></DD03P></DD03P_TABLE>`),
+  "app/zincr_group.fugr.xml": xml(`<INCLUDES><SOBJ_NAME>LZINCR_GROUPTOP</SOBJ_NAME><SOBJ_NAME>SAPLZINCR_GROUP</SOBJ_NAME></INCLUDES>
+<FUNCTIONS><item><FUNCNAME>ZINCR_FUNCTION</FUNCNAME><IMPORT><RSIMP><PARAMETER>IS_LINE</PARAMETER><TYP>ZINCR_LINE</TYP></RSIMP></IMPORT><EXPORT><RSEXP><PARAMETER>EV_VALUE</PARAMETER><TYP>I</TYP></RSEXP></EXPORT></item></FUNCTIONS>`),
+  "app/zincr_group.fugr.saplzincr_group.abap": "INCLUDE lzincr_grouptop.\n",
+  "app/zincr_group.fugr.lzincr_grouptop.abap": "FUNCTION-POOL zincr_group.\n",
+  "app/zincr_group.fugr.zincr_function.abap": "FUNCTION zincr_function. ev_value = strlen( is_line-tdline ). ENDFUNCTION.\n",
   "app/zif_incr_types.intf.abap": `INTERFACE zif_incr_types PUBLIC.
   TYPES: BEGIN OF ty_pair, a TYPE i, b TYPE i, END OF ty_pair.
   TYPES ty_nr TYPE i.

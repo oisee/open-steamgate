@@ -22,7 +22,7 @@
 import {createHash} from "node:crypto";
 import {createRequire} from "node:module";
 import {existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync} from "node:fs";
-import {join, relative, resolve} from "node:path";
+import {join, relative} from "node:path";
 import {deserialize, serialize} from "node:v8";
 import {deflateRawSync, inflateRawSync} from "node:zlib";
 import {compileProgram, defaultValue, aliasTarget} from "./frontend.mjs";
@@ -34,7 +34,7 @@ import {objectOfFile} from "./osgo-layers.mjs";
 import {portable, toolIdentity} from "./frontend-object-cache.mjs";
 import {prepareDynamicStatics} from "./frontend-dynamic-call.mjs";
 
-export const SCHEMA = "osgo-incr/2";
+export const SCHEMA = "osgo-incr/3";
 const sha = (value) => createHash("sha256").update(value).digest("hex");
 const upper = (text) => String(text).toUpperCase();
 const walk = (d) => readdirSync(d, {withFileTypes: true}).sort((a, b) => a.name.localeCompare(b.name))
@@ -137,13 +137,23 @@ export function incrRecorder({root, folders, hidden, objects, includeTests}) {
   const buckets = new Map();
   const order = []; // first-enter order == the lowering sequence
   let current = null;
+  let lowering = false;
   let program;
   const bucket = (key) => {
     if (!buckets.has(key)) buckets.set(key, {key, writes: Object.fromEntries(RECORDED.map((c) => [c, []])),
-      reads: new Set(), supplied: [], rttiDefs: []});
+      early: {}, reads: new Set(), supplied: [], rttiDefs: []});
     return buckets.get(key);
   };
-  const record = (coll, op) => { if (current !== null) bucket(current).writes[coll].push(op); };
+  // a write outside any object's mark is a global pass, which the fast
+  // build runs again over its own registry; what is recorded per object is
+  // how many of its writes came before the lowering started (the local
+  // discovery), so the merge can put the passes between the two parts
+  const record = (coll, op) => {
+    if (current === null) return;
+    const b = bucket(current);
+    b.writes[coll].push(op);
+    if (!lowering) b.early[coll] = b.writes[coll].length;
+  };
   const proxy = (coll, value) => opProxy(coll, value, (op) => record(coll, op));
   const ownership = new Map();
   return {
@@ -162,6 +172,7 @@ export function incrRecorder({root, folders, hidden, objects, includeTests}) {
     },
     enter(key) { if (!order.includes(key)) order.push(key); current = key; },
     exit() { current = null; },
+    lowering() { lowering = true; },
     suppliedOf(owner, contributed) { bucket(keyOf("CLAS", owner)).supplied = contributed; },
     rttiOf(owner, defs) { bucket(keyOf("CLAS", owner)).rttiDefs = defs; },
     ownershipOf(name, value) { ownership.set(upper(name), {names: [...value.names], dynamic: value.dynamic}); },
@@ -209,10 +220,14 @@ export function incrRecorder({root, folders, hidden, objects, includeTests}) {
         }
         deps.delete(key);
         /** @type {any} */ const payload = {key, ir: Object.fromEntries(irs.map((c) => [c.name, c])),
-          writes: b.writes, reads: [...b.reads], supplied: b.supplied, rttiDefs: b.rttiDefs};
+          writes: b.writes, early: b.early, reads: [...b.reads], supplied: b.supplied, rttiDefs: b.rttiDefs};
         let ok = true;
         try { if (!portable(payload)) ok = false; } catch { ok = false; }
-        const entry = {deps: [...deps].sort(), reads: [...b.reads].sort(), pushed: irs.map((c) => c.name),
+        // the file name the registry gives each pushed class (status.mjs
+        // counts a pack's objects by it): recorded as the full build has it
+        const regFiles = Object.fromEntries(irs.map((c) => [c.name, (reg.getObject("CLAS", c.name) ?? reg.getObject("INTF", c.name))?.getFiles?.()[0]?.getFilename?.()])
+          .filter(([, f]) => f !== undefined));
+        const entry = {deps: [...deps].sort(), reads: [...b.reads].sort(), pushed: irs.map((c) => c.name), regFiles,
           anonRefs: [...anonRefs].sort(), broken: false,
           super: irs.find((c) => !c.name.includes(":"))?.super ?? supers[key.slice(5)] ?? null,
           files: Object.fromEntries((filesByObject.get(key) ?? []).map((f) => [relative(root, f), sha(readFileSync(f))]))};
@@ -354,6 +369,10 @@ export function incrAssemble({root, folders, objects, hidden, includeTests, proo
     for (const f of files) need.add(f);
     queue.push(key);
   }
+  // the CDS sources: compileProgram reads their SQL view names off them,
+  // and the lowering (a SELECT from a CDS name) and the table registry ask
+  // for those; registryFiles leaves them out, they are not registry objects
+  for (const folder of folders) for (const f of walk(folder)) if (/\.ddls\.asddls$/i.test(f) && !hidden.has(f)) need.add(f);
   const wordCache = new Map();
   const words = (key) => {
     if (wordCache.has(key)) return wordCache.get(key);
@@ -451,8 +470,10 @@ export function incrAssemble({root, folders, objects, hidden, includeTests, proo
   const freshRtti = [];
   const freshOwnership = new Map();
   const freshOps = new Map(); // key -> {coll: [ops]} (the writes of a fresh lowering)
-  const strayOps = {}; // coll -> [ops], the global passes inside compileProgram
+  const strayOps = [{}, {}]; // [before, after the lowering starts]: coll -> [ops], the global passes
+  const freshEarly = new Map(); // key -> {coll: n}, how many fresh writes came before the lowering
   let currentKey = null;
+  let lowering = 0;
   const opsOf = (key) => {
     if (!freshOps.has(key)) freshOps.set(key, {});
     return freshOps.get(key);
@@ -465,6 +486,7 @@ export function incrAssemble({root, folders, objects, hidden, includeTests, proo
     compiles: (key) => relower.has(key),
     enter(key) { currentKey = key; },
     exit() { currentKey = null; },
+    lowering() { lowering = 1; },
     // the partial registry cannot walk the superclass chains of the classes
     // it does not hold -- and its own `wanted` is partial with them, the
     // selection drops what the registry does not know -- so both the walk's
@@ -485,13 +507,18 @@ export function incrAssemble({root, folders, objects, hidden, includeTests, proo
           }
         }
         // the fresh lowering's writes land in the same collections, recorded
-        // per object; one outside any object's mark is a global pass (the
-        // write side does not record those either -- both builds run them
-        // after every object), appended at the end by the rebuild below.
+        // per object; one outside any object's mark is a global pass,
+        // recorded by which side of the lowering it ran on (the rebuild
+        // below puts it there).
         // `classes` keeps its own merge off index.classes below.
         if (coll !== "classes") p[coll] = opProxy(coll, target, (op) => {
-          if (currentKey === null) (strayOps[coll] ??= []).push(op);
-          else (opsOf(currentKey)[coll] ??= []).push(op);
+          if (currentKey === null) { (strayOps[lowering][coll] ??= []).push(op); return; }
+          const ops = (opsOf(currentKey)[coll] ??= []);
+          ops.push(op);
+          if (lowering === 0) {
+            if (!freshEarly.has(currentKey)) freshEarly.set(currentKey, {});
+            freshEarly.get(currentKey)[coll] = ops.length;
+          }
         });
       }
       const supplied = new Map(p.supplied);
@@ -531,8 +558,10 @@ export function incrAssemble({root, folders, objects, hidden, includeTests, proo
   // from the cache. "Reused first, fresh after it" is not that order, and
   // the program digest and the emitted Go read several of these collections
   // in insertion order. Writes outside any object's mark (the global passes
-  // inside compileProgram, which run after every object in a full build
-  // too) append at the end.
+  // inside compileProgram) go where the full build makes them: some run
+  // before the lowering (function group signatures: TLINE first of all)
+  // and some after it, and "at the end" put the first kind after every
+  // object, which moved their structures in the emitted Go.
   const apply = (target, op) => {
     const [method, ...args] = op;
     if (method === "set") target.set(args[0], args[1]);
@@ -546,12 +575,21 @@ export function incrAssemble({root, folders, objects, hidden, includeTests, proo
     if (coll === "classes") continue; // merged below, off index.classes
     const like = program2[coll];
     const out = like instanceof Map ? new Map() : like instanceof Set ? new Set() : [];
-    for (const key of index.order) {
-      if (opsOf(key)[coll] !== undefined) { for (const op of opsOf(key)[coll]) apply(out, op); continue; }
-      if (relower.has(key)) continue;
-      for (const op of load(key).writes[coll] ?? []) apply(out, op);
+    // the full build's sequence: each object's local discovery, the global
+    // passes before the lowering (the function group signatures), each
+    // object's lowering, the global passes after it (interface methods,
+    // tables). The passes are the fast build's own: its registry holds every
+    // object they read (every non-class object is a member)
+    for (const half of [0, 1]) {
+      for (const key of index.order) {
+        let ops, early;
+        if (opsOf(key)[coll] !== undefined) { ops = opsOf(key)[coll]; early = freshEarly.get(key)?.[coll] ?? 0; }
+        else if (relower.has(key)) continue;
+        else { ops = load(key).writes[coll] ?? []; early = load(key).early?.[coll] ?? 0; }
+        for (const op of half === 0 ? ops.slice(0, early) : ops.slice(early)) apply(out, op);
+      }
+      for (const op of strayOps[half][coll] ?? []) apply(out, op);
     }
-    for (const op of strayOps[coll] ?? []) apply(out, op);
     program2[coll] = out;
   }
 
@@ -619,6 +657,10 @@ export function incrAssemble({root, folders, objects, hidden, includeTests, proo
     // the merged `classes` array is
     for (const c of classes) if (c.name.includes(":")) classSupers.set(c.name, c.super ?? null);
     program2.rtti = {structs, known, classSupers};
+    // the dictionary's other names (frontend.mjs tableRegistry): the mini
+    // computed them off its own partial rtti, so they follow the merged one
+    const tableNames = new Set((program2.tables ?? []).map((t) => t.name));
+    program2.ddicNames = [...known].filter((n) => !/=>/.test(n) && !tableNames.has(n)).sort();
   }
   // the superclass chain of every merged class, for CATCH at run time
   {
@@ -657,11 +699,10 @@ export function incrAssemble({root, folders, objects, hidden, includeTests, proo
   prepareDynamicStatics(program2, {defaultValue, aliasTarget});
   // the files of the compiled classes, for what reads them without lowering
   // (status.mjs): the partial registry does not hold most of them
+  // -- the name the full build's registry gave it, which is what the
+  // status counts by, so the fast and the full build answer the same
   const filesOf = new Map();
-  for (const [key, entry] of Object.entries(index.entries)) {
-    const main = Object.keys(entry.files ?? {}).filter((f) => /\.(clas|intf)\.abap$/i.test(f)).sort()[0] ?? Object.keys(entry.files ?? {}).sort()[0];
-    if (main !== undefined) for (const name of entry.pushed ?? []) filesOf.set(name, resolve(root, main));
-  }
+  for (const entry of Object.values(index.entries)) for (const [name, file] of Object.entries(entry.regFiles ?? {})) filesOf.set(name, file);
   program2.filesOf = filesOf;
   return {ok: true, program: program2, lowered: [...relower].sort(), reused: reusedKeys.length, notes,
     incrDb: {dir, relower: [...relower], registryOrder: index.registryOrder}};

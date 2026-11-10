@@ -204,6 +204,7 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
   // @ts-expect-error -- abapiti form pending
   /** @param {string} c @returns {string | null | undefined} */ const superOf = (c) => clasDef(reg, c)?.getSuperClass()?.toUpperCase() ?? RUNTIME_CX_SUPER[c];
   program.caught = incr?.caughtIndex?.(reg, program.wanted, superOf) ?? caughtIndex(reg, program.wanted, superOf);
+  incr?.lowering?.();
   // @ts-expect-error -- abapiti form pending
   const lowerClass = (ctx, obj) => {
     const saved = PROGRAM;
