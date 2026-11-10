@@ -175,13 +175,7 @@ export function inputsOf(root, config = loadConfig(root)) {
   // nothing, so it names nothing; the moment it holds an input file (the same
   // rule hashOf applies to a folder: NOT_AN_INPUT files do not count) it is
   // an input. A data, ddic or webapp folder, or a tile, keeps it one anyway.
-  //
-  // **Seed rows the build itself makes are not an input either.** A pack
-  // whose data/ is captured from the generation just built (SEEDS_MARKER,
-  // makePackSeeds below) would otherwise name the next generation after the
-  // first build wrote its rows: the tree hashed to one name before the
-  // build and to another after it, and every host then found "no build of
-  // that exists" and built again at its start (PR #880, CI run 42731141909).
+  // Rows the build captured (seedsBuilt, makePackSeeds) are output, not input.
   const data = (pack) => seedsBuilt(pack.data) ? undefined : pack.data;
   const packs = packsOf(root).filter((pack) => data(pack) !== undefined || pack.ddic !== undefined ||
     pack.webapp !== undefined || pack.tiles.length > 0 ||
