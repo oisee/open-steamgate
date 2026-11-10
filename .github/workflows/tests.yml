@@ -191,7 +191,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: built-tree
-          path: ${{ runner.temp }}/built-tree.tar
+          path: |
+            ${{ runner.temp }}/built-tree.tar
+            ${{ runner.temp }}/built-tree.tar.osd-provenance.json
           if-no-files-found: error
           retention-days: 1
 
@@ -278,6 +280,7 @@ jobs:
           path: ${{ runner.temp }}
       - name: Restore and verify this run's build
         run: |
+          node tools/osd-provenance.mjs verify "$RUNNER_TEMP/built-tree.tar"
           tar -xf "$RUNNER_TEMP/built-tree.tar"
           test -f gen/osd-ddic-binary.mjs
           test -f output/init.mjs
@@ -332,6 +335,7 @@ jobs:
           path: ${{ runner.temp }}
       - name: Restore and verify this run's build
         run: |
+          node tools/osd-provenance.mjs verify "$RUNNER_TEMP/built-tree.tar"
           tar -xf "$RUNNER_TEMP/built-tree.tar"
           test -f gen/osd-ddic-binary.mjs
           test -f output/init.mjs
@@ -371,6 +375,7 @@ jobs:
           path: ${{ runner.temp }}
       - name: Restore and verify this run's build
         run: |
+          node tools/osd-provenance.mjs verify "$RUNNER_TEMP/built-tree.tar"
           tar -xf "$RUNNER_TEMP/built-tree.tar"
           test -f gen/osd-ddic-binary.mjs
           test -f output/init.mjs
@@ -450,6 +455,7 @@ jobs:
           path: ${{ runner.temp }}
       - name: Restore and verify this run's build
         run: |
+          node tools/osd-provenance.mjs verify "$RUNNER_TEMP/built-tree.tar"
           tar -xf "$RUNNER_TEMP/built-tree.tar"
           test -f build/live/manifest.json
           test -d .local/lars/open-abap-core
@@ -700,6 +706,7 @@ jobs:
       - name: Restore this run's pinned runtime and libraries
         timeout-minutes: 5
         run: |
+          node tools/osd-provenance.mjs verify "$RUNNER_TEMP/built-tree.tar"
           tar -xf "$RUNNER_TEMP/built-tree.tar"
           test -d .local/lars/open-abap-core
           test -f .local/ci-artifact/transpiler/packages/transpiler/build/src/index.js
@@ -753,6 +760,7 @@ jobs:
           path: ${{ runner.temp }}
       - name: Restore and verify the build used by the shards
         run: |
+          node tools/osd-provenance.mjs verify "$RUNNER_TEMP/built-tree.tar"
           tar -xf "$RUNNER_TEMP/built-tree.tar"
           echo "TRANSPILER=$PWD/.local/ci-artifact/transpiler" >> "$GITHUB_ENV"
           TRANSPILER="$PWD/.local/ci-artifact/transpiler" node tools/osd-link.mjs transpiler packages/transpiler

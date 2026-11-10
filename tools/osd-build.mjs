@@ -355,11 +355,10 @@ export function hashOf(root, inputs = inputsOf(root), options = {}) {
     return this;
   }, digest: (...args) => hash.digest(...args)};
   h.update("transpiler\0").update(String(options.transpiler ?? buildIdentity(root))).update("\0");
-  // the rule that decides a name held by two inputs is part of what the
-  // output is: a generation built under another rule is another generation
   h.update("layers\0later-wins\0");
   const system = activeSystem(root);
   if (system) h.update("system\0").update(system.digest).update("\0");
+  for (const name of generationSystem(root, inputs).provenance.filter(input => input.private).map(input => `${input.kind}:${input.path}`).sort()) h.update("private-input\0").update(name).update("\0");
   for (const layer of inputs.sourceLayers ?? []) {
     h.update("source-layer\0").update(JSON.stringify(layer)).update("\0");
   }
@@ -858,7 +857,7 @@ export async function build(options = {}) {
     const objects = made.objects;
 
     const manifest = {
-      sourceLayers: inputs.sourceLayers ?? [], ...generationSystem(root),
+      sourceLayers: inputs.sourceLayers ?? [], ...generationSystem(root, inputs),
       hash,
       builtAt: new Date().toISOString(),
       ms: Date.now() - started,
@@ -866,6 +865,7 @@ export async function build(options = {}) {
       transpiler: describeBuild(root),
       toolchain: identity,
       inputs: {folders: inputs.folders.map((f) => relative(root, f)), libs: inputs.libs.map((f) => relative(root, f)),
+        bspFolders: inputs.bspFolders.map(f => relative(root, f)), packFiles: inputs.packFiles.map(f => relative(root, f)), packFolders: inputs.packFolders.map(f => relative(root, f)),
         // the active copies an overlay added: a publisher reads them too (osd-tmp.mjs)
         overlay: overlayFilesOf(root, options.overlay)},
       // What `gen/` held when this generation was made. `gen/` is an OUTPUT

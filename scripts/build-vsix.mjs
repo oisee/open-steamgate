@@ -888,6 +888,8 @@ export async function buildVsix(env = process.env, outputDir = BUILD_DIR) {
   };
   const unpackedTotal = Object.values(breakdown).reduce((a, b) => a + b, 0);
   const vsixSize = statSync(out).size;
+  const {generationProvenance, writeArtefactProvenance} = await import("../tools/osd-provenance.mjs");
+  writeArtefactProvenance(out, generationProvenance(generation === undefined ? ROOT : seedRoot));
 
   log(`.vsix: ${out} (${fmtMB(vsixSize)})`);
   log(`unpacked: ${fmtMB(unpackedTotal)}`);

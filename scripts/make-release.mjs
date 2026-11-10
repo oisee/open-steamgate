@@ -27,6 +27,7 @@ import {execFileSync} from "node:child_process";
 import {basename, dirname, join, relative, resolve} from "node:path";
 import {fileURLToPath, pathToFileURL} from "node:url";
 import {assertPublicSystem} from "../tools/osd-system.mjs";
+import {verifyPublicArtefact, writeArtefactProvenance} from "../tools/osd-provenance.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const out = resolve(process.argv[2] ?? join(root, ".local", "release"));
@@ -129,6 +130,7 @@ const host = (relativePath, name, how) => {
       `contain it -- which is how an evening was spent testing code that was ` +
       `not running. Build it first: ${how}`);
   }
+  verifyPublicArtefact(from);
   cpSync(from, join(out, name));
   say(`host: ${name}, built ${new Date(built).toISOString()}`);
 };
@@ -274,3 +276,5 @@ esac
 execFileSync("chmod", ["+x", join(out, "run.sh")]);
 const size = execFileSync("du", ["-sh", out], {encoding: "utf8"}).split(/\s+/)[0];
 console.log(`${out}: ${size}`);
+writeArtefactProvenance(out);
+verifyPublicArtefact(out);

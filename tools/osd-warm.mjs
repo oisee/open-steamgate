@@ -852,7 +852,7 @@ export class WarmCompiler {
           writeFileSync(join(tmp, "manifest.json"), JSON.stringify({
             hash, builtAt: new Date().toISOString(), ms: Date.now() - started, objects: manifest.objects,
             transpiler, toolchain: this.loaded.identity, inputs: manifest.inputs, gen: manifest.gen, overridden: manifest.overridden,
-            ...generationSystem(root),
+            ...generationSystem(root, manifest.inputs),
           }, null, 2));
           const sharedSources = keepSourceInputs(root, tmp, digests, actual, overlay,
             {generation: join(paths.byInput, from), digests: this.digests});

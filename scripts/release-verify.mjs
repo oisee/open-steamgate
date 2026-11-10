@@ -26,6 +26,7 @@ import {createHash} from "node:crypto";
 import {existsSync, mkdtempSync, openSync, readSync, closeSync, readFileSync, rmSync, statSync, mkdirSync} from "node:fs";
 import {report} from "../tools/osd-inputs.mjs";
 import {assertPublicSystem} from "../tools/osd-system.mjs";
+import {verifyPublicArtefact} from "../tools/osd-provenance.mjs";
 import {createServer} from "node:net";
 import {tmpdir} from "node:os";
 import {dirname, join, resolve} from "node:path";
@@ -84,6 +85,7 @@ export function executableOf(bytes) {
 // live generation (the OSGo binary compiles both in).
 export function checkReleaseBinary(file, target, sourceRoot = root) {
   assertPublicSystem(sourceRoot);
+  verifyPublicArtefact(file);
   return checkBinary(file, target);
 }
 
@@ -247,6 +249,6 @@ if (isMain) {
     console.log(`release-verify ${command}: ok ${JSON.stringify(result)}`);
   } catch (error) {
     console.error(`release-verify ${command}: ${error.message}`);
-    process.exit(1);
+    process.exit(["PRIVATE_LAYER", "BAD_PROVENANCE"].includes(error.code) ? 2 : 1);
   }
 }

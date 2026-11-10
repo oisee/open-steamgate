@@ -57,15 +57,51 @@ export function assertPublicSystem(root) {
       error.code = "PRIVATE_LAYER";
       throw error;
     }
-    if (generation?.systemPrivate !== false || generation.systemDigest !== (system?.digest ?? null))
+    if (generation?.systemPrivate !== false || !Array.isArray(generation.provenance)
+      || generation.provenance.some(input => typeof input.private !== "boolean" || input.private)
+      || generation.systemDigest !== (system?.digest ?? null))
       fail("live generation has no matching public system identity; rebuild with node tools/osd-build.mjs");
   }
 }
 
 // What a generation records about the system it was compiled from.
-export function generationSystem(root) {
+export function generationSystem(root, inputs = {}) {
   const system = activeSystem(root);
-  return {systemDigest: system?.digest ?? null, systemPrivate: system?.layers.some(layer => layer.private === true) ?? false};
+  const provenance = (system?.layers ?? []).map(layer => ({kind: layer.kind, path: layer.path, digest: layer.digest, private: layer.private === true}));
+  const folders = [...(inputs.folders ?? []), ...(inputs.libs ?? []), ...(inputs.bspFolders ?? []),
+    ...(inputs.packFolders ?? []), ...(inputs.packFiles ?? []), ...(inputs.sourceLayers ?? []).map(layer => layer.path)];
+  const seen = new Set();
+  const inspect = (path, kind) => {
+    const dir = resolve(root, path);
+    if (seen.has(dir) || !existsSync(dir)) return;
+    seen.add(dir);
+    let identity;
+    for (let parent = dir; ; parent = dirname(parent)) {
+      for (const file of [".osd-source.json", LAYER_ID]) {
+        const at = join(parent, file);
+        if (existsSync(at)) {
+          try { identity = JSON.parse(readFileSync(at, "utf8")); } catch { fail(`invalid input identity: ${at}`); }
+          if (file === ".osd-source.json" && typeof identity.private !== "boolean") fail(`fetched input has no explicit privacy: ${at}`);
+          break;
+        }
+      }
+      if (identity || parent === root || dirname(parent) === parent) break;
+    }
+    const logical = relative(root, dir);
+    provenance.push({kind, path: logical === ".." || logical.startsWith("../") ? `external/${dir.split(/[\\/]/).at(-1)}` : logical,
+      private: identity?.private === true});
+  };
+  folders.forEach(path => inspect(path, "source"));
+  const packDirs = new Set([...(inputs.packFiles ?? []).map(file => dirname(resolve(root, file)))]);
+  for (const pack of (existsSync(join(root, "packs")) ? readdirSync(join(root, "packs"), {withFileTypes: true}) : []).filter(entry => entry.isDirectory()))
+    packDirs.add(join(root, "packs", pack.name));
+  for (const dir of packDirs) {
+    if (!existsSync(dir)) continue;
+    for (const entry of readdirSync(dir, {withFileTypes: true})) {
+      if (entry.isDirectory() && existsSync(join(dir, entry.name, ".osd-source.json"))) inspect(join(dir, entry.name), "pack-oci");
+    }
+  }
+  return {systemDigest: system?.digest ?? null, systemPrivate: provenance.some(input => input.private), provenance};
 }
 
 // Everything under build/ for an archive of the whole store: every kept

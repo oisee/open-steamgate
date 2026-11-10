@@ -40,14 +40,15 @@ describe("osd-system: one digest supplies the system", function () {
       expect(() => assertPublicSystem(scratch)).to.throw(/no matching public system identity/);
       json(join(scratch, "build/by-input/fixture/manifest.json"), {hash: "fixture"});
       expect(() => assertPublicSystem(scratch)).to.throw(/no matching public system identity/);
-      json(join(scratch, "build/by-input/fixture/manifest.json"), {systemDigest: null, systemPrivate: false});
+      json(join(scratch, "build/by-input/fixture/manifest.json"), {systemDigest: null, systemPrivate: false, provenance: []});
       expect(() => assertPublicSystem(scratch)).not.to.throw();
       // what osd-build and osd-warm record while a private system is installed
       const identity = {order: 0, name: "synthetic", kind: "lib", private: true,
         digest: `sha256:${"1".repeat(64)}`, treeDigest: `sha256:${"2".repeat(64)}`, path: "libs/synthetic"};
       json(join(scratch, ".local/system/.osd-system.json"), {digest: `sha256:${"3".repeat(64)}`, layers: [identity]});
       json(join(scratch, ".local/system/libs/synthetic", LAYER_ID), identity);
-      expect(generationSystem(scratch)).to.deep.equal({systemDigest: `sha256:${"3".repeat(64)}`, systemPrivate: true});
+      expect(generationSystem(scratch)).to.deep.equal({systemDigest: `sha256:${"3".repeat(64)}`, systemPrivate: true,
+        provenance: [{kind: "lib", path: "libs/synthetic", digest: `sha256:${"1".repeat(64)}`, private: true}]});
     } finally { rmSync(scratch, {recursive: true, force: true}); }
   });
   let root, source, r, host, ref, env, cwd;

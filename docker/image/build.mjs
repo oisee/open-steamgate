@@ -3,6 +3,7 @@ import {readFileSync, mkdirSync, existsSync, chmodSync} from "node:fs";
 import {resolve} from "node:path";
 import {imagePacks} from "./packs.mjs";
 import {assertPublicSystem} from "../../tools/osd-system.mjs";
+import {verifyPublicArtefact} from "../../tools/osd-provenance.mjs";
 
 assertPublicSystem(process.cwd());
 
@@ -50,4 +51,6 @@ for (const source of sources.libraries) {
 if (selectedPacks.length) run("node", ["tools/osd-fetch.mjs"]);
 // a published image: $TMP is left out (tools/osd-tmp.mjs)
 run("node", ["tools/osd-build.mjs", "--publish"]);
+assertPublicSystem(process.cwd());
 run("node", ["docker/image/assemble.mjs", "/image"]);
+verifyPublicArtefact("/image");

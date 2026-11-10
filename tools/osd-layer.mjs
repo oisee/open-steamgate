@@ -28,6 +28,32 @@ const jsonBytes = (value) => Buffer.from(JSON.stringify(value));
 const descriptor = (mediaType, bytes) => ({mediaType, digest: sha256(bytes), size: bytes.length});
 const fail = (code, message) => { throw new OciError(code, message); };
 
+function privateContent(folder) {
+  const names = new Set([".osd-source.json", ".osd-layer.json", ".osd-system.json"]);
+  const read = file => {
+    let value;
+    try { value = JSON.parse(readFileSync(file, "utf8")); }
+    catch { fail("BAD_LAYER", `invalid identity at ${file}`); }
+    if (basename(file) === ".osd-source.json" && typeof value.private !== "boolean")
+      fail("BAD_LAYER", `fetched identity with no explicit privacy cannot be published: ${file}`);
+    return value.private === true || value.layers?.some(layer => layer.private === true);
+  };
+  const walk = dir => {
+    for (const item of readdirSync(dir, {withFileTypes: true})) {
+      if (item.name === ".git" || item.name === "node_modules") continue;
+      const path = join(dir, item.name);
+      if (item.isFile() && names.has(item.name) && read(path)) return true;
+      if (item.isDirectory() && walk(path)) return true;
+    }
+    return false;
+  };
+  for (let dir = resolve(folder); ; dir = dirname(dir)) {
+    for (const name of names) if (existsSync(join(dir, name)) && read(join(dir, name))) return true;
+    if (dir === toolRoot || dirname(dir) === dir) break;
+  }
+  return walk(resolve(folder));
+}
+
 /** Read every file, without following links or carrying fetch identity. */
 function folderFiles(folder) {
   const files = [];
@@ -69,6 +95,7 @@ export function build(folder, {name, kind, source, annotations: extraAnnotations
   if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(name ?? "")) fail("BAD_NAME", "--name must be a simple filename");
   if (!["lib", "input", "pack", "customer"].includes(kind)) fail("BAD_KIND", "--kind must be lib, input, pack or customer");
   if (!lstatSync(resolve(folder)).isDirectory()) fail("UNSAFE_ENTRY", "input must be a folder");
+  if (privateContent(folder) && !isPrivate) fail("PRIVATE_LAYER", "private input requires --private");
   let files = folderFiles(resolve(folder));
   if (kind === "pack") validatePack(files, name);
   if (!files.some((f) => f.path === ".abapgit.xml")) {

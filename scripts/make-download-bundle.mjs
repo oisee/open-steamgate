@@ -9,6 +9,7 @@ import {fileURLToPath} from "node:url";
 import {libraryFiles} from "../tools/osd-inputs.mjs";
 import {unfetched, describeUnfetched} from "../tools/osd-fetch.mjs";
 import {assertPublicSystem} from "../tools/osd-system.mjs";
+import {verifyPublicArtefact, writeArtefactProvenance} from "../tools/osd-provenance.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 assertPublicSystem(root);
@@ -43,6 +44,9 @@ const stage = join(probe, folder);
 const archive = join(probe, `${folder}${target.archive}`);
 if (existsSync(stage) || existsSync(archive)) {
   if (!existsSync(stage) || !existsSync(archive)) throw new Error(`Incomplete existing bundle: ${stage}`);
+  verifyPublicArtefact(join(probe, target.bun));
+  verifyPublicArtefact(stage);
+  verifyPublicArtefact(archive);
   const manifest = JSON.parse(readFileSync(join(stage, "release.json"), "utf8"));
   for (const file of [target.bun]) {
     const digest = createHash("sha256").update(readFileSync(join(probe, file))).digest("hex");
@@ -85,6 +89,7 @@ mkdirSync(join(stage, "build", "by-input"), {recursive: true});
 cpSync(join(root, "build", generation), join(stage, "build", generation), {recursive: true});
 symlinkSync(generation, join(stage, "build", "live"));
 symlinkSync(join("build", "live", "output"), join(stage, "output"));
+verifyPublicArtefact(join(probe, target.bun));
 cpSync(join(probe, target.bun), join(stage, target.bun));
 const launcher = name === "windows-x64" ? "run.ps1" : "run.sh";
 cpSync(join(root, "scripts", "release", launcher), join(stage, launcher));
@@ -107,6 +112,7 @@ writeFileSync(join(stage, "PRIVATE-TEST-ONLY.txt"),
   "Private test artifact. Do not redistribute before dependency-notice and provenance review.\n" +
   "Mini-Zork public-domain claim: https://www.inform-fiction.org/zmachine/standards/z1point1/appf.html\n" +
   "SQLite data is stored outside this directory by run.sh or run.ps1.\n");
+writeArtefactProvenance(stage);
 if (target.archive === ".zip") {
   execFileSync("zip", ["-q", "-r", archive, folder], {cwd: probe, stdio: "inherit"});
 } else {
@@ -114,4 +120,5 @@ if (target.archive === ".zip") {
 }
 const digest = createHash("sha256").update(readFileSync(archive)).digest("hex");
 writeFileSync(`${archive}.sha256`, `${digest}  ${basename(archive)}\n`);
+writeArtefactProvenance(archive);
 console.log(`${archive} (${Math.round(statSync(archive).size / 1e6)} MB, sha256 ${digest})`);

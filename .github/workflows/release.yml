@@ -122,6 +122,7 @@ jobs:
           version="${RELEASE_TAG##*v}"
           vsix="build/vsix/open-steamgate-$version.vsix"
           test -f "$vsix"
+          node tools/osd-provenance.mjs verify "$vsix"
           node scripts/release-version.mjs "$RELEASE_TAG" "$vsix" --allow-untagged
           (cd build/vsix && sha256sum "open-steamgate-$version.vsix" > "open-steamgate-$version.vsix.sha256")
       - name: Generate and scan CHANGELOG, README and FILE_ID.DIZ
@@ -431,6 +432,7 @@ jobs:
           mkdir -p build/release
           commit="$(git rev-parse HEAD)"
           (cd tools/gogen/go && go build -trimpath -ldflags="-s -w -X main.releaseTag=$RELEASE_TAG -X main.releaseCommit=$commit" -o "../../../build/release/$ASSET" ./cmd/osgo)
+          node tools/osd-provenance.mjs write "build/release/$ASSET"
           for private_path in "$GITHUB_WORKSPACE" "$HOME"; do
             if [[ -n "$private_path" ]] && LC_ALL=C grep -aFq "$private_path" "build/release/$ASSET"; then
               echo "::error::OSGo binary contains a runner path"
@@ -582,6 +584,7 @@ jobs:
           export OSD_VSIX_PRERELEASE=0
           if [[ "$RELEASE_CHANNEL" == prerelease ]]; then export OSD_VSIX_PRERELEASE=1; fi
           npm run vsix 2>&1 | tee "$RUNNER_TEMP/marketplace-build.log"
+          node tools/osd-provenance.mjs verify build/vsix/*.vsix
           node scripts/verify-vsix-transpiler.mjs build/vsix/*.vsix
           # These two placeholder licences have explicit maintainer overrides
           # in third-party-notices.mjs. Any new issue needs a fresh review.

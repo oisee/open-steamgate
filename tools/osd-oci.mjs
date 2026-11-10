@@ -126,7 +126,7 @@ const normalizedRegistry = value => {
 
 /** Refuse public hosts regardless of the private registry allow-list. */
 export function assertPrivateTarget(ref, layers, env = readEnvironment(["OSD_PRIVATE_REGISTRIES"])) {
-  const registry = parseRef(ref).registry;
+  const registry = parseRef(ref.replace(/^([^/]+)\//, (_, host) => `${host.toLowerCase()}/`)).registry;
   const layer = layers.find(item => item.config?.private === true);
   if (!layer) return;
   const target = normalizedRegistry(registry);

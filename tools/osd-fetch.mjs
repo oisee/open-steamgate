@@ -179,7 +179,7 @@ export async function fetchSource(pack, source, options = {}) {
   const before = sourceOf(source.dir);
   if (options.force !== true && existsSync(source.dir) && statSync(source.dir).isDirectory() && sourceMatches(source, before)) {
     log(`${pack.name}/${source.folder}: already at ${before.digest ? before.digest.slice(0, 19) : before.commit.slice(0, 12)}`);
-    return {pack: pack.name, folder: source.folder, commit: before.commit, digest: before.digest, treeDigest: before.treeDigest, files: before.files, fetched: false};
+    return {pack: pack.name, folder: source.folder, commit: before.commit, digest: before.digest, treeDigest: before.treeDigest, private: before.private, files: before.files, fetched: false};
   }
   if (source.oci !== undefined) return fetchOci(pack, source, log);
   log(`${pack.name}/${source.folder}: fetching ${source.repo} at ${source.ref}`);
@@ -196,10 +196,10 @@ export async function fetchSource(pack, source, options = {}) {
     const files = copyTree(from, stage, source);
     await publish(pack, source, stage, {
       repo: source.repo, ref: source.ref, commit, path: source.path, exclude: source.exclude,
-      files: files.length, at: new Date().toISOString(),
+      private: false, files: files.length, at: new Date().toISOString(),
     }, log);
     log(`${pack.name}/${source.folder}: ${files.length} files from ${commit.slice(0, 12)}`);
-    return {pack: pack.name, folder: source.folder, commit, files: files.length, fetched: true};
+    return {pack: pack.name, folder: source.folder, commit, private: false, files: files.length, fetched: true};
   } finally {
     for (const path of [stage, dir].filter(Boolean)) {
       try { rmSync(path, {recursive: true, force: true}); }
@@ -238,10 +238,12 @@ async function fetchOci(pack, source, log) {
       writeFileSync(join(stage, path), bytes);
       files++;
     }
-    await publish(pack, source, stage, {oci: source.oci, digest: layer.manifest.digest, treeDigest: digest,
+    if (typeof layer.config?.private !== "boolean" && layer.config?.private !== undefined) throw new Error("BAD_LAYER: invalid private marker");
+    const privateLayer = layer.config.private === true;
+    await publish(pack, source, stage, {oci: source.oci, digest: layer.manifest.digest, treeDigest: digest, private: privateLayer,
       path: source.path, exclude: source.exclude, files, at: new Date().toISOString()}, log);
     log(`${pack.name}/${source.folder}: ${files} files from ${source.oci.split("@")[1].slice(0, 19)} tree ${digest.slice(0, 19)}`);
-    return {pack: pack.name, folder: source.folder, digest: layer.manifest.digest, treeDigest: digest, files, fetched: true};
+    return {pack: pack.name, folder: source.folder, digest: layer.manifest.digest, treeDigest: digest, private: privateLayer, files, fetched: true};
   } catch (error) {
     if (error instanceof FetchFailed) throw error;
     const failure = new FetchFailed(source.oci, undefined, error.message, error.code);

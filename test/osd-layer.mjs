@@ -12,6 +12,7 @@ import {archiveFiles} from "../tools/osd-source-zip.mjs";
 import {fetchAll} from "../tools/osd-fetch.mjs";
 import {fetchSystem} from "../tools/osd-system-fetch.mjs";
 import {assertPublicSystem} from "../tools/osd-system.mjs";
+import {generationSystem} from "../tools/osd-system.mjs";
 import {registry, listening} from "./helpers/oci-registry.mjs";
 
 import {toolCommand, setHostedLeakScanner} from "../tools/osd-host.mjs";
@@ -93,6 +94,31 @@ describe("osd-layer: reproducible publishing", function () {
     const nearlyFull = {unresolved: 1, items: [{text: "x".repeat(JSON_LIMIT - 105)}]};
     expect(Buffer.byteLength(JSON.stringify(nearlyFull))).to.be.lessThan(JSON_LIMIT);
     expect(() => build(folder, {...options, closure: nearlyFull})).to.throw(/config exceeds 4 MiB/);
+  });
+
+  it("keeps OCI source privacy through fetch, generation and a src subdirectory rebuild", async () => {
+    const r = registry(), host = await listening(r);
+    try {
+      const privateLayer = build(folder, {...options, private: true});
+      const digest = await push(`${host}/source/private:v1`, privateLayer, {env: {OSD_PRIVATE_REGISTRIES: host}});
+      const pack = join(root, "packs/private-pack");
+      write(join(pack, "osd-pack.json"), JSON.stringify({name: "private-pack", abap: ["upstream/src"],
+        sources: [{folder: "upstream", oci: `${host}/source/private@${digest}`}]}));
+      await fetchAll(root, {env: {}});
+      const source = join(pack, "upstream");
+      expect(JSON.parse(readFileSync(join(source, ".osd-source.json"), "utf8")).private).to.equal(true);
+      expect(generationSystem(root).systemPrivate).to.equal(true);
+      write(join(source, "src/zcl_smoke.clas.abap"), "CLASS zcl_smoke DEFINITION PUBLIC. ENDCLASS.");
+      expect(() => build(join(source, "src"), options)).to.throw().with.property("code", "PRIVATE_LAYER");
+      expect(build(join(source, "src"), {...options, private: true}).config.private).to.equal(true);
+    } finally { await new Promise(done => r.server.close(done)); }
+  });
+
+  it("normalizes an uppercase registry host before checking private publication", () => {
+    const layer = build(folder, {...options, private: true});
+    expect(() => assertPrivateTarget("LOCALHOST:5000/osd/private:v1", [layer], {OSD_PRIVATE_REGISTRIES: "localhost:5000"})).not.to.throw();
+    expect(() => assertPrivateTarget("GHCR.IO/osd/private:v1", [layer], {OSD_PRIVATE_REGISTRIES: "ghcr.io"}))
+      .to.throw().with.property("code", "PRIVATE_LAYER");
   });
 
   it("passes private mode through the hosted scanner used by compiled hosts", () => {

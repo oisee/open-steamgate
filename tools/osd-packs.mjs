@@ -73,6 +73,7 @@ export const seedsBuilt = (dataDir) => dataDir !== undefined && existsSync(join(
 
 export function sourceMatches(source, entry) {
   if (!entry || entry.path !== source.path
+      || typeof entry.private !== "boolean"
       || JSON.stringify(entry.exclude) !== JSON.stringify(source.exclude)) return false;
   return source.oci !== undefined
     ? entry.oci === source.oci && entry.repo === undefined && entry.ref === undefined

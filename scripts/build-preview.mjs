@@ -1,4 +1,5 @@
 import {assertPublicSystem, rootWebappOf} from "../tools/osd-system.mjs";
+import {writeArtefactProvenance} from "../tools/osd-provenance.mjs";
 // Builds the static preview deployment into build/:
 //   sw.js        the transpiled gateway + sql.js in a service worker
 //   index.html   installs the worker, then goes to app/
@@ -434,3 +435,4 @@ for (const entry of await readdir(resolve(root, "output"))) {
 console.log(`Media: ${carried} W3MI objects, ${(bytes / 1048576).toFixed(1)} MB in media/`);
 
 console.log(`Preview build is in ${build}`);
+writeArtefactProvenance(build);

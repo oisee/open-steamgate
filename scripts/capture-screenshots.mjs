@@ -7,8 +7,11 @@ import {spawn} from "node:child_process";
 import {tmpdir} from "node:os";
 import {join, resolve} from "node:path";
 import {fileURLToPath} from "node:url";
+import {verifyPublicArtefact, writeArtefactProvenance} from "../tools/osd-provenance.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
+const preview = resolve(root, "build/preview");
+const provenance = verifyPublicArtefact(preview);
 const out = resolve(root, "build/preview/screenshots");
 await mkdir(out, {recursive: true});
 
@@ -27,6 +30,7 @@ try {
   await page.screenshot({path: join(out, "metadata.png"), fullPage: true});
   await page.goto(`http://localhost:${port}/sap/opu/odata/sap/ZSTG_SADL_SRV/Zc_Stg_TravelcubeSet?$select=STATUS,SEATS&$orderby=STATUS&$format=json`);
   await page.screenshot({path: join(out, "sadl-aggregate.png"), fullPage: true});
+  writeArtefactProvenance(preview, provenance);
   console.log(`Screenshots in ${out}`);
 } finally {
   await context.close();
