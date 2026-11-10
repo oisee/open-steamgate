@@ -42,7 +42,7 @@ import {fileURLToPath, pathToFileURL} from "node:url";
 import {buildIdentity, assertToolchain, describeBuild} from "./osd-transpiler.mjs";
 import {describeDuplicates, excludePatterns, layers} from "./osd-inputs.mjs";
 import {transpile, selectedModules} from "./osd-transpile.mjs";
-import {inputFoldersOf, packsOf, userFoldersOf, webappsOf} from "./osd-packs.mjs";
+import {inputFoldersOf, packsOf, seedsBuilt, userFoldersOf, webappsOf} from "./osd-packs.mjs";
 import {describeUnfetched, unfetched} from "./osd-fetch.mjs";
 import {toolCommand, hosted} from "./osd-host.mjs";
 import {runsAs} from "./osd-main.mjs";
@@ -175,11 +175,19 @@ export function inputsOf(root, config = loadConfig(root)) {
   // nothing, so it names nothing; the moment it holds an input file (the same
   // rule hashOf applies to a folder: NOT_AN_INPUT files do not count) it is
   // an input. A data, ddic or webapp folder, or a tile, keeps it one anyway.
-  const packs = packsOf(root).filter((pack) => pack.data !== undefined || pack.ddic !== undefined ||
+  //
+  // **Seed rows the build itself makes are not an input either.** A pack
+  // whose data/ is captured from the generation just built (SEEDS_MARKER,
+  // makePackSeeds below) would otherwise name the next generation after the
+  // first build wrote its rows: the tree hashed to one name before the
+  // build and to another after it, and every host then found "no build of
+  // that exists" and built again at its start (PR #880, CI run 42731141909).
+  const data = (pack) => seedsBuilt(pack.data) ? undefined : pack.data;
+  const packs = packsOf(root).filter((pack) => data(pack) !== undefined || pack.ddic !== undefined ||
     pack.webapp !== undefined || pack.tiles.length > 0 ||
     pack.abap.some((dir) => existsSync(dir) && walk(dir).some((f) => !NOT_AN_INPUT.test(f))));
   const packFiles = packs.map((pack) => join(pack.dir, "osd-pack.json"));
-  const packFolders = packs.flatMap((pack) => [pack.data, pack.ddic].filter(Boolean));
+  const packFolders = packs.flatMap((pack) => [data(pack), pack.ddic].filter(Boolean));
   const sourceLayers = userLayersOf(root);
   return {folders, libs, bspFolders, packFiles, packFolders, sourceLayers, config: layout(root).config};
 }

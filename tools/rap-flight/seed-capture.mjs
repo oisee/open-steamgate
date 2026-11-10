@@ -33,7 +33,7 @@ import {join, resolve} from "node:path";
 import {pathToFileURL} from "node:url";
 import {dialogStep} from "../osd-dialog-step.mjs";
 import {runsAs} from "../osd-main.mjs";
-import {markerOf} from "../osd-packs.mjs";
+import {markerOf, SEEDS_MARKER} from "../osd-packs.mjs";
 
 // the tables the generator writes, in the order a reader expects them
 export const TABLES = [
@@ -153,7 +153,7 @@ export function seedsDue(root = process.cwd()) {
   }
   const digest = seedInputsDigest(root);
   try {
-    const marker = JSON.parse(readFileSync(join(pack, "data", ".osd-seed.json"), "utf8"));
+    const marker = JSON.parse(readFileSync(join(pack, "data", SEEDS_MARKER), "utf8"));
     if (marker.digest === digest && TABLES.every((t) => existsSync(join(pack, "data", fileOf(t))))) {
       return false;
     }
@@ -172,7 +172,7 @@ export async function ensurePackSeeds(root = process.cwd(), log = console.log, {
   log("rap-flight seed: the generator's rows are made at build (not tracked), running it");
   const {counts} = await capture({root, log, output});
   mkdirSync(join(pack, "data"), {recursive: true});
-  writeFileSync(join(pack, "data", ".osd-seed.json"),
+  writeFileSync(join(pack, "data", SEEDS_MARKER),
     JSON.stringify({digest: seedInputsDigest(root), counts, at: new Date().toISOString()}, null, 2) + "\n");
   return true;
 }
