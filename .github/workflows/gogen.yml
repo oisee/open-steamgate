@@ -201,7 +201,7 @@ jobs:
         # the library clones must be the pinned ones (tools/gogen/lib-pins.mjs)
         env:
           OSABAP_STRICT_PINS: "1"
-        run: node --test tools/gogen/builtins.test.mjs tools/gogen/lib-pins.test.mjs tools/gogen/osabap-f4.test.mjs tools/gogen/osabap-list.test.mjs tools/gogen/osabap.test.mjs tools/gogen/osabap-sql-corpus.test.mjs tools/gogen/unit.test.mjs tools/gogen/osgo-fast.test.mjs
+        run: node --test tools/gogen/builtins.test.mjs tools/gogen/lib-pins.test.mjs tools/gogen/osabap-f4.test.mjs tools/gogen/osabap-list.test.mjs tools/gogen/osabap.test.mjs tools/gogen/osabap-sql-corpus.test.mjs tools/gogen/unit.test.mjs tools/gogen/osgo-fast.test.mjs tools/gogen/program-digest.test.mjs tools/gogen/osgo-incr.test.mjs
       - name: Generated-class ABAP Unit CI entry points (real Go and JS builds)
         if: matrix.part == 'suites'
         run: flock /tmp/osd-heavy.lock node tools/osd-suites.mjs --group gogen

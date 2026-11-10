@@ -1,5 +1,5 @@
 import {writeGo} from "./symbols.ts";
-import {emitGo, goIdent} from "./emit-go.mjs";
+import {goIdent} from "./emit-go.mjs";
 import {planLayers, writeLayers} from "./go-layers.mjs";
 import {editedObjects, osgoTiers} from "./osgo-layers.mjs";
 import {gofmtCached} from "./gofmt-cache.mjs";
@@ -30,7 +30,8 @@ import {gofmtCached} from "./gofmt-cache.mjs";
 // zz_boot.go (what boots, which SICF nodes are mounted, the launchpad tiles
 // and the pack folders, as read from the checkout now).
 import {execFileSync} from "node:child_process";
-import {existsSync, mkdirSync, rmSync, writeFileSync} from "node:fs";
+import {createHash} from "node:crypto";
+import {existsSync, mkdirSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {join, relative} from "node:path";
 import {columnRegistry, compileProgram} from "./frontend.mjs";
 import {home} from "./home.mjs";
@@ -106,6 +107,11 @@ if (echo) {
     }
   }
   const {compileOsg, osgDatabase, staleGen} = await import("./osg-build.mjs");
+  // the per-object cache of the fast path (osgo-incr.mjs): a full front end
+  // records what it lowered into the live generation's cache, a proven fast
+  // build reads it. Without a live generation there is nothing to record.
+  const {liveHash} = await import(`${home}/tools/osd-build.mjs`);
+  const recordGen = liveHash(home);
   // a stale gen/ is refused (--stale-gen builds it anyway, with the warning)
   const staleCheck = async () => {
     const stale = await staleGen();
@@ -117,7 +123,7 @@ if (echo) {
   };
   if (!fastInfo?.ok) await staleCheck();
   phase("stale check");
-  let built = compileOsg({extraFolders, includeTests: new Set(owners)});
+  let built = compileOsg({extraFolders, includeTests: new Set(owners), ...(recordGen || fastInfo ? {incr: {proof: fastInfo?.ok ? fastInfo : undefined, recordGen}} : {})});
   phase("front end");
   // the fast path skipped the Node build's syntax check: an edited object
   // the front end found errors in is not built here. The full path runs
@@ -132,7 +138,7 @@ if (echo) {
       fastInfo = {ok: false, hash: fastInfo.hash, base: fastInfo.base, reason: refusal};
       nodeBuild();
       await staleCheck();
-      built = compileOsg({extraFolders, includeTests: new Set(owners)});
+      built = compileOsg({extraFolders, includeTests: new Set(owners), ...(recordGen ? {incr: {recordGen}} : {})});
       phase("front end");
     }
   }
@@ -148,7 +154,7 @@ if (echo) {
     xref = await fastXrefRows(home, fastInfo);
     console.log(`osgo fast: cross-reference ${xref ? "from the live generation's rows" : "parsed (no live rows to start from)"}`);
   }
-  const db = await osgDatabase(program, {xref});
+  const db = await osgDatabase(program, {xref, ...(built.incr ? {incr: built.incr} : {})});
   statements = db.statements;
   console.log(db.summary);
   // SMW0: the W3MI objects of the layers (the BSP apps' pages among them)
@@ -207,10 +213,15 @@ if (echo) {
 }
 phase("database, media, ICF, store");
 
-// The generated classes, in one package or in three. The text `go` is what
-// the checks below and the generation read: the unlayered emission in both
-// cases, so the generation names the program, not how it was packaged.
+// The generated classes, in one package or in three. The generation no
+// longer reads an emission: it is the content digest of the program itself
+// plus the statements it boots from (program-digest.mjs), so a build that
+// emits package main only (a fast save, below) still names the generation a
+// full build names.
 let go, layerInfo;
+let pkgInputs; // the emission-input digest of each package below main
+let pkgEmitted; // ...and which of them this build emitted
+let tierSymbols; // the symbols each emitted package contributed
 rmSync(join(dir, "zz_generated.go"), {force: true});
 if (layered) {
   const {layers, libs, hidden} = await import("./osg-build.mjs");
@@ -218,12 +229,44 @@ if (layered) {
   const plan = planLayers(program, osgoTiers({layers, libs: [...libs, ...extraFolders], hidden, hot}));
   layerInfo = {...plan.info, edited: [...hot].sort()};
   phase("layer plan");
-  writeLayers(program, plan, {mainDir: dir, pkgDir: (i) => join(layersDir, plan.names[i]),
-    importPath: (i) => `osg/gogen/generated/osgo/${plan.names[i]}`, unitBuild: false});
+  // A package below main whose emission inputs and on-disk bytes are what the
+  // last build left is not emitted again (a fast save re-lowers only main's
+  // classes, so core and app cannot have changed -- and their bytes prove it).
+  // The inputs are the tier assignment, the IR digests of the classes in the
+  // package, the program-level facts every package embeds (program-digest
+  // parts) and the tool identity; anything else changing re-emits.
+  const {programParts} = await import("./program-digest.mjs");
+  const {componentInterfaces} = await import("./emit-go.mjs");
+  const {toolIdentity} = await import("./frontend-object-cache.mjs");
+  const parts = programParts(program, {componentInterfaces});
+  const pkgFile = join(here, ".out", "osgo-pkg.json");
+  let pkgRecord;
+  try { pkgRecord = JSON.parse(readFileSync(pkgFile, "utf8")); } catch { pkgRecord = undefined; }
+  const classDigest = new Map(parts.classes);
+  const assignment = [[...plan.layer].sort(([a], [b]) => (a < b ? -1 : 1)), [...plan.structLayer].sort(([a], [b]) => (a < b ? -1 : 1)),
+    [...plan.interfaceLayer].sort(([a], [b]) => (a < b ? -1 : 1)), plan.names];
+  const pkgInput = (i) => createHash("sha256")
+    .update(JSON.stringify(["osgo-pkg/1", toolIdentity(), assignment,
+      plan.layerClasses[i].map((c) => [c.name, classDigest.get(c.name)]), parts.globals])).digest("hex");
+  const skip = new Set();
+  const inputs = new Map();
+  for (let i = 0; i + 1 < plan.names.length; i += 1) {
+    const name = plan.names[i];
+    inputs.set(name, pkgInput(i));
+    const recorded = pkgRecord?.packages?.[name];
+    const file = join(layersDir, name, "zz_generated.go");
+    if (recorded?.input === inputs.get(name) && existsSync(file) && recorded.output === createHash("sha256").update(readFileSync(file)).digest("hex")) skip.add(i);
+  }
+  const emittedSymbols = new Map();
+  const sources = writeLayers(program, plan, {mainDir: dir, pkgDir: (i) => join(layersDir, plan.names[i]),
+    importPath: (i) => `osg/gogen/generated/osgo/${plan.names[i]}`, unitBuild: false, skip,
+    symbolsOf: (i) => new Map(Object.entries(pkgRecord?.packages?.[plan.names[i]]?.symbols ?? {})),
+    symbolsSink: (i, entries) => emittedSymbols.set(plan.names[i], entries)});
+  pkgInputs = inputs;
+  pkgEmitted = plan.names.filter((_, i) => !skip.has(i) && i + 1 < plan.names.length);
+  tierSymbols = emittedSymbols;
   phase("emit");
-  go = emitGo(program);
-  phase("generation hash emit");
-  console.log(`layers: ${Object.entries(plan.info.classes).map(([n, c]) => `${n} ${c}`).join(", ")} classes; edited: ${layerInfo.edited.join(", ") || "none"}${plan.info.promoted.length ? `; promoted: ${plan.info.promoted.length}` : ""}`);
+  console.log(`layers: ${Object.entries(plan.info.classes).map(([n, c]) => `${n} ${c}`).join(", ")} classes; edited: ${layerInfo.edited.join(", ") || "none"}${plan.info.promoted.length ? `; promoted: ${plan.info.promoted.length}` : ""}${skip.size ? `; emitted: main only (${[...skip].map((i) => plan.names[i]).join(", ")} unchanged)` : ""}`);
 } else {
   rmSync(layersDir, {recursive: true, force: true});
   go = writeGo(join(dir, "zz_generated.go"), program);
@@ -242,19 +285,34 @@ writeFileSync(join(dir, "zz_store.json"), store);
 writeMainGo("zz_unit.go", unitGo(unit.classes));
 // the table registry as JSON, the column registry a dynamic WHERE parser reads
 writeFileSync(join(dir, "zz_tables.json"), JSON.stringify(columnRegistry(program), null, 1));
-const has = (fn) => go.includes(`\nfunc ${fn}(`);
+// what the emitted text spelled before the generation stopped reading it: a
+// class by its constructor factory, a method by its function (both through
+// the program, so a build that emits package main only answers the same).
+// The function name is matched whole: a method name may contain an
+// underscore (ZCL_OSD_ADT_HANDLER_USE_SESSION is USE_SESSION of
+// ZCL_OSD_ADT_HANDLER, not SESSION of ZCL_OSD_ADT_HANDLER_USE), and
+// splitting at the last underscore wrote the ADT session adapter as its
+// no-op fallback, which serves no login.
+const compiledClass = new Set(program.classes.map((c) => c.name));
+const compiledMethod = new Set(program.classes.flatMap((c) => [...c.methods, ...(c.stubs ?? [])].map((m) => `${c.name}_${String(m.name).toUpperCase()}`)));
+const has = (fn) => fn.startsWith("New_") ? compiledClass.has(fn.slice(4)) : compiledMethod.has(fn);
 if (lintEngine === "abap" && lintLib && (!has("ZCL_OSD_LINT_ENGINE_PRIME") || !has("ZCL_OSD_LINT_ENGINE_CHECK"))) {
   throw new Error("ABAP lint facade methods were not compiled");
 }
 const lintSpec = lintLib ? await lintBuildSpec(home) : undefined;
 writeMainGo("zz_lint.go", lintEngine === "go" ? goLintEngineGo(lintSpec) : lintEngineGo(lintSpec, field));
 // the system status of the binary (ultra/json, status.mjs / go/cmd/osgo/status.go):
-// what it serves, and the generation it is
+// what it serves, and the generation it is -- the program by content, and
+// the statements, not any emitted text (program-digest.mjs)
 {
+  const {programDigest} = await import("./program-digest.mjs");
+  const {componentInterfaces} = await import("./emit-go.mjs");
+  const digest = programDigest(program, {componentInterfaces});
+  phase("program digest");
   const {statusFacts, statusGo} = await import("./status.mjs");
-  const generated = go + JSON.stringify(statements);
-  const facts = echo ? {services: [], packs: [], generation: `go:${(await import("node:crypto")).createHash("sha256").update(generated).digest("hex").slice(0, 16)}`}
-    : await statusFacts({program, services: services.filter((x) => x.active), webapps, generated});
+  const generation = `go:${createHash("sha256").update(`${digest}\0${createHash("sha256").update(JSON.stringify(statements)).digest("hex")}`).digest("hex").slice(0, 16)}`;
+  const facts = echo ? {services: [], packs: [], generation}
+    : await statusFacts({program, services: services.filter((x) => x.active), webapps, generation});
   writeMainGo("zz_status.go", statusGo(facts, has("ZCL_OSD_STATUS_REFRESH")));
   console.log(`status: ${facts.services.length} services and ${facts.packs.length} packs of this binary, generation ${facts.generation}`);
 }
@@ -434,12 +492,28 @@ ${webapps.map((w) => `\t${JSON.stringify(w.path)}: ${JSON.stringify(relative(hom
 mkdirSync(join(here, ".out"), {recursive: true});
 phase("emit");
 // a generated package whose emission is unchanged gets its formatted copy
-// back from .out/gofmt (gofmt-cache.mjs)
+// back from .out/gofmt (gofmt-cache.mjs); a package this build did not emit
+// keeps its formatted file as it lies (the skip above proved its bytes)
 try {
   gofmtCached({dir, cacheDir: join(here, ".out", "gofmt"),
-    files: layered ? ["core", "app"].map((p) => ({key: p, file: join(layersDir, p, "zz_generated.go")})) : []});
+    files: layered ? pkgEmitted.map((p) => ({key: p, file: join(layersDir, p, "zz_generated.go")})) : []});
 } catch (e) { console.log(`gofmt: ${String(e.stderr).split("\n").slice(0, 10).join("\n")}`); process.exit(1); }
 phase("gofmt");
+// the package record for the next build's skip: the formatted bytes of every
+// package this build emitted, with the symbols it contributed
+if (layered && pkgEmitted) {
+  const record = {schema: "osgo-pkg/1", packages: {}};
+  try {
+    const previous = JSON.parse(readFileSync(join(here, ".out", "osgo-pkg.json"), "utf8"));
+    if (previous.schema === "osgo-pkg/1") for (const [name, p] of Object.entries(previous.packages ?? {})) record.packages[name] = p;
+  } catch { /* none yet */ }
+  for (const name of pkgEmitted) {
+    const file = join(layersDir, name, "zz_generated.go");
+    record.packages[name] = {input: pkgInputs.get(name), output: createHash("sha256").update(readFileSync(file)).digest("hex"),
+      symbols: Object.fromEntries(tierSymbols.get(name) ?? [])};
+  }
+  writeFileSync(join(here, ".out", "osgo-pkg.json"), JSON.stringify(record));
+}
 const t1 = performance.now();
 // OSGO_GO_TRACE=<file>: go build's own trace of its actions (Chrome trace
 // JSON), which tools/gogen/osgo-cycle.mjs reads for compile and link times
