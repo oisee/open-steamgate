@@ -103,6 +103,7 @@ edit ABAP values in source rather than using Set Value on the projected children
 
 - Portable AMDP support is limited. HANA-specific SQLScript needs HANA, and some methods are not portable to SQLite.
 - Warm rebuild requires upstream transpiler fixes [#1900](https://github.com/abaplint/transpiler/pull/1900) and [#1921](https://github.com/abaplint/transpiler/pull/1921) to be released. Until then activation uses the cold build path.
+- `osd.engine: "osgo"` runs the release's Go executable instead of the Node host. It is downloaded on the first start (about 73 MB on Linux x64) from this extension's own release, checked against its `.sha256` and kept; it is never part of the VSIX. It serves the services it was built with, so workspace ABAP is not compiled into it, an activation needs a rebuild of osgo, and CHECK/activation need the compiler sidecar it does not download yet. SQLite only; no debugger and no background jobs.
 - The Marketplace build has no browser extension entry. The separate web gateway probe remains a development experiment.
 
 The extension is MIT licensed. Bundled dependency declarations and licence review items are in `THIRD-PARTY-NOTICES.md` inside the VSIX.
