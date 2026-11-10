@@ -155,10 +155,11 @@ describe("RAP R5 over OData", function () {
     res = await item(id, "nothing", 0);
     assert.equal(res.status, 400);
     assert.match(res.body.error.message.value, /the quantity must be positive/);
-    // and a child is never created on its own
+    // and a child is never created on its own: the projection does not use
+    // a create of Item (the base has none either: it is created by its order)
     res = await call(`${v2}/Item`, {method: "POST", headers: write, body: JSON.stringify({OrderId: id, Product: "loose", Quantity: 1})});
     assert.equal(res.status, 400);
-    assert.match(res.body.error.message.value, /created through its parent/);
+    assert.equal(res.body.error.message.value, "Item: the projection does not use create");
     res = await item("99999999", "orphan", 1);
     assert.equal(res.status, 400);
     assert.match(res.body.error.message.value, /order not found/);

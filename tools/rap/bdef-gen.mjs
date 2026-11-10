@@ -4,7 +4,8 @@ import {createHash} from "node:crypto";
 import {basename, join, resolve} from "node:path";
 import {existsSync, readFileSync, readdirSync, mkdirSync, writeFileSync, rmSync} from "node:fs";
 import {parseBdef} from "./bdef-parse.mjs";
-import {parseDDLS, resolveCompositions, resolveProjections} from "../cds2ddic.mjs";
+import {parseDDLS} from "../cds2ddic.mjs";
+import {resolveTree} from "../cds-tree.mjs";
 import {contentFoldersOf, winningByLayer} from "../osd-packs.mjs";
 import {nameOf} from "../osd-store-types.mjs";
 import {libraryPath} from "../osd-lib-path.mjs";
@@ -197,8 +198,7 @@ export function generate(files, dependencies = []) {
   }));
   // R5: composition pairs and projection associations need every view
   const parsedViews = [...views.values()].filter(v => v && !v.skip);
-  resolveCompositions(parsedViews, views);
-  resolveProjections(parsedViews, views);
+  resolveTree(parsedViews, views);
   const fieldsOf = (name, visiting = new Set()) => {
     const key = upper(name);
     if (visiting.has(key)) throw new Error(`Cyclic CDS type ${name}`);

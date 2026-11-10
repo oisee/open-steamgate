@@ -28,6 +28,11 @@ CLASS zcl_osd_rap_runtime DEFINITION PUBLIC CREATE PRIVATE.
 *                   save, nothing is written and the LUW is rolled back
 *   save            the persistent table written through the BDEF mapping,
 *                   then COMMIT WORK and cleanup
+*   tree (R5)       create and read by association; a delete takes the
+*                   composition children; an update, delete, action or
+*                   create by association locks the root instance (lock
+*                   master / dependent) and a child write stamps the
+*                   root's total change fields
 *
 * The rows of the buffer are the BDEF's derived READ RESULT rows, held as
 * data references and addressed by component name; the delta (create,

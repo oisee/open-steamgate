@@ -22,6 +22,8 @@ import {readFileSync, readdirSync, writeFileSync, mkdirSync, existsSync, rmSync,
 import {createHash} from "node:crypto";
 import {basename, join} from "node:path";
 import {libraryPath} from "./osd-lib-path.mjs";
+import {compositionsOf, namespaced, projectedAssociations, projectionBase, redirectOf, resolveTree} from "./cds-tree.mjs";
+import {castType, edmOf} from "./cds-types.mjs";
 
 const OUT = "gen/cds";
 // **The libraries this generator resolves types against, and they have to be
@@ -57,44 +59,6 @@ function find(node, name) { const out = []; const rec = (n) => { if (nodeName(n)
 function firstDirect(node, name) { return children(node).find((c) => nodeName(c) === name); }
 function normAnno(text) { return text.replace(/\s*\.\s*/g, ".").replace(/\s*:\s*/g, ": ").replace(/@\s+/g, "@").trim(); }
 
-// cast( '' as abap.char( 20 ) ) -> the ABAP type of the virtual element and
-// what it is in OData; the handful of types a calculated element uses
-function castType(text) {
-  const m = /as\s+abap\s*\.\s*(\w+)\s*(?:\(\s*(\d+)\s*(?:,\s*(\d+)\s*)?\))?/i.exec(String(text));
-  if (!m) return undefined;
-  const kind = m[1].toLowerCase();
-  const a = Number(m[2] ?? 0);
-  const b = Number(m[3] ?? 0);
-  switch (kind) {
-    case "char": return {abap: `c LENGTH ${a || 1}`, edm: {edm: "Edm.String", maxlength: a || 1}};
-    case "numc": return {abap: `n LENGTH ${a || 1}`, edm: {edm: "Edm.String", maxlength: a || 1}};
-    case "sstring": case "string": return {abap: "string", edm: {edm: "Edm.String", maxlength: a || 0}};
-    case "int1": case "int2": case "int4": return {abap: "i", edm: {edm: "Edm.Int32"}};
-    case "int8": return {abap: "int8", edm: {edm: "Edm.Int64"}};
-    case "dats": return {abap: "d", edm: {edm: "Edm.DateTime", precision: 0}};
-    case "tims": return {abap: "t", edm: {edm: "Edm.Time"}};
-    case "dec": case "curr": case "quan":
-      return {abap: `p LENGTH ${Math.floor((a || 15) / 2) + 1} DECIMALS ${b}`, edm: {edm: "Edm.Decimal", precision: a || 15, scale: b}};
-    default: return undefined;
-  }
-}
-
-function edmOf(type) {
-  const n = type?.constructor?.name ?? "VoidType";
-  const len = type?.getLength?.() ?? 0;
-  switch (n) {
-    case "CharacterType": return {edm: "Edm.String", maxlength: len};
-    case "NumericType": return {edm: "Edm.String", maxlength: len};
-    case "StringType": return {edm: "Edm.String", maxlength: 0};
-    case "IntegerType": case "Integer8Type": return {edm: "Edm.Int32", maxlength: 0};
-    case "PackedType": return {edm: "Edm.Decimal", precision: len * 2 - 1, scale: type.getDecimals?.() ?? 0};
-    case "FloatType": case "DecFloat16Type": case "DecFloat34Type": return {edm: "Edm.Decimal", precision: 34, scale: 0};
-    case "DateType": return {edm: "Edm.DateTime", precision: 0};
-    case "TimeType": return {edm: "Edm.Time", precision: 0};
-    default: return {edm: "Edm.String", maxlength: len};
-  }
-}
-
 export function parseDDLS(obj, reg, depth = 0) {
   const p = obj.getParsedData();
   const tree = p?.tree;
@@ -102,20 +66,10 @@ export function parseDDLS(obj, reg, depth = 0) {
   const name = obj.getName();
   const sqlView = (p.sqlViewName ?? name).toUpperCase();
   const viewAnnotations = children(tree).filter((c) => nodeName(c) === "CDSAnnotation").map((c) => normAnno(tokensOf(c)));
-  // R5 (docs/rap-runtime.md): `as projection on <view>` is read as a view
-  // of the base view's table, composed down one hop -- each element names a
-  // base element, and the base element names the column -- so the DDIC view,
-  // the source class and the SADL read are those of any view over a table.
-  // A redirected association is the base's, re-pointed (resolveProjections)
+  // R5: `as projection on` reads the base view's table (tools/cds-tree.mjs)
   const isProjection = nodeName(tree) === "CDSDefineProjection";
-  let projected;
-  if (isProjection) {
-    const projectionOf = tokensOf(children(tree).filter((c) => nodeName(c) === "CDSName")[1]).replace(/\s+/g, "").toUpperCase();
-    const baseObj = depth < 8 ? reg.getObject("DDLS", projectionOf) : undefined;
-    if (baseObj === undefined) return {name, skip: `a projection on ${projectionOf}, which is not a CDS view of this system`};
-    projected = parseDDLS(baseObj, reg, depth + 1);
-    if (projected === undefined || projected.skip) return {name, skip: `a projection on ${projectionOf}, which is not generated (${projected?.skip ?? "no parse tree"})`};
-  }
+  const projected = isProjection ? projectionBase(tree, reg, name, depth, parseDDLS) : undefined;
+  if (projected?.skip) return projected;
   const select = isProjection ? tree : firstDirect(tree, "CDSSelect");
   if (!select) return {name, skip: "no select"};
   const sources = isProjection ? [projected.source]
@@ -209,22 +163,15 @@ export function parseDDLS(obj, reg, depth = 0) {
     if (!srcName) continue;
     if (srcName.startsWith("_")) {
       exposedAssociations.push(srcName); associationAnnotations.set(srcName, annos);
-      const to = /:\s*redirected\s+to\s+(?:parent\s+|composition\s+child\s+)?([\w/]+)/i.exec(tokensOf(el));
-      if (to) redirects.set(srcName, to[1].toUpperCase());
+      if (redirectOf(tokensOf(el))) redirects.set(srcName, redirectOf(tokensOf(el)));
       continue;
     }
     if (/[()+\-*\/]/.test(srcName) || /^'/.test(srcName)) continue; // expressions: not yet
     const fieldName = (alias ?? srcName.split(".").pop()).toUpperCase();
     let baseField = srcName.split(".").pop().toUpperCase();
-    let below;
-    if (isProjection) {
-      // the element names a base element; the column is the base element's
-      below = projected.fields.find((f) => f.name === baseField);
-      if (below === undefined || below.virtual || !below.base) {
-        return {name, skip: `${fieldName}: ${baseField} is no column element of ${projected.name}`};
-      }
-      baseField = below.base;
-    }
+    const below = isProjection ? projected.fields.find((f) => f.name === baseField && !f.virtual && f.base) : undefined;
+    if (isProjection && below === undefined) return {name, skip: `${fieldName}: ${baseField} is no column element of ${projected.name}`};
+    if (below) baseField = below.base;
     const t = edmOf(comps.get(baseField));
     const label = annos.map((a) => /@EndUserText\.label:\s*'([^']*)'/.exec(a)?.[1]).find(Boolean) ?? (below && below.label !== below.name ? below.label : undefined);
     fields.push({name: fieldName, element: alias ?? srcName.split(".").pop(), base: baseField, key: isKey, ...t, label: label ?? fieldName,
@@ -232,26 +179,12 @@ export function parseDDLS(obj, reg, depth = 0) {
   }
 
   const associations = [];
-  // R5: `composition [0..*] of ZI_CHILD as _Child` -- a part of this
-  // entity. It has no ON condition: its pairs are the reverse of the child's
-  // `association to parent`, filled by resolveCompositions once every view
-  // is parsed
-  for (const c of find(select, "CDSComposition")) {
-    const toks = tokensOf(c).replace(/\s+/g, " ");
-    const m = /\[\s*(\d+)\s*\.\s*\.\s*(\d+|\*)\s*\]/.exec(toks);
-    const rel = /\bof\s+(?:\[[^\]]*\]\s*)?([\w/]+)(?:\s+as\s+([\w/]+))?/i.exec(toks.replace(/\bof\s+\[[^\]]*\]/i, "of"));
-    const target = rel?.[1]?.toUpperCase();
-    const alias = rel?.[2] ?? target;
-    associations.push({alias, target, min: m?.[1] ?? "0", max: m?.[2] ?? "*", pairs: [], exposed: exposedAssociations.includes(alias),
-      composition: "CHILD"});
-  }
+  associations.push(...compositionsOf(find(select, "CDSComposition").map(tokensOf), exposedAssociations));
   for (const a of find(select, "CDSAssociation")) {
     const card = tokensOf(firstDirect(a, "CDSCardinality")).replace(/\s+/g, "");
     const m = /\[(\d+)\.\.(\d+|\*)\]/.exec(card);
-    const toks = tokensOf(a);
-    // `association to parent ZI_ROOT as _Root on ...`: the parent of a
-    // composition (R5); the word `parent` is not the target
-    const toParent = /\bto\s+parent\s+/i.test(toks);
+    const toks = namespaced(tokensOf(a));
+    const toParent = /\bto\s+parent\s+/i.test(toks); // R5: `parent` is not the target
     const target = /\bto\s+(?:parent\s+)?(\S+)/i.exec(toks)?.[1]?.toUpperCase();
     const alias = /\bas\s+(\S+)\s+on\b/i.exec(toks)?.[1] ?? target;
     const cond = tokensOf(firstDirect(a, "CDSCondition")) ?? "";
@@ -269,18 +202,7 @@ export function parseDDLS(obj, reg, depth = 0) {
     associations.push({alias, target, min: toParent ? "1" : m?.[1] ?? "0", max: toParent ? "1" : m?.[2] ?? "*", pairs, exposed: exposedAssociations.includes(alias),
       composition: kind === undefined ? undefined : kind.toUpperCase()});
   }
-  // a projection's associations are its base's, named by the elements it
-  // exposes, re-pointed where it redirects them; the pairs are renamed by
-  // resolveProjections, which sees both ends
-  if (isProjection) {
-    for (const alias of exposedAssociations) {
-      if (associations.some((a) => a.alias === alias)) continue;
-      const own = projected.associations.find((a) => a.alias === alias);
-      if (own === undefined) continue;
-      associations.push({...own, target: redirects.get(alias) ?? own.target, pairs: [], exposed: true,
-        projectedFrom: {view: projected.name, target: own.target}});
-    }
-  }
+  if (isProjection) associations.push(...projectedAssociations(projected, exposedAssociations, redirects, associations));
   const label = viewAnnotations.map((a) => /@EndUserText\.label:\s*'([^']*)'/.exec(a)?.[1]).find(Boolean) ?? name;
 
   // a writable projection: the view says so (@ObjectModel.writeEnabled, or
@@ -477,54 +399,6 @@ export function resolveWriteChain(views, byName, depth = 8) {
     view.write = {...w, writable: current.write.writable === true, why: "",
       keyColumns: current.write.keyColumns, mandt: current.write.mandt,
       through: current.name};
-  }
-  return views;
-}
-
-/** R5: the pairs of a composition, `composition [0..*] of ZI_CHILD as _x`,
- *  which has no ON condition: they are the reverse of the child's
- *  `association to parent` back to this view, so the parent's key field is
- *  the source and the child's field that carries it the target. A
- *  composition whose child declares no such association keeps no pairs, and
- *  nothing navigates or cascades over it. */
-export function resolveCompositions(views, byName) {
-  for (const view of views) {
-    for (const a of view.associations ?? []) {
-      if (a.composition !== "CHILD" || (a.pairs ?? []).length > 0 || a.projectedFrom) continue;
-      const child = byName.get(String(a.target ?? "").toUpperCase());
-      const up = (child?.associations ?? []).find((x) => x.composition === "PARENT" && String(x.target).toUpperCase() === view.name.toUpperCase());
-      if (up === undefined) continue;
-      a.pairs = up.pairs.map((p) => ({source: p.target, target: p.source}));
-    }
-  }
-  return views;
-}
-
-/** R5: a projection's association, redirected or not, carries the base's
- *  pairs renamed through the projections at both ends: a pair names base
- *  elements, and each projection says which of its elements a base element
- *  became. A base element a projection does not expose leaves the
- *  association without pairs (and unnavigable), said in `unresolvedAssociations`. */
-export function resolveProjections(views, byName) {
-  const nameIn = (view, element) => {
-    if (view === undefined) return undefined;
-    if (view.projectionOf === undefined) return element;
-    return view.fields.find((f) => f.fromElement === String(element).toUpperCase())?.name;
-  };
-  for (const view of views) {
-    for (const a of view.associations ?? []) {
-      if (!a.projectedFrom) continue;
-      const base = byName.get(a.projectedFrom.view.toUpperCase());
-      const own = (base?.associations ?? []).find((x) => x.alias === a.alias);
-      const target = byName.get(String(a.target).toUpperCase());
-      const pairs = (own?.pairs ?? []).map((p) => ({source: nameIn(view, p.source), target: nameIn(target, p.target)}));
-      if (pairs.length === 0 || pairs.some((p) => p.source === undefined || p.target === undefined)) {
-        view.unresolvedAssociations = [...(view.unresolvedAssociations ?? []), a.alias];
-        a.pairs = [];
-        continue;
-      }
-      a.pairs = pairs;
-    }
   }
   return views;
 }
@@ -1156,8 +1030,7 @@ export function main() {
     views.push(e);
   }
   const byName = new Map(views.map((v) => [v.name.toUpperCase(), v]));
-  resolveCompositions(views, byName);
-  resolveProjections(views, byName);
+  resolveTree(views, byName);
   inheritAssociations(views, byName);
   resolveWriteChain(views, byName);
   // A view that still reads another CDS view (not composed down to a table

@@ -39,6 +39,7 @@ import {runsAs} from "../osd-main.mjs";
 const root = resolve(process.env.OSD_ROOT ?? process.cwd());
 const dir = join(root, ".local", "rap-flight-classify");
 const KEPT = /^(managed|reuse)\//;
+const DDIC = /^(managed|reuse|legacy|readonly)\//;
 const EXTENSION = /\/(cntry|rev)\//;
 
 // what the tree does with each construct: runs (with the test that shows
@@ -213,8 +214,15 @@ async function tree(log) {
 
 async function main() {
   const all = process.argv.includes("--all");
-  const files = (await tree(l => console.error(`constructs: ${l}`))).filter(f => KEPT.test(f.rel));
-  const ddic = files.filter(f => /\.(ddls\.(asddls|xml)|tabl\.xml|view\.xml|dtel\.xml|doma\.xml)$/.test(f.filename));
+  const fetched = await tree(l => console.error(`constructs: ${l}`));
+  const files = fetched.filter(f => KEPT.test(f.rel));
+  // R5: the dictionary the pack builds with, legacy/ included (the /dmo/
+  // data elements live there); before R5 no BDEF got as far as its fields
+  // and the pack's overlay (packs/rap-flight/src: the standard data elements
+  // the scenario's tables name, as stubs)
+  const overlay = walk(join(root, "packs/rap-flight/src")).map(path => ({path, rel: "overlay", filename: basename(path), contents: readFileSync(path, "utf8")}));
+  const ddic = [...fetched.filter(f => DDIC.test(f.rel)), ...overlay]
+    .filter(f => /\.(ddls\.(asddls|xml)|tabl\.xml|view\.xml|dtel\.xml|doma\.xml)$/.test(f.filename));
   const libDdic = libraryDdic();
   const bdefs = files.filter(f => f.filename.endsWith(".bdef.asbdef") && (all || !EXTENSION.test(f.rel)))
     .sort((a, b) => a.filename.localeCompare(b.filename));

@@ -1,4 +1,4 @@
-# The managed RAP runtime (R2)
+# The managed RAP runtime (R2 .. R5)
 
 R2 of [the RAP plan](oracle-rap.md): a managed behavior definition runs. Its
 behavior pool's determinations, validations and action are called, its
@@ -181,8 +181,9 @@ the save sequence); nothing measured on a system.
   a later failing member undoes a create, update, delete or action that
   had already run (`test/rap-serve.mjs`). Each operation is still its own
   save sequence (validations run per operation, not once at the end).
-- **Locks and authorization** are parsed and ignored; ETags, instance
-  features and early numbering are R4 (below).
+- **Authorization** is parsed and ignored; ETags, instance features and
+  early numbering are R4, locks (`lock master` / `lock dependent`) R5
+  (below).
 
 ## Handler methods
 
@@ -553,8 +554,11 @@ the types a pool and EML use (`TYPE TABLE FOR ... e\_x`):
   holds the LUW the locks stay until the request ends. One lock per root
   per transaction. Held by another owner, the operation fails with
   `%fail-cause = if_abap_behv=>cause-locked` and the message `<Root alias>
-  <key> is locked by another user` (this runtime's text), which the OData
-  bridge answers with **409**. A new root is not locked (nobody else can
+  <key> is locked by another user` (this runtime's text). The OData bridge
+  answers it with 400 like every other refusal: a system answers a locked
+  instance with 409, but `/IWBEP/CX_MGW_BUSI_EXCEPTION` of this tree
+  carries no HTTP status yet, so the bridge cannot say so (a gateway
+  change of its own). A new root is not locked (nobody else can
   see it); `lock master` on a child or `lock dependent` without a parent is
   refused by the generator. The pool's `FOR LOCK` method (unmanaged lock)
   is not called: managed only.
@@ -624,6 +628,41 @@ the association to `zif_stg_sadl_behavior~create_by`. A child set has
 ("created through its parent"). The navigation name is the V2 one
 (`to_Items`) on both protocols, as for every service of this registry; a
 RAP V4 binding on a system names it `_Items`.
+
+### The measurement: the flight BDEFs before and after
+
+`node tools/rap-flight/constructs.mjs` again, now with the dictionary the
+pack builds with (`legacy/` and the overlay's stubs: before R5 no BDEF got
+as far as its fields, so nobody had noticed the tool resolved the scenario's
+types without them), and a projection generated together with its base BDEF.
+The first wall per behavior definition:
+
+| BDEF | before R5 | after R5 |
+| --- | --- | --- |
+| `/DMO/I_TRAVEL_M` | associations (the combined R1 refusal) | **past compositions, cba numbering, lock and associations**; stops at `internal action ReCalcTotalPrice` (then: factory action, several pools, additional and unmanaged save) |
+| `/DMO/C_TRAVEL_PROCESSOR_M`, `/DMO/C_TRAVEL_APPROVER_M` | projection | **the projection resolves**; stops at its base's wall (`ReCalcTotalPrice`) |
+| `/DMO/I_SUPPLEMENT`, `/DMO/R_AGENCYTP` | associations / functions / determine actions | `determine action Prepare` (named now; then draft) |
+| `/DMO/C_SUPPLEMENT`, `/DMO/C_AGENCYTP` | projection | the base's `determine action` |
+| `/DMO/I_CARRIERSLOCKSINGLETON_S`, `/DMO/C_CARRIERSLOCKSINGLETON_S` | unparsed grammar / projection | unparsed singleton grammar (the base's, for the projection) |
+| `/DMO/I_AGENCYTP` | interface | interface |
+
+Constructs whose verdict changed (over the ten BDEFs):
+
+| construct | BDEFs | before | after |
+| --- | ---: | --- | --- |
+| `association (read)` | 5 | refused | runs |
+| `association create` | 5 | refused | runs |
+| `projection` | 5 | refused | runs |
+| `lock master` | 4 | ignored | runs |
+| `lock dependent` | 3 | ignored | runs |
+| `association create ( features : instance )` | 1 | refused | runs |
+| `FOR NUMBERING (create by association)` | 1 | refused | runs |
+
+No flight BDEF runs end to end yet. Three (the travel BO and its two
+projections) are past the tree and stop at the internal action; the
+supplement and agency BOs and their projections stop earlier, at a
+determine action, so whether their trees pass is not measured yet; and
+draft is behind seven of the ten.
 
 ### What R5 leaves
 
