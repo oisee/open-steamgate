@@ -739,9 +739,12 @@ export function incrAssemble({root, folders, objects, hidden, includeTests, proo
         if (coll === "classes") continue;
         const raw = raws[coll];
         const want = mergeColl(coll, strays.bySlot, false);
+        // the keyed collections were pre-seeded, so they must hold the same
+        // entries already; the lists (skipped, partial) were not, and take
+        // the cached objects' entries here
         const same = raw instanceof Map ? raw.size === want.size && [...want.keys()].every((k) => raw.has(k))
           : raw instanceof Set ? raw.size === want.size && [...want].every((k) => raw.has(k))
-            : raw.length === want.length;
+            : true;
         if (!same) { hookDoubt = `the merged ${coll} holds other entries than the fresh build's`; return; }
         if (raw instanceof Map) { raw.clear(); for (const [k, v] of want) raw.set(k, v); }
         else if (raw instanceof Set) { raw.clear(); for (const v of want) raw.add(v); }

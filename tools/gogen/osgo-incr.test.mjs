@@ -589,3 +589,45 @@ test("the interfaces keep the full build's declaration order when an earlier use
     assert.equal(emitted(attempt.program), emitted(reference));
   } finally { rmSync(root, {recursive: true, force: true}); }
 });
+
+// The lists (skipped, partial) are not pre-seeded: a cached object's entries
+// come back only through the merge. The real tree refused here first ("the
+// merged skipped holds other entries than the fresh build's") once the final
+// analyses ran over the merged state; a cached class with a method outside
+// the subset must keep its entry, in the full build's place.
+test("a cached object's skipped methods stay in the merged list, in order", () => {
+  const extra = {
+    "app/zcl_incr_aa_skip.clas.abap": `CLASS zcl_incr_aa_skip DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    METHODS odd IMPORTING x TYPE decfloat34 RETURNING VALUE(r) TYPE i.
+ENDCLASS.
+CLASS zcl_incr_aa_skip IMPLEMENTATION.
+  METHOD odd.
+    r = 1.
+  ENDMETHOD.
+ENDCLASS.`,
+    "app/zcl_incr_zz_skip.clas.abap": `CLASS zcl_incr_zz_skip DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    METHODS odd IMPORTING x TYPE utclong RETURNING VALUE(r) TYPE i.
+ENDCLASS.
+CLASS zcl_incr_zz_skip IMPLEMENTATION.
+  METHOD odd.
+    r = 1.
+  ENDMETHOD.
+ENDCLASS.`,
+  };
+  const root = tree(extra);
+  try {
+    writeCache(root);
+    edit(root, "app/zcl_incr_hot.clas.abap", "'Key TravelId missing'", "'Key TravelId missing (edited)'");
+    const reference = fullProgram(root);
+    assert.equal(reference.skipped.length, 2, `fixture (${reference.skipped})`);
+    const attempt = incrAssemble({root, folders: [join(root, "app")], objects: objectNames(root), hidden: new Set(), includeTests: new Set(),
+      proof: {ok: true, base: "live1", changed: changedFiles(root, extra)}});
+    assert.equal(attempt.ok, true, attempt.reason);
+    assert.ok(!attempt.lowered.includes("CLAS ZCL_INCR_AA_SKIP"));
+    assert.deepEqual(attempt.program.skipped, reference.skipped);
+    assert.deepEqual(attempt.program.partial, reference.partial);
+    assert.equal(emitted(attempt.program), emitted(reference));
+  } finally { rmSync(root, {recursive: true, force: true}); }
+});
