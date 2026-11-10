@@ -93,6 +93,11 @@ INTERFACE zif_osd_rap_bo PUBLIC.
 * R5: ROOT the root entity of the tree, PARENT and PARENT_ASSOC the parent
 * entity and the association to it (initial for the root), LOCK M for lock
 * master and D for lock dependent, ASSOCS the associations.
+* R7: SAVE A for `with additional save` (the managed write, then the
+* savers' save_modified), U for `with unmanaged save` (no managed write;
+* TABLE is the `mapping for` table, read only), initial for the managed
+* write alone. FULL_DATA: `with full data`, update rows of the request carry
+* every field. POOL: the entity's behavior pool (`implementation in class`).
   TYPES:
     BEGIN OF ty_entity,
       name      TYPE string,
@@ -114,16 +119,29 @@ INTERFACE zif_osd_rap_bo PUBLIC.
       parent_assoc TYPE string,
       lock         TYPE ty_flag,
       assocs       TYPE tt_assoc,
+      save         TYPE ty_flag,
+      full_data    TYPE abap_bool,
+      pool         TYPE string,
       fields    TYPE tt_field,
       callables TYPE tt_callable,
     END OF ty_entity,
     tt_entity TYPE STANDARD TABLE OF ty_entity WITH DEFAULT KEY.
 
+* R7: SAVERS the local saver classes of every pool of the BDEF (absolute
+* names, the header's pool first); MODIFIED when it implements save_modified.
+* SAVER is the first of them (R2).
+  TYPES:
+    BEGIN OF ty_saver,
+      name     TYPE string,
+      modified TYPE abap_bool,
+    END OF ty_saver,
+    tt_saver TYPE STANDARD TABLE OF ty_saver WITH DEFAULT KEY.
   TYPES:
     BEGIN OF ty_model,
       bdef     TYPE string,
       pool     TYPE string,
       saver    TYPE string,
+      savers   TYPE tt_saver,
       entities TYPE tt_entity,
     END OF ty_model.
 
@@ -190,5 +208,25 @@ INTERFACE zif_osd_rap_bo PUBLIC.
       ir_failed   TYPE REF TO data
       ir_reported TYPE REF TO data
       ir_mapped   TYPE REF TO data OPTIONAL.
+
+* R7: an empty request of the saver: IV_KIND CHANGE (TYPE REQUEST FOR
+* CHANGE, the create and update of save_modified) or DELETE (TYPE REQUEST
+* FOR DELETE), one table per entity named by its alias
+  METHODS new_request
+    IMPORTING
+      iv_kind           TYPE csequence
+    RETURNING
+      VALUE(rr_request) TYPE REF TO data.
+
+* R7: call save_modified of a saver: IR_CREATE and IR_UPDATE from
+* NEW_REQUEST( 'CHANGE' ), IR_DELETE from NEW_REQUEST( 'DELETE' ),
+* IR_REPORTED the caller's RESPONSE FOR REPORTED
+  METHODS save_modified
+    IMPORTING
+      io_saver    TYPE REF TO object
+      ir_create   TYPE REF TO data
+      ir_update   TYPE REF TO data
+      ir_delete   TYPE REF TO data
+      ir_reported TYPE REF TO data.
 
 ENDINTERFACE.

@@ -166,8 +166,93 @@ function lowerImplicit(source, filename, bindings) {
   return source;
 }
 
+// R7: a pool's saver declares `METHODS save_modified REDEFINITION.`; on a
+// system its parameters are implicit and typed by the BDEF, here they are
+// written out over the pool's bindings (abaplint voids every parameter of a
+// CL_ABAP_BEHAVIOR_SAVER method, ANORMALIES "RAP saver phases"):
+//   IMPORTING create TYPE REQUEST FOR CHANGE b  update TYPE REQUEST FOR CHANGE b
+//             delete TYPE REQUEST FOR DELETE b  CHANGING reported TYPE RESPONSE FOR REPORTED LATE b
+export const SAVE_MODIFIED = [["create", "importing", "REQUEST CHANGE"], ["update", "importing", "REQUEST CHANGE"],
+  ["delete", "importing", "REQUEST DELETE"], ["reported", "changing", "RESPONSE REPORTED"]];
+
+/** the saver classes of a source and their `save_modified REDEFINITION` token */
+export function saverRedefinitions(source, filename) {
+  if (!/\.abap$/i.test(filename) || !/cl_abap_behavior_saver/i.test(source)) return [];
+  const tokens = new Lexer().run(new MemoryFile(filename, source)).tokens.filter(t => t.constructor.name !== "Comment");
+  const w = i => tokens[i]?.getStr().toUpperCase();
+  const out = [];
+  let saver = false, statement = true, inMethods = false;
+  for (let i = 0; i < tokens.length; i++) {
+    const first = statement;
+    statement = w(i) === ".";
+    if (first && w(i) === "CLASS" && w(i + 2) === "DEFINITION") {
+      let j = i + 3;
+      while (j < tokens.length && w(j) !== ".") j++;
+      const words = tokens.slice(i + 3, j).map(t => t.getStr().toUpperCase());
+      const from = words.indexOf("FROM");
+      saver = from > 0 && words[from - 1] === "INHERITING" && words[from + 1] === "CL_ABAP_BEHAVIOR_SAVER";
+    }
+    if (first) inMethods = w(i) === "METHODS";
+    if (saver && inMethods && w(i) === "SAVE_MODIFIED" && w(i + 1) === "REDEFINITION") {
+      out.push({token: tokens[i + 1], where: `${filename}:${tokens[i].getStart().getRow()}`});
+    }
+    if (w(i) === "ENDCLASS") saver = false;
+  }
+  return out;
+}
+
+function lowerSaver(source, filename, bindings) {
+  const found = saverRedefinitions(source, filename);
+  if (!found.length) return source;
+  const pool = poolOf(filename);
+  const lines = [0];
+  for (let i = 0; i < source.length; i++) if (source[i] === "\n") lines.push(i + 1);
+  const offset = t => lines[t.getStart().getRow() - 1] + t.getStart().getCol() - 1;
+  for (const {token, where} of found.reverse()) {
+    const type = key => {
+      const t = bindings[`POOL ${pool} FOR ${key}`.toUpperCase()];
+      if (!t) throw new Error(`${where}: save_modified in pool ${pool}, which no behavior definition with a saver request names (${key})`);
+      return t;
+    };
+    const group = d => SAVE_MODIFIED.filter(p => p[1] === d).map(([n, , k]) => `${n} TYPE ${type(k)}`).join(" ");
+    const start = offset(token);
+    source = source.slice(0, start) + `IMPORTING ${group("importing")} CHANGING ${group("changing")}` + source.slice(start + token.getStr().length);
+  }
+  return source;
+}
+
+// R7: CORRESPONDING #( x-alias MAPPING FROM ENTITY ) -- the entity's
+// `mapping for` read backwards -- becomes the explicit MAPPING of its pairs
+// (nothing when it names none); MAPPING TO ENTITY the other way round. A
+// source `delete-<alias>` (save_modified's REQUEST FOR DELETE) maps its keys only
+function lowerMappingEntity(source, filename, bindings) {
+  if (!/\bMAPPING\s+(FROM|TO)\s+ENTITY\b/i.test(source)) return source;
+  const pool = poolOf(filename);
+  const tokens = new Lexer().run(new MemoryFile(filename, source)).tokens.filter(t => t.constructor.name !== "Comment");
+  const w = i => tokens[i]?.getStr().toUpperCase();
+  const lines = [0];
+  for (let i = 0; i < source.length; i++) if (source[i] === "\n") lines.push(i + 1);
+  const offset = t => lines[t.getStart().getRow() - 1] + t.getStart().getCol() - 1;
+  const changes = [];
+  for (let i = 1; i < tokens.length; i++) {
+    if (w(i) !== "MAPPING" || !["FROM", "TO"].includes(w(i + 1)) || w(i + 2) !== "ENTITY") continue;
+    const where = `${filename}:${tokens[i].getStart().getRow()}`;
+    // `delete-<alias>`, the save_modified parameter, is a REQUEST FOR DELETE: keys only
+    const keys = w(i - 2) === "-" && w(i - 3) === "DELETE" ? " KEYS" : "";
+    const clause = pool && bindings[`POOL ${pool} FOR MAPPING ${w(i + 1)} ENTITY${keys} ${w(i - 1)}`];
+    if (!clause) throw new Error(`${where}: MAPPING ${w(i + 1)} ENTITY after ${tokens[i - 1].getStr()}, which names no entity of a behavior definition of pool ${pool}`);
+    const start = offset(tokens[i]), end = offset(tokens[i + 2]) + tokens[i + 2].getStr().length;
+    changes.push({start, end, text: clause === "%NONE" ? "" : clause});
+  }
+  for (const c of changes.reverse()) source = source.slice(0, c.start) + c.text + source.slice(c.end);
+  return source;
+}
+
 export function lowerDerived(source, filename, bindings) {
-  if (!filename.endsWith(".abap") || !/\bFOR\b/i.test(source)) return source;
+  if (!filename.endsWith(".abap")) return source;
+  source = lowerSaver(source, filename, bindings);
+  source = lowerMappingEntity(source, filename, bindings);
+  if (!/\bFOR\b/i.test(source)) return source;
   source = lowerImplicit(source, filename, bindings);
   const allTokens = new Lexer().run(new MemoryFile(filename, source)).tokens;
   const tokens = allTokens.filter(t => t.constructor.name !== "Comment");

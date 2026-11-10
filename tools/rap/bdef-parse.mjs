@@ -102,7 +102,12 @@ class Parser {
     } else {
       const kind = this.take('additional') ?? this.take('unmanaged');
       if (!kind) throw new Error('Unknown with clause');
-      this.need('save'); target.options.push({kind: `${kind.toLowerCase()} save`});
+      this.need('save');
+      // R7: with additional|unmanaged save [with full data] [and cleanup]
+      const option = {kind: `${kind.toLowerCase()} save`};
+      if (this.at('with') && this.tokens[this.i + 1]?.lower === 'full') { this.i += 2; this.need('data'); option.fullData = true; }
+      if (this.at('and') && this.tokens[this.i + 1]?.lower === 'cleanup') { this.i += 2; option.cleanup = true; }
+      target.options.push(option);
     }
   }
   parse() {

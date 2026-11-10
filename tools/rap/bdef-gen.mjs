@@ -25,6 +25,8 @@ const struct = (name, fields) => {
   if (!fields.length) throw new Error(`Empty RAP structure ${name}`);
   return `  TYPES: BEGIN OF ${name},\n${fields.map(([n, t]) => `           ${n} TYPE ${t},`).join("\n")}\n         END OF ${name}.\n`;
 };
+/** R7: the behavior pools a BDEF names, the header's first, upper case */
+export const poolsOf = model => [...new Set([model.implementationClass, ...model.entities.map(e => e.implementationClass)].filter(Boolean).map(p => p.toUpperCase()))];
 // Named includes preserve both direct fields and RAP component groups.
 const included = (name, type, group, fields = []) => `  TYPES BEGIN OF ${name}.\n  INCLUDE TYPE ${type} AS ${group}.\n`
   + fields.map(([n, t]) => `  TYPES ${n} TYPE ${t}.\n`).join("") + `  TYPES END OF ${name}.\n`;
@@ -287,6 +289,7 @@ export function generate(files, dependencies = []) {
     const iface = `zif_rap_${digest(upper(root))}`;
     let body = `INTERFACE ${iface} PUBLIC.\n`;
     const responses = new Map();
+    const requests = [], mappingsOf = [];
     const plan = {root, iface, model, entities: [], projection};
     plans.push(plan);
     for (const [index, entity] of model.entities.entries()) {
@@ -322,6 +325,17 @@ export function generate(files, dependencies = []) {
       // %data includes all CDS fields with a key group; %tky shares its key fields.
       body += included(`${p}_data`, `${p}_tky`, "%tky", pairs(fields.filter(f => !f.key)));
       body += struct(`${p}_fail`, [["cause", "i"]]);
+      // R7: the saver's request (REQUEST FOR CHANGE / DELETE), one table per
+      // entity, keyed `entity` by the entity's keys as on a system
+      if (!projection) {
+        const secondary = `WITH DEFAULT KEY WITH NON-UNIQUE SORTED KEY entity COMPONENTS ${keys.map(f => f.name).join(" ")}`;
+        body += included(`${p}_req_change`, `${p}_data`, "%data", [["%control", `${p}_control`]]);
+        body += `  TYPES t_${p}_req_change TYPE STANDARD TABLE OF ${p}_req_change ${secondary}.\n`;
+        body += included(`${p}_req_delete`, `${p}_tky`, "%tky");
+        body += `  TYPES t_${p}_req_delete TYPE STANDARD TABLE OF ${p}_req_delete ${secondary}.\n`;
+        requests.push([(entity.alias ?? entity.entity).toLowerCase(), p]);
+        mappingsOf.push({entity, fields});
+      }
       const opFields = entity.operations.map(o => [`%${o.kind}`, "x LENGTH 1"]);
       if (entity.actions.length) {
         body += struct(`${p}_actions`, entity.actions.map(a => [a.name.toLowerCase(), "x LENGTH 1"]));
@@ -417,9 +431,31 @@ export function generate(files, dependencies = []) {
       if (fields.some(([n]) => !ident(n))) throw new Error(`${root}: response aliases must be ABAP identifiers`);
       const name = `r_${kind.toLowerCase()}`;
       body += struct(name, fields);
-      for (const phase of ["", " EARLY"]) bind("RESPONSE", kind + phase, root, `${iface}=>${name}`);
-      for (const pool of new Set([model.implementationClass, ...model.entities.map(e => e.implementationClass)].filter(Boolean).map(upper))) {
-        bind(`POOL ${pool}`, "RESPONSE", kind, `${iface}=>${name}`);
+      // R7: a saver's LATE response is the EARLY type (docs/rap-runtime.md, R7)
+      for (const phase of ["", " EARLY", " LATE"]) bind("RESPONSE", kind + phase, root, `${iface}=>${name}`);
+      for (const pool of poolsOf(model)) bind(`POOL ${pool}`, "RESPONSE", kind, `${iface}=>${name}`);
+    }
+    // R7: the request of save_modified, and MAPPING FROM / TO ENTITY per entity
+    if (requests.length) {
+      if (requests.some(([n]) => !ident(n))) throw new Error(`${root}: entity aliases must be ABAP identifiers`);
+      body += struct("r_change", requests.map(([n, p]) => [n, `t_${p}_req_change`]));
+      body += struct("r_delete", requests.map(([n, p]) => [n, `t_${p}_req_delete`]));
+      bind("REQUEST", "CHANGE", root, `${iface}=>r_change`);
+      bind("REQUEST", "DELETE", root, `${iface}=>r_delete`);
+      for (const pool of poolsOf(model)) {
+        bind(`POOL ${pool}`, "REQUEST", "CHANGE", `${iface}=>r_change`);
+        bind(`POOL ${pool}`, "REQUEST", "DELETE", `${iface}=>r_delete`);
+        for (const {entity, fields} of mappingsOf) {
+          const mapping = entity.mappings.find(m => upper(m.table) === upper(entity.persistentTable ?? "")) ?? entity.mappings[0];
+          const all = (mapping?.fields ?? []).map(m => fields.find(f => upper(f.name) === upper(m.field))).map((f, i) => ({...f, column: mapping.fields[i].column.toLowerCase()}));
+          // a REQUEST FOR DELETE row has the keys only: its own clause
+          for (const [suffix, pairs] of [["", all], [" KEYS", all.filter(f => f.key)]]) {
+            for (const ref of new Set([entity.alias ?? entity.entity, entity.entity])) {
+              bind(`POOL ${pool}`, `MAPPING FROM ENTITY${suffix}`, ref, pairs.length ? `MAPPING ${pairs.map(f => `${f.column} = ${f.name}`).join(" ")}` : "%NONE");
+              bind(`POOL ${pool}`, `MAPPING TO ENTITY${suffix}`, ref, pairs.length ? `MAPPING ${pairs.map(f => `${f.name} = ${f.column}`).join(" ")}` : "%NONE");
+            }
+          }
+        }
       }
     }
     outputs[`${iface}.intf.abap`] = body + "ENDINTERFACE.\n";
@@ -469,7 +505,8 @@ export function main() {
   }
   const {outputs, bindings, plans} = generate(files, deps);
   // the runtime adapters read the behavior pools named by the BDEFs (R2)
-  const pools = new Set((plans ?? []).map(p => (p.model.implementationClass ?? "").toLowerCase().replaceAll("/", "#")).filter(Boolean));
+  // R7: every pool the BDEF names, the entities' own too
+  const pools = new Set((plans ?? []).flatMap(p => poolsOf(p.model)).map(p => p.toLowerCase().replaceAll("/", "#")));
   const poolFiles = paths.filter(f => pools.has(basename(f).toLowerCase().split(".")[0]) && /\.clas\.(locals_imp\.|locals_def\.)?abap$/i.test(f))
     .map(f => ({filename: basename(f), contents: readFileSync(f, "utf8")}));
   Object.assign(outputs, runtimeOutputs(plans ?? [], poolFiles));
