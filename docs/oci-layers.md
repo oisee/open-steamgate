@@ -47,12 +47,43 @@ layer config again before uploading.
 Public artefacts made from a checkout (release and download archives, the
 VSIX and binary seeds, the OSGo and Bun release binaries, Pages, the Docker
 image, CI artifacts, the system release) call `assertPublicSystem`. It
-refuses, as `PRIVATE_LAYER`, an installed system with a private layer and a
-live generation built from one: every generation's `manifest.json` records
-`systemDigest` and `systemPrivate`. A live generation without that record,
-or from another system than the installed one, is refused until rebuilt.
-A CI artifact packs all of `build/`, so it also refuses any kept generation
-in `build/by-input` that is not recorded public.
+refuses, as `PRIVATE_LAYER`, an installed system with a private layer, a
+private fetched source under `packs/`, and a live generation built from
+either: every generation's `manifest.json` records `systemDigest`,
+`systemPrivate` and the privacy of each input. A live generation without that
+record, or from another system than the installed one, is refused until
+rebuilt.
+
+An artefact copies the working tree, not the manifest, so its provenance comes
+from `tools/osd-public-tree.mjs`. At write time, and again at verify time for
+artefacts made from the tree (the release directory and its hosts, download
+bundles, the preview and its screenshots, the Docker image, the CI archive),
+it requires the tree to hash to the live generation (`hashOf(root)`, which
+names private and unknown inputs) and recomputes the privacy of every
+current input, `OSD_PACKS` folders included. A private pack fetched after a
+public build is refused; any other change asks for a rebuild. The sidecar of
+a directory artefact records links by their target and refuses a link that
+leaves the artefact.
+
+A fetched identity has `private` true or false, or `null` when the source
+cannot attest it: only an osd layer config can, so a foreign OCI zip (an
+empty config) records `null`. An identity fetched before the field existed
+has none. Both build and serve; every publishing path refuses them, and
+`node tools/osd-fetch.mjs` fetches an identity without the field again.
+
+A CI artifact carries the live generation, never all of `build/`. Of the
+caches every generation shares it carries what the public live generation
+reaches, which is what the swap job's fast path reads: the
+`build/source-by-digest` entries named in live's `source-inputs.json`, and
+live's cross-reference rows `build/xref/<key>.json`. Each is listed with its
+digest in `.local/ci-artifact/closure.json`; `osd-ci-artifact verify` checks
+every listed digest and refuses an unlisted file.
+
+A layer cannot be built from a build store without `--private`: a folder
+under this checkout's `build/`, under any `build/` holding `by-input` or
+`source-by-digest`, or holding a generation `manifest.json`. Files copied
+out of a store carry no identity and cannot be detected; keep their identity
+with them or mark the layer private.
 
 `build` and `push` also accept `--closure <file.json>`. The file must hold
 `{"unresolved":0,"items":[]}` with a nonnegative integer and an array of

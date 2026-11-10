@@ -6,7 +6,8 @@ import {registry, listening} from "./helpers/oci-registry.mjs";
 import {build as layerBuild, pushSystem, validateLayer} from "../tools/osd-layer.mjs";
 import {push, pushManifest, manifest, pull, sha256, treeDigest} from "../tools/osd-oci.mjs";
 import {fetchSystem, main as fetchMain} from "../tools/osd-fetch.mjs";
-import {activeSystem, assertPublicSystem, generationSystem, rootWebappOf, LAYER_ID} from "../tools/osd-system.mjs";
+import {activeSystem, assertPublicSystem, generationSystem, rootWebappOf, LAYER_ID, unrecordedGeneration} from "../tools/osd-system.mjs";
+import {publicProvenance, restampTreeArtefact, verifyTreeArtefact, writePublicArtefact} from "../tools/osd-public-tree.mjs";
 import {libraryPath} from "../tools/osd-lib-path.mjs";
 import {inputFoldersOf, packsOf, dataDirsOf, ddicDirsOf, webappsOf, tilesOf, contentFoldersOf} from "../tools/osd-packs.mjs";
 import {layers, libraryFiles, excludePatterns} from "../tools/osd-inputs.mjs";
@@ -29,6 +30,7 @@ describe("osd-system: one digest supplies the system", function () {
   it("refuses a stale live generation compiled from a private system", () => {
     const scratch = mkdtempSync(join(tmpdir(), "osd-private-generation-"));
     try {
+      json(join(scratch, "abap_transpile.json"), {input_folder: [], libs: []});
       // built while a private system was installed, which has since gone
       json(join(scratch, "build/by-input/fixture/manifest.json"), {systemDigest: "sha256:" + "a".repeat(64), systemPrivate: true});
       symlinkSync("by-input/fixture", join(scratch, "build/live"));
@@ -40,7 +42,7 @@ describe("osd-system: one digest supplies the system", function () {
       expect(() => assertPublicSystem(scratch)).to.throw(/no matching public system identity/);
       json(join(scratch, "build/by-input/fixture/manifest.json"), {hash: "fixture"});
       expect(() => assertPublicSystem(scratch)).to.throw(/no matching public system identity/);
-      json(join(scratch, "build/by-input/fixture/manifest.json"), {systemDigest: null, systemPrivate: false, provenance: []});
+      json(join(scratch, "build/by-input/fixture/manifest.json"), {hash: hashOf(scratch, inputsOf(scratch)), systemDigest: null, systemPrivate: false, provenance: []});
       expect(() => assertPublicSystem(scratch)).not.to.throw();
       // what osd-build and osd-warm record while a private system is installed
       const identity = {order: 0, name: "synthetic", kind: "lib", private: true,
@@ -50,6 +52,118 @@ describe("osd-system: one digest supplies the system", function () {
       expect(generationSystem(scratch)).to.deep.equal({systemDigest: `sha256:${"3".repeat(64)}`, systemPrivate: true,
         provenance: [{kind: "lib", path: "libs/synthetic", digest: `sha256:${"1".repeat(64)}`, private: true}]});
     } finally { rmSync(scratch, {recursive: true, force: true}); }
+  });
+
+  // P1-1: the provenance an artefact gets is the tree it copies, not only
+  // the live record. A public live generation, then a pack fetched after it.
+  describe("the public tree (tools/osd-public-tree.mjs)", () => {
+    let scratch;
+    const oci = `localhost:5000/synthetic/demo@sha256:${"a".repeat(64)}`;
+    const live = (provenance = []) => {
+      const hash = hashOf(scratch, inputsOf(scratch));
+      json(join(scratch, `build/by-input/${hash}/manifest.json`), {hash, systemDigest: null, systemPrivate: false, provenance});
+      rmSync(join(scratch, "build/live"), {force: true});
+      symlinkSync(`by-input/${hash}`, join(scratch, "build/live"));
+      return hash;
+    };
+    const fetched = (dir, identity) => {
+      json(join(dir, "osd-pack.json"), {abap: ["upstream"], sources: [{folder: "upstream", oci}]});
+      write(join(dir, "upstream/zdemo.prog.abap"), "REPORT zdemo.\n");
+      json(join(dir, "upstream/.osd-source.json"), {oci, path: "", exclude: [], files: 1, ...identity});
+    };
+    beforeEach(() => {
+      scratch = mkdtempSync(join(tmpdir(), "osd-public-tree-"));
+      json(join(scratch, "abap_transpile.json"), {input_folder: ["src"], libs: []});
+      write(join(scratch, "src/zpublic.prog.abap"), "REPORT zpublic.\n");
+    });
+    afterEach(() => rmSync(scratch, {recursive: true, force: true}));
+
+    it("refuses a private pack fetched after a public generation was built, at write and at verify", () => {
+      const hash = live();
+      const record = publicProvenance(scratch);
+      expect(record).to.include({generation: hash, systemPrivate: false});
+      const artefact = join(scratch, "artefact");
+      write(join(artefact, "init.mjs"), "public");
+      writePublicArtefact(artefact, scratch);
+      expect(verifyTreeArtefact(artefact, scratch).generation).to.equal(hash);
+      fetched(join(scratch, "packs/demo"), {private: true});
+      // the edge every publisher shares, and the full check of the tree
+      expect(() => assertPublicSystem(scratch)).to.throw(/private input packs\/demo\/upstream/).with.property("code", "PRIVATE_LAYER");
+      for (const step of [() => publicProvenance(scratch), () => writePublicArtefact(artefact, scratch), () => verifyTreeArtefact(artefact, scratch)])
+        expect(step).to.throw(/private input packs\/demo\/upstream/).with.property("code", "PRIVATE_LAYER");
+    });
+
+    it("recomputes privacy over the current inputs: a private OSD_PACKS folder is refused", () => {
+      live();
+      const outside = mkdtempSync(join(tmpdir(), "osd-public-tree-packs-"));
+      const old = process.env.OSD_PACKS;
+      try {
+        fetched(join(outside, "extra"), {private: true});
+        process.env.OSD_PACKS = outside;
+        // not under packs/, so only the recomputed inputs see it
+        expect(() => assertPublicSystem(scratch)).not.to.throw();
+        expect(() => publicProvenance(scratch)).to.throw(/private input external\/upstream is in the tree/).with.property("code", "PRIVATE_LAYER");
+      } finally {
+        if (old === undefined) delete process.env.OSD_PACKS; else process.env.OSD_PACKS = old;
+        rmSync(outside, {recursive: true, force: true});
+      }
+    });
+
+    it("requires the working tree to hash to the live generation", () => {
+      live();
+      expect(() => publicProvenance(scratch)).not.to.throw();
+      write(join(scratch, "src/zlate.prog.abap"), "REPORT zlate.\n");
+      expect(() => publicProvenance(scratch)).to.throw(/working tree .* is not the live generation/).with.property("code", "BAD_PROVENANCE");
+    });
+
+    it("re-stamps an artefact changed in place only while the tree is the generation it was verified as", () => {
+      live();
+      const artefact = join(scratch, "preview");
+      write(join(artefact, "index.html"), "public");
+      writePublicArtefact(artefact, scratch);
+      const before = verifyTreeArtefact(artefact, scratch);
+      write(join(artefact, "screenshots/a.png"), "png");
+      expect(restampTreeArtefact(artefact, scratch, before).files).to.have.property("screenshots/a.png");
+      write(join(scratch, "src/zlate.prog.abap"), "REPORT zlate.\n");
+      live();
+      write(join(artefact, "screenshots/b.png"), "png");
+      expect(() => restampTreeArtefact(artefact, scratch, before)).to.throw(/live generation changed/).with.property("code", "BAD_PROVENANCE");
+    });
+
+    // P2-4: an identity fetched before privacy existed hashes and builds;
+    // only publishing refuses it, and says how to fix it
+    it("hashes an old fetched identity for development and explains the publish refusal", () => {
+      fetched(join(scratch, "packs/demo"), {});
+      const inputs = inputsOf(scratch);
+      expect(generationSystem(scratch, inputs).provenance.find(input => input.path === "packs/demo/upstream").private).to.equal(null);
+      const hash = hashOf(scratch, inputs);
+      expect(hash).to.match(/^[0-9a-f]{16}$/);
+      // after a build recorded it as unknown
+      live(generationSystem(scratch, inputs).provenance);
+      expect(() => assertPublicSystem(scratch)).to.throw(/rerun node tools\/osd-fetch.mjs/);
+      // a live record from before the pack: the tree check says the same
+      live([]);
+      expect(() => publicProvenance(scratch)).to.throw(/packs\/demo\/upstream has no recorded privacy; rerun node tools\/osd-fetch.mjs/);
+    });
+
+    // an installed layer's identity without the key is the public old format
+    it("keeps a layer identity without a private key public", () => {
+      const identity = {order: 0, name: "plain", kind: "input", digest: `sha256:${"1".repeat(64)}`, treeDigest: `sha256:${"2".repeat(64)}`, path: "inputs/plain"};
+      json(join(scratch, ".local/system/.osd-system.json"), {digest: `sha256:${"3".repeat(64)}`, layers: [identity]});
+      json(join(scratch, ".local/system/inputs/plain", LAYER_ID), identity);
+      write(join(scratch, ".local/system/inputs/plain/src/zplain.prog.abap"), "REPORT zplain.\n");
+      const inputs = {folders: [join(scratch, ".local/system/inputs/plain/src")]};
+      expect(generationSystem(scratch, inputs).provenance.every(input => input.private === false)).to.equal(true);
+    });
+
+    // P3-5: a record with systemPrivate and no provenance is built again
+    it("treats a generation recorded without provenance as unrecorded", () => {
+      const dir = join(scratch, "build/by-input/0123456789abcdef");
+      json(join(dir, "manifest.json"), {hash: "0123456789abcdef", systemDigest: null, systemPrivate: false});
+      expect(unrecordedGeneration(dir)).to.equal(true);
+      json(join(dir, "manifest.json"), {hash: "0123456789abcdef", systemDigest: null, systemPrivate: false, provenance: []});
+      expect(unrecordedGeneration(dir)).to.equal(false);
+    });
   });
   let root, source, r, host, ref, env, cwd;
   beforeEach(async () => {

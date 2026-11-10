@@ -10,6 +10,7 @@ import {tmpdir} from "node:os";
 import {join, resolve} from "node:path";
 import {checkBinary, checkReleaseBinary, executableOf} from "../scripts/release-verify.mjs";
 import {verifyPublicArtefact, writeArtefactProvenance} from "../tools/osd-provenance.mjs";
+import {hashOf, inputsOf} from "../tools/osd-build.mjs";
 import {stageVscodeWeb} from "../scripts/stage-vscode-web.mjs";
 
 const elf = (machine) => {
@@ -74,6 +75,7 @@ describe("scripts/release-verify: an artefact by its content", () => {
   it("refuses to release a binary built from a private live generation, OSGo included", () => {
     const source = join(dir, "private-source");
     mkdirSync(join(source, "build/by-input/fixture"), {recursive: true});
+    writeFileSync(join(source, "abap_transpile.json"), JSON.stringify({input_folder: [], libs: []}));
     const generation = (record) => writeFileSync(join(source, "build/by-input/fixture/manifest.json"), JSON.stringify(record));
     symlinkSync("by-input/fixture", join(source, "build/live"));
     const binary = write("osgo-private", elf(0x3e));
@@ -82,7 +84,7 @@ describe("scripts/release-verify: an artefact by its content", () => {
     expect(() => checkReleaseBinary(binary, "go-linux-amd64", source)).to.throw().with.property("code", "PRIVATE_LAYER");
     generation({systemDigest: null});
     expect(() => checkReleaseBinary(binary, "go-linux-amd64", source)).to.throw(/no matching public system identity/);
-    generation({systemDigest: null, systemPrivate: false, provenance: []});
+    generation({hash: hashOf(source, inputsOf(source)), systemDigest: null, systemPrivate: false, provenance: []});
     expect(() => checkReleaseBinary(binary, "go-linux-amd64", source)).to.throw().with.property("code", "PRIVATE_LAYER");
     writeArtefactProvenance(binary, {generation: "public", systemDigest: null, systemPrivate: false, inputs: []});
     expect(checkReleaseBinary(binary, "go-linux-amd64", source).target).to.equal("go-linux-amd64");
@@ -117,6 +119,18 @@ describe("scripts/release-verify: an artefact by its content", () => {
     expect(() => verifyPublicArtefact(preview)).to.throw().with.property("code", "BAD_PROVENANCE");
   });
 
+  it("records internal links and refuses links that escape a directory artefact", () => {
+    const source = {generation: "links", systemDigest: null, systemPrivate: false, inputs: []};
+    const artifact = join(dir, "linked-artifact");
+    mkdirSync(join(artifact, "build/live/output"), {recursive: true});
+    writeFileSync(join(artifact, "build/live/output/init.mjs"), "public");
+    symlinkSync("build/live/output", join(artifact, "output"));
+    writeArtefactProvenance(artifact, source);
+    expect(verifyPublicArtefact(artifact).files.output.link).to.equal("build/live/output");
+    symlinkSync("../outside", join(artifact, "escape"));
+    expect(() => writeArtefactProvenance(artifact, source)).to.throw().with.property("code", "BAD_PROVENANCE");
+  });
+
   it("refuses to stage an unproven VS Code web bundle", async () => {
     const extension = join(dir, "extension");
     mkdirSync(join(extension, "dist/web"), {recursive: true});
@@ -144,30 +158,64 @@ describe("scripts/release-verify: an artefact by its content", () => {
     expect(verifyPublicArtefact(preview).files).to.have.property("vscode-web/dist/web/extension.js");
   });
 
-  it("archives only the public live CI generation", async () => {
+  // FIX5: the shared caches travel when the public live generation reaches
+  // them -- the swap job's fast path reads exactly these -- and nothing else
+  it("archives only the public live CI generation and the shared cache entries it reaches", async () => {
     const root = join(dir, "ci-tree");
-    for (const path of ["build/by-input/1234567890abcdef/output", "build/tmp", "build/source-by-digest", "build/xref", "gen", "packs", ".local/lars", ".local/ci-artifact/transpiler"])
+    for (const path of ["build/tmp", "build/source-by-digest", "build/xref", "gen", "packs", ".local/lars", ".local/ci-artifact/transpiler"])
       mkdirSync(join(root, path), {recursive: true});
+    writeFileSync(join(root, "abap_transpile.json"), JSON.stringify({input_folder: [], libs: []}));
     const {genHash} = await import("../tools/osd-build.mjs");
-    writeFileSync(join(root, "build/by-input/1234567890abcdef/manifest.json"), JSON.stringify({hash: "1234567890abcdef",
-      systemDigest: null, systemPrivate: false, provenance: [], gen: genHash(root)}));
-    writeFileSync(join(root, "build/by-input/1234567890abcdef/output/init.mjs"), "public");
+    const {cacheKey} = await import("../tools/osd-xref-seed.mjs");
+    const {verifyCiClosure} = await import("../tools/osd-ci-closure.mjs");
+    const currentHash = hashOf(root, inputsOf(root));
+    const sha = (text) => createHash("sha256").update(text).digest("hex");
+    const publicSource = "REPORT zpublic.\n", privateSource = "REPORT zsecret.\n";
+    const generation = (hash, record, inputs) => {
+      mkdirSync(join(root, "build/by-input", hash, "output"), {recursive: true});
+      writeFileSync(join(root, "build/by-input", hash, "manifest.json"), JSON.stringify({hash, ...record}));
+      writeFileSync(join(root, "build/by-input", hash, "source-inputs.json"), JSON.stringify(inputs));
+    };
+    generation(currentHash, {systemDigest: null, systemPrivate: false, provenance: [], gen: genHash(root)}, {"src/zpublic.prog.abap": sha(publicSource)});
+    // an older generation from a private system: its sources share the store
+    generation("fedcba9876543210", {systemDigest: `sha256:${"a".repeat(64)}`, systemPrivate: true, provenance: []}, {"src/zsecret.prog.abap": sha(privateSource)});
+    writeFileSync(join(root, "build/by-input", currentHash, "output/init.mjs"), "public");
+    writeFileSync(join(root, "build/source-by-digest", sha(publicSource)), publicSource);
+    writeFileSync(join(root, "build/source-by-digest", sha(privateSource)), privateSource);
+    const key = await cacheKey(root, {hash: currentHash});
+    expect(key).to.match(/^[0-9a-f]{16}$/);
+    writeFileSync(join(root, "build/xref", `${key}.json`), JSON.stringify({CROSS: [], WBCROSSGT: [], WBCROSSGTX: [], D010INC: []}));
+    writeFileSync(join(root, "build/xref/0000000000000000.json"), JSON.stringify({CROSS: [{NAME: "ZSECRET"}]}));
     writeFileSync(join(root, "build/tmp/private.bin"), "private");
     writeFileSync(join(root, "build/source-by-digest/private.bin"), "private");
-    writeFileSync(join(root, "build/xref/private.bin"), "private");
-    symlinkSync("by-input/1234567890abcdef", join(root, "build/live"));
+    symlinkSync(`by-input/${currentHash}`, join(root, "build/live"));
     symlinkSync("build/live/output", join(root, "output"));
     const archive = join(dir, "ci-tree.tar");
     execFileSync(process.execPath, [resolve("tools/osd-ci-artifact.mjs"), "pack", archive], {cwd: root});
-    const members = execFileSync("tar", ["-tf", archive], {encoding: "utf8"});
-    expect(members).to.include("build/by-input/1234567890abcdef/output/init.mjs");
-    expect(members).not.to.include("private.bin");
-    expect(verifyPublicArtefact(archive).generation).to.equal("1234567890abcdef");
+    const members = execFileSync("tar", ["-tf", archive], {encoding: "utf8"}).split("\n");
+    expect(members).to.include(`build/by-input/${currentHash}/output/init.mjs`);
+    expect(members).to.include.members([`build/source-by-digest/${sha(publicSource)}`, `build/xref/${key}.json`, ".local/ci-artifact/closure.json"]);
+    for (const left of ["private.bin", sha(privateSource), "0000000000000000", "fedcba9876543210"])
+      expect(members.filter(member => member.includes(left)), left).to.deep.equal([]);
+    expect(verifyPublicArtefact(archive).generation).to.equal(currentHash);
     const consumer = join(dir, "ci-consumer");
     mkdirSync(consumer);
     execFileSync("tar", ["-xf", archive, "-C", consumer]);
     expect(readFileSync(join(consumer, "output/init.mjs"), "utf8")).to.equal("public");
-    expect(readFileSync(join(consumer, "build/live/manifest.json"), "utf8")).to.include("1234567890abcdef");
+    expect(readFileSync(join(consumer, "build/live/manifest.json"), "utf8")).to.include(currentHash);
+    // listed with digests, and checked where it is unpacked
+    const closure = verifyCiClosure(consumer, currentHash);
+    expect(closure.files).to.deep.equal({[`build/source-by-digest/${sha(publicSource)}`]: sha(publicSource),
+      [`build/xref/${key}.json`]: sha(readFileSync(join(root, "build/xref", `${key}.json`)))});
+    // the fast path's inputs: live's sources by digest, live's xref rows by the key osgo-fast asks for
+    for (const digest of Object.values(JSON.parse(readFileSync(join(consumer, "build/live/source-inputs.json"), "utf8"))))
+      expect(readFileSync(join(consumer, "build/source-by-digest", digest), "utf8")).to.equal(publicSource);
+    expect(readFileSync(join(consumer, "build/xref", `${await cacheKey(consumer, {hash: currentHash})}.json`), "utf8")).to.include("CROSS");
+    writeFileSync(join(consumer, "build/source-by-digest", sha(publicSource)), "changed");
+    expect(() => verifyCiClosure(consumer, currentHash)).to.throw(/differs from its listed digest/);
+    writeFileSync(join(consumer, "build/source-by-digest", sha(publicSource)), publicSource);
+    writeFileSync(join(consumer, "build/xref/0000000000000000.json"), "{}");
+    expect(() => verifyCiClosure(consumer, currentHash)).to.throw(/not in the public closure/);
   });
 
   it("refuses a binary for another target, a script, and a sidecar that is not its digest", () => {

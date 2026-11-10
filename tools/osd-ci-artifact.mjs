@@ -1,12 +1,23 @@
 // Archive the output of this run for the suite and browser jobs.
-import {readFileSync, readdirSync, existsSync, readlinkSync} from "node:fs";
+import {readFileSync, readdirSync, existsSync, readlinkSync, mkdirSync, writeFileSync, mkdtempSync, rmSync} from "node:fs";
 import {spawnSync} from "node:child_process";
-import {assertPublicSystem} from "./osd-system.mjs";
-import {generationProvenance, verifyPublicArtefact, writeArtefactProvenance} from "./osd-provenance.mjs";
+import {tmpdir} from "node:os";
+import {join} from "node:path";
+import {verifyPublicArtefact, writeArtefactProvenance} from "./osd-provenance.mjs";
+import {publicProvenance} from "./osd-public-tree.mjs";
+import {CLOSURE, ciClosure, verifyCiClosure} from "./osd-ci-closure.mjs";
 
 if (process.argv[2] === "verify") {
   const {generationStateSnapshot} = await import("./osd-build.mjs");
   const state = generationStateSnapshot();
+  // the shared caches unpacked beside it are exactly live's public closure
+  try {
+    const closure = verifyCiClosure(process.cwd(), state.live);
+    console.log(`osd-ci-artifact: closure: ${Object.keys(closure.files).length} shared cache files verified`);
+  } catch (error) {
+    console.error(`osd-ci-artifact: ${error.message}`);
+    process.exit(2);
+  }
   console.log(`osd-ci-artifact: generation: ${JSON.stringify(state)}`);
   process.exit(state.live !== null && state.live === state.tree ? 0 : 1);
 }
@@ -16,13 +27,10 @@ if (!archive) {
   console.error("usage: node tools/osd-ci-artifact.mjs pack <tar-file> | verify");
   process.exit(2);
 }
-assertPublicSystem(process.cwd());
-const provenance = generationProvenance(process.cwd());
-if (provenance.systemPrivate || provenance.inputs.some(input => input.private)) {
-  const error = new Error("private generation cannot be archived"); error.code = "PRIVATE_LAYER"; throw error;
-}
+// the tree is archived, so the tree must be the public live generation
+const provenance = publicProvenance(process.cwd());
 const live = readlinkSync("build/live");
-if (!/^by-input\/[0-9a-f]{16}$/.test(live)) throw new Error("invalid live generation link");
+if (!/^by-input\/[0-9a-f]{16}$/.test(live) || live !== `by-input/${provenance.generation}`) throw new Error("invalid live generation link");
 const generation = JSON.parse(readFileSync(`build/${live}/manifest.json`, "utf8"));
 const {genHash} = await import("./osd-build.mjs");
 if (typeof generation.gen !== "string" || generation.gen !== genHash(process.cwd()))
@@ -54,7 +62,17 @@ for (const path of paths) {
     process.exit(2);
   }
 }
-const result = spawnSync("tar", ["-cf", archive, ...paths], {stdio: "inherit"});
+// build/source-by-digest and build/xref: what live reaches, listed with digests
+const closure = await ciClosure(process.cwd(), provenance.generation);
+mkdirSync(".local/ci-artifact", {recursive: true});
+writeFileSync(CLOSURE, `${JSON.stringify(closure, null, 2)}\n`);
+const scratch = mkdtempSync(join(tmpdir(), "osd-ci-closure-"));
+let result;
+try {
+  const list = join(scratch, "files");
+  writeFileSync(list, Object.keys(closure.files).map(path => `${path}\n`).join(""));
+  result = spawnSync("tar", ["-cf", archive, ...paths, CLOSURE, "-T", list], {stdio: "inherit"});
+} finally { rmSync(scratch, {recursive: true, force: true}); }
 if (result.status !== 0) process.exit(result.status ?? 1);
 writeArtefactProvenance(archive, provenance);
 verifyPublicArtefact(archive);

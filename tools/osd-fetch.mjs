@@ -177,7 +177,10 @@ export async function fetchSource(pack, source, options = {}) {
   }
   cleanupLeftovers(pack.dir);
   const before = sourceOf(source.dir);
-  if (options.force !== true && existsSync(source.dir) && statSync(source.dir).isDirectory() && sourceMatches(source, before)) {
+  // An identity fetched before privacy was recorded is fetched again: that is
+  // what records it (publishing asks for exactly this rerun).
+  if (options.force !== true && existsSync(source.dir) && statSync(source.dir).isDirectory() && sourceMatches(source, before)
+      && before.private !== undefined) {
     log(`${pack.name}/${source.folder}: already at ${before.digest ? before.digest.slice(0, 19) : before.commit.slice(0, 12)}`);
     return {pack: pack.name, folder: source.folder, commit: before.commit, digest: before.digest, treeDigest: before.treeDigest, private: before.private, files: before.files, fetched: false};
   }
@@ -239,7 +242,12 @@ async function fetchOci(pack, source, log) {
       files++;
     }
     if (typeof layer.config?.private !== "boolean" && layer.config?.private !== undefined) throw new Error("BAD_LAYER: invalid private marker");
-    const privateLayer = layer.config.private === true;
+    // Only an osd layer config can attest privacy (osd-layer --private writes
+    // it there; absent means public). A foreign zip -- an oras push with an
+    // empty config -- cannot: its identity records private: null, which a
+    // build accepts and every publishing path refuses (fail closed).
+    const privateLayer = layer.manifest.json.config?.mediaType === "application/vnd.osd.layer.config.v1+json"
+      ? layer.config?.private === true : null;
     await publish(pack, source, stage, {oci: source.oci, digest: layer.manifest.digest, treeDigest: digest, private: privateLayer,
       path: source.path, exclude: source.exclude, files, at: new Date().toISOString()}, log);
     log(`${pack.name}/${source.folder}: ${files} files from ${source.oci.split("@")[1].slice(0, 19)} tree ${digest.slice(0, 19)}`);

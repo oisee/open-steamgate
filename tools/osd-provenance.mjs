@@ -1,5 +1,5 @@
 import {createHash} from "node:crypto";
-import {existsSync, lstatSync, readFileSync, readlinkSync, readdirSync, writeFileSync} from "node:fs";
+import {existsSync, lstatSync, readFileSync, readlinkSync, realpathSync, readdirSync, writeFileSync} from "node:fs";
 import {basename, dirname, isAbsolute, join, relative, resolve} from "node:path";
 
 const sidecar = path => lstatSync(path).isDirectory() ? join(path, ".osd-provenance.json") : `${path}.osd-provenance.json`;
@@ -11,25 +11,34 @@ function filesOf(dir) {
   const walk = (base, prefix = "") => {
     for (const entry of readdirSync(base, {withFileTypes: true}).sort((a, b) => Buffer.compare(Buffer.from(a.name), Buffer.from(b.name)))) {
       if (!prefix && entry.name === ".osd-provenance.json") continue;
-      const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+      const entryPath = prefix ? `${prefix}/${entry.name}` : entry.name;
       const path = join(base, entry.name);
-      if (entry.isDirectory()) walk(path, relative);
-      else if (entry.isFile()) files[relative] = hash(path);
+      if (entry.isDirectory()) walk(path, entryPath);
+      else if (entry.isFile()) files[entryPath] = hash(path);
       else if (entry.isSymbolicLink()) {
         const target = readlinkSync(path);
         const actual = relative(dir, resolve(dirname(path), target));
         if (isAbsolute(actual) || actual === ".." || actual.startsWith("../"))
-          fail("BAD_PROVENANCE", `artifact link escapes its directory: ${relative}`);
-        files[relative] = {link: target, sha256: createHash("sha256").update(target).digest("hex")};
+          fail("BAD_PROVENANCE", `artifact link escapes its directory: ${entryPath}`);
+        if (existsSync(path)) {
+          const final = relative(realpathSync(dir), realpathSync(path));
+          if (isAbsolute(final) || final === ".." || final.startsWith("../"))
+            fail("BAD_PROVENANCE", `artifact link escapes its directory: ${entryPath}`);
+        }
+        files[entryPath] = {link: target, sha256: createHash("sha256").update(target).digest("hex")};
       }
-      else fail("BAD_PROVENANCE", `unsupported artifact entry: ${relative}`);
+      else fail("BAD_PROVENANCE", `unsupported artifact entry: ${entryPath}`);
     }
   };
   walk(dir);
   return files;
 }
 
-export function generationProvenance(root) {
+// The live generation's own record, as written: no claim about the working
+// tree. Publishing edges take provenance from tools/osd-public-tree.mjs,
+// which ties this record to the bytes the tree holds now. This module stays
+// free of repository imports: docker/Dockerfile verifies with it alone.
+export function liveGenerationRecord(root) {
   let manifest;
   try { manifest = JSON.parse(readFileSync(join(root, "build/live/manifest.json"), "utf8")); }
   catch { fail("BAD_PROVENANCE", "live generation manifest is missing or invalid"); }
@@ -40,7 +49,8 @@ export function generationProvenance(root) {
     inputs: manifest.provenance};
 }
 
-export function writeArtefactProvenance(path, source = generationProvenance(process.cwd())) {
+export function writeArtefactProvenance(path, source) {
+  if (source === undefined) fail("BAD_PROVENANCE", "artifact provenance needs a checked source (tools/osd-public-tree.mjs publicProvenance)");
   path = resolve(path);
   if (!existsSync(path)) fail("BAD_PROVENANCE", `artifact is missing: ${path}`);
   const directory = lstatSync(path).isDirectory();
@@ -70,7 +80,10 @@ export function verifyPublicArtefact(path) {
 if (process.argv[1] && resolve(process.argv[1]) === import.meta.filename) {
   const [operation, path] = process.argv.slice(2);
   try {
-    if (operation === "write" && path) writeArtefactProvenance(path);
+    if (operation === "write" && path) {
+      const {publicProvenance} = await import("./osd-public-tree.mjs");
+      writeArtefactProvenance(path, publicProvenance(process.cwd()));
+    }
     else if (operation === "verify" && path) verifyPublicArtefact(path);
     else fail("BAD_PROVENANCE", "usage: osd-provenance.mjs write|verify <artifact>");
   } catch (error) {

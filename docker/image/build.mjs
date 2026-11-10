@@ -3,7 +3,7 @@ import {readFileSync, mkdirSync, existsSync, chmodSync} from "node:fs";
 import {resolve} from "node:path";
 import {imagePacks} from "./packs.mjs";
 import {assertPublicSystem} from "../../tools/osd-system.mjs";
-import {verifyPublicArtefact} from "../../tools/osd-provenance.mjs";
+import {verifyTreeArtefact} from "../../tools/osd-public-tree.mjs";
 
 assertPublicSystem(process.cwd());
 
@@ -53,4 +53,4 @@ if (selectedPacks.length) run("node", ["tools/osd-fetch.mjs"]);
 run("node", ["tools/osd-build.mjs", "--publish"]);
 assertPublicSystem(process.cwd());
 run("node", ["docker/image/assemble.mjs", "/image"]);
-verifyPublicArtefact("/image");
+verifyTreeArtefact("/image", process.cwd());

@@ -358,7 +358,7 @@ export function hashOf(root, inputs = inputsOf(root), options = {}) {
   h.update("layers\0later-wins\0");
   const system = activeSystem(root);
   if (system) h.update("system\0").update(system.digest).update("\0");
-  for (const name of generationSystem(root, inputs).provenance.filter(input => input.private).map(input => `${input.kind}:${input.path}`).sort()) h.update("private-input\0").update(name).update("\0");
+  for (const name of generationSystem(root, inputs).provenance.filter(input => input.private !== false).map(input => `${input.kind}:${input.path}${input.private === null ? ":unknown" : ""}`).sort()) h.update("private-input\0").update(name).update("\0"); // unknown privacy names a generation too
   for (const layer of inputs.sourceLayers ?? []) {
     h.update("source-layer\0").update(JSON.stringify(layer)).update("\0");
   }

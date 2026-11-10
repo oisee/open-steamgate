@@ -1,7 +1,7 @@
 import {syncBuiltinESMExports} from 'node:module';
 import {expect} from "chai";
 import childProcess, {execFileSync, spawn, spawnSync} from "node:child_process";
-import {copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
+import {copyFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {load as parseYaml} from "js-yaml";
@@ -13,6 +13,9 @@ import {fetchAll} from "../tools/osd-fetch.mjs";
 import {fetchSystem} from "../tools/osd-system-fetch.mjs";
 import {assertPublicSystem} from "../tools/osd-system.mjs";
 import {generationSystem} from "../tools/osd-system.mjs";
+import {hashOf, inputsOf} from "../tools/osd-build.mjs";
+import {publicProvenance, verifyTreeArtefact} from "../tools/osd-public-tree.mjs";
+import {verifyPublicArtefact} from "../tools/osd-provenance.mjs";
 import {registry, listening} from "./helpers/oci-registry.mjs";
 
 import {toolCommand, setHostedLeakScanner} from "../tools/osd-host.mjs";
@@ -71,6 +74,39 @@ describe("osd-layer: reproducible publishing", function () {
     await main(["build", folder, "--name", "smoke", "--kind", "input", "--out", join(root, "out")]);
     expect(readFileSync(join(root, "out/smoke.zip"))).to.deep.equal(a.zip);
     expect(sha256(readFileSync(join(root, "out/manifest.json")))).to.equal(a.digest);
+  });
+
+  // P2-5: osd-build's store holds every generation's sources and output,
+  // private ones included, with no identity file a layer build could read
+  it("requires --private when repackaging a build store folder or a generation", () => {
+    const refusedUnlessPrivate = (dir) => {
+      expect(() => build(dir, options), dir).to.throw(/requires --private/).with.property("code", "PRIVATE_LAYER");
+      expect(() => build(dir, {...options, private: true}), dir).not.to.throw();
+    };
+    // this checkout's build/
+    mkdirSync(join(oldCwd, "build"), {recursive: true});
+    const cache = mkdtempSync(join(oldCwd, "build", "osd-layer-cache-"));
+    try {
+      write(join(cache, "sample.abap"), "synthetic");
+      refusedUnlessPrivate(cache);
+    } finally { rmSync(cache, {recursive: true, force: true}); }
+    // another checkout's store
+    const store = join(root, "other-checkout/build"), hash = "0123456789abcdef";
+    write(join(store, `by-input/${hash}/manifest.json`), JSON.stringify({hash, systemDigest: null, systemPrivate: true, provenance: []}));
+    for (const path of [`by-input/${hash}/source`, `by-input/${hash}/output`, "source-by-digest", "xref"]) {
+      write(join(store, path, "zsynthetic.prog.abap"), "REPORT zsynthetic.");
+      refusedUnlessPrivate(join(store, path));
+    }
+    refusedUnlessPrivate(join(root, "other-checkout"));
+    // a copied generation, out of any build/: its manifest says what it is
+    const copied = join(root, "copied-generation");
+    write(join(copied, "manifest.json"), JSON.stringify({hash, gen: "synthetic"}));
+    write(join(copied, "output/zsynthetic.prog.mjs"), "synthetic");
+    refusedUnlessPrivate(copied);
+    refusedUnlessPrivate(join(copied, "output"));
+    // an ordinary folder that happens to be called build is not a store
+    write(join(root, "plain/build/zplain.prog.abap"), "REPORT zplain.");
+    expect(() => build(join(root, "plain"), options)).not.to.throw();
   });
 
   it("stores private and closure only when requested and preserves the old digest", async () => {
@@ -773,5 +809,130 @@ describe("public entry points refuse a private installed system", function () {
     symlinkSync(join(repo, "node_modules"), join(fixture, "node_modules"), "dir");
     copy("scripts/build-binary.mjs", "scripts/build-vsix.mjs", "scripts/third-party-notices.mjs");
     refusedWithoutWrites("bun", ["scripts/build-binary.mjs", "--seed", join(outside, "osd")]);
+  });
+});
+
+// P1-1, the critic's repro: a public live generation, then a private OCI pack
+// declared and fetched AFTER the build (or any other change to the tree).
+// Each entry point that copies the tree refuses before it writes; a release
+// made before the fetch no longer verifies against the tree.
+describe("public entry points refuse a tree that is not the public live generation", function () {
+  this.timeout(180000);
+  const repo = new URL("..", import.meta.url).pathname;
+  let fixture, outside;
+  const put = (path, text) => { mkdirSync(join(fixture, path, ".."), {recursive: true}); writeFileSync(join(fixture, path), text); };
+  const copy = (...paths) => { for (const path of paths) { mkdirSync(join(fixture, path, ".."), {recursive: true}); copyFileSync(join(repo, path), join(fixture, path)); } };
+  const tree = () => readdirSync(fixture, {recursive: true}).map(String).sort();
+  const refused = (message, command, args, env = {}) => {
+    const before = tree();
+    const result = spawnSync(command, args, {cwd: fixture, encoding: "utf8", env: {...process.env, ...env}});
+    expect(result.status, result.stdout + result.stderr).not.to.equal(0);
+    expect(result.stderr).to.match(message);
+    expect(tree()).to.deep.equal(before);
+  };
+  const live = () => {
+    const hash = hashOf(fixture, inputsOf(fixture));
+    put(`build/by-input/${hash}/manifest.json`, JSON.stringify({hash, systemDigest: null, systemPrivate: false, provenance: []}));
+    put(`build/by-input/${hash}/output/init.mjs`, "public\n");
+    symlinkSync(`by-input/${hash}`, join(fixture, "build/live"));
+    symlinkSync("build/live/output", join(fixture, "output"));
+    return hash;
+  };
+  const latePrivatePack = () => {
+    const oci = `localhost:5000/synthetic/demo@sha256:${"a".repeat(64)}`, identity = {oci, path: "src", exclude: [], files: 1, private: true};
+    put("packs/demo/osd-pack.json", JSON.stringify({abap: ["upstream"], sources: [{folder: "upstream", oci}]}));
+    put("packs/demo/.osd-fetched.json", JSON.stringify({upstream: identity}));
+    put("packs/demo/upstream/.osd-source.json", JSON.stringify(identity));
+    put("packs/demo/upstream/zsecret.prog.abap", "REPORT zsecret.\n");
+  };
+  const lateSource = () => put("src/zlate.prog.abap", "REPORT zlate.\n");
+  const PRIVATE = /private input packs\/demo\/upstream/, STALE = /working tree \([0-9a-f]{16}\) is not the live generation/;
+  beforeEach(() => {
+    fixture = mkdtempSync(join(tmpdir(), "osd-public-tree-entry-"));
+    outside = mkdtempSync(join(tmpdir(), "osd-public-tree-entry-out-"));
+    symlinkSync(join(repo, "tools"), join(fixture, "tools"), "dir");
+    put("abap_transpile.json", JSON.stringify({input_folder: ["src"], libs: []}));
+    put("src/zpublic.prog.abap", "REPORT zpublic.\n");
+  });
+  afterEach(() => { rmSync(fixture, {recursive: true, force: true}); rmSync(outside, {recursive: true, force: true}); });
+
+  it("make-release ships the public live tree with its links, then refuses after a late private fetch", () => {
+    copy("scripts/make-release.mjs");
+    const hash = live();
+    const env = {...process.env, GITHUB_SHA: "0".repeat(40), OSD_NODE_DIR: join(outside, "no-node")};
+    const release = join(outside, "release");
+    const made = spawnSync(process.execPath, ["scripts/make-release.mjs", release], {cwd: fixture, encoding: "utf8", env});
+    expect(made.status, made.stdout + made.stderr).to.equal(0);
+    // P2-1: a directory artefact with links records them by target
+    const record = verifyTreeArtefact(release, fixture);
+    expect(record.files.output).to.deep.include({link: "build/live/output"});
+    expect(record.files["build/live"]).to.deep.include({link: `by-input/${hash}`});
+    latePrivatePack();
+    expect(() => verifyTreeArtefact(release, fixture)).to.throw(PRIVATE);
+    const again = join(outside, "release-again");
+    const late = spawnSync(process.execPath, ["scripts/make-release.mjs", again], {cwd: fixture, encoding: "utf8", env});
+    expect(late.status, late.stdout + late.stderr).not.to.equal(0);
+    expect(late.stderr).to.match(PRIVATE);
+    expect(readdirSync(outside)).to.deep.equal(["release"]);
+    rmSync(join(fixture, "packs"), {recursive: true});
+    lateSource();
+    refused(STALE, process.execPath, ["scripts/make-release.mjs", again], env);
+    // a fetch WHILE it runs: the private Node host make-release copies and
+    // asks for its version is the hook; the stamp at the end refuses
+    rmSync(join(fixture, "src/zlate.prog.abap"));
+    const node = join(outside, "node");
+    mkdirSync(join(node, "bin"), {recursive: true});
+    const pack = `${fixture}/packs/demo/upstream`;
+    writeFileSync(join(node, "bin/node"), `#!/bin/sh\nmkdir -p '${pack}'\nprintf '{"private":true}' > '${pack}/.osd-source.json'\necho v0.0.0\n`, {mode: 0o755});
+    const during = spawnSync(process.execPath, ["scripts/make-release.mjs", again], {cwd: fixture, encoding: "utf8", env: {...env, OSD_NODE_DIR: node}});
+    expect(during.status, during.stdout + during.stderr).not.to.equal(0);
+    expect(during.stderr).to.match(PRIVATE);
+    expect(() => verifyPublicArtefact(again)).to.throw().with.property("code", "BAD_PROVENANCE");
+  });
+
+  it("build-preview writes no preview", () => {
+    symlinkSync(join(repo, "test"), join(fixture, "test"), "dir");
+    copy("scripts/build-preview.mjs");
+    live();
+    expect(() => publicProvenance(fixture)).not.to.throw();
+    lateSource();
+    refused(STALE, process.execPath, ["scripts/build-preview.mjs"]);
+    rmSync(join(fixture, "src/zlate.prog.abap"));
+    latePrivatePack();
+    refused(PRIVATE, process.execPath, ["scripts/build-preview.mjs"]);
+  });
+
+  // P3: the binary is stamped from the tree it was built from (root), not
+  // from whatever directory it was started in
+  it("build-binary stamps from the tree it builds, not the working directory", function () {
+    if (spawnSync("bun", ["--version"]).status !== 0) this.skip();
+    for (const entry of ["web", "webapp", "editors", "node_modules", "data", "test", "package.json", "libs.lock.json"])
+      symlinkSync(join(repo, entry), join(fixture, entry));
+    // copied: the entry resolves its relative imports from where it lies
+    cpSync(join(repo, "bin"), join(fixture, "bin"), {recursive: true});
+    copy("scripts/build-binary.mjs", "scripts/build-vsix.mjs", "scripts/third-party-notices.mjs");
+    const hash = live();
+    const elsewhere = join(outside, "elsewhere");
+    mkdirSync(elsewhere);
+    const binary = join(outside, "osd");
+    const built = spawnSync("bun", [join(fixture, "scripts/build-binary.mjs"), binary], {cwd: elsewhere, encoding: "utf8"});
+    expect(built.status, built.stdout + built.stderr).to.equal(0);
+    expect(verifyPublicArtefact(binary).generation).to.equal(hash);
+  });
+
+  it("build-binary --seed stages no seed", function () {
+    if (spawnSync("bun", ["--version"]).status !== 0) this.skip();
+    symlinkSync(join(repo, "editors"), join(fixture, "editors"), "dir");
+    symlinkSync(join(repo, "node_modules"), join(fixture, "node_modules"), "dir");
+    copy("scripts/build-binary.mjs", "scripts/build-vsix.mjs", "scripts/third-party-notices.mjs");
+    live();
+    // bun names the same generation as node does
+    const agrees = spawnSync("bun", ["-e", `import {publicProvenance} from ${JSON.stringify(join(repo, "tools/osd-public-tree.mjs"))}; publicProvenance(${JSON.stringify(fixture)});`], {encoding: "utf8"});
+    expect(agrees.status, agrees.stderr).to.equal(0);
+    lateSource();
+    refused(STALE, "bun", ["scripts/build-binary.mjs", "--seed", join(outside, "osd")]);
+    rmSync(join(fixture, "src/zlate.prog.abap"));
+    latePrivatePack();
+    refused(PRIVATE, "bun", ["scripts/build-binary.mjs", "--seed", join(outside, "osd")]);
   });
 });

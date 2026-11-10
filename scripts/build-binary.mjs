@@ -11,8 +11,7 @@ import {execFileSync} from "node:child_process";
 import {mkdirSync, rmSync} from "node:fs";
 import {resolve} from "node:path";
 import {stageSystemSeed} from "./build-vsix.mjs";
-import {assertPublicSystem} from "../tools/osd-system.mjs";
-import {writeArtefactProvenance} from "../tools/osd-provenance.mjs";
+import {assertPublicTree, writePublicArtefact} from "../tools/osd-public-tree.mjs";
 import {describeVsixPreflight} from "../tools/osd-lock.mjs";
 import {vsixPreflightMissing} from "../tools/osd-lib-path.mjs";
 
@@ -37,7 +36,8 @@ const started = Date.now();
 let archive;
 let seedId;
 if (seeded) {
-  assertPublicSystem(root);
+  // the seed is the tree: it must be the public live generation
+  assertPublicTree(root);
   const preflight = describeVsixPreflight(vsixPreflightMissing(root));
   if (preflight !== undefined) {
     console.error(preflight.replace(/^build-vsix: missing (.*); run npm install and node tools\/osd-libs\.mjs as needed$/,
@@ -120,7 +120,7 @@ for (const log of result.logs) {
 if (!result.success) {
   process.exit(1);
 }
-writeArtefactProvenance(outfile, undefined);
+writePublicArtefact(outfile, root);
 const size = (await Bun.file(outfile).size) / 1e6;
 console.log(`built ${outfile}${target ? ` for ${target}` : ""}: ${size.toFixed(1)} MB in ${Date.now() - started} ms`);
 console.log(seeded ? `system seed: ${seedId}` : "checkout mode: no embedded system seed");

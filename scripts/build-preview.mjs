@@ -1,5 +1,5 @@
 import {assertPublicSystem, rootWebappOf} from "../tools/osd-system.mjs";
-import {writeArtefactProvenance} from "../tools/osd-provenance.mjs";
+import {assertPublicTree, writePublicArtefact} from "../tools/osd-public-tree.mjs";
 // Builds the static preview deployment into build/:
 //   sw.js        the transpiled gateway + sql.js in a service worker
 //   index.html   installs the worker, then goes to app/
@@ -30,6 +30,9 @@ import {cdsEntityOf} from "../tools/adt-cds.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 assertPublicSystem(root);
+// a preview bundles the tree: it must be the public live generation now
+// (OSD_PREVIEW_GENERATE_ONLY writes web/generated/ for tests, no artefact)
+if (process.env.OSD_PREVIEW_GENERATE_ONLY !== "1") assertPublicTree(root);
 const generated = resolve(root, "web/generated");
 // build/preview, not build/: build/ is the generation store of tools/osd-build.mjs
 // (build/live is what output/ points at), and webpack cleans its output
@@ -435,4 +438,4 @@ for (const entry of await readdir(resolve(root, "output"))) {
 console.log(`Media: ${carried} W3MI objects, ${(bytes / 1048576).toFixed(1)} MB in media/`);
 
 console.log(`Preview build is in ${build}`);
-writeArtefactProvenance(build);
+writePublicArtefact(build, root);

@@ -73,7 +73,9 @@ export const seedsBuilt = (dataDir) => dataDir !== undefined && existsSync(join(
 
 export function sourceMatches(source, entry) {
   if (!entry || entry.path !== source.path
-      || typeof entry.private !== "boolean"
+      // privacy: boolean, null (unknown, empty-config OCI) or absent (fetched
+      // before it was recorded) all build; publishing refuses the last two
+      || !(entry.private === undefined || entry.private === null || typeof entry.private === "boolean")
       || JSON.stringify(entry.exclude) !== JSON.stringify(source.exclude)) return false;
   return source.oci !== undefined
     ? entry.oci === source.oci && entry.repo === undefined && entry.ref === undefined

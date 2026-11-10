@@ -9,10 +9,12 @@ import {fileURLToPath} from "node:url";
 import {libraryFiles} from "../tools/osd-inputs.mjs";
 import {unfetched, describeUnfetched} from "../tools/osd-fetch.mjs";
 import {assertPublicSystem} from "../tools/osd-system.mjs";
-import {verifyPublicArtefact, writeArtefactProvenance} from "../tools/osd-provenance.mjs";
+import {verifyPublicArtefact} from "../tools/osd-provenance.mjs";
+import {assertPublicTree, verifyTreeArtefact, writePublicArtefact} from "../tools/osd-public-tree.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 assertPublicSystem(root);
+assertPublicTree(root);
 const targets = {
   "linux-amd64": {bun: "osd", archive: ".tar.gz"},
   "linux-arm64": {bun: "osd", archive: ".tar.gz"},
@@ -45,8 +47,8 @@ const archive = join(probe, `${folder}${target.archive}`);
 if (existsSync(stage) || existsSync(archive)) {
   if (!existsSync(stage) || !existsSync(archive)) throw new Error(`Incomplete existing bundle: ${stage}`);
   verifyPublicArtefact(join(probe, target.bun));
-  verifyPublicArtefact(stage);
-  verifyPublicArtefact(archive);
+  verifyTreeArtefact(stage, root);
+  verifyTreeArtefact(archive, root);
   const manifest = JSON.parse(readFileSync(join(stage, "release.json"), "utf8"));
   for (const file of [target.bun]) {
     const digest = createHash("sha256").update(readFileSync(join(probe, file))).digest("hex");
@@ -112,7 +114,7 @@ writeFileSync(join(stage, "PRIVATE-TEST-ONLY.txt"),
   "Private test artifact. Do not redistribute before dependency-notice and provenance review.\n" +
   "Mini-Zork public-domain claim: https://www.inform-fiction.org/zmachine/standards/z1point1/appf.html\n" +
   "SQLite data is stored outside this directory by run.sh or run.ps1.\n");
-writeArtefactProvenance(stage);
+writePublicArtefact(stage, root);
 if (target.archive === ".zip") {
   execFileSync("zip", ["-q", "-r", archive, folder], {cwd: probe, stdio: "inherit"});
 } else {
@@ -120,5 +122,5 @@ if (target.archive === ".zip") {
 }
 const digest = createHash("sha256").update(readFileSync(archive)).digest("hex");
 writeFileSync(`${archive}.sha256`, `${digest}  ${basename(archive)}\n`);
-writeArtefactProvenance(archive);
+writePublicArtefact(archive, root);
 console.log(`${archive} (${Math.round(statSync(archive).size / 1e6)} MB, sha256 ${digest})`);

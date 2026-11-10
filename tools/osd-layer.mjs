@@ -35,7 +35,7 @@ function privateContent(folder) {
     try { value = JSON.parse(readFileSync(file, "utf8")); }
     catch { fail("BAD_LAYER", `invalid identity at ${file}`); }
     if (basename(file) === ".osd-source.json" && typeof value.private !== "boolean")
-      fail("BAD_LAYER", `fetched identity with no explicit privacy cannot be published: ${file}`);
+      fail("BAD_LAYER", `fetched identity with no recorded privacy cannot be published without --private (rerun node tools/osd-fetch.mjs; an empty-config OCI zip stays unknown): ${file}`);
     return value.private === true || value.layers?.some(layer => layer.private === true);
   };
   const walk = dir => {
@@ -52,6 +52,37 @@ function privateContent(folder) {
     if (dir === toolRoot || dirname(dir) === dir) break;
   }
   return walk(resolve(folder));
+}
+
+// osd-build's store (build/by-input, build/source-by-digest, build/xref)
+// holds the sources and output of every generation, private ones included,
+// and no file in it carries an identity privateContent could read. So any
+// folder inside a build store, or holding a generation manifest, is private
+// unless proven otherwise: only --private builds a layer from it. Files
+// copied out of the store lose that context and cannot be recognised.
+const STORE = ["by-input", "source-by-digest"];
+function generationManifest(file) {
+  try {
+    const value = JSON.parse(readFileSync(file, "utf8"));
+    return typeof value?.hash === "string" && ["gen", "systemPrivate", "provenance", "builtAt"].some(key => Object.hasOwn(value, key));
+  } catch { return false; }
+}
+function generationCache(folder) {
+  const start = resolve(folder);
+  for (let dir = start; ; dir = dirname(dir)) {
+    if (dir === join(toolRoot, "build")) return true;
+    if (basename(dir) === "build" && STORE.some(part => existsSync(join(dir, part)))) return true;
+    if (generationManifest(join(dir, "manifest.json"))) return true;
+    if (dirname(dir) === dir) break;
+  }
+  const walk = dir => readdirSync(dir, {withFileTypes: true}).some(item => {
+    if (item.name === ".git" || item.name === "node_modules") return false;
+    const path = join(dir, item.name);
+    if (item.isFile()) return item.name === "manifest.json" && generationManifest(path);
+    if (!item.isDirectory()) return false;
+    return (item.name === "build" && STORE.some(part => existsSync(join(path, part)))) || walk(path);
+  });
+  return walk(start);
 }
 
 /** Read every file, without following links or carrying fetch identity. */
@@ -95,7 +126,8 @@ export function build(folder, {name, kind, source, annotations: extraAnnotations
   if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(name ?? "")) fail("BAD_NAME", "--name must be a simple filename");
   if (!["lib", "input", "pack", "customer"].includes(kind)) fail("BAD_KIND", "--kind must be lib, input, pack or customer");
   if (!lstatSync(resolve(folder)).isDirectory()) fail("UNSAFE_ENTRY", "input must be a folder");
-  if (privateContent(folder) && !isPrivate) fail("PRIVATE_LAYER", "private input requires --private");
+  if (!isPrivate && generationCache(folder)) fail("PRIVATE_LAYER", "a build cache (build/, or a folder holding a generation manifest) requires --private");
+  if (!isPrivate && privateContent(folder)) fail("PRIVATE_LAYER", "private input requires --private");
   let files = folderFiles(resolve(folder));
   if (kind === "pack") validatePack(files, name);
   if (!files.some((f) => f.path === ".abapgit.xml")) {

@@ -3,8 +3,10 @@ import {existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, readdirS
 import {execFileSync, spawnSync} from "node:child_process";
 import {tmpdir} from "node:os";
 import {dirname, join, relative, resolve} from "node:path";
-import {build, hashOf, liveHash, missingLibraries} from "../tools/osd-build.mjs";
+import {build, genHash, hashOf, inputsOf, liveHash, missingLibraries} from "../tools/osd-build.mjs";
 import {packsOf} from "../tools/osd-packs.mjs";
+import {CLOSURE, ciClosure} from "../tools/osd-ci-closure.mjs";
+import {publicProvenance} from "../tools/osd-public-tree.mjs";
 import {transpile} from "../tools/osd-transpile.mjs";
 
 // The builder over a tree of its own. What is cheap to check here is what
@@ -42,6 +44,14 @@ describe("tools/osd-build: the layers, refused before a lock is taken", function
     write("src/zcl_archive.clas.abap", "CLASS zcl_archive DEFINITION PUBLIC. ENDCLASS. CLASS zcl_archive IMPLEMENTATION. ENDCLASS.\n");
     const built = await build({root, generators: false});
     const verify = () => spawnSync(process.execPath, [resolve("tools/osd-ci-artifact.mjs"), "verify"], {cwd: root, encoding: "utf8"});
+    // unpacked without its closure list: refused, fail closed
+    const unlisted = verify();
+    expect(unlisted.status, unlisted.stdout + unlisted.stderr).to.equal(2);
+    expect(unlisted.stderr).to.include("closure.json is missing");
+    // a real build's shared sources are what live reaches, each by its digest
+    const closure = await ciClosure(root, built.hash);
+    expect(Object.keys(closure.files).length).to.be.greaterThan(0);
+    write(CLOSURE, JSON.stringify(closure));
     const fresh = verify();
     expect(fresh.status, fresh.stdout + fresh.stderr).to.equal(0);
     expect(JSON.parse(fresh.stdout.split("generation: ")[1])).to.include({live: built.hash, tree: built.hash});
@@ -51,14 +61,35 @@ describe("tools/osd-build: the layers, refused before a lock is taken", function
     expect(liveHash(root)).to.equal(built.hash);
   });
 
+  // P2-4: a checkout fetched before privacy was recorded still builds; only
+  // publishing refuses it, and says to rerun osd-fetch
+  it("builds over a fetched identity without recorded privacy and refuses to publish it", async () => {
+    const oci = `localhost:5000/synthetic/pack@sha256:${"a".repeat(64)}`;
+    write("src/zdev.prog.abap", "REPORT zdev.\n");
+    write("packs/test/osd-pack.json", JSON.stringify({abap: ["upstream"], sources: [{folder: "upstream", oci}]}));
+    write("packs/test/upstream/ztest.prog.abap", "REPORT ztest.\n");
+    const identity = {oci, path: "src", exclude: [], files: 1};
+    write("packs/test/.osd-fetched.json", JSON.stringify({upstream: identity}));
+    write("packs/test/upstream/.osd-source.json", JSON.stringify(identity));
+    const built = await build({root, generators: false});
+    expect(liveHash(root)).to.equal(built.hash);
+    const manifest = JSON.parse(readFileSync(join(root, "build/live/manifest.json"), "utf8"));
+    expect(manifest.provenance.find(input => input.path === "packs/test/upstream").private).to.equal(null);
+    expect(() => publicProvenance(root)).to.throw(/rerun node tools\/osd-fetch.mjs/);
+  });
+
   it("hardening 1: CI pack and tar restore retain fetched source markers", () => {
     const oci = `ghcr.io/example/pack@sha256:${"a".repeat(64)}`;
     write("packs/test/osd-pack.json", JSON.stringify({abap: ["upstream"], sources: [{folder: "upstream", oci}]}));
     write("packs/test/upstream/ztest.prog.abap", "REPORT ztest.");
-    const marker = JSON.stringify({upstream: {oci, path: "src", exclude: [], files: 1}});
+    const marker = JSON.stringify({upstream: {oci, path: "src", exclude: [], files: 1, private: false}});
     write("packs/test/.osd-fetched.json", marker);
     write("packs/test/upstream/.osd-source.json", JSON.stringify(JSON.parse(marker).upstream));
     for (const path of ["gen", "output", "build", ".local/lars", ".local/ci-artifact/transpiler"]) mkdirSync(join(root, path), {recursive: true});
+    const hash = hashOf(root, inputsOf(root));
+    write(`build/by-input/${hash}/manifest.json`, JSON.stringify({hash, systemDigest: null, systemPrivate: false,
+      provenance: [{kind: "pack-oci", path: "packs/test/upstream", private: false}], gen: genHash(root)}));
+    symlinkSync(`by-input/${hash}`, join(root, "build/live"));
     const archive = join(root, "artifact.tar");
     const packed = spawnSync(process.execPath, [resolve("tools/osd-ci-artifact.mjs"), "pack", archive], {cwd: root, encoding: "utf8"});
     expect(packed.status, packed.stderr).to.equal(0);
@@ -85,24 +116,21 @@ describe("tools/osd-build: the layers, refused before a lock is taken", function
     expect(existsSync(archive)).to.equal(false);
   });
 
-  // the archive carries all of build/: an older generation's sources too
-  it("refuses to pack a CI artifact beside an older private or unrecorded generation", () => {
-    for (const path of ["gen", "output", "packs", ".local/lars", ".local/ci-artifact/transpiler", "build/by-input/live", "build/by-input/older"]) mkdirSync(join(root, path), {recursive: true});
-    write("build/by-input/live/manifest.json", JSON.stringify({systemDigest: null, systemPrivate: false}));
-    symlinkSync("by-input/live", join(root, "build/live"));
+  // The archive carries only the live generation. Older cache entries stay out.
+  it("packs only the live generation beside older private or unrecorded cache entries", () => {
+    for (const path of ["gen", "output", "packs", ".local/lars", ".local/ci-artifact/transpiler", "build/by-input/older"]) mkdirSync(join(root, path), {recursive: true});
+    const hash = hashOf(root, inputsOf(root));
+    write(`build/by-input/${hash}/manifest.json`, JSON.stringify({hash, systemDigest: null, systemPrivate: false, provenance: [], gen: genHash(root)}));
+    symlinkSync(`by-input/${hash}`, join(root, "build/live"));
     const archive = join(root, "artifact.tar");
     const pack = () => spawnSync(process.execPath, [resolve("tools/osd-ci-artifact.mjs"), "pack", archive], {cwd: root, encoding: "utf8"});
-    for (const [older, message] of [[{systemDigest: `sha256:${"a".repeat(64)}`, systemPrivate: true}, /generation older is from a private system/],
-      [{hash: "older"}, /generation older is not recorded public/]]) {
+    for (const older of [{systemDigest: `sha256:${"a".repeat(64)}`, systemPrivate: true}, {hash: "older"}]) {
       write("build/by-input/older/manifest.json", JSON.stringify(older));
-      const refused = pack();
-      expect(refused.status, refused.stderr).to.not.equal(0);
-      expect(refused.stderr).to.match(message);
-      expect(existsSync(archive)).to.equal(false);
+      const packed = pack();
+      expect(packed.status, packed.stderr).to.equal(0);
+      const names = execFileSync("tar", ["-tf", archive], {encoding: "utf8"});
+      expect(names).not.to.include("build/by-input/older/");
     }
-    write("build/by-input/older/manifest.json", JSON.stringify({systemDigest: null, systemPrivate: false}));
-    const packed = pack();
-    expect(packed.status, packed.stderr).to.equal(0);
     expect(existsSync(archive)).to.equal(true);
   });
 

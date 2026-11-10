@@ -26,12 +26,12 @@ import {cpSync, existsSync, mkdirSync, readdirSync, readFileSync, readlinkSync, 
 import {execFileSync} from "node:child_process";
 import {basename, dirname, join, relative, resolve} from "node:path";
 import {fileURLToPath, pathToFileURL} from "node:url";
-import {assertPublicSystem} from "../tools/osd-system.mjs";
-import {verifyPublicArtefact, writeArtefactProvenance} from "../tools/osd-provenance.mjs";
+import {assertPublicTree, verifyTreeArtefact, writePublicArtefact} from "../tools/osd-public-tree.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const out = resolve(process.argv[2] ?? join(root, ".local", "release"));
-assertPublicSystem(root);
+// the tree is what is copied: it must be the public live generation now
+assertPublicTree(root);
 const say = (m) => console.log(`  ${m}`);
 
 rmSync(out, {recursive: true, force: true});
@@ -130,7 +130,7 @@ const host = (relativePath, name, how) => {
       `contain it -- which is how an evening was spent testing code that was ` +
       `not running. Build it first: ${how}`);
   }
-  verifyPublicArtefact(from);
+  verifyTreeArtefact(from, root);
   cpSync(from, join(out, name));
   say(`host: ${name}, built ${new Date(built).toISOString()}`);
 };
@@ -276,5 +276,6 @@ esac
 execFileSync("chmod", ["+x", join(out, "run.sh")]);
 const size = execFileSync("du", ["-sh", out], {encoding: "utf8"}).split(/\s+/)[0];
 console.log(`${out}: ${size}`);
-writeArtefactProvenance(out);
-verifyPublicArtefact(out);
+// checked again now that it is copied: a fetch while this ran is refused
+writePublicArtefact(out, root);
+verifyTreeArtefact(out, root);

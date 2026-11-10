@@ -35,6 +35,10 @@ export function activeSystem(root, env) {
   return system;
 }
 
+// What publishing says about an input whose privacy is not recorded.
+export const unknownPrivacy = path => `input ${path} has no recorded privacy; rerun node tools/osd-fetch.mjs `
+  + "and rebuild with node tools/osd-build.mjs before publishing (a foreign OCI zip with an empty config stays unknown and cannot be published)";
+
 export function assertPublicSystem(root) {
   const system = activeSystem(root);
   const layer = system?.layers.find(layer => layer.private === true);
@@ -57,16 +61,30 @@ export function assertPublicSystem(root) {
       error.code = "PRIVATE_LAYER";
       throw error;
     }
+    const unknown = generation?.provenance?.find?.(input => input.private === null);
+    if (unknown) fail(unknownPrivacy(unknown.path));
     if (generation?.systemPrivate !== false || !Array.isArray(generation.provenance)
       || generation.provenance.some(input => typeof input.private !== "boolean" || input.private)
       || generation.systemDigest !== (system?.digest ?? null))
       fail("live generation has no matching public system identity; rebuild with node tools/osd-build.mjs");
+  }
+  // A pack fetched after the build is not in the live record. The fetched
+  // identities under packs/ are cheap to read here; the full check of the
+  // tree against the live generation (hash and every current input) is
+  // tools/osd-public-tree.mjs, which every artefact writer and verifier uses.
+  const late = generationSystem(root).provenance.find(input => input.private === true);
+  if (late) {
+    const error = new Error(`private input ${late.path} cannot be published to a public destination`);
+    error.code = "PRIVATE_LAYER";
+    throw error;
   }
 }
 
 // What a generation records about the system it was compiled from.
 export function generationSystem(root, inputs = {}) {
   const system = activeSystem(root);
+  // An installed layer is private only when marked (absent = public, the
+  // byte-identical old format); activeSystem checked each identity.
   const provenance = (system?.layers ?? []).map(layer => ({kind: layer.kind, path: layer.path, digest: layer.digest, private: layer.private === true}));
   const folders = [...(inputs.folders ?? []), ...(inputs.libs ?? []), ...(inputs.bspFolders ?? []),
     ...(inputs.packFolders ?? []), ...(inputs.packFiles ?? []), ...(inputs.sourceLayers ?? []).map(layer => layer.path)];
@@ -75,13 +93,18 @@ export function generationSystem(root, inputs = {}) {
     const dir = resolve(root, path);
     if (seen.has(dir) || !existsSync(dir)) return;
     seen.add(dir);
-    let identity;
+    let identity, privacy = false;
     for (let parent = dir; ; parent = dirname(parent)) {
       for (const file of [".osd-source.json", LAYER_ID]) {
         const at = join(parent, file);
         if (existsSync(at)) {
           try { identity = JSON.parse(readFileSync(at, "utf8")); } catch { fail(`invalid input identity: ${at}`); }
-          if (file === ".osd-source.json" && typeof identity.private !== "boolean") fail(`fetched input has no explicit privacy: ${at}`);
+          // A layer identity without the key is public (the old format). A
+          // fetched identity without a boolean is unknown: one fetched before
+          // the field existed, or a foreign OCI zip with an empty config
+          // (null). Development hashes and builds it; publishing refuses it.
+          privacy = file === LAYER_ID ? identity.private === true
+            : typeof identity.private === "boolean" ? identity.private : null;
           break;
         }
       }
@@ -89,7 +112,7 @@ export function generationSystem(root, inputs = {}) {
     }
     const logical = relative(root, dir);
     provenance.push({kind, path: logical === ".." || logical.startsWith("../") ? `external/${dir.split(/[\\/]/).at(-1)}` : logical,
-      private: identity?.private === true});
+      private: privacy});
   };
   folders.forEach(path => inspect(path, "source"));
   const packDirs = new Set([...(inputs.packFiles ?? []).map(file => dirname(resolve(root, file)))]);
@@ -127,7 +150,7 @@ export function assertPublicGenerations(root) {
 export function unrecordedGeneration(dir) {
   const file = join(dir, "manifest.json");
   if (!existsSync(file)) return false;
-  try { return typeof JSON.parse(readFileSync(file, "utf8")).systemPrivate !== "boolean"; } catch { return true; }
+  try { const record = JSON.parse(readFileSync(file, "utf8")); return typeof record.systemPrivate !== "boolean" || !Array.isArray(record.provenance); } catch { return true; }
 }
 
 export const layerDir = (root, layer) => join(root, ".local/system", layer.path);

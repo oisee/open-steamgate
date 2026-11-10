@@ -119,5 +119,5 @@ async function measure(dir) {
 }
 await measure(app);
 console.log(`VS Code web apps: ${appFiles} files, ${appBytes} bytes (${(appBytes / 1048576).toFixed(2)} MiB), ${Object.keys(components).length} UI5 components`);
-const {writeArtefactProvenance} = await import("../tools/osd-provenance.mjs");
-writeArtefactProvenance(resolve(root, "editors/vscode/dist/web"));
+const {writePublicArtefact} = await import("../tools/osd-public-tree.mjs");
+writePublicArtefact(resolve(root, "editors/vscode/dist/web"), root);
