@@ -19,7 +19,7 @@ const write = {"content-type": "application/json", "x-csrf-token": "open-steamga
 const LATEST = encodeURIComponent("IsActiveEntity eq false or SiblingEntity/IsActiveEntity eq null");
 const LATEST_AND = rest => encodeURIComponent(`(IsActiveEntity eq false or SiblingEntity/IsActiveEntity eq null) and ${rest}`);
 // the draft tables and the admin table of src/rap the demo's BDEF needs
-const trip = () => [...walk("src/rap_r8"), "src/rap/zosd_draft_adm.tabl.xml"].filter(f => /\.(abap|xml|asbdef|asddls|srvdsrv)$/.test(f))
+const trip = () => [...walk("src/rap_r8"), "src/rap/zosd_draft_adm.tabl.xml", "src/rap/zosd_i_draftadm.ddls.asddls", "src/rap/zosd_i_draftadm.ddls.xml"].filter(f => /\.(abap|xml|asbdef|asddls|srvdsrv)$/.test(f))
   .map(f => ({filename: basename(f), contents: readFileSync(f, "utf8")}));
 const pools = files => files.filter(f => /\.clas\.(locals_imp\.)?abap$/.test(f.filename));
 const build = files => {
@@ -229,8 +229,9 @@ describe("RAP R8 draft over OData V4", function () {
 
   it("takes the list filter in its own spelling only, and refuses other SiblingEntity filters (501)", async () => {
     const latest = "IsActiveEntity eq false or SiblingEntity/IsActiveEntity eq null";
+    // SiblingEntity/IsActiveEntity eq null alone is an Editing Status condition since R9 (test/rap-r9.mjs)
     for (const filter of [latest.replace("SiblingEntity", "siblingentity"), `description ne 'x' and ${latest}`,
-      `(${latest}) or description eq 'x'`, "SiblingEntity/IsActiveEntity eq null"]) {
+      `(${latest}) or description eq 'x'`]) {
       const res = await get(`${v4}/Trip?$filter=${encodeURIComponent(filter)}`);
       assert.equal(res.status, 501, `${filter}: ${JSON.stringify(res.body)}`);
     }

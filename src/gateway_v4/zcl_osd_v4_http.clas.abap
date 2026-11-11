@@ -46,6 +46,8 @@ CLASS zcl_osd_v4_http IMPLEMENTATION.
 * its own); a batch that dumped never reached its reset, and the next RAP save
 * would leave its COMMIT to a group that is gone (ZCL_OSD_LUW_HOLD=>HELD).
     zcl_osd_luw_hold=>hold( abap_false ).
+* R9: who sends it (the draft owner); a static, so set on every request
+    zcl_osd_logon=>enter( server->request->get_header_field( 'authorization' ) ).
 * ANORMALIES: posted-form-has-no-fields, V4 GET addendum. Decode once
 * from the raw query: names, form spaces and literal encoded plus signs.
     lv_query = server->request->get_header_field( '~query_string' ).

@@ -95,6 +95,21 @@ function edm(type, where) {
 
 const yamlString = s => JSON.stringify(String(s));
 
+// R9: the CDS view a draft-enabled service serves its draft administrative
+// data from (src/rap/zosd_i_draftadm.ddls.asddls, over ZOSD_DRAFT_ADM), the
+// entity set and type it is served as, and the OData type of each element
+// where the CDS type alone does not say it (docs/rap-runtime.md, R9;
+// unmeasured: a system's set and type names and Edm.Guid for the UUID)
+export const DRAFT_ADMIN = {view: "ZOSD_I_DRAFTADM", set: "DraftAdministrativeData", type: "DraftAdministrativeDataType"};
+// the element names as the view spells them (a virtual element's case is not kept by the CDS parse)
+const DRAFT_ADMIN_NAMES = new Map(["DraftUUID", "DraftEntityType", "CreationDateTime", "CreatedByUser", "LastChangeDateTime",
+  "LastChangedByUser", "InProcessByUser", "CreatedByUserDescription", "LastChangedByUserDescription", "InProcessByUserDescription",
+  "DraftIsCreatedByMe", "DraftIsLastChangedByMe", "DraftIsProcessedByMe"].map(n => [n.toUpperCase(), n]));
+const DRAFT_ADMIN_TYPES = {
+  CREATIONDATETIME: "DateTimeOffset", LASTCHANGEDATETIME: "DateTimeOffset",
+  DRAFTISCREATEDBYME: "Boolean", DRAFTISLASTCHANGEDBYME: "Boolean", DRAFTISPROCESSEDBYME: "Boolean",
+};
+
 /**
  * The stg-compile model of a service definition.
  * entityOf(name) -> {view, fields, behavior} where view is the parsed CDS
@@ -133,6 +148,9 @@ export function serviceYaml(srvd, entityOf, file = "srvd") {
   const aliases = new Set();
   const resolved = [];
   const annotations = [];
+  // R9: the navigations every entity of a draft BO has, SiblingEntity (the
+  // other version of the instance) and DraftAdministrativeData
+  const draftNavs = [];
   for (const x of srvd.exposed) {
     if (aliases.has(upper(x.alias))) throw new Error(`${file}: ${x.alias} is exposed twice`);
     aliases.add(upper(x.alias));
@@ -178,6 +196,7 @@ export function serviceYaml(srvd, entityOf, file = "srvd") {
       lines.push("      HasDraftEntity: {type: Boolean, field: HASDRAFTENTITY, readonly: true, label: \"HasDraftEntity\"}");
       // the actions Fiori Elements V4 calls by the names Common.DraftRoot
       // gives; Discard is the DELETE of the draft root (docs/rap-runtime.md, R8)
+      draftNavs.push(x.alias);
       if (draft.root) annotations.push(`  ${type}:`, `    draftRoot: {set: ${x.alias}, activation: ${service}.Activate, edit: ${service}.Edit, prepare: ${service}.Prepare}`);
       else annotations.push(`  ${type}:`, `    draftNode: {set: ${x.alias}}`);
     }
@@ -191,6 +210,24 @@ export function serviceYaml(srvd, entityOf, file = "srvd") {
       if (draft && upper(a) === "EDIT") params.push("PreserveChanges: Boolean");
       functions.push(`  ${a}:`, "    method: POST", `    returns: {entity: ${type}, set: ${x.alias}, multiplicity: "1"}`, `    for: ${type}`,
         `    parameters: {${params.join(", ")}}`);
+    }
+  }
+  if (draftNavs.length) {
+    if (aliases.has(upper(DRAFT_ADMIN.set))) throw new Error(`${file}: ${DRAFT_ADMIN.set} is the draft administrative data of a draft service`);
+    let admin;
+    try {
+      admin = entityOf(DRAFT_ADMIN.view);
+    } catch (error) {
+      throw new Error(`${file}: a draft service serves ${DRAFT_ADMIN.view} as ${DRAFT_ADMIN.set}: ${error.message}`);
+    }
+    const prop = f => DRAFT_ADMIN_NAMES.get(upper(f.name)) ?? f.name;
+    lines.push(`  ${DRAFT_ADMIN.type}:`, `    set: ${DRAFT_ADMIN.set}`,
+      `    source: {cds: ${DRAFT_ADMIN.view}, struct: "${upper(classNameOf("zcl_stg_cds_", admin.view.sqlView))}=>TY_ROW"}`,
+      `    keys: [${admin.fields.filter(f => f.key).map(prop).join(", ")}]`,
+      "    creatable: false", "    updatable: false", "    deletable: false", "    operations: [R, Q]", "    properties:");
+    for (const f of admin.fields) {
+      const type = DRAFT_ADMIN_TYPES[upper(f.name)] ?? edm(f.type, `${DRAFT_ADMIN.view}.${f.name}`);
+      lines.push(`      ${prop(f)}: {type: ${type}, field: ${upper(f.name)}, readonly: true, label: ${yamlString(prop(f))}}`);
     }
   }
   // R5: the associations of an exposed entity to another exposed entity are
@@ -215,6 +252,17 @@ export function serviceYaml(srvd, entityOf, file = "srvd") {
       if (!parent) assocLines.push(`    constraint: {${a.pairs.map(pr => `${element(r, pr.source)}: ${element(to, pr.target)}`).join(", ")}}`);
       assocLines.push(`    navigation: {${r.type}: ${nav}}`);
     }
+  }
+  // R9: SiblingEntity is the same type (no constraint: the key without
+  // IsActiveEntity, the other version); DraftAdministrativeData the admin
+  // row of the instance's draft. Both 0..1, both resolved by the SADL data
+  // provider (zcl_stg_sadl_dpc), not by CDS associations
+  for (const alias of draftNavs) {
+    const type = `${alias}Type`;
+    assocLines.push(`  ${alias}_SiblingEntity:`, `    from: ${type}`, `    to: ${type}`, `    cardinality: "1:0"`, `    set: ${alias}_SiblingEntity`,
+      `    navigation: {${type}: SiblingEntity}`);
+    assocLines.push(`  ${alias}_DraftAdministrativeData:`, `    from: ${type}`, `    to: ${DRAFT_ADMIN.type}`, `    cardinality: "1:0"`,
+      `    set: ${alias}_DraftAdministrativeData`, `    navigation: {${type}: DraftAdministrativeData}`);
   }
   if (assocLines.length) lines.push("associations:", ...assocLines);
   if (functions.length) lines.push("functions:", ...functions);

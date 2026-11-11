@@ -50,6 +50,22 @@ CLASS zcl_stg_sadl_dpc DEFINITION PUBLIC INHERITING FROM /iwbep/cl_mgw_push_abs_
       RETURNING
         VALUE(rr_data) TYPE REF TO data.
 
+* R9 (docs/rap-runtime.md): Set(key)/SiblingEntity, the other version of
+* a draft-enabled instance, and Set(key)/DraftAdministrativeData, the admin
+* row of its draft; neither is a CDS association. Returns abap_false when
+* the navigation is neither (or the source has no drafts)
+    METHODS draft_navigation
+      IMPORTING
+        io_context      TYPE REF TO zcl_stg_request_context
+        is_path         TYPE /iwbep/s_mgw_navigation_path
+        is_entity       TYPE zcl_stg_cds_registry=>ty_entity
+      EXPORTING
+        es_data         TYPE any
+      RETURNING
+        VALUE(rv_known) TYPE abap_bool
+      RAISING
+        /iwbep/cx_mgw_tech_exception.
+
     METHODS entity_of
       IMPORTING
         iv_entity_set    TYPE string
@@ -216,6 +232,78 @@ CLASS zcl_stg_sadl_dpc IMPLEMENTATION.
       lv_class = is_entity-source_class.
     ENDIF.
     CREATE OBJECT ro_source TYPE (lv_class).
+  ENDMETHOD.
+
+  METHOD draft_navigation.
+    DATA lv_nav     TYPE string.
+    DATA ls_source  TYPE zcl_stg_cds_registry=>ty_entity.
+    DATA lt_flags   TYPE /iwbep/t_mgw_select_option.
+    DATA lt_keys    TYPE /iwbep/t_mgw_name_value_pair.
+    DATA lr_data    TYPE REF TO data.
+    DATA lo_source  TYPE REF TO zif_stg_cds_source.
+    DATA lv_uuid    TYPE x LENGTH 16.
+    DATA lv_hex     TYPE string.
+    DATA lt_none    TYPE string_table.
+    FIELD-SYMBOLS <ls_flag>  LIKE LINE OF lt_flags.
+    FIELD-SYMBOLS <ls_opt>   TYPE /iwbep/s_cod_select_option.
+    FIELD-SYMBOLS <lt_data>  TYPE STANDARD TABLE.
+    FIELD-SYMBOLS <ls_row>   TYPE any.
+    FIELD-SYMBOLS <lv_uuid>  TYPE any.
+
+    CLEAR es_data.
+    lv_nav = to_upper( is_path-nav_prop ).
+    IF lv_nav <> 'SIBLINGENTITY' AND lv_nav <> 'DRAFTADMINISTRATIVEDATA'.
+      RETURN.
+    ENDIF.
+    ls_source = entity_of( io_context->mv_source_entity_set ).
+    IF draft_class_of( ls_source ) IS INITIAL.
+      RETURN.
+    ENDIF.
+    rv_known = abap_true.
+    split_flags( EXPORTING it_key_tab = is_path-key_tab IMPORTING et_key_tab = lt_keys CHANGING ct_flags = lt_flags ).
+    IF lv_nav = 'SIBLINGENTITY'.
+* the same key, the other version
+      LOOP AT lt_flags ASSIGNING <ls_flag> WHERE property = 'ISACTIVEENTITY'.
+        LOOP AT <ls_flag>-select_options ASSIGNING <ls_opt>.
+          IF <ls_opt>-low IS INITIAL.
+            <ls_opt>-low = abap_true.
+          ELSE.
+            CLEAR <ls_opt>-low.
+          ENDIF.
+        ENDLOOP.
+      ENDLOOP.
+      lr_data = read_versions( is_entity = ls_source iv_where = key_where( lt_keys ) it_orderby = lt_none it_flags = lt_flags ).
+      ASSIGN lr_data->* TO <lt_data>.
+      READ TABLE <lt_data> INDEX 1 ASSIGNING <ls_row>.
+      IF sy-subrc = 0.
+        es_data = <ls_row>.
+      ENDIF.
+      RETURN.
+    ENDIF.
+* the admin row of the instance's draft: a draft's own, an active
+* instance's when it has one (its DRAFTUUID), none otherwise
+    lr_data = read_versions( is_entity = ls_source iv_where = key_where( lt_keys ) it_orderby = lt_none it_flags = lt_flags ).
+    ASSIGN lr_data->* TO <lt_data>.
+    READ TABLE <lt_data> INDEX 1 ASSIGNING <ls_row>.
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+    ASSIGN COMPONENT 'DRAFTUUID' OF STRUCTURE <ls_row> TO <lv_uuid>.
+    IF sy-subrc <> 0 OR <lv_uuid> IS INITIAL.
+      RETURN.
+    ENDIF.
+    lv_uuid = <lv_uuid>.
+    lv_hex = lv_uuid.
+    lo_source = source_of( is_entity ).
+    lr_data = lo_source->read( iv_where   = |DRAFTUUID = { sql_literal( lv_hex ) }|
+                               it_orderby = lt_none ).
+    ASSIGN lr_data->* TO <lt_data>.
+    calculate_virtual( EXPORTING is_entity = is_entity
+                       CHANGING  ct_data   = <lt_data> ).
+    READ TABLE <lt_data> INDEX 1 ASSIGNING <ls_row>.
+    IF sy-subrc = 0.
+      es_data = <ls_row>.
+    ENDIF.
   ENDMETHOD.
 
   METHOD draft_class_of.
@@ -618,6 +706,7 @@ CLASS zcl_stg_sadl_dpc IMPLEMENTATION.
       IF sy-subrc = 0.
         split_flags( EXPORTING it_key_tab = ls_navpath-key_tab IMPORTING et_key_tab = lt_nokeys CHANGING ct_flags = lt_flags ).
       ENDIF.
+      APPEND LINES OF lo_context->mt_draft_filter TO lt_flags.
       lo_context->mt_filter = lt_filter.
       lv_where = io_tech_request_context->get_osql_where_clause( ).
       lo_context->mt_filter = lt_keep.
@@ -721,6 +810,13 @@ CLASS zcl_stg_sadl_dpc IMPLEMENTATION.
     ls_entity = entity_of( io_tech_request_context->get_entity_set_name( ) ).
     lo_source = source_of( ls_entity ).
 
+* R9: the two navigations of a draft-enabled entity that are no association
+    READ TABLE lo_context->mt_navigation_path INTO ls_navpath INDEX 1.
+    IF sy-subrc = 0 AND draft_navigation( EXPORTING io_context = lo_context is_path = ls_navpath is_entity = ls_entity
+                                          IMPORTING es_data = es_data ) = abap_true.
+      RETURN.
+    ENDIF.
+    CLEAR ls_navpath.
 * through a navigation the association pairs identify the target; the key
 * tab then still holds the source keys and must not be applied
     IF draft_class_of( ls_entity ) IS NOT INITIAL.

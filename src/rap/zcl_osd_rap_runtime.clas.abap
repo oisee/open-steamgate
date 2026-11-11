@@ -286,6 +286,15 @@ CLASS zcl_osd_rap_runtime DEFINITION PUBLIC CREATE PRIVATE.
       RETURNING
         VALUE(rv_exists) TYPE abap_bool.
 
+* R9: who the draft of the root instance IS_KEYS names is in process by
+* (initial: no draft, or one of this transaction)
+    METHODS draft_holder
+      IMPORTING
+        is_root        TYPE zif_osd_rap_bo=>ty_entity
+        is_keys        TYPE any
+      RETURNING
+        VALUE(rv_user) TYPE syuname.
+
 * R8: the draft actions (KIND E) on the instance at IV_INDEX
     METHODS draft_action
       IMPORTING
@@ -355,6 +364,29 @@ CLASS zcl_osd_rap_runtime DEFINITION PUBLIC CREATE PRIVATE.
         cs_reported     TYPE any
       RETURNING
         VALUE(rv_index) TYPE i
+      RAISING
+        zcx_osd_rap.
+
+* R9: the user a draft is in process by (ZOSD_DRAFT_ADM), initial when
+* the admin row is not written yet (a draft of this transaction)
+    METHODS holder_of
+      IMPORTING
+        iv_uuid        TYPE zosd_draft_adm-draftuuid
+      RETURNING
+        VALUE(rv_user) TYPE syuname.
+
+* R9: whether the draft at IV_INDEX (any instance of its tree) belongs to
+* another user than the request's; FAILED and REPORTED say so when it does
+    METHODS foreign_draft
+      IMPORTING
+        is_entity       TYPE zif_osd_rap_bo=>ty_entity
+        iv_index        TYPE i
+        is_input        TYPE any
+      CHANGING
+        cs_failed       TYPE any
+        cs_reported     TYPE any
+      RETURNING
+        VALUE(rv_foreign) TYPE abap_bool
       RAISING
         zcx_osd_rap.
 
@@ -1637,6 +1669,13 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
         ev_ok = abap_false.
         RETURN.
       ENDIF.
+* R9: a draft is its owner's: another user's change of it is refused
+      IF is_draft( <ls_row> ) = abap_true AND ls_inst-created = abap_false
+          AND foreign_draft( EXPORTING is_entity = is_entity iv_index = iv_index is_input = is_input
+                             CHANGING cs_failed = cs_failed cs_reported = cs_reported ) = abap_true.
+        ev_ok = abap_false.
+        RETURN.
+      ENDIF.
     ENDIF.
     IF ls_inst-created = abap_true.
       RETURN.
@@ -2702,7 +2741,8 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
       ASSIGN COMPONENT ls_field-name OF STRUCTURE <ls_row> TO <lv_value>.
       CHECK sy-subrc = 0.
       IF ls_field-admin CP '*_BY'.
-        <lv_value> = sy-uname.
+* R9: the request's user (SY-UNAME without a credential, ZCL_OSD_LOGON)
+        <lv_value> = zcl_osd_logon=>user( ).
       ELSE.
         GET TIME STAMP FIELD lv_now.
         lv_old = <lv_value>.
@@ -3255,6 +3295,87 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
     ENDIF.
   ENDMETHOD.
 
+  METHOD draft_holder.
+    DATA lr_keys  TYPE REF TO data.
+    DATA lr_line  TYPE REF TO data.
+    DATA lv_key   TYPE string.
+    DATA lv_index TYPE i.
+    DATA ls_inst  TYPE ty_inst.
+    DATA lv_uuid  TYPE zosd_draft_adm-draftuuid.
+    FIELD-SYMBOLS <ls_keys> TYPE any.
+    FIELD-SYMBOLS <ls_line> TYPE any.
+    FIELD-SYMBOLS <lv_uuid> TYPE any.
+
+    lr_keys = new_row( is_root ).
+    ASSIGN lr_keys->* TO <ls_keys>.
+    copy_keys( EXPORTING is_entity = is_root is_from = is_keys CHANGING cs_to = <ls_keys> ).
+    set_draft( EXPORTING iv_on = abap_true CHANGING cs_row = <ls_keys> ).
+    lv_key = key_of( is_entity = is_root is_row = <ls_keys> ).
+    lv_index = index_of( iv_entity = is_root-name iv_key = lv_key ).
+    IF lv_index > 0.
+      READ TABLE mt_inst INDEX lv_index INTO ls_inst.
+      IF ls_inst-state = co_operation-delete OR ls_inst-created = abap_true.
+        RETURN.
+      ENDIF.
+      lv_uuid = ls_inst-admin_uuid.
+    ENDIF.
+    IF lv_uuid IS INITIAL.
+      lr_line = table_row( is_entity = is_root is_keys = <ls_keys> ).
+      IF lr_line IS INITIAL.
+        RETURN.
+      ENDIF.
+      ASSIGN lr_line->* TO <ls_line>.
+      ASSIGN COMPONENT 'DRAFTADMINISTRATIVEDATAUUID' OF STRUCTURE <ls_line> TO <lv_uuid>.
+      IF sy-subrc <> 0.
+        RETURN.
+      ENDIF.
+      lv_uuid = <lv_uuid>.
+    ENDIF.
+    rv_user = holder_of( lv_uuid ).
+  ENDMETHOD.
+
+  METHOD holder_of.
+    DATA lv_uuid TYPE zosd_draft_adm-draftuuid.
+    lv_uuid = iv_uuid.
+    IF lv_uuid IS INITIAL.
+      RETURN.
+    ENDIF.
+    SELECT SINGLE inprocessbyuser FROM zosd_draft_adm INTO rv_user WHERE draftuuid = lv_uuid.
+    IF sy-subrc <> 0.
+      CLEAR rv_user.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD foreign_draft.
+* R9 (docs/rap-runtime.md, "The owner"): the user a draft is in process by
+* holds it; the same user resumes it, anybody else is refused, as the
+* exclusive lock of Edit refuses them on a system (unmeasured: the cause a
+* system gives and its text, and the expiry after which another user may
+* take a draft over -- there is none here)
+    DATA lv_holder TYPE syuname.
+    DATA ls_root   TYPE zif_osd_rap_bo=>ty_entity.
+    DATA lv_root   TYPE i.
+    DATA ls_inst   TYPE ty_inst.
+    FIELD-SYMBOLS <ls_row> TYPE any.
+
+    lv_holder = holder_of( admin_uuid( is_entity = is_entity iv_index = iv_index ) ).
+    IF lv_holder IS INITIAL OR lv_holder = zcl_osd_logon=>user( ).
+      RETURN.
+    ENDIF.
+    rv_foreign = abap_true.
+    root_of( EXPORTING is_entity = is_entity iv_index = iv_index IMPORTING es_root = ls_root ev_index = lv_root ).
+    IF lv_root = 0.
+      ls_root = is_entity.
+      lv_root = iv_index.
+    ENDIF.
+    READ TABLE mt_inst INDEX lv_root INTO ls_inst.
+    ASSIGN ls_inst-row->* TO <ls_row>.
+    fail( EXPORTING is_entity = is_entity is_input = is_input
+                    iv_cause = if_abap_behv=>cause-locked
+                    iv_text = |{ ls_root-alias } { key_text( is_entity = ls_root is_row = <ls_row> ) } is a draft of user { lv_holder }|
+          CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
+  ENDMETHOD.
+
   METHOD result_row.
     FIELD-SYMBOLS <ls_out>   TYPE any.
     FIELD-SYMBOLS <ls_param> TYPE any.
@@ -3274,6 +3395,7 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
     DATA lv_ok     TYPE abap_bool.
     DATA lv_uuid   TYPE x LENGTH 16.
     DATA lv_index  TYPE i.
+    DATA lv_holder TYPE syuname.
     FIELD-SYMBOLS <ls_row>    TYPE any.
     FIELD-SYMBOLS <ls_copy>   TYPE any.
 
@@ -3302,9 +3424,25 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
       RETURN.
     ENDIF.
 
+* R9: Activate, Discard, Resume and Prepare of another user's draft are refused
+    IF lv_draft = abap_true AND ls_inst-created = abap_false
+        AND foreign_draft( EXPORTING is_entity = is_entity iv_index = iv_index is_input = is_key
+                           CHANGING cs_failed = cs_failed cs_reported = cs_reported ) = abap_true.
+      RETURN.
+    ENDIF.
+
     CASE iv_action.
       WHEN 'EDIT'.
-* one draft per instance: a second Edit is a conflict
+* one draft per instance: a second Edit is a conflict; R9: the draft of
+* another user locks the instance (unmeasured: a system's cause and text)
+        lv_holder = draft_holder( is_root = is_entity is_keys = <ls_row> ).
+        IF lv_holder IS NOT INITIAL AND lv_holder <> zcl_osd_logon=>user( ).
+          fail( EXPORTING is_entity = is_entity is_input = is_key
+                          iv_cause = if_abap_behv=>cause-locked
+                          iv_text = |{ is_entity-alias } { key_text( is_entity = is_entity is_row = <ls_row> ) } is locked by user { lv_holder }|
+                CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
+          RETURN.
+        ENDIF.
         IF draft_exists( is_root = is_entity is_keys = <ls_row> ) = abap_true.
           fail( EXPORTING is_entity = is_entity is_input = is_key
                           iv_cause = if_abap_behv=>cause-conflict
@@ -3676,14 +3814,14 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
       CLEAR ls_adm.
       ls_adm-draftuuid        = lv_uuid.
       ls_adm-draftentitytype  = ms_model-bdef.
-      ls_adm-createdbyuser    = sy-uname.
+      ls_adm-createdbyuser    = zcl_osd_logon=>user( ).
       ls_adm-creationdatetime = lv_now.
-      ls_adm-inprocessbyuser  = sy-uname.
-      ls_adm-lastchangedbyuser  = sy-uname.
+      ls_adm-inprocessbyuser  = zcl_osd_logon=>user( ).
+      ls_adm-lastchangedbyuser  = zcl_osd_logon=>user( ).
       ls_adm-lastchangedatetime = lv_now.
       INSERT zosd_draft_adm FROM ls_adm.
     ELSE.
-      ls_adm-lastchangedbyuser  = sy-uname.
+      ls_adm-lastchangedbyuser  = zcl_osd_logon=>user( ).
       ls_adm-lastchangedatetime = lv_now.
       UPDATE zosd_draft_adm FROM ls_adm.
     ENDIF.
