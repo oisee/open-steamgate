@@ -176,6 +176,34 @@ CLASS zcl_osd_rap_runtime DEFINITION PUBLIC CREATE PRIVATE.
 * forget the buffer without writing it
     METHODS rollback.
 
+* R10: the augment of a projection (use create / update ( augment )): the
+* generated class IO_AUGMENT calls the projection pool's FOR MODIFY method
+* with the request's rows while this runtime is active, so its MODIFY
+* AUGMENTING ENTITIES (EML) lands in this transaction. EV_FAILED: the rows
+* the augment put into its FAILED
+    METHODS augment
+      IMPORTING
+        io_augment TYPE REF TO zif_osd_rap_augment
+        iv_entity  TYPE csequence
+        ir_create  TYPE REF TO data OPTIONAL
+        ir_update  TYPE REF TO data OPTIONAL
+      EXPORTING
+        ev_failed  TYPE i
+      RAISING
+        zcx_osd_rap.
+
+* R10: late numbering. After a save, the final key adjust_numbers gave an
+* instance the transaction created under a preliminary key: CS_ROW (a row of
+* IV_ENTITY with its keys, IsActiveEntity or %is_draft) gets the final key
+* when its key was a preliminary one of the last save, and stays otherwise
+    METHODS final_key
+      IMPORTING
+        iv_entity TYPE csequence
+      CHANGING
+        cs_row    TYPE any
+      RAISING
+        zcx_osd_rap.
+
 * the behavior definition this runtime runs
     METHODS bo
       RETURNING
@@ -242,6 +270,32 @@ CLASS zcl_osd_rap_runtime DEFINITION PUBLIC CREATE PRIVATE.
 * R8: Activate takes the lock of the active root while its draft still
 * exists; the draft is the activation's own and does not refuse it
     DATA mv_activating TYPE abap_bool.
+* R10: the preliminary and final keys of the last save's late numbering
+    TYPES:
+      BEGIN OF ty_late,
+        entity TYPE string,
+        pre    TYPE string,
+        row    TYPE REF TO data,
+      END OF ty_late,
+      tt_late TYPE STANDARD TABLE OF ty_late WITH DEFAULT KEY.
+    DATA mt_late TYPE tt_late.
+
+* R10: a preliminary key and %pid for an instance of a late-numbered entity
+* (docs/rap-runtime.md, R10)
+    METHODS late_key
+      IMPORTING
+        is_entity TYPE zif_osd_rap_bo=>ty_entity
+      CHANGING
+        cs_row    TYPE any
+      RAISING
+        zcx_osd_rap.
+* R10: the save's adjust_numbers: MAPPED LATE of every created active
+* instance of a late-numbered entity to the savers, the final keys back
+    METHODS late_numbers
+      CHANGING
+        cs_reported TYPE any
+      RAISING
+        zcx_osd_rap.
 
     METHODS entity_of
       IMPORTING
@@ -934,6 +988,14 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
       CHECK sy-subrc = 0.
       <lv_to> = <lv_from>.
     ENDLOOP.
+* R10: %pid is part of %pky (late numbering)
+    ASSIGN COMPONENT '%PID' OF STRUCTURE is_from TO <lv_from>.
+    IF sy-subrc = 0.
+      ASSIGN COMPONENT '%PID' OF STRUCTURE cs_to TO <lv_to>.
+      IF sy-subrc = 0.
+        <lv_to> = <lv_from>.
+      ENDIF.
+    ENDIF.
 * R8: %is_draft is part of %tky
     ASSIGN COMPONENT '%IS_DRAFT' OF STRUCTURE is_from TO <lv_from>.
     IF sy-subrc = 0.
@@ -1291,6 +1353,10 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
     ENDLOOP.
 
     set_draft( EXPORTING iv_on = is_draft( is_input ) CHANGING cs_row = <ls_row> ).
+* R10: late numbering -- a preliminary key and %pid until adjust_numbers
+    IF is_entity-numbering = 'L'.
+      late_key( EXPORTING is_entity = is_entity CHANGING cs_row = <ls_row> ).
+    ENDIF.
     ls_inst-entity = is_entity-name.
     ls_inst-key    = key_of( is_entity = is_entity is_row = <ls_row> ).
     lv_index = index_of( iv_entity = is_entity-name iv_key = ls_inst-key ).
@@ -2937,6 +3003,7 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
     DATA lv_business TYPE abap_bool.
 
     ev_saved = abap_false.
+    CLEAR mt_late.
     lt_savers = savers( ).
     lv_before = count_failed( cs_failed ).
     CLEAR mt_done.
@@ -2968,12 +3035,10 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-* R7: no late numbering, so adjust_numbers has nothing to map and is
-* called without parameters
+* R10: adjust_numbers of the savers that redefine it, with MAPPED LATE of
+* the instances created under a preliminary key (late numbering)
     APPEND 'ADJUST_NUMBERS' TO mt_trace.
-    LOOP AT lt_savers INTO lo_saver.
-      lo_saver->adjust_numbers( ).
-    ENDLOOP.
+    late_numbers( CHANGING cs_reported = cs_reported ).
 
     APPEND 'SAVE' TO mt_trace.
 * R7: a failure in the save ends the transaction here: the LUW is rolled
@@ -3026,6 +3091,243 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
     mi_luw->discard( ).
     CLEAR: mt_inst, mt_done.
     ev_saved = abap_true.
+  ENDMETHOD.
+
+  METHOD augment.
+    DATA lv_top   TYPE i.
+    DATA lx_error TYPE REF TO cx_root.
+
+    APPEND |AUGMENT { iv_entity }| TO mt_trace.
+    APPEND me TO gt_active.
+    TRY.
+        io_augment->augment( EXPORTING iv_entity = iv_entity ir_create = ir_create ir_update = ir_update
+                             IMPORTING ev_failed = ev_failed ).
+      CATCH cx_root INTO lx_error.
+        lv_top = lines( gt_active ).
+        DELETE gt_active INDEX lv_top.
+        RAISE EXCEPTION TYPE zcx_osd_rap EXPORTING iv_reason = |augment of { iv_entity }: { lx_error->get_text( ) }|.
+    ENDTRY.
+    lv_top = lines( gt_active ).
+    DELETE gt_active INDEX lv_top.
+  ENDMETHOD.
+
+  METHOD late_key.
+* the preliminary key counts down from the largest value of the key's type,
+* skipping every key an active instance, a draft or the buffer has: the
+* final key adjust_numbers draws counts up from the number range, so the two
+* do not meet (unmeasured: on a system the key may stay initial and %pid
+* alone names the instance; a key is what OData addresses, so one is given)
+    DATA ls_field TYPE zif_osd_rap_bo=>ty_field.
+    DATA lv_kind  TYPE c LENGTH 1.
+    DATA lv_len   TYPE i.
+    DATA lv_k     TYPE i.
+    DATA lv_value TYPE string.
+    DATA lv_num   TYPE string.
+    DATA lv_int   TYPE i.
+    DATA lv_tail  TYPE i.
+    DATA lv_x16   TYPE x LENGTH 16.
+    DATA lr_probe TYPE REF TO data.
+    DATA lv_taken TYPE abap_bool.
+    DATA lv_keys  TYPE i.
+    FIELD-SYMBOLS <lv_key>   TYPE any.
+    FIELD-SYMBOLS <lv_pid>   TYPE any.
+    FIELD-SYMBOLS <ls_probe> TYPE any.
+    FIELD-SYMBOLS <lv_probe> TYPE any.
+
+    ASSIGN COMPONENT '%PID' OF STRUCTURE cs_row TO <lv_pid>.
+    IF sy-subrc = 0 AND <lv_pid> IS INITIAL.
+      TRY.
+          lv_x16 = cl_system_uuid=>create_uuid_x16_static( ).
+        CATCH cx_uuid_error.
+          RAISE EXCEPTION TYPE zcx_osd_rap EXPORTING iv_reason = |no %pid for { is_entity-name }|.
+      ENDTRY.
+      <lv_pid> = lv_x16.
+    ENDIF.
+    LOOP AT is_entity-fields INTO ls_field WHERE key = abap_true.
+      lv_keys = lv_keys + 1.
+      ASSIGN COMPONENT ls_field-name OF STRUCTURE cs_row TO <lv_key>.
+      IF <lv_key> IS NOT INITIAL.
+        RETURN.
+      ENDIF.
+    ENDLOOP.
+    IF lv_keys <> 1.
+      RAISE EXCEPTION TYPE zcx_osd_rap EXPORTING iv_reason = |late numbering of { is_entity-name }: a preliminary key for more than one key field is outside R10|.
+    ENDIF.
+    DESCRIBE FIELD <lv_key> TYPE lv_kind OUTPUT-LENGTH lv_len.
+    IF lv_kind <> 'N' AND lv_kind <> 'C' AND lv_kind <> 'I'.
+      RAISE EXCEPTION TYPE zcx_osd_rap EXPORTING iv_reason = |late numbering of { is_entity-name }: a preliminary key of type { lv_kind } is outside R10|.
+    ENDIF.
+    lr_probe = new_row( is_entity ).
+    ASSIGN lr_probe->* TO <ls_probe>.
+    ASSIGN COMPONENT ls_field-name OF STRUCTURE <ls_probe> TO <lv_probe>.
+    IF lv_kind = 'I'.
+      lv_len = 9.
+    ENDIF.
+    lv_tail = lv_len.
+    IF lv_tail > 9.
+      lv_tail = 9.
+    ENDIF.
+    DO 1000 TIMES.
+      lv_k = sy-index - 1.
+      lv_int = 1.
+      DO lv_tail TIMES.
+        lv_int = lv_int * 10.
+      ENDDO.
+      lv_int = lv_int - 1 - lv_k.
+      lv_num = lv_int.
+      lv_num = condense( lv_num ).
+      lv_value = repeat( val = '9' occ = lv_len - lv_tail ) && repeat( val = '0' occ = lv_tail - strlen( lv_num ) ) && lv_num.
+      <lv_probe> = lv_value.
+      lv_taken = abap_false.
+      set_draft( EXPORTING iv_on = abap_false CHANGING cs_row = <ls_probe> ).
+      IF index_of( iv_entity = is_entity-name iv_key = key_of( is_entity = is_entity is_row = <ls_probe> ) ) > 0
+          OR select_row( is_entity = is_entity is_keys = <ls_probe> ) IS NOT INITIAL.
+        lv_taken = abap_true.
+      ENDIF.
+      IF ms_model-draft = abap_true AND lv_taken = abap_false.
+        set_draft( EXPORTING iv_on = abap_true CHANGING cs_row = <ls_probe> ).
+        IF index_of( iv_entity = is_entity-name iv_key = key_of( is_entity = is_entity is_row = <ls_probe> ) ) > 0
+            OR select_row( is_entity = is_entity is_keys = <ls_probe> ) IS NOT INITIAL.
+          lv_taken = abap_true.
+        ENDIF.
+      ENDIF.
+      IF lv_taken = abap_false.
+        <lv_key> = lv_value.
+        RETURN.
+      ENDIF.
+    ENDDO.
+    RAISE EXCEPTION TYPE zcx_osd_rap EXPORTING iv_reason = |late numbering of { is_entity-name }: no free preliminary key|.
+  ENDMETHOD.
+
+  METHOD late_numbers.
+    DATA ls_entity TYPE zif_osd_rap_bo=>ty_entity.
+    DATA ls_field  TYPE zif_osd_rap_bo=>ty_field.
+    DATA ls_saver  TYPE zif_osd_rap_bo=>ty_saver.
+    DATA lt_savers LIKE mt_savers.
+    DATA lo_saver  TYPE REF TO cl_abap_behavior_saver.
+    DATA lr_mapped TYPE REF TO data.
+    DATA lr_rep    TYPE REF TO data.
+    DATA ls_late   TYPE ty_late.
+    DATA lt_index  TYPE STANDARD TABLE OF i WITH DEFAULT KEY.
+    DATA lv_index  TYPE i.
+    DATA lv_row    TYPE i.
+    DATA lv_any    TYPE abap_bool.
+    FIELD-SYMBOLS <ls_inst>   TYPE ty_inst.
+    FIELD-SYMBOLS <ls_mapped> TYPE any.
+    FIELD-SYMBOLS <lt_late>   TYPE STANDARD TABLE.
+    FIELD-SYMBOLS <ls_late>   TYPE any.
+    FIELD-SYMBOLS <ls_row>    TYPE any.
+    FIELD-SYMBOLS <lv_from>   TYPE any.
+    FIELD-SYMBOLS <lv_to>     TYPE any.
+    FIELD-SYMBOLS <ls_tmp>    TYPE any.
+
+    LOOP AT ms_model-entities INTO ls_entity WHERE numbering = 'L'.
+      lv_any = abap_true.
+    ENDLOOP.
+    IF lv_any = abap_false.
+      RETURN.
+    ENDIF.
+    lr_mapped = mo_bo->new_response( 'MAPPED LATE' ).
+    ASSIGN lr_mapped->* TO <ls_mapped>.
+    LOOP AT ms_model-entities INTO ls_entity WHERE numbering = 'L'.
+      ASSIGN COMPONENT ls_entity-response OF STRUCTURE <ls_mapped> TO <lt_late>.
+      CHECK sy-subrc = 0.
+      CLEAR lt_index.
+* a created active instance (a draft keeps its preliminary key until it is
+* activated, and Activate creates the active instance)
+      LOOP AT mt_inst ASSIGNING <ls_inst> WHERE entity = ls_entity-name AND state = co_operation-create.
+        CHECK NOT <ls_inst>-key CP 'D|*'.
+        lv_index = sy-tabix.
+        ASSIGN <ls_inst>-row->* TO <ls_row>.
+        APPEND INITIAL LINE TO <lt_late> ASSIGNING <ls_late>.
+        ASSIGN COMPONENT '%PID' OF STRUCTURE <ls_row> TO <lv_from>.
+        IF sy-subrc = 0.
+          ASSIGN COMPONENT '%PID' OF STRUCTURE <ls_late> TO <lv_to>.
+          IF sy-subrc = 0.
+            <lv_to> = <lv_from>.
+          ENDIF.
+        ENDIF.
+        ASSIGN COMPONENT '%TMP' OF STRUCTURE <ls_late> TO <ls_tmp>.
+        LOOP AT ls_entity-fields INTO ls_field WHERE key = abap_true.
+          ASSIGN COMPONENT ls_field-name OF STRUCTURE <ls_row> TO <lv_from>.
+          ASSIGN COMPONENT ls_field-name OF STRUCTURE <ls_tmp> TO <lv_to>.
+          IF sy-subrc = 0.
+            <lv_to> = <lv_from>.
+          ENDIF.
+        ENDLOOP.
+        APPEND lv_index TO lt_index.
+      ENDLOOP.
+      IF lt_index IS INITIAL.
+        CONTINUE.
+      ENDIF.
+      lt_savers = savers( ).
+      GET REFERENCE OF cs_reported INTO lr_rep.
+      LOOP AT ms_model-savers INTO ls_saver WHERE adjust = abap_true.
+        READ TABLE lt_savers INDEX sy-tabix INTO lo_saver.
+        CHECK sy-subrc = 0.
+        mo_bo->adjust_numbers( io_saver = lo_saver ir_mapped = lr_mapped ir_reported = lr_rep ).
+      ENDLOOP.
+* the final keys back into the instances: their rows are what the save writes
+      LOOP AT lt_index INTO lv_index.
+        lv_row = sy-tabix.
+        READ TABLE mt_inst INDEX lv_index ASSIGNING <ls_inst>.
+        READ TABLE <lt_late> INDEX lv_row ASSIGNING <ls_late>.
+        ASSIGN <ls_inst>-row->* TO <ls_row>.
+        CLEAR ls_late.
+        ls_late-entity = ls_entity-name.
+        ls_late-pre = <ls_inst>-key.
+        LOOP AT ls_entity-fields INTO ls_field WHERE key = abap_true.
+          ASSIGN COMPONENT ls_field-name OF STRUCTURE <ls_late> TO <lv_from>.
+          IF sy-subrc <> 0 OR <lv_from> IS INITIAL.
+            RAISE EXCEPTION TYPE zcx_osd_rap EXPORTING iv_reason = |adjust_numbers gave { ls_entity-alias } { <ls_inst>-key } no final key|.
+          ENDIF.
+          ASSIGN COMPONENT ls_field-name OF STRUCTURE <ls_row> TO <lv_to>.
+          <lv_to> = <lv_from>.
+        ENDLOOP.
+        <ls_inst>-key = key_of( is_entity = ls_entity is_row = <ls_row> ).
+        ls_late-row = <ls_inst>-row.
+        APPEND ls_late TO mt_late.
+        APPEND |LATE { ls_entity-alias } { ls_late-pre } -> { <ls_inst>-key }| TO mt_trace.
+      ENDLOOP.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD final_key.
+    DATA ls_entity TYPE zif_osd_rap_bo=>ty_entity.
+    DATA ls_field  TYPE zif_osd_rap_bo=>ty_field.
+    DATA ls_late   TYPE ty_late.
+    DATA lr_probe  TYPE REF TO data.
+    DATA lv_key    TYPE string.
+    FIELD-SYMBOLS <ls_probe> TYPE any.
+    FIELD-SYMBOLS <ls_final> TYPE any.
+    FIELD-SYMBOLS <lv_from>  TYPE any.
+    FIELD-SYMBOLS <lv_to>    TYPE any.
+
+    IF mt_late IS INITIAL.
+      RETURN.
+    ENDIF.
+    ls_entity = entity_of( iv_entity ).
+    lr_probe = new_row( ls_entity ).
+    ASSIGN lr_probe->* TO <ls_probe>.
+    LOOP AT ls_entity-fields INTO ls_field WHERE key = abap_true.
+      ASSIGN COMPONENT ls_field-name OF STRUCTURE cs_row TO <lv_from>.
+      CHECK sy-subrc = 0.
+      ASSIGN COMPONENT ls_field-name OF STRUCTURE <ls_probe> TO <lv_to>.
+      <lv_to> = <lv_from>.
+    ENDLOOP.
+    lv_key = key_of( is_entity = ls_entity is_row = <ls_probe> ).
+    READ TABLE mt_late INTO ls_late WITH KEY entity = ls_entity-name pre = lv_key.
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+    ASSIGN ls_late-row->* TO <ls_final>.
+    LOOP AT ls_entity-fields INTO ls_field WHERE key = abap_true.
+      ASSIGN COMPONENT ls_field-name OF STRUCTURE <ls_final> TO <lv_from>.
+      ASSIGN COMPONENT ls_field-name OF STRUCTURE cs_row TO <lv_to>.
+      IF sy-subrc = 0.
+        <lv_to> = <lv_from>.
+      ENDIF.
+    ENDLOOP.
   ENDMETHOD.
 
   METHOD persist.

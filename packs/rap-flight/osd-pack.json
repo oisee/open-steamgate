@@ -16,15 +16,15 @@
         "^(draft|colldraft|hierarchy|unmanaged)/",
         "^reuse/agency/(cntry|datgn|rev)/",
         "^reuse/agency/slogn/.*\\.(clas|ddls|devc)\\.",
-        "^(?!managed/#dmo#(i_travel_m|c_travel_processor_m|c_travel_approver_m)\\.bdef\\.).*\\.bdef\\.",
-        "\\.srvd\\.",
+        "^(?!managed/#dmo#(i_travel_m|c_travel_processor_m|c_travel_approver_m)\\.bdef\\.|reuse/supplement/#dmo#(i|c)_supplement\\.bdef\\.|reuse/agency/#dmo#(r|c)_agencytp\\.bdef\\.).*\\.bdef\\.",
+        "^(?!reuse/supplement/#dmo#ui_supplement\\.srvd\\.|reuse/agency/#dmo#ui_agency\\.srvd\\.).*\\.srvd\\.",
         "\\.clas\\.testclasses\\.abap$",
         "/#dmo#bp_",
         "/#dmo#tc_",
         "/#dmo#cl_flight_amdp\\.",
         "/#dmo#cl_flight_legacy\\.",
         "/#dmo#flight_travel_api\\.fugr\\.",
-        "^reuse/(agency/#dmo#(c|i)_agencytp|carrier/#dmo#c_carrier_s|carrier/#dmo#(c|i)_carrierslocksingleton_s|supplement/#dmo#c_supplement)\\.ddls\\.",
+        "^reuse/(agency/#dmo#i_agencytp|carrier/#dmo#c_carrier_s|carrier/#dmo#(c|i)_carrierslocksingleton_s)\\.ddls\\.",
         "^legacy/#dmo#currency_helper\\.ddls\\."
       ]
     }

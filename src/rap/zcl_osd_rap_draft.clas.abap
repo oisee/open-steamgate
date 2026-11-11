@@ -35,6 +35,15 @@ CLASS zcl_osd_rap_draft DEFINITION PUBLIC FINAL CREATE PUBLIC.
 * whether a row satisfies the flag conditions: per property the I lines
 * OR-ed, the E lines AND-ed after them (the select-options meaning); EQ
 * and NE only, anything else is no match
+* R10: the draft table of a CDS entity that is an entity of a draft-enabled
+* behavior definition of the registry, initial otherwise (asked by the path
+* elements of a draft row, ZCL_STG_CDS_PATH)
+    CLASS-METHODS draft_table_of
+      IMPORTING
+        iv_entity       TYPE string
+      RETURNING
+        VALUE(rv_table) TYPE string.
+
     CLASS-METHODS matches
       IMPORTING
         is_row          TYPE any
@@ -60,6 +69,37 @@ CLASS zcl_osd_rap_draft DEFINITION PUBLIC FINAL CREATE PUBLIC.
 ENDCLASS.
 
 CLASS zcl_osd_rap_draft IMPLEMENTATION.
+
+  METHOD draft_table_of.
+    DATA li_registry TYPE REF TO zif_osd_rap_registry.
+    DATA li_bo       TYPE REF TO zif_osd_rap_bo.
+    DATA lt_bdefs    TYPE zif_osd_rap_registry=>tt_name.
+    DATA lv_bdef     TYPE string.
+    DATA lv_class    TYPE string.
+    DATA lv_entity   TYPE string.
+    DATA ls_model    TYPE zif_osd_rap_bo=>ty_model.
+    DATA ls_entity   TYPE zif_osd_rap_bo=>ty_entity.
+
+    lv_class = 'ZCL_OSD_RAP_REGISTRY'.
+    TRY.
+        CREATE OBJECT li_registry TYPE (lv_class).
+      CATCH cx_sy_create_object_error.
+        RETURN.
+    ENDTRY.
+    lv_entity = to_upper( iv_entity ).
+    lt_bdefs = li_registry->list( ).
+    LOOP AT lt_bdefs INTO lv_bdef.
+      li_bo = li_registry->get( lv_bdef ).
+      CHECK li_bo IS BOUND.
+      ls_model = li_bo->model( ).
+      CHECK ls_model-draft = abap_true.
+      READ TABLE ls_model-entities INTO ls_entity WITH KEY name = lv_entity.
+      IF sy-subrc = 0.
+        rv_table = ls_entity-draft_table.
+        RETURN.
+      ENDIF.
+    ENDLOOP.
+  ENDMETHOD.
 
   METHOD key_text.
     DATA lv_key  TYPE string.

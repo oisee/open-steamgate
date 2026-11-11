@@ -24,6 +24,7 @@ import {basename, join} from "node:path";
 import {libraryPath} from "./osd-lib-path.mjs";
 import {compositionsOf, namespaced, projectedAssociations, projectionBase, redirectOf, resolveTree} from "./cds-tree.mjs";
 import {castType, edmOf} from "./cds-types.mjs";
+import {pathClass, pathElement} from "./cds-path.mjs";
 
 const OUT = "gen/cds";
 // **The libraries this generator resolves types against, and they have to be
@@ -161,6 +162,12 @@ export function parseDDLS(obj, reg, depth = 0) {
       continue;
     }
     if (!srcName) continue;
+    // R10: `_Assoc._Next.Element as X [: localized]`, a calculated element
+    // (tools/cds-path.mjs)
+    if (srcName.startsWith("_") && srcName.includes(".")) {
+      fields.push(pathElement(srcName, alias, annos, tokensOf(el), sqlView));
+      continue;
+    }
     if (srcName.startsWith("_")) {
       exposedAssociations.push(srcName); associationAnnotations.set(srcName, annos);
       if (redirectOf(tokensOf(el))) redirects.set(srcName, redirectOf(tokensOf(el)));
@@ -173,8 +180,11 @@ export function parseDDLS(obj, reg, depth = 0) {
     if (isProjection && below === undefined) return {name, skip: `${fieldName}: ${baseField} is no column element of ${projected.name}`};
     if (below) baseField = below.base;
     const t = edmOf(comps.get(baseField));
+    // R10: the ABAP type of the column, for a path element that ends here
+    const column = comps.get(baseField);
+    const typeABAP = below?.typeABAP ?? (column && !/Void|Unknown/.test(column.constructor.name) && !column.containsVoid?.() ? column.toABAP?.() : undefined);
     const label = annos.map((a) => /@EndUserText\.label:\s*'([^']*)'/.exec(a)?.[1]).find(Boolean) ?? (below && below.label !== below.name ? below.label : undefined);
-    fields.push({name: fieldName, element: alias ?? srcName.split(".").pop(), base: baseField, key: isKey, ...t, label: label ?? fieldName,
+    fields.push({name: fieldName, element: alias ?? srcName.split(".").pop(), base: baseField, key: isKey, ...t, typeABAP, label: label ?? fieldName,
       annotations: below ? [...annos, ...(below.annotations ?? [])] : annos, ...(below ? {fromElement: below.name} : {})});
   }
 
@@ -1031,6 +1041,9 @@ export function main() {
   }
   const byName = new Map(views.map((v) => [v.name.toUpperCase(), v]));
   resolveTree(views, byName);
+  // R10: a path element that does not resolve is not served (resolvePaths
+  // took it out), and the build says which hop broke
+  for (const e of views) for (const d of e.droppedPaths ?? []) console.log(`cds2ddic: ${e.name}: path element ${d.name} not served (${d.why})`);
   inheritAssociations(views, byName);
   resolveWriteChain(views, byName);
   // A view that still reads another CDS view (not composed down to a table
@@ -1062,6 +1075,7 @@ export function main() {
       write(fileOf(e.name) + ".view.xml", viewXml({...e, sqlView: e.name.toUpperCase()}, {client: false}));
     }
     write(classNameOf("zcl_stg_cds_", e.sqlView).toLowerCase() + ".clas.abap", sourceClass(e, byName));
+    if (e.fields.some((f) => f.path)) write(classNameOf("zcl_stg_cds_", e.sqlView, "_p").toLowerCase() + ".clas.abap", pathClass(e));
     let published = "";
     if (e.viewAnnotations.some((a) => /@OData\.publish:\s*true/i.test(a))) {
       // the whole set of views is needed: an exposed association pulls its

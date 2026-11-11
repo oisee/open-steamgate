@@ -174,8 +174,12 @@ function lowerImplicit(source, filename, bindings) {
 //             delete TYPE REQUEST FOR DELETE b  CHANGING reported TYPE RESPONSE FOR REPORTED LATE b
 export const SAVE_MODIFIED = [["create", "importing", "REQUEST CHANGE"], ["update", "importing", "REQUEST CHANGE"],
   ["delete", "importing", "REQUEST DELETE"], ["reported", "changing", "RESPONSE REPORTED"]];
+// R10: `METHODS adjust_numbers REDEFINITION.` the same way:
+//   CHANGING mapped TYPE RESPONSE FOR MAPPED LATE b  reported TYPE RESPONSE FOR REPORTED LATE b
+export const ADJUST_NUMBERS = [["mapped", "changing", "RESPONSE MAPPED LATE"], ["reported", "changing", "RESPONSE REPORTED"]];
 
-/** the saver classes of a source and their `save_modified REDEFINITION` token */
+/** the saver classes of a source and their `save_modified REDEFINITION` (R10:
+ *  and `adjust_numbers REDEFINITION`) token */
 export function saverRedefinitions(source, filename) {
   if (!/\.abap$/i.test(filename) || !/cl_abap_behavior_saver/i.test(source)) return [];
   const tokens = new Lexer().run(new MemoryFile(filename, source)).tokens.filter(t => t.constructor.name !== "Comment");
@@ -193,8 +197,8 @@ export function saverRedefinitions(source, filename) {
       saver = from > 0 && words[from - 1] === "INHERITING" && words[from + 1] === "CL_ABAP_BEHAVIOR_SAVER";
     }
     if (first) inMethods = w(i) === "METHODS";
-    if (saver && inMethods && w(i) === "SAVE_MODIFIED" && w(i + 1) === "REDEFINITION") {
-      out.push({token: tokens[i + 1], where: `${filename}:${tokens[i].getStart().getRow()}`});
+    if (saver && inMethods && ["SAVE_MODIFIED", "ADJUST_NUMBERS"].includes(w(i)) && w(i + 1) === "REDEFINITION") {
+      out.push({token: tokens[i + 1], method: w(i), where: `${filename}:${tokens[i].getStart().getRow()}`});
     }
     if (w(i) === "ENDCLASS") saver = false;
   }
@@ -208,15 +212,17 @@ function lowerSaver(source, filename, bindings) {
   const lines = [0];
   for (let i = 0; i < source.length; i++) if (source[i] === "\n") lines.push(i + 1);
   const offset = t => lines[t.getStart().getRow() - 1] + t.getStart().getCol() - 1;
-  for (const {token, where} of found.reverse()) {
+  for (const {token, method, where} of found.reverse()) {
     const type = key => {
       const t = bindings[`POOL ${pool} FOR ${key}`.toUpperCase()];
-      if (!t) throw new Error(`${where}: save_modified in pool ${pool}, which no behavior definition with a saver request names (${key})`);
+      if (!t) throw new Error(`${where}: ${method.toLowerCase()} in pool ${pool}, which no behavior definition ${method === "ADJUST_NUMBERS" ? "with late numbering" : "with a saver request"} names (${key})`);
       return t;
     };
-    const group = d => SAVE_MODIFIED.filter(p => p[1] === d).map(([n, , k]) => `${n} TYPE ${type(k)}`).join(" ");
+    const params = method === "ADJUST_NUMBERS" ? ADJUST_NUMBERS : SAVE_MODIFIED;
+    const group = d => params.filter(p => p[1] === d).map(([n, , k]) => `${n} TYPE ${type(k)}`).join(" ");
     const start = offset(token);
-    source = source.slice(0, start) + `IMPORTING ${group("importing")} CHANGING ${group("changing")}` + source.slice(start + token.getStr().length);
+    const text = [["importing", "IMPORTING"], ["changing", "CHANGING"]].filter(([d]) => group(d)).map(([d, w]) => `${w} ${group(d)}`).join(" ");
+    source = source.slice(0, start) + text + source.slice(start + token.getStr().length);
   }
   return source;
 }
@@ -260,7 +266,7 @@ function lowerLintOnly(source, filename) {
   return source.split("\n").map(line => {
     if (/^\* LINT-ONLY begin/.test(line)) { blank = true; return ""; }
     if (/^\* LINT-ONLY end/.test(line)) { blank = false; return ""; }
-    if (/^\s*METHOD save_modified\./i.test(line)) method = true;
+    if (/^\s*METHOD (save_modified|adjust_numbers)\./i.test(line)) method = true;
     if (method) { if (/^\s*ENDMETHOD\./i.test(line)) method = false; return ""; }
     return blank ? "" : line;
   }).join("\n");

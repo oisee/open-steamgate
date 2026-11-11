@@ -91,7 +91,9 @@ INTERFACE zif_osd_rap_bo PUBLIC.
 * the pool's local handler class. R4: ETAG the element of `etag master`;
 * FEATURES set when the pool has a FOR INSTANCE FEATURES method, FEAT_UPDATE
 * and FEAT_DELETE when update / delete are declared ( features : instance );
-* NUMBERING E for `early numbering` (a FOR NUMBERING method draws the key).
+* NUMBERING E for `early numbering` (a FOR NUMBERING method draws the key),
+* R10: L for `late numbering` (a preliminary key and %pid in the interaction
+* phase, the final key from the saver's adjust_numbers).
 * R5: ROOT the root entity of the tree, PARENT and PARENT_ASSOC the parent
 * entity and the association to it (initial for the root), LOCK M for lock
 * master and D for lock dependent, ASSOCS the associations.
@@ -140,11 +142,13 @@ INTERFACE zif_osd_rap_bo PUBLIC.
 
 * R7: SAVERS the local saver classes of every pool of the BDEF (absolute
 * names, the header's pool first); MODIFIED when it implements save_modified.
-* SAVER is the first of them (R2).
+* SAVER is the first of them (R2). R10: ADJUST when it redefines
+* adjust_numbers (late numbering).
   TYPES:
     BEGIN OF ty_saver,
       name     TYPE string,
       modified TYPE abap_bool,
+      adjust   TYPE abap_bool,
     END OF ty_saver,
     tt_saver TYPE STANDARD TABLE OF ty_saver WITH DEFAULT KEY.
   TYPES:
@@ -190,7 +194,8 @@ INTERFACE zif_osd_rap_bo PUBLIC.
     RETURNING
       VALUE(rr_table) TYPE REF TO data.
 
-* an empty response structure: MAPPED, FAILED or REPORTED (EARLY)
+* an empty response structure: MAPPED, FAILED or REPORTED (EARLY); R10: MAPPED
+* LATE when an entity of the BDEF has late numbering
   METHODS new_response
     IMPORTING
       iv_kind            TYPE csequence
@@ -239,6 +244,14 @@ INTERFACE zif_osd_rap_bo PUBLIC.
       ir_create   TYPE REF TO data
       ir_update   TYPE REF TO data
       ir_delete   TYPE REF TO data
+      ir_reported TYPE REF TO data.
+
+* R10: call adjust_numbers of a saver: IR_MAPPED from NEW_RESPONSE( 'MAPPED
+* LATE' ), IR_REPORTED the caller's RESPONSE FOR REPORTED
+  METHODS adjust_numbers
+    IMPORTING
+      io_saver    TYPE REF TO object
+      ir_mapped   TYPE REF TO data
       ir_reported TYPE REF TO data.
 
 ENDINTERFACE.

@@ -125,6 +125,31 @@ CLASS zcl_osd_rap_sadl DEFINITION PUBLIC FINAL CREATE PUBLIC.
         is_base       TYPE any
       CHANGING
         cs_row        TYPE any.
+* R10: the augment of a projection's create / update (use ... ( augment )):
+* the projection's row and fields, kept while its base runs the operation,
+* and run on the base's transaction before the save (AUGMENT_NOW)
+    DATA ms_aug_proj   TYPE zif_osd_rap_registry=>ty_projection.
+    DATA mr_aug_row    TYPE REF TO data.
+    DATA mt_aug_fields TYPE string_table.
+    METHODS augment_now
+      IMPORTING
+        io_runtime TYPE REF TO zcl_osd_rap_runtime
+        iv_kind    TYPE csequence
+        is_line    TYPE any
+      RAISING
+        /iwbep/cx_mgw_busi_exception
+        /iwbep/cx_mgw_tech_exception.
+    METHODS keep_augment
+      IMPORTING
+        is_projection TYPE zif_osd_rap_registry=>ty_projection
+        is_row        TYPE any
+        it_fields     TYPE string_table.
+* R10: a projection of a draft-enabled BO: the version and flags of a row
+    METHODS put_flags
+      IMPORTING
+        is_from TYPE any
+      CHANGING
+        cs_to   TYPE any.
 * the request's fields named as the base names them; a projection's own
 * read-only field is dropped when it is sent unchanged (or empty, on a
 * create) and refused otherwise
@@ -431,6 +456,9 @@ CLASS zcl_osd_rap_sadl IMPLEMENTATION.
   METHOD base_line.
     DATA li_bo   TYPE REF TO zif_osd_rap_bo.
     DATA lr_rows TYPE REF TO data.
+    DATA ls_model  TYPE zif_osd_rap_bo=>ty_model.
+    DATA ls_entity TYPE zif_osd_rap_bo=>ty_entity.
+    DATA li_source TYPE REF TO zif_stg_cds_source.
     FIELD-SYMBOLS <lt_rows> TYPE STANDARD TABLE.
 
     li_bo = bo_of( is_projection-base_entity ).
@@ -439,9 +467,133 @@ CLASS zcl_osd_rap_sadl IMPLEMENTATION.
         EXPORTING
           method = |RAP behavior of { is_projection-base_entity }, the base of { is_projection-entity }|.
     ENDIF.
+* R10: the base of a draft projection is served by its union: its row says
+* the version (IsActiveEntity), which the base's methods read
+    ls_model = li_bo->model( ).
+    READ TABLE ls_model-entities INTO ls_entity WITH KEY name = is_projection-base_entity.
+    IF sy-subrc = 0 AND ls_entity-union IS NOT INITIAL.
+      TRY.
+          CREATE OBJECT li_source TYPE (ls_entity-union).
+          rr_row = li_source->create_line( ).
+          RETURN.
+        CATCH cx_sy_create_object_error.
+          RAISE EXCEPTION TYPE /iwbep/cx_mgw_tech_exception
+            EXPORTING
+              method = |draft union { ls_entity-union } of { is_projection-base_entity }|.
+      ENDTRY.
+    ENDIF.
     lr_rows = li_bo->new_rows( is_projection-base_entity ).
     ASSIGN lr_rows->* TO <lt_rows>.
     CREATE DATA rr_row LIKE LINE OF <lt_rows>.
+  ENDMETHOD.
+
+  METHOD put_flags.
+    FIELD-SYMBOLS <lv_from> TYPE any.
+    FIELD-SYMBOLS <lv_to>   TYPE any.
+    DATA lt_flags TYPE string_table.
+    DATA lv_flag  TYPE string.
+
+    APPEND 'ISACTIVEENTITY' TO lt_flags.
+    APPEND 'HASACTIVEENTITY' TO lt_flags.
+    APPEND 'HASDRAFTENTITY' TO lt_flags.
+    APPEND 'DRAFTUUID' TO lt_flags.
+    LOOP AT lt_flags INTO lv_flag.
+      ASSIGN COMPONENT lv_flag OF STRUCTURE is_from TO <lv_from>.
+      CHECK sy-subrc = 0.
+      ASSIGN COMPONENT lv_flag OF STRUCTURE cs_to TO <lv_to>.
+      CHECK sy-subrc = 0.
+      <lv_to> = <lv_from>.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD keep_augment.
+    FIELD-SYMBOLS <ls_row> TYPE any.
+    CLEAR: ms_aug_proj, mr_aug_row, mt_aug_fields.
+    IF is_projection-augment IS INITIAL.
+      RETURN.
+    ENDIF.
+    ms_aug_proj = is_projection.
+    CREATE DATA mr_aug_row LIKE is_row.
+    ASSIGN mr_aug_row->* TO <ls_row>.
+    <ls_row> = is_row.
+    mt_aug_fields = it_fields.
+  ENDMETHOD.
+
+  METHOD augment_now.
+* R10: the projection's request rows, keyed as the base line, to the augment
+    DATA li_augment TYPE REF TO zif_osd_rap_augment.
+    DATA lr_tab     TYPE REF TO data.
+    DATA ls_proj    TYPE zif_osd_rap_registry=>ty_projection.
+    DATA ls_map     TYPE zif_osd_rap_registry=>ty_map.
+    DATA lv_field   TYPE string.
+    DATA lv_failed  TYPE i.
+    DATA lx_error   TYPE REF TO zcx_osd_rap.
+    FIELD-SYMBOLS <lt_tab>  TYPE STANDARD TABLE.
+    FIELD-SYMBOLS <ls_new>  TYPE any.
+    FIELD-SYMBOLS <ls_row>  TYPE any.
+    FIELD-SYMBOLS <lv_from> TYPE any.
+    FIELD-SYMBOLS <lv_to>   TYPE any.
+
+    IF ms_aug_proj-entity IS INITIAL.
+      RETURN.
+    ENDIF.
+    ls_proj = ms_aug_proj.
+    CLEAR ms_aug_proj.
+    TRY.
+        CREATE OBJECT li_augment TYPE (ls_proj-augment).
+      CATCH cx_sy_create_object_error.
+        RAISE EXCEPTION TYPE /iwbep/cx_mgw_tech_exception EXPORTING method = |augment { ls_proj-augment }|.
+    ENDTRY.
+    lr_tab = li_augment->new_table( iv_entity = ls_proj-entity iv_kind = iv_kind ).
+    IF lr_tab IS INITIAL.
+      RETURN.
+    ENDIF.
+    ASSIGN lr_tab->* TO <lt_tab>.
+    APPEND INITIAL LINE TO <lt_tab> ASSIGNING <ls_new>.
+    ASSIGN mr_aug_row->* TO <ls_row>.
+* the keys, the version and the content ID are the base line's (a created
+* instance is named by %cid until the save draws its key)
+    LOOP AT ls_proj-fields INTO ls_map.
+      ASSIGN COMPONENT ls_map-base OF STRUCTURE is_line TO <lv_from>.
+      CHECK sy-subrc = 0.
+      ASSIGN COMPONENT ls_map-name OF STRUCTURE <ls_new> TO <lv_to>.
+      CHECK sy-subrc = 0.
+      <lv_to> = <lv_from>.
+    ENDLOOP.
+    ASSIGN COMPONENT '%IS_DRAFT' OF STRUCTURE is_line TO <lv_from>.
+    IF sy-subrc = 0.
+      ASSIGN COMPONENT '%IS_DRAFT' OF STRUCTURE <ls_new> TO <lv_to>.
+      IF sy-subrc = 0.
+        <lv_to> = <lv_from>.
+      ENDIF.
+    ENDIF.
+    ASSIGN COMPONENT '%CID' OF STRUCTURE is_line TO <lv_from>.
+    IF sy-subrc = 0.
+      ASSIGN COMPONENT '%CID' OF STRUCTURE <ls_new> TO <lv_to>.
+      IF sy-subrc = 0.
+        <lv_to> = <lv_from>.
+      ENDIF.
+    ENDIF.
+* the fields of the request, the projection's names (its calculated ones too)
+    LOOP AT mt_aug_fields INTO lv_field.
+      put_field( EXPORTING iv_field = lv_field is_from = <ls_row> CHANGING cs_line = <ls_new> ).
+    ENDLOOP.
+    TRY.
+        IF iv_kind = 'CREATE'.
+          io_runtime->augment( EXPORTING io_augment = li_augment iv_entity = ls_proj-entity ir_create = lr_tab
+                               IMPORTING ev_failed = lv_failed ).
+        ELSE.
+          io_runtime->augment( EXPORTING io_augment = li_augment iv_entity = ls_proj-entity ir_update = lr_tab
+                               IMPORTING ev_failed = lv_failed ).
+        ENDIF.
+      CATCH zcx_osd_rap INTO lx_error.
+        io_runtime->rollback( ).
+        technical( lx_error ).
+    ENDTRY.
+    IF lv_failed > 0.
+      io_runtime->rollback( ).
+      refuse( |{ ls_proj-alias }: the augment of the { to_lower( iv_kind ) } failed| ).
+    ENDIF.
   ENDMETHOD.
 
   METHOD to_base.
@@ -456,6 +608,7 @@ CLASS zcl_osd_rap_sadl IMPLEMENTATION.
       CHECK sy-subrc = 0.
       <lv_to> = <lv_from>.
     ENDLOOP.
+    put_flags( EXPORTING is_from = is_row CHANGING cs_to = cs_base ).
   ENDMETHOD.
 
   METHOD from_base.
@@ -470,6 +623,7 @@ CLASS zcl_osd_rap_sadl IMPLEMENTATION.
       CHECK sy-subrc = 0.
       <lv_to> = <lv_from>.
     ENDLOOP.
+    put_flags( EXPORTING is_from = is_base CHANGING cs_to = cs_row ).
   ENDMETHOD.
 
   METHOD base_fields.
@@ -630,6 +784,14 @@ CLASS zcl_osd_rap_sadl IMPLEMENTATION.
     DATA ls_entity TYPE zif_osd_rap_bo=>ty_entity.
     DATA lv_name   TYPE string.
 
+    DATA ls_proj   TYPE zif_osd_rap_registry=>ty_projection.
+
+* R10: a projection of a draft-enabled BO has a union of its own
+    ls_proj = projection_of( iv_entity ).
+    IF ls_proj-entity IS NOT INITIAL.
+      rv_class = ls_proj-union.
+      RETURN.
+    ENDIF.
     li_bo = bo_of( iv_entity ).
     IF li_bo IS INITIAL.
       RETURN.
@@ -700,6 +862,7 @@ CLASS zcl_osd_rap_sadl IMPLEMENTATION.
       ASSIGN lr_base->* TO <ls_base>.
       to_base( EXPORTING is_projection = ls_proj is_row = cs_row CHANGING cs_base = <ls_base> ).
       lt_base_fields = base_fields( is_projection = ls_proj it_fields = it_fields is_row = cs_row ).
+      keep_augment( is_projection = ls_proj is_row = cs_row it_fields = it_fields ).
       zif_stg_sadl_behavior~create( EXPORTING iv_entity = ls_proj-base_entity it_fields = lt_base_fields
                                     CHANGING  cs_row    = <ls_base> ).
       from_base( EXPORTING is_projection = ls_proj is_base = <ls_base> CHANGING cs_row = cs_row ).
@@ -761,6 +924,11 @@ CLASS zcl_osd_rap_sadl IMPLEMENTATION.
         lo_runtime->rollback( ).
         technical( lx_error ).
     ENDTRY.
+* R10: a projection's augment adds to the request before the save
+    IF count_failed( is_model = lo_runtime->bo( )->model( ) is_failed = <ls_failed> ) = 0.
+      augment_now( io_runtime = lo_runtime iv_kind = 'CREATE' is_line = <ls_line> ).
+    ENDIF.
+    CLEAR ms_aug_proj.
     finish( EXPORTING io_runtime  = lo_runtime
             CHANGING  cs_failed   = <ls_failed>
                       cs_reported = <ls_reported> ).
@@ -774,6 +942,12 @@ CLASS zcl_osd_rap_sadl IMPLEMENTATION.
                   CHANGING  cs_to     = cs_row ).
       ENDIF.
     ENDIF.
+* R10: late numbering -- the key the save drew in place of the preliminary one
+    TRY.
+        lo_runtime->final_key( EXPORTING iv_entity = ls_entity-name CHANGING cs_row = cs_row ).
+      CATCH zcx_osd_rap INTO lx_error.
+        technical( lx_error ).
+    ENDTRY.
   ENDMETHOD.
 
   METHOD zif_stg_sadl_behavior~update.
@@ -812,6 +986,7 @@ CLASS zcl_osd_rap_sadl IMPLEMENTATION.
       ASSIGN lr_base_current->* TO <ls_base_current>.
       to_base( EXPORTING is_projection = ls_proj is_row = is_current CHANGING cs_base = <ls_base_current> ).
       lt_base_fields = base_fields( is_projection = ls_proj it_fields = it_fields is_row = is_row is_current = is_current ).
+      keep_augment( is_projection = ls_proj is_row = is_row it_fields = it_fields ).
       zif_stg_sadl_behavior~update( iv_entity = ls_proj-base_entity is_row = <ls_base> is_current = <ls_base_current>
                                     it_fields = lt_base_fields iv_replace = iv_replace ).
       RETURN.
@@ -870,6 +1045,11 @@ CLASS zcl_osd_rap_sadl IMPLEMENTATION.
         lo_runtime->rollback( ).
         technical( lx_error ).
     ENDTRY.
+* R10: a projection's augment adds to the request before the save
+    IF count_failed( is_model = lo_runtime->bo( )->model( ) is_failed = <ls_failed> ) = 0.
+      augment_now( io_runtime = lo_runtime iv_kind = 'UPDATE' is_line = <ls_line> ).
+    ENDIF.
+    CLEAR ms_aug_proj.
     finish( EXPORTING io_runtime  = lo_runtime
             CHANGING  cs_failed   = <ls_failed>
                       cs_reported = <ls_reported> ).
@@ -1051,6 +1231,14 @@ CLASS zcl_osd_rap_sadl IMPLEMENTATION.
         IF sy-subrc = 0.
           put_keys( EXPORTING is_entity = ls_entity is_from = <ls_line>
                     CHANGING  cs_to     = es_row ).
+* R10: Activate of a new draft of a late-numbered entity: the final key
+          IF lv_action = 'ACTIVATE'.
+            TRY.
+                lo_runtime->final_key( EXPORTING iv_entity = ls_entity-name CHANGING cs_row = es_row ).
+              CATCH zcx_osd_rap INTO lx_error.
+                technical( lx_error ).
+            ENDTRY.
+          ENDIF.
         ENDIF.
       ENDIF.
       RETURN.
