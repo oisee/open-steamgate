@@ -337,6 +337,19 @@ export function packsOf(root, env) {
   return packs.sort((a, b) => a.order - b.order || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 }
 
+/** what finding the packs reads in the tree's own place, selected or not:
+ *  each manifest and the identity of each folder it declares (packAt). A
+ *  selection (OSD_WEB_PACKS) narrows what is built, not what is read. */
+export function packReadsOf(root, env) {
+  const place = placesOf(root, env)[0];
+  if (isDir(place) === false) return [];
+  const dirs = existsSync(join(place, MANIFEST)) ? [place] : readdirSync(place).sort().map((e) => join(place, e));
+  return dirs.flatMap((dir) => {
+    const pack = packAt(root, dir);
+    return pack === undefined ? [] : [join(dir, MANIFEST), ...pack.sources.map((s) => join(s.dir, SOURCE)).filter(existsSync)];
+  });
+}
+
 /** a pack's ABAP folder as the build and the store name it: root-relative */
 export function folderOf(root, dir) {
   const rel = slash(relative(root, dir));

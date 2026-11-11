@@ -2,6 +2,7 @@ import {expect} from "chai";
 import {existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, readdirSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {execFileSync, spawnSync} from "node:child_process";
 import {tmpdir} from "node:os";
+import {pathToFileURL} from "node:url";
 import {dirname, join, relative, resolve} from "node:path";
 import {build, genHash, hashOf, inputsOf, liveHash, missingLibraries} from "../tools/osd-build.mjs";
 import {packsOf} from "../tools/osd-packs.mjs";
@@ -116,6 +117,36 @@ describe("tools/osd-build: the layers, refused before a lock is taken", function
     const named = new Map();
     hashOf(root, inputsOf(root), {digests: named});
     expect(named.has(join(root, "packs/test/empty/.osd-source.json"))).to.equal(true);
+  });
+
+  // FIX8 M2: finding the packs reads every manifest and the identity of each
+  // folder it declares, before OSD_WEB_PACKS narrows what is built
+  it("hashes what finding the packs reads, a pack the selection leaves out too", () => {
+    const oci = `localhost:5000/synthetic/left@sha256:${"c".repeat(64)}`;
+    write("src/zsel.prog.abap", "REPORT zsel.\n");
+    write("packs/zleft/osd-pack.json", JSON.stringify({abap: ["src"], sources: [{folder: "upstream", oci}]}));
+    write("packs/zleft/src/zleft.prog.abap", "REPORT zleft.\n");
+    write("packs/zleft/upstream/.osd-source.json", JSON.stringify({oci, path: "src", exclude: [], private: false}));
+    const saved = process.env.OSD_WEB_PACKS;
+    process.env.OSD_WEB_PACKS = "";
+    try {
+      const log = join(root, "packs-reads.jsonl");
+      const child = spawnSync(process.execPath, ["--import", resolve("tools/osd-generator-reads.mjs"), "--input-type=module", "-e",
+        `import {packsOf} from ${JSON.stringify(pathToFileURL(resolve("tools/osd-packs.mjs")).href)}; packsOf(process.env.OSD_ROOT);`],
+      {cwd: root, env: {...process.env, OSD_ROOT: root, OSD_GENERATOR_READS: log}, encoding: "utf8"});
+      expect(child.status, child.stderr).to.equal(0);
+      const entries = readFileSync(log, "utf8").trim().split("\n").map(JSON.parse);
+      expect(entries.map(entry => entry.path)).to.include.members(["packs/zleft/osd-pack.json", "packs/zleft/upstream/.osd-source.json"]);
+      const inputs = inputsOf(root);
+      expect(inputs.packFiles).to.deep.equal([]);
+      const named = new Map();
+      const before = hashOf(root, inputs, {digests: named});
+      expect(makeReadRecord(root, named, entries).uncovered).to.deep.equal([]);
+      write("packs/zleft/osd-pack.json", JSON.stringify({abap: ["src"], sources: [{folder: "upstream", oci}], description: "edited"}));
+      expect(hashOf(root, inputsOf(root))).not.to.equal(before);
+    } finally {
+      if (saved === undefined) delete process.env.OSD_WEB_PACKS; else process.env.OSD_WEB_PACKS = saved;
+    }
   });
 
   // P2-4: a checkout fetched before privacy was recorded still builds; only

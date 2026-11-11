@@ -44,7 +44,7 @@ import {buildIdentity, assertToolchain, describeBuild} from "./osd-transpiler.mj
 import {describeDuplicates, excludePatterns, layers} from "./osd-inputs.mjs";
 import {transpile, selectedModules, isBinaryFilename, listFiles} from "./osd-transpile.mjs";
 import {makeReadRecord, markIncomplete, readEntry, readGeneratorLog, READS, sha256, withSeedReads} from "./osd-read-record.mjs";
-import {inputFoldersOf, packsOf, seedsBuilt, userFoldersOf, webappsOf} from "./osd-packs.mjs";
+import {inputFoldersOf, packReadsOf, packsOf, seedsBuilt, userFoldersOf, webappsOf} from "./osd-packs.mjs";
 import {describeUnfetched, unfetched} from "./osd-fetch.mjs";
 import {toolCommand, hosted} from "./osd-host.mjs";
 import {runsAs} from "./osd-main.mjs";
@@ -193,7 +193,7 @@ export function inputsOf(root, config = loadConfig(root)) {
   const packFolders = packs.flatMap((pack) => [data(pack), pack.ddic].filter(Boolean));
   const sourceLayers = userLayersOf(root);
   const rootInputs = ["data", "abaplint.jsonc"].map((name) => join(root, name)).filter(existsSync);
-  return {folders, libs, bspFolders, packFiles, packFolders, sourceLayers, rootInputs, config: layout(root).config};
+  return {folders, libs, bspFolders, packFiles, packFolders, packReads: packReadsOf(root), sourceLayers, rootInputs, config: layout(root).config};
 }
 
 // What the transpiler and the generators read, and nothing else: a mocha
@@ -348,6 +348,11 @@ export function hashOf(root, inputs = inputsOf(root), options = {}) {
         h.update(`identity ${relative(root, marker)}\0`).update(digestOf(marker)).update("\0");
       }
     }
+  }
+  // what finding the packs reads, an unselected pack's manifest too
+  for (const file of (inputs.packReads ?? []).filter((f) => !(inputs.packFiles ?? []).includes(f))) {
+    digests?.set(file, digestOf(file));
+    h.update(`pack-read ${relative(root, file)}\0`).update(digestOf(file)).update("\0");
   }
   // the generators that will actually run -- the files under node, the
   // binary itself when it is the binary, because it executes its own copies
