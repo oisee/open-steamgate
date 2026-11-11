@@ -79,8 +79,12 @@ and the overlay carries the three pools `/dmo/bp_i_supplement`,
 (late numbering), each change marked `OSD overlay`; an `I_COUNTRY` stand-in
 filled by the seed class; and `zcl_osd_rapflight_r10_test`.
 
-The carrier singleton is what the RAP runtime cannot take yet (its grammar;
-see the document).
+Since RAP R11 the agency's interface BDEF `/DMO/I_AGENCYTP` and the carrier
+singleton run as well (docs/rap-flight-pack.md, "R11"): their BDEFs, views
+and `/DMO/UI_CARRIERS_S` are fetched, the overlay carries the singleton's
+pool `/dmo/bp_i_carrierslocksingle_s` (changes marked `OSD overlay`), the
+`I_CURRENCY` stand-in gets the carriers' currencies, and
+`zcl_osd_rapflight_r11_test` covers both. All ten BDEFs of the scenario run.
 
 Licence: upstream's files are Apache-2.0 (the repository's `LICENSES/` and
 `REUSE.toml`), and so are the copies in `src/` -- [LICENSE](LICENSE) says

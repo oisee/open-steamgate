@@ -1079,12 +1079,22 @@ CLASS zcl_osd_rap_sadl IMPLEMENTATION.
 
     DATA ls_proj TYPE zif_osd_rap_registry=>ty_projection.
     DATA lr_base TYPE REF TO data.
+    DATA lv_discard TYPE abap_bool.
     FIELD-SYMBOLS <ls_base> TYPE any.
     FIELD-SYMBOLS <lv_active> TYPE any.
 
     ls_proj = projection_of( iv_entity ).
     IF ls_proj-entity IS NOT INITIAL.
-      IF ls_proj-delete = abap_false.
+* R11: a draft's DELETE is its Discard (a used draft action), which a
+* projection of a root without delete (the carrier singleton) still serves
+      ASSIGN COMPONENT 'ISACTIVEENTITY' OF STRUCTURE is_row TO <lv_active>.
+      IF sy-subrc = 0 AND ls_proj-union IS NOT INITIAL.
+        READ TABLE ls_proj-actions TRANSPORTING NO FIELDS WITH KEY table_line = 'DISCARD'.
+        IF sy-subrc = 0 AND <lv_active> IS INITIAL.
+          lv_discard = abap_true.
+        ENDIF.
+      ENDIF.
+      IF ls_proj-delete = abap_false AND lv_discard = abap_false.
         refuse( |{ ls_proj-alias }: the projection does not use delete| ).
       ENDIF.
       lr_base = base_line( ls_proj ).

@@ -99,7 +99,9 @@ describe("RAP R6 actions (generator)", () => {
     for (const [from, to, error] of [
       [det, "determine action check { determination calcTotal; }", /determination calcTotal is on modify/],
       [det, "determine action check { validation missing; }", /validation missing, which ZI_RAP_BILL does not declare/],
-      [det, "determine action check { validation Other~checkAmount; }", /validation Other~checkAmount of another entity is outside R6/],
+      // R11: a root's determine action may name members of the entities
+      // below it; an entity the BDEF does not declare is still refused
+      [det, "determine action check { validation Other~checkAmount; }", /validation Other~checkAmount of another entity, which this behavior definition does not declare/],
       [det, "determine action check { validation ( foo ) checkAmount; }", /options other than always/],
       [det, "draft determine action check { validation checkAmount; }", /a draft determine action in a behavior definition without with draft/],
       [det, "determine action ( features : instance ) check { validation checkAmount; }", /determine action options \(features : instance\) are outside R6/],

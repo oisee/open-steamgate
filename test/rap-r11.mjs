@@ -84,7 +84,8 @@ describe("RAP R11 the flight's interface BDEF and carrier singleton (generators)
     if (!existsSync(join(PACK, "upstream"))) this.skip();
     const {files, deps} = inputs();
     out = generate(files, deps);
-    runtime = runtimeOutputs(out.plans, pools(["#dmo#bp_i_carrierslocksingle_s", "#dmo#bp_r_agencytp", "#dmo#bp_i_supplement",
+    // the flight's BDEFs only: the tree's other BOs need pools of src/
+    runtime = runtimeOutputs(out.plans.filter(p => p.root.startsWith("/DMO/")), pools(["#dmo#bp_i_carrierslocksingle_s", "#dmo#bp_r_agencytp", "#dmo#bp_i_supplement",
       "#dmo#bp_c_supplement", "#dmo#bp_travel_m", "#dmo#bp_booking_m", "#dmo#bp_bookingsupplement_m"]));
   });
   const plan = root => out.plans.find(p => p.root === root);
@@ -153,7 +154,7 @@ describe("RAP R11 the carrier singleton over OData V4", function () {
     assert.equal(res.status, 200);
     assert.match(res.body, /<Property Name="CarrierSingletonID" Type="Edm.Byte"/);
     assert.match(res.body, /<Action Name="Edit" IsBound="true"/);
-    assert.match(res.body, /<NavigationProperty Name="_Airline"/);
+    assert.match(res.body, /<NavigationProperty Name="to_Airline"/, "the composition, named as every navigation of this registry");
     assert.match(res.body, /Common\.v1\.DraftRoot/);
   });
 
@@ -161,23 +162,28 @@ describe("RAP R11 the carrier singleton over OData V4", function () {
     let res = await get(`${v4}/CarriersSingleton`);
     assert.equal(res.status, 200, JSON.stringify(res.body));
     assert.deepEqual(res.body.value.map(v => [v.CarrierSingletonID, v.IsActiveEntity]), [[1, true]]);
-    res = await get(`${root(true)}/_Airline`);
+    res = await get(`${root(true)}/to_Airline`);
     assert.equal(res.status, 200, JSON.stringify(res.body));
     assert.ok(res.body.value.length > 3, "the seeded carriers");
     assert.ok(res.body.value.every(v => v.CarrierSingletonID === 1 && v.IsActiveEntity === true));
+    // a navigation and an $expand of a namespaced service (its name escaped
+    // in the path the provider builds for the target, R11)
+    const expanded = await get(`${root(true)}?$expand=to_Airline`);
+    assert.equal(expanded.status, 200, JSON.stringify(expanded.body));
+    assert.equal(expanded.body.to_Airline.length, res.body.value.length);
   });
 
   it("edits the singleton: changes a carrier, creates one below the draft, activates them together", async () => {
-    const carriers = (await get(`${root(true)}/_Airline`)).body.value;
+    const carriers = (await get(`${root(true)}/to_Airline`)).body.value;
     const first = carriers[0];
     let res = await act(true, "Edit", JSON.stringify({PreserveChanges: true}));
     assert.equal(res.status, 200, JSON.stringify(res.body));
     assert.equal(res.body.IsActiveEntity, false);
-    res = await get(`${root(false)}/_Airline`);
+    res = await get(`${root(false)}/to_Airline`);
     assert.equal(res.body.value.length, carriers.length, "a draft of every carrier");
     res = await patch(carrier(first.AirlineID, false), {Name: "R11 renamed"});
     assert.ok([200, 204].includes(res.status), JSON.stringify(res.body));
-    res = await call(`${root(false)}/_Airline`, {method: "POST", headers: write,
+    res = await call(`${root(false)}/to_Airline`, {method: "POST", headers: write,
       body: JSON.stringify({AirlineID: "ZY", Name: "R11 airline", CurrencyCode: first.CurrencyCode})});
     assert.equal(res.status, 201, JSON.stringify(res.body));
     assert.equal(res.body.CarrierSingletonID, 1, "below the root");
@@ -199,7 +205,7 @@ describe("RAP R11 the carrier singleton over OData V4", function () {
   });
 
   it("refuses to activate a carrier without a name (Carrier~validateName in the root's Prepare); discards the draft", async () => {
-    const first = (await get(`${root(true)}/_Airline`)).body.value[0];
+    const first = (await get(`${root(true)}/to_Airline`)).body.value[0];
     assert.equal((await act(true, "Edit", JSON.stringify({PreserveChanges: true}))).status, 200);
     assert.ok([200, 204].includes((await patch(carrier(first.AirlineID, false), {Name: ""})).status));
     const res = await act(false, "Activate");
@@ -208,5 +214,9 @@ describe("RAP R11 the carrier singleton over OData V4", function () {
     assert.equal((await call(root(false), {method: "DELETE", headers: write})).status, 204, "Discard");
     assert.equal((await get(root(false))).status, 404);
     assert.equal((await get(carrier(first.AirlineID, true))).body.Name, first.Name);
+    // the active root has no delete: only its draft takes a DELETE (Discard)
+    const res2 = await call(root(true), {method: "DELETE", headers: write});
+    assert.ok(res2.status >= 400 && res2.status < 500, JSON.stringify(res2));
+    assert.equal((await get(root(true))).status, 200);
   });
 });

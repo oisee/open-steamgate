@@ -162,7 +162,11 @@ export function serviceYaml(srvd, entityOf, file = "srvd") {
     const {view, fields, behavior, draft} = entityOf(x.entity);
     const type = `${x.alias}Type`;
     resolved.push({x, view, type});
-    const b = behavior ?? {create: false, update: false, delete: false, control: new Map(), actions: []};
+    const b0 = behavior ?? {create: false, update: false, delete: false, control: new Map(), actions: []};
+    // R11: DELETE of a draft root's draft is its Discard (what sap.fe sends),
+    // so a draft root takes a DELETE even when its active instance has none
+    // (the carrier singleton's root); the runtime refuses it on the active one
+    const b = draft?.root && !b0.delete ? {...b0, delete: true} : b0;
     const ops = ["R", "Q"];
     if (b.create) ops.unshift("C");
     if (b.update) ops.push("U");

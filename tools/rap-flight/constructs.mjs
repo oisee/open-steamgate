@@ -281,7 +281,7 @@ async function main() {
     // one with the entity the projection's root view projects on) goes along
     // and the projection's wall may be its base's
     const inputs = [bdef];
-    if (model.implementationType === "projection") {
+    if (["projection", "interface"].includes(model.implementationType)) {
       const rootView = model.entities[0]?.entity ?? "";
       const ddls = ddic.find(f => f.filename.endsWith(".ddls.asddls") && name(f) === rootView.toUpperCase());
       const base = /as\s+projection\s+on\s+([\w/]+)/i.exec(ddls?.contents ?? "")?.[1]?.toUpperCase();
