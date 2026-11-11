@@ -8,6 +8,7 @@
     "stg.status": "status/",
     "stg.taxi": "taxi/",
     "osd.travel4": "travel4/",
+    "osd.trip4": "trip4/",
     "stg.workbench": "workbench/",
     "l3.fleet2": "zosd_fleet2/",
     "l3.fleet2.set": "zosd_fleet2_s/",
