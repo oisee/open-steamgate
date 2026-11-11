@@ -396,6 +396,32 @@ main({heapLimit: ${512 * 1048576}, beforeCompile: async ({method}) => {
     console.log(`hung prime: cold activation ${(performance.now() - started).toFixed(0)} ms including the subsequent publication`);
   });
 
+  it("lets a save stop waiting for a slow prime and build cold, leaving the prime running", async () => {
+    // The prime's own deadline is long (a whole tree on a slow host); the
+    // save's wait for it is bounded on its own (tools/warm-deadline/).
+    await save("zcl_a", 3);
+    mode("hang-prime");
+    store.warmDeadlineMs = 60000;
+    store.warmSaveWaitMs = 500;
+    const priming = store.warmUp();
+    await waitPaused();
+    const started = performance.now();
+    const result = await activate();
+    expect(performance.now() - started).to.be.lessThan(5000);
+    expect(result.ok, JSON.stringify(result)).to.equal(true);
+    expect(result.transpile.warm).to.not.equal(true);
+    expect(out("zcl_a")).to.include("IntegerFactory.get(3)");
+    expect(store.warmState.disabled, "a slow prime is not a dead compiler").to.not.equal(true);
+    expect(store.warmState.priming, "the prime goes on").to.equal(priming);
+    // the next save does not wait the bound again for the same prime
+    await save("zcl_a", 4);
+    const again = performance.now();
+    expect((await activate()).ok).to.equal(true);
+    expect(performance.now() - again).to.be.lessThan(store.warmSaveWaitMs + 4000);
+    expect(out("zcl_a")).to.include("IntegerFactory.get(4)");
+    await closeWarm(store);
+  });
+
   it("reaps a compiler that exceeds its own heap growth limit, retaining the published warm generation", async () => {
     await compiler.drop();
     const worker = join(root, "worker.mjs");
