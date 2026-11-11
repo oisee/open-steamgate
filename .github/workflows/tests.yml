@@ -397,13 +397,10 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: chromium-v1-${{ runner.os }}-${{ steps.playwright_version.outputs.version }}
+      # apt only if Chromium does not launch; a smoke launch decides
+      # (scripts/ci-chromium.sh, docs/ci-tests.md).
       - name: Install Chromium for browser smoke tests
-        run: |
-          if [[ "${{ steps.chromium_cache.outputs.cache-hit }}" == true ]]; then
-            npx playwright install-deps chromium
-          else
-            npx playwright install --with-deps chromium
-          fi
+        run: bash scripts/ci-chromium.sh "${{ steps.chromium_cache.outputs.cache-hit }}"
 
       # **The generation the browser specs serve is not the one the build job
       # packed.** playwright.config.mjs adds the demo/cockpit-fleet pack to
