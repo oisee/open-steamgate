@@ -338,3 +338,57 @@ distinguishes literals from the rest cannot be done in two passes. Items 7 and
 expression over the whole joined string, which no longer knows. Both were
 silent data corruption rather than an error, and both were caught by a test
 comparing a stored value, not by reading the code.
+
+## Existing schema, read-only
+
+`HANA_EXISTING_SCHEMA=1` runs the runtime over a HANA that already holds an
+SAP system's schema — the tables are there, the data is there, and nothing of
+ours may touch either. Built 2026-11-11 (H1): the mode in
+`tools/hana-client.mjs`, the read-only guard beside it, and the first
+measuring tool, `tools/hana-ddic-probe.mjs`.
+
+The flags:
+
+- `HANA_EXISTING_SCHEMA=1` — the mode. `connect()` skips `DROP SCHEMA` and
+  `CREATE SCHEMA` and points the session at the configured `HANA_SCHEMA`
+  with `SET SCHEMA`; `test/setup.mjs` returns straight after `connect()`, so
+  the transpiler's DDL, the seed, the drift checks and the pack reseed are
+  all skipped. The mode only skips; there is no second code path.
+- `STG_DB_FRESH=1` together with it is refused before a socket is even
+  opened: "start from nothing" is exactly what the mode must never mean
+  against a schema somebody else owns.
+- `OSD_HANA_WRITE=1` lifts the read-only guard below. Nothing in this tree
+  sets it; it is the seam a later slice will need when the mode stops being
+  read-only.
+
+What is refused: unless `OSD_HANA_WRITE=1`, every statement that is not a
+SELECT is refused at one chokepoint (`#guard` in `tools/hana-client.mjs`)
+before it reaches the driver, with code `HANA_READONLY` and the statement
+kind in the message — never the statement text, which may carry data.
+Allowed beside SELECT: `SET` (connect()'s own session statement) and
+`COMMIT`/`ROLLBACK` — the LUW bracket the runtime calls unconditionally
+(`COMMIT WORK`, every `disconnect()`); the guard runs before a refused
+statement could open a transaction, so both degenerate to the no-op their
+early return already is. Refused by kind: INSERT, UPDATE, DELETE, MERGE,
+UPSERT, CREATE, DROP, ALTER, TRUNCATE, CALL — and anything else, WITH
+included. `insert()`/`update()`/`delete()` re-throw the refusal instead of
+answering subrc 4: "refused" is not "no such row". The native channel
+(`defineRelation`, `native`, `dropRelation`) is refused the same way — a
+lowered SQLScript write is a write.
+
+The probe:
+
+```
+node tools/hana-ddic-probe.mjs --tables <A,B,C> [--out <dir>] [--diff] [--mandt]
+```
+
+reads DD02L, DD03L, DD04L, DD01L and DD02T from the configured schema
+through the hana-client — the same `HANA_*` env, the same identifier
+folding and literal trim — and emits the tree's own abapGit `*.tabl.xml`
+per table. The DD03L → shape mapping is `tools/hana-ddic-map.mjs`, a pure
+function tested without a database (`test/hana-ddic-map.mjs`, fixtures
+`ZOSD_H1_*`). `--diff` compares against `src/**/<table>.tabl.xml` when
+present — field order, type, length, decimals, key flag — and exits 1 on
+any difference; `--mandt` says which tables have MANDT as the first key
+field. No HANA is reachable from CI: the probe is exercised with fixtures
+and fake drivers, and run against a system by hand.
