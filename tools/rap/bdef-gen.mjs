@@ -202,7 +202,7 @@ export function projectedBehavior(planned) {
 // determine actions; anything else is refused by name
 // R8: the draft actions a draft-enabled root declares (docs/rap-runtime.md, R8)
 export const DRAFT_ACTIONS = ["EDIT", "ACTIVATE", "DISCARD", "RESUME"];
-function checkAction(entity, action, projection, draft = false, root = false) {
+function checkAction(entity, action, projection, draft = false, root = false, model = undefined) {
   const where = `${entity.entity}~${action.name}`;
   if (action.use && !projection) throw new Error(`${where}: use action outside a projection`);
   const mods = action.modifiers ?? [];
@@ -226,12 +226,17 @@ function checkAction(entity, action, projection, draft = false, root = false) {
   // neither feature control nor authorization is asked for a determine action
   if ((action.options ?? []).length) throw new Error(`${where}: determine action options (${action.options.map(o => o.value ? `${o.name} : ${o.value}` : o.name).join(", ")}) are outside R6`);
   for (const t of action.triggers ?? []) {
-    const [owner, name] = t.name.includes("~") ? t.name.split("~") : [undefined, t.name];
-    if (owner && ![entity.entity, entity.alias].filter(Boolean).some(n => upper(n) === upper(owner))) throw new Error(`${where}: ${t.kind} ${t.name} of another entity is outside R6`);
+    const [owner, name] = t.name.includes("~") ? t.name.split("~").map(x => x.trim()) : [undefined, t.name];
+    // R11: a determine action of the root may run members of the entities
+    // below it (the carrier singleton's Prepare runs Carrier~validateName):
+    // they run for the instances of that entity in the root's tree
+    const own = !owner || [entity.entity, entity.alias].filter(Boolean).some(n => upper(n) === upper(owner));
+    const other = own ? entity : model?.entities.find(e => [e.entity, e.alias].filter(Boolean).some(n => upper(n) === upper(owner)));
+    if (!own && (!root || !other)) throw new Error(`${where}: ${t.kind} ${t.name} of another entity${root ? ", which this behavior definition does not declare" : " (only a root's determine action runs those of the entities below it)"}`);
     if ((t.options ?? []).some(o => o.name !== "always")) throw new Error(`${where}: ${t.kind} ${t.name} with options other than always`);
-    const list = t.kind === "determination" ? entity.determinations : entity.validations;
+    const list = t.kind === "determination" ? other.determinations : other.validations;
     const found = list.find(x => upper(x.name) === upper(name));
-    if (!found) throw new Error(`${where}: ${t.kind} ${name}, which ${entity.entity} does not declare`);
+    if (!found) throw new Error(`${where}: ${t.kind} ${name}, which ${other.entity} does not declare`);
     if (t.kind === "determination" && found.on !== "save") throw new Error(`${where}: determination ${name} is on modify; a determine action runs determinations on save`);
   }
 }
@@ -354,7 +359,7 @@ export function generate(files, dependencies = []) {
       const abap = f.abapType ?? sourceType;
       if (!ident(f.name) || !abap || /todo|unknown|void/i.test(abap)) throw new Error(`Unresolved CDS field ${name}.${f.name}`);
       return {name: f.name.toLowerCase(), type: abap, key: f.key, base: f.base, admin: adminOf(f.annotations ?? []),
-        from: f.fromElement ? f.fromElement.toLowerCase() : undefined, virtual: !!f.virtual, path: f.path};
+        from: f.fromElement ? f.fromElement.toLowerCase() : undefined, virtual: !!f.virtual, path: f.path, constant: f.constant};
     });
   };
   const outputs = {}, bindings = {}, plans = [];
@@ -364,12 +369,19 @@ export function generate(files, dependencies = []) {
     bindings[key] = type;
   };
   // R5: a projection BDEF is resolved against its base, so the bases go first
+  // R11: an interface BDEF is resolved against its base as a projection is
+  const layered = m => ["projection", "interface"].includes(m.implementationType);
   const ordered = bdefs.map(file => ({file, model: parseBdef(file.contents)}))
-    .sort((a, b) => (a.model.implementationType === "projection") - (b.model.implementationType === "projection"));
+    .sort((a, b) => layered(a.model) - layered(b.model));
   for (const {file, model} of ordered) {
     if (model.unparsed.length) throw new Error(`${file.filename}: unparsed BDEF grammar`);
-    const projection = model.implementationType === "projection";
-    if (model.implementationType !== "managed" && model.implementationType !== "unmanaged" && !projection) throw new Error(`${file.filename}: unsupported ${model.implementationType} BDEF (interface BDEFs are outside R5)`);
+    // R11 (docs/rap-runtime.md, "Interface BDEFs"): `interface;` is a
+    // projection BDEF without a service of its own -- the stable layer other
+    // BOs and EML consumers use; it is checked and typed like a projection
+    // and runs on its base the same way
+    const projection = layered(model);
+    if (model.implementationType !== "managed" && model.implementationType !== "unmanaged" && !projection) throw new Error(`${file.filename}: unsupported ${model.implementationType} BDEF`);
+    if (model.implementationType === "interface" && model.implementationClass) throw new Error(`${file.filename}: an interface BDEF has no behavior pool of its own`);
     // abapGit writes /DMO/I_X as #dmo#i_x: the name, not the file, is the root
     const root = nameOf(basename(file.filename).replace(/\.bdef\.asbdef$/, ""));
     const iface = `zif_rap_${digest(upper(root))}`;
@@ -377,7 +389,7 @@ export function generate(files, dependencies = []) {
     const responses = new Map();
     const lateOf = [];
     const requests = [], mappingsOf = [];
-    const plan = {root, iface, model, entities: [], projection};
+    const plan = {root, iface, model, entities: [], projection, interface: model.implementationType === "interface"};
     plans.push(plan);
     for (const [index, entity] of model.entities.entries()) {
       if (entity.functions.length) throw new Error(`${entity.entity}~${entity.functions[0].name}: functions are outside R6`);
@@ -412,7 +424,11 @@ export function generate(files, dependencies = []) {
       if (!keys.length) throw new Error(`${entity.entity}: no CDS key`);
       const pairs = fs => fs.map(f => [f.name, f.type]);
       body += struct(`${p}_key`, pairs(keys));
-      body += included(`${p}_pky`, `${p}_key`, "%key", entity.numbering === "late" ? [["%pid", "x LENGTH 16"]] : []);
+      // R11: a projection or interface of a late-numbered entity carries
+      // %pid in %pky as its base does (an EML consumer of the interface gets
+      // the instance's %pid in MAPPED)
+      const late = entity.numbering === "late" || planned.base?.entity.numbering === "late";
+      body += included(`${p}_pky`, `${p}_key`, "%key", late ? [["%pid", "x LENGTH 16"]] : []);
       body += included(`${p}_tky`, `${p}_pky`, "%pky", model.withDraft ? [["%is_draft", "x LENGTH 1"]] : []);
       body += struct(`${p}_control`, fields.map(f => [f.name, "x LENGTH 1"]));
       // %data includes all CDS fields with a key group; %tky shares its key fields.
@@ -475,7 +491,11 @@ export function generate(files, dependencies = []) {
         if (["UPDATE", "DELETE"].includes(kind)) extra.push(["%cid_ref", "c LENGTH 128"]);
         if (["CREATE", "UPDATE", "READ IMPORT"].includes(kind)) extra.push(["%control", `${p}_control`]);
         if (kind === "FAILED") extra.push(["%fail", `${p}_fail`], ...(opFields.length ? [["%op", `${p}_op`]] : []));
-        if (kind === "REPORTED") extra.push(["%msg", "REF TO object"], ["%element", `${p}_control`], ["%state_area", "c LENGTH 128"], ["%global", "x LENGTH 1"]);
+        if (kind === "REPORTED") extra.push(["%msg", "REF TO object"], ["%element", `${p}_control`], ["%state_area", "c LENGTH 128"], ["%global", "x LENGTH 1"],
+          // R11: the operation a message is about (the carrier singleton's
+          // features answer `%delete = mk-on` with its message); on a system
+          // the %op group's flags, here its operation flags themselves
+          ...entity.operations.map(o => [`%${o.kind}`, "x LENGTH 1"]));
         if (path && ["FAILED", "REPORTED"].includes(kind)) extra.push(["%path", `${p}_path`]);
         body += included(name, `${p}_${fullData ? "data" : "tky"}`, fullData ? "%data" : "%tky", extra);
         body += `  TYPES t_${name} TYPE STANDARD TABLE OF ${name} WITH DEFAULT KEY.\n`;
@@ -522,7 +542,7 @@ export function generate(files, dependencies = []) {
         poolBind("INSTANCE FEATURES RESULT", ref, `${iface}=>t_${p}_features_result`);
       }
       for (const [a, action] of entity.actions.entries()) {
-        checkAction(entity, action, projection, model.withDraft, !planned.tree.parent);
+        checkAction(entity, action, projection, model.withDraft, !planned.tree.parent, model);
         const param = action.parameter ? fieldsOf(action.parameter.name) : undefined;
         if (param) body += struct(`${p}_a${a}_param`, pairs(param));
         for (const kind of ["IMPORT", "RESULT"]) {

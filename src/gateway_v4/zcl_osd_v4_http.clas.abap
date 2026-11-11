@@ -330,8 +330,10 @@ CLASS zcl_osd_v4_http IMPLEMENTATION.
       IF iv_method <> 'GET' AND NOT ( iv_method = 'POST' AND ls_nav-to_many = abap_true ).
         zcl_osd_v4_query=>fail( iv_text = 'Writes through a navigation property are not implemented' iv_status = 501 ).
       ENDIF.
+* R11: a namespaced service (/DMO/UI_CARRIERS_S) goes into the path escaped,
+* as it came: unescaped its slashes end the service name at /DMO
       CREATE OBJECT lo_source EXPORTING
-        iv_path = |/sap/opu/odata4/sap/{ lo_model->ms_service-name }/{ ls_set-name }({ lo_query->ms_request-key_string })|
+        iv_path = |/sap/opu/odata4/sap/{ replace( val = lo_model->ms_service-name sub = '/' with = '%2F' occ = 0 ) }/{ ls_set-name }({ lo_query->ms_request-key_string })|
         it_options = lt_none.
       lo_source->prepare( is_set = ls_set io_model = lo_model ).
       ls_source = ls_set.
@@ -561,7 +563,7 @@ CLASS zcl_osd_v4_http IMPLEMENTATION.
 * the options inside the parentheses are a query of the target set: the
 * same validation and the same select-options as a request to it
       CREATE OBJECT lo_sub EXPORTING
-        iv_path = |/sap/opu/odata4/sap/{ io_model->ms_service-name }/{ ls_target-name }| it_options = ls_item-options.
+        iv_path = |/sap/opu/odata4/sap/{ replace( val = io_model->ms_service-name sub = '/' with = '%2F' occ = 0 ) }/{ ls_target-name }| it_options = ls_item-options.
       lo_sub->prepare( is_set = ls_target io_model = io_model ).
       lo_context = lo_sub->mo_context.
       lo_context->mt_key_tab = lt_keys.

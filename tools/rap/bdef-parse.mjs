@@ -178,6 +178,14 @@ class Parser {
     if (this.take('use')) { this.need('etag'); e.useEtag = true; return; }
     if (this.take('using')) { e.using = this.name(); return; }
     if (this.take('extensible')) { e.options.push({kind: 'extensible'}); return; }
+    // R11: a pragma (`##DRAFT_OP_NOT_REQUIRED` on the carrier singleton)
+    // silences a message of the system's syntax check; it is kept, it
+    // changes nothing at runtime
+    // (the tokenizer gives `#`, `#` and the name, adjacent on one line)
+    const [h1, h2, word] = this.tokens.slice(this.i, this.i + 3);
+    if (h1?.value === '#' && h2?.value === '#' && word && h2.end === h1.end + 1 && word.start === h2.end && /^\w+$/.test(word.value)) {
+      (e.pragmas ??= []).push(`##${word.value.toUpperCase()}`); this.i += 3; return;
+    }
     throw new Error('Unknown entity header clause');
   }
   cardinality() {

@@ -100,8 +100,9 @@ describe("RAP R7 saver (generator)", () => {
 
   it("refuses what R7 does not run, each by name", () => {
     assert.match(refusal(swap(tour(), POOL, "METHODS save_modified REDEFINITION.", "")), /with additional save needs a saver with save_modified/);
-    assert.match(refusal(swap(tour(), BDEF, "  mapping for zrap_tourstop corresponding\n  {\n    place = place_name;\n  }\n", "")),
-      /with unmanaged save needs a mapping for a table/);
+    // R11: without a mapping table an unmanaged save reads through its CDS
+    // view (the carrier singleton's root, docs/rap-runtime.md "R11")
+    assert.equal(refusal(swap(tour(), BDEF, "  mapping for zrap_tourstop corresponding\n  {\n    place = place_name;\n  }\n", "")), "accepted");
     assert.match(refusal(swap(tour(), BDEF, "with unmanaged save\n", "with unmanaged save\npersistent table zrap_tourstop\n")), /with unmanaged save and a persistent table/);
     // a pool the BDEF names must be in the tree
     assert.match(refusal(tour().filter(f => !f.filename.startsWith("zbp_rap_stop."))), /behavior pool zbp_rap_stop not found/);

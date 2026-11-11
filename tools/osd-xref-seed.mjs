@@ -270,6 +270,11 @@ export const counts = (tables) => Object.fromEntries(TABLES.map((t) => [t, (tabl
  *  this" to every tool that asks them. */
 export async function seedAtStartup(client, options = {}) {
   const say = options.say ?? ((line) => console.log(line));
+  // a warning goes to stderr unless the caller takes the lines: under quiet
+  // stdout is the caller's (the unit runner's child answers its JSON there,
+  // and a row left out printed beside it broke the parse -- R11, a
+  // namespaced class whose include name is longer than D010INC's column)
+  const warn = options.say ?? ((line) => console.error(line));
   try {
     const started = Date.now();
     const tables = await rows(options.root ?? process.cwd(), options);
@@ -279,7 +284,7 @@ export async function seedAtStartup(client, options = {}) {
     }
     // said even when quiet: a row left out is a where-used that is short
     for (const {table, column, row} of n.refused) {
-      say(`cross-reference: ${table} row left out, ${column} longer than its column: ${JSON.stringify(row)}`);
+      warn(`cross-reference: ${table} row left out, ${column} longer than its column: ${JSON.stringify(row)}`);
     }
     return n;
   } catch (e) {

@@ -25,6 +25,13 @@ key `IsActiveEntity` and `Common.DraftRoot` / `DraftNode`. R9: it adds the
 navigations `SiblingEntity` and `DraftAdministrativeData` to every entity of
 a draft BO and serves `ZOSD_I_DRAFTADM` as `DraftAdministrativeData`; the
 union rows carry `SIBLINGENTITY`, `DRAFTADMIN`, `INPROCESSBYUSER`.
+R11: an interface BDEF (`interface;`) is resolved and typed as a projection
+of its base; a root's determine action may name members of the entities
+below it (`ls_member-entity`); an unmanaged save without a mapping table
+reads through its CDS view; the adapter hands handlers `%is_draft` and
+`%pid` in their keys; `bdef-parse.mjs` keeps an entity header's pragmas.
+The CDS side of the carrier singleton (constant elements, the computed
+root) is `tools/cds-computed.mjs`.
 `srvd-gen.mjs` (called by `bdef-gen.mjs`) reads service definitions
 (`*.srvd.srvdsrv`) into `gen/rap/<srvd>.stg.yaml`, which `stg-compile --all`
 compiles into a service ([R2c](../../docs/rap-runtime.md#serving-r2c)).

@@ -1,4 +1,4 @@
-# Managed RAP runtime (R2, R2a, R3, R4, R5, R6, R8, R9, R10)
+# Managed RAP runtime (R2, R2a, R3, R4, R5, R6, R8, R9, R10, R11)
 
 Runs a managed behavior definition handler-direct, and the EML statements
 over it:
@@ -29,6 +29,12 @@ the answer), a projection's `use draft` (a union of its own, the base's
 draft table) and its augment (`zif_osd_rap_augment`, run by `augment( )`
 with the base's transaction active), on the flight's supplement and agency
 BOs (`packs/rap-flight`).
+R11: an interface BDEF is run on its base (`zcl_osd_rap_eml=>route`,
+the registry's `projections`); a constant element (a CDS literal) is a
+field every instance has (`ty_field-constant`, filled on read, a pair to it
+holds for all saved instances); an entity without a table reads through
+its CDS view; a root's determine action runs members of the entities below
+it -- the flight's agency interface and carrier singleton.
 
 - `zcl_osd_rap_runtime` - the runtime; `for_bdef( 'ZI_...' )` to start;
   `active( )` names the runtime whose handler runs, where EML inside a
@@ -60,5 +66,6 @@ Tests: `test/unit/zcl_osd_rap_test` (ABAP Unit, over `src/rap_demo/`),
 `test/unit/zcl_osd_rap_r8_test` (draft, over `src/rap_r8/`), `test/rap-r8.mjs`,
 `test/unit/zcl_osd_rap_r9_test` (the owner), `test/rap-r9.mjs`, `test/e2e/trip4.spec.mjs`,
 `packs/rap-flight` `zcl_osd_rapflight_r10_test` and `test/rap-r10.mjs` (the flight draft BOs, R10),
+`zcl_osd_rapflight_r11_test` and `test/rap-r11.mjs` (the interface BDEF and the carrier singleton, R11),
 `test/unit/zcl_osd_rap_eml_test` (the EML facade), `test/rap-runtime-gen.mjs`, `test/rap-serve.mjs` (the OData wire). Contract and limits:
 [docs/rap-runtime.md](../../docs/rap-runtime.md).

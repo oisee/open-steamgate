@@ -22,6 +22,9 @@ INTERFACE zif_osd_rap_bo PUBLIC.
       mandatory TYPE ty_flag,
       numbering TYPE abap_bool,
       admin     TYPE string,
+* R11: the value of a CDS element that is a literal (`1 as
+* CarrierSingletonID`): no column holds it, every instance has it
+      constant  TYPE string,
     END OF ty_field,
     tt_field TYPE STANDARD TABLE OF ty_field WITH DEFAULT KEY.
 
@@ -44,6 +47,9 @@ INTERFACE zif_osd_rap_bo PUBLIC.
       kind   TYPE ty_flag,
       name   TYPE string,
       always TYPE abap_bool,
+* R11: the entity of a member of another entity than the action's (a
+* root's determine action running a validation of the entities below it)
+      entity TYPE string,
     END OF ty_member,
     tt_member TYPE STANDARD TABLE OF ty_member WITH DEFAULT KEY.
   TYPES:
