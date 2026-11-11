@@ -25,6 +25,7 @@ import {libraryPath} from "./osd-lib-path.mjs";
 import {compositionsOf, namespaced, projectedAssociations, projectionBase, redirectOf, resolveTree} from "./cds-tree.mjs";
 import {castType, edmOf} from "./cds-types.mjs";
 import {pathClass, pathElement} from "./cds-path.mjs";
+import {computedSourceClass, constantLines, constantsOf, literalElement, singletonOf, structureXml} from "./cds-computed.mjs";
 
 const OUT = "gen/cds";
 // **The libraries this generator resolves types against, and they have to be
@@ -75,7 +76,11 @@ export function parseDDLS(obj, reg, depth = 0) {
   if (!select) return {name, skip: "no select"};
   const sources = isProjection ? [projected.source]
     : find(select, "CDSSource").map((s) => tokensOf(s).replace(/\s+as\s+\w+$/i, "").trim().toUpperCase());
-  if (find(select, "CDSJoin").length > 0 || sources.length !== 1) return {name, skip: "joins are not supported yet"};
+  // R11: the singleton root (a left outer join on 0 = 0 with aggregates and
+  // literals, one row) is computed by its source class (tools/cds-computed.mjs)
+  const computed = isProjection ? projected.computed : singletonOf(select, {find, children, nodeName, tokensOf, firstDirect, reg, name});
+  if (computed?.skip) return computed;
+  if (!computed && (find(select, "CDSJoin").length > 0 || sources.length !== 1)) return {name, skip: "joins are not supported yet"};
   // **A WHERE was read and thrown away, and that was wrong in both
   // directions.** The generated DDIC view carries `DD26V` (the table) and
   // `DD27P` (the fields) and no selection condition at all, so a filtered
@@ -87,11 +92,11 @@ export function parseDDLS(obj, reg, depth = 0) {
   //
   // Refused at generation rather than at runtime, because the author is here
   // and the reader of a wrong row is not (2026-09-19, B.1).
-  if (find(select, "CDSWhere").length > 0) {
+  if (!computed && find(select, "CDSWhere").length > 0) {
     return {name, skip: "a WHERE in the view is not carried yet: the DDIC view would return every row, " +
       "and a write through it could insert a row the view cannot show"};
   }
-  const source = sources[0].replace(/\s+/g, "");
+  const source = computed && !isProjection ? computed.table : sources[0].replace(/\s+/g, "");
   const table = reg.getObject("TABL", source) ?? reg.getObject("VIEW", source);
   const comps = new Map();
   for (const c of table?.parseType(reg)?.getComponents?.() ?? []) comps.set(c.name.toUpperCase(), c.type);
@@ -161,7 +166,23 @@ export function parseDDLS(obj, reg, depth = 0) {
         ...t.edm, abapType: t.abap, casted: true, label: label ?? fieldName, annotations: annos});
       continue;
     }
-    if (!srcName) continue;
+    // R11: a literal (`key 1 as CarrierSingletonID`) is a constant element
+    if (!srcName) {
+      const lit = literalElement(el, {children, nodeName, tokensOf, annos, isKey});
+      if (lit?.skip) return {name, skip: lit.skip};
+      if (lit) { fields.push(lit.field); continue; }
+      const agg = computed && !isProjection ? firstDirect(el, "CDSAggregate") : undefined;
+      const a = agg ? computed.aggregates.find((x) => x.name === (alias ?? "").toUpperCase()) : undefined;
+      if (a) {
+        const column = comps.get(a.column);
+        const t = a.fn === "COUNT" ? {edm: "Edm.Int32", maxlength: 0} : edmOf(column);
+        const typeABAP = a.fn === "COUNT" ? "i" : column?.toABAP?.();
+        const label = annos.map((x) => /@EndUserText\.label:\s*'([^']*)'/.exec(x)?.[1]).find(Boolean);
+        fields.push({name: a.name, element: alias, base: a.fn === "COUNT" ? "" : a.column, key: isKey, ...t, typeABAP,
+          ...(a.fn === "COUNT" ? {abapType: "i", virtual: true, calculatedBy: ""} : {}), aggregate: a, label: label ?? a.name, annotations: annos});
+      }
+      continue;
+    }
     // R10: `_Assoc._Next.Element as X [: localized]`, a calculated element
     // (tools/cds-path.mjs)
     if (srcName.startsWith("_") && srcName.includes(".")) {
@@ -176,6 +197,13 @@ export function parseDDLS(obj, reg, depth = 0) {
     if (/[()+\-*\/]/.test(srcName) || /^'/.test(srcName)) continue; // expressions: not yet
     const fieldName = (alias ?? srcName.split(".").pop()).toUpperCase();
     let baseField = srcName.split(".").pop().toUpperCase();
+    // R11: a constant of the view below stays a constant
+    const constant = isProjection ? projected.fields.find((f) => f.name === baseField && f.constant !== undefined) : undefined;
+    if (constant) {
+      fields.push({...constant, name: fieldName, element: alias ?? srcName.split(".").pop(), key: isKey || constant.key,
+        annotations: [...annos, ...(constant.annotations ?? [])], fromElement: constant.name});
+      continue;
+    }
     const below = isProjection ? projected.fields.find((f) => f.name === baseField && !f.virtual && f.base) : undefined;
     if (isProjection && below === undefined) return {name, skip: `${fieldName}: ${baseField} is no column element of ${projected.name}`};
     if (below) baseField = below.base;
@@ -185,7 +213,8 @@ export function parseDDLS(obj, reg, depth = 0) {
     const typeABAP = below?.typeABAP ?? (column && !/Void|Unknown/.test(column.constructor.name) && !column.containsVoid?.() ? column.toABAP?.() : undefined);
     const label = annos.map((a) => /@EndUserText\.label:\s*'([^']*)'/.exec(a)?.[1]).find(Boolean) ?? (below && below.label !== below.name ? below.label : undefined);
     fields.push({name: fieldName, element: alias ?? srcName.split(".").pop(), base: baseField, key: isKey, ...t, typeABAP, label: label ?? fieldName,
-      annotations: below ? [...annos, ...(below.annotations ?? [])] : annos, ...(below ? {fromElement: below.name} : {})});
+      annotations: below ? [...annos, ...(below.annotations ?? [])] : annos, ...(below ? {fromElement: below.name} : {}),
+      ...(below?.aggregate ? {aggregate: below.aggregate} : {})});
   }
 
   const associations = [];
@@ -246,7 +275,7 @@ export function parseDDLS(obj, reg, depth = 0) {
   };
   if (fields.length === 0) return {name, skip: `no field of ${source} could be resolved (is the source a view or table of this tree?)`};
   return {name, sqlView, source, fields, associations, exposedAssociations,
-    viewAnnotations, label, write, ...(isProjection ? {projectionOf: projected.name} : {})};
+    viewAnnotations, label, write, ...(isProjection ? {projectionOf: projected.name} : {}), ...(computed ? {computed} : {})};
 }
 
 /** The fields of the generated SQL view, in order. A CDS SQL view over a
@@ -503,11 +532,27 @@ ${virtual.length === 0 ? "    TYPES: " : `    TYPES: ${virtual.map((f) => `${f.n
 `;
   const writable = e.write?.writable === true;
   const parts = childrenMethod(e, byName);
+  // R11: constant elements -- a condition on one is decided before the
+  // SELECT (the view has no column for it), the value filled after it
+  const constants = constantsOf(e);
+  const decide = constants.length ? `    IF zcl_stg_cds_const=>decide( EXPORTING it_const = constants( ) CHANGING cv_where = lv_where ) = abap_false.
+      RETURN.
+    ENDIF.
+    lt_fields = it_fields.
+${constants.map((f) => `    DELETE lt_fields WHERE table_line = '${f.name}'.
+`).join("")}` : "";
+  const fill = constants.length ? `    LOOP AT <lt_data> ASSIGNING <ls_row>.
+      zcl_stg_cds_const=>fill( EXPORTING it_const = constants( ) CHANGING cs_row = <ls_row> ).
+    ENDLOOP.
+` : "";
   return `CLASS ${cls} DEFINITION PUBLIC CREATE PUBLIC.
 * generated by tools/cds2ddic.mjs from ${e.name} - do not edit
   PUBLIC SECTION.
 ${rowDecl}    INTERFACES zif_stg_cds_source.
-${parts.declare}${writable ? `  PRIVATE SECTION.
+${parts.declare}${constants.length ? `    CLASS-METHODS constants
+      RETURNING
+        VALUE(rt_const) TYPE zcl_stg_cds_const=>tt_const.
+` : ""}${writable ? `  PRIVATE SECTION.
     METHODS to_base
       IMPORTING
         is_line       TYPE any
@@ -519,29 +564,32 @@ CLASS ${cls} IMPLEMENTATION.
 
   METHOD zif_stg_cds_source~read.
     DATA lv_where TYPE string.
-    FIELD-SYMBOLS <lt_data> TYPE STANDARD TABLE.
-
+${constants.length ? "    DATA lt_fields TYPE string_table.\n" : ""}    FIELD-SYMBOLS <lt_data> TYPE STANDARD TABLE.
+${constants.length ? "    FIELD-SYMBOLS <ls_row> TYPE any.\n" : ""}
     CREATE DATA rr_data TYPE tt_row.
     ASSIGN rr_data->* TO <lt_data>.
 
 * an empty condition is every row on a system; '1 = 1' in its place is
 * CX_SY_DYNAMIC_OSQL_SEMANTICS there (measured on A4H, docs/osql-where.md)
     lv_where = iv_where.
-
-    IF it_fields IS INITIAL.
+${decide}
+    IF ${constants.length ? "lt_fields" : "it_fields"} IS INITIAL.
       SELECT * FROM ${view}
         INTO CORRESPONDING FIELDS OF TABLE <lt_data>
         WHERE (lv_where)
         ORDER BY (it_orderby).
     ELSE.
-      SELECT (it_fields) FROM ${view}
+      SELECT (${constants.length ? "lt_fields" : "it_fields"}) FROM ${view}
         INTO CORRESPONDING FIELDS OF TABLE <lt_data>
         WHERE (lv_where)
         GROUP BY (it_groupby)
         ORDER BY (it_orderby).
     ENDIF.
-  ENDMETHOD.
-
+${fill}  ENDMETHOD.
+${constants.length ? `
+  METHOD constants.
+${constantLines(constants)}  ENDMETHOD.
+` : ""}
   METHOD zif_stg_cds_source~create_line.
     CREATE DATA rr_line TYPE ty_row.
   ENDMETHOD.
@@ -1070,6 +1118,13 @@ export function main() {
   }
   for (const e of views) {
     entities.push(e);
+    // R11: a singleton root has no SQL view; its source class computes it
+    if (e.computed) {
+      write(classNameOf("zcl_stg_cds_", e.sqlView).toLowerCase() + ".clas.abap", computedSourceClass(e));
+      write(fileOf(e.name) + ".tabl.xml", structureXml(e));
+      console.log(`cds2ddic: ${e.name} -> computed (${e.fields.length} fields: ${e.computed.aggregates.map((a) => `${a.fn}( ${a.column} )`).join(", ")} over ${e.computed.table})`);
+      continue;
+    }
     write(fileOf(e.sqlView) + ".view.xml", viewXml(e));
     // on a system the CDS entity name is a type and a select source of its own
     // (SELECT FROM zc_stg_travel, TYPES x TYPE zc_stg_travel); the SQL view is

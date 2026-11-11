@@ -202,7 +202,7 @@ export function projectedBehavior(planned) {
 // determine actions; anything else is refused by name
 // R8: the draft actions a draft-enabled root declares (docs/rap-runtime.md, R8)
 export const DRAFT_ACTIONS = ["EDIT", "ACTIVATE", "DISCARD", "RESUME"];
-function checkAction(entity, action, projection, draft = false, root = false) {
+function checkAction(entity, action, projection, draft = false, root = false, model = undefined) {
   const where = `${entity.entity}~${action.name}`;
   if (action.use && !projection) throw new Error(`${where}: use action outside a projection`);
   const mods = action.modifiers ?? [];
@@ -226,12 +226,17 @@ function checkAction(entity, action, projection, draft = false, root = false) {
   // neither feature control nor authorization is asked for a determine action
   if ((action.options ?? []).length) throw new Error(`${where}: determine action options (${action.options.map(o => o.value ? `${o.name} : ${o.value}` : o.name).join(", ")}) are outside R6`);
   for (const t of action.triggers ?? []) {
-    const [owner, name] = t.name.includes("~") ? t.name.split("~") : [undefined, t.name];
-    if (owner && ![entity.entity, entity.alias].filter(Boolean).some(n => upper(n) === upper(owner))) throw new Error(`${where}: ${t.kind} ${t.name} of another entity is outside R6`);
+    const [owner, name] = t.name.includes("~") ? t.name.split("~").map(x => x.trim()) : [undefined, t.name];
+    // R11: a determine action of the root may run members of the entities
+    // below it (the carrier singleton's Prepare runs Carrier~validateName):
+    // they run for the instances of that entity in the root's tree
+    const own = !owner || [entity.entity, entity.alias].filter(Boolean).some(n => upper(n) === upper(owner));
+    const other = own ? entity : model?.entities.find(e => [e.entity, e.alias].filter(Boolean).some(n => upper(n) === upper(owner)));
+    if (!own && (!root || !other)) throw new Error(`${where}: ${t.kind} ${t.name} of another entity${root ? ", which this behavior definition does not declare" : " (only a root's determine action runs those of the entities below it)"}`);
     if ((t.options ?? []).some(o => o.name !== "always")) throw new Error(`${where}: ${t.kind} ${t.name} with options other than always`);
-    const list = t.kind === "determination" ? entity.determinations : entity.validations;
+    const list = t.kind === "determination" ? other.determinations : other.validations;
     const found = list.find(x => upper(x.name) === upper(name));
-    if (!found) throw new Error(`${where}: ${t.kind} ${name}, which ${entity.entity} does not declare`);
+    if (!found) throw new Error(`${where}: ${t.kind} ${name}, which ${other.entity} does not declare`);
     if (t.kind === "determination" && found.on !== "save") throw new Error(`${where}: determination ${name} is on modify; a determine action runs determinations on save`);
   }
 }
@@ -354,7 +359,7 @@ export function generate(files, dependencies = []) {
       const abap = f.abapType ?? sourceType;
       if (!ident(f.name) || !abap || /todo|unknown|void/i.test(abap)) throw new Error(`Unresolved CDS field ${name}.${f.name}`);
       return {name: f.name.toLowerCase(), type: abap, key: f.key, base: f.base, admin: adminOf(f.annotations ?? []),
-        from: f.fromElement ? f.fromElement.toLowerCase() : undefined, virtual: !!f.virtual, path: f.path};
+        from: f.fromElement ? f.fromElement.toLowerCase() : undefined, virtual: !!f.virtual, path: f.path, constant: f.constant};
     });
   };
   const outputs = {}, bindings = {}, plans = [];
@@ -486,7 +491,11 @@ export function generate(files, dependencies = []) {
         if (["UPDATE", "DELETE"].includes(kind)) extra.push(["%cid_ref", "c LENGTH 128"]);
         if (["CREATE", "UPDATE", "READ IMPORT"].includes(kind)) extra.push(["%control", `${p}_control`]);
         if (kind === "FAILED") extra.push(["%fail", `${p}_fail`], ...(opFields.length ? [["%op", `${p}_op`]] : []));
-        if (kind === "REPORTED") extra.push(["%msg", "REF TO object"], ["%element", `${p}_control`], ["%state_area", "c LENGTH 128"], ["%global", "x LENGTH 1"]);
+        if (kind === "REPORTED") extra.push(["%msg", "REF TO object"], ["%element", `${p}_control`], ["%state_area", "c LENGTH 128"], ["%global", "x LENGTH 1"],
+          // R11: the operation a message is about (the carrier singleton's
+          // features answer `%delete = mk-on` with its message); on a system
+          // the %op group's flags, here its operation flags themselves
+          ...entity.operations.map(o => [`%${o.kind}`, "x LENGTH 1"]));
         if (path && ["FAILED", "REPORTED"].includes(kind)) extra.push(["%path", `${p}_path`]);
         body += included(name, `${p}_${fullData ? "data" : "tky"}`, fullData ? "%data" : "%tky", extra);
         body += `  TYPES t_${name} TYPE STANDARD TABLE OF ${name} WITH DEFAULT KEY.\n`;
@@ -533,7 +542,7 @@ export function generate(files, dependencies = []) {
         poolBind("INSTANCE FEATURES RESULT", ref, `${iface}=>t_${p}_features_result`);
       }
       for (const [a, action] of entity.actions.entries()) {
-        checkAction(entity, action, projection, model.withDraft, !planned.tree.parent);
+        checkAction(entity, action, projection, model.withDraft, !planned.tree.parent, model);
         const param = action.parameter ? fieldsOf(action.parameter.name) : undefined;
         if (param) body += struct(`${p}_a${a}_param`, pairs(param));
         for (const kind of ["IMPORT", "RESULT"]) {

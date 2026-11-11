@@ -90,6 +90,9 @@ function edm(type, where) {
   if (t === "d") return "date";
   if (t === "t") return "Time";
   if (t === "i" || t === "int4") return "Int32";
+  // R11: a literal's type (the carrier singleton's `1`: INT1)
+  if (t === "int1") return "Byte";
+  if (t === "int2") return "Int16";
   if (t === "int8") return "Int64";
   if ((m = /^p length (\d+) decimals (\d+)$/.exec(t))) return `"Decimal(${Number(m[1]) * 2 - 1},${Number(m[2])})"`;
   throw new Error(`${where}: no OData type for ABAP type ${type}`);
@@ -241,13 +244,17 @@ export function serviceYaml(srvd, entityOf, file = "srvd") {
     return f?.element ?? f?.name ?? name;
   };
   const assocLines = [];
+  // R11: an association (set) name is at most 40 characters in the model
+  // (/IWBEP/ external names): the singleton's CarriersSingleton_DraftAdmini-
+  // strativeData has 41. A longer one keeps 35 and a hash of the whole
+  const bounded = n => n.length <= 40 ? n : `${n.slice(0, 35)}_${createHash("sha256").update(n).digest("hex").slice(0, 4).toUpperCase()}`;
   for (const r of resolved) {
     for (const a of r.view.associations ?? []) {
       if (!a.exposed || !(a.pairs ?? []).length) continue;
       const to = resolved.find(t => upper(t.x.entity) === upper(a.target));
       if (!to) continue;
       const nav = `to_${a.alias.replace(/^_/, "")}`;
-      const name = `${r.x.alias}_${a.alias.replace(/^_/, "")}`;
+      const name = bounded(`${r.x.alias}_${a.alias.replace(/^_/, "")}`);
       const parent = a.composition === "PARENT";
       const card = parent ? "N:1" : a.max === "*" ? "1:N" : a.min === "0" ? "1:0" : "1:1";
       assocLines.push(`  ${name}:`, `    from: ${r.type}`, `    to: ${to.type}`, `    cardinality: "${card}"`, `    set: ${name}`);
@@ -261,10 +268,11 @@ export function serviceYaml(srvd, entityOf, file = "srvd") {
   // provider (zcl_stg_sadl_dpc), not by CDS associations
   for (const alias of draftNavs) {
     const type = `${alias}Type`;
-    assocLines.push(`  ${alias}_SiblingEntity:`, `    from: ${type}`, `    to: ${type}`, `    cardinality: "1:0"`, `    set: ${alias}_SiblingEntity`,
+    const sibling = bounded(`${alias}_SiblingEntity`), admin = bounded(`${alias}_DraftAdministrativeData`);
+    assocLines.push(`  ${sibling}:`, `    from: ${type}`, `    to: ${type}`, `    cardinality: "1:0"`, `    set: ${sibling}`,
       `    navigation: {${type}: SiblingEntity}`);
-    assocLines.push(`  ${alias}_DraftAdministrativeData:`, `    from: ${type}`, `    to: ${DRAFT_ADMIN.type}`, `    cardinality: "1:0"`,
-      `    set: ${alias}_DraftAdministrativeData`, `    navigation: {${type}: DraftAdministrativeData}`);
+    assocLines.push(`  ${admin}:`, `    from: ${type}`, `    to: ${DRAFT_ADMIN.type}`, `    cardinality: "1:0"`,
+      `    set: ${admin}`, `    navigation: {${type}: DraftAdministrativeData}`);
   }
   if (assocLines.length) lines.push("associations:", ...assocLines);
   if (functions.length) lines.push("functions:", ...functions);

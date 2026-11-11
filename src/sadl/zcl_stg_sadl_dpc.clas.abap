@@ -621,7 +621,9 @@ CLASS zcl_stg_sadl_dpc IMPLEMENTATION.
     ENDLOOP.
     lv_all = to_upper( |{ lv_all } { iv_where }| ).
 
-    LOOP AT is_entity-fields INTO ls_field WHERE virtual = abap_true.
+* R11: a constant element (no calculating class) is decided by the source
+* class's read (ZCL_STG_CDS_CONST), so a condition on it may go there
+    LOOP AT is_entity-fields INTO ls_field WHERE virtual = abap_true AND calculated_by IS NOT INITIAL.
       FIND REGEX |\\b{ to_upper( ls_field-name ) }\\b| IN lv_all.
       IF sy-subrc = 0.
         RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
@@ -644,6 +646,10 @@ CLASS zcl_stg_sadl_dpc IMPLEMENTATION.
     DATA lx_root    TYPE REF TO cx_root.
 
     LOOP AT is_entity-fields INTO ls_field WHERE virtual = abap_true.
+* R11: a constant element has no class: the read itself fills it
+      IF ls_field-calculated_by IS INITIAL.
+        CONTINUE.
+      ENDIF.
       READ TABLE lt_classes TRANSPORTING NO FIELDS WITH KEY table_line = ls_field-calculated_by.
       IF sy-subrc <> 0.
         APPEND ls_field-calculated_by TO lt_classes.

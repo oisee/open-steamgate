@@ -47,7 +47,9 @@ const EXTENSION = /\/(cntry|rev)\//;
 export const SUPPORT = {
   "managed": ["runs", "test/rap-serve.mjs"],
   "projection": ["runs", "test/rap-r5.mjs: the order projection served over V2 and V4"],
-  "interface": ["refused", "bdef-gen: interface BDEF"],
+  "interface": ["runs", "ZCL_OSD_RAPFLIGHT_R11_TEST: /DMO/I_AgencyTP through EML, run on its base in the base's transaction (R11)"],
+  "pragma": ["ignored", "R11: kept by bdef-parse (##DRAFT_OP_NOT_REQUIRED), silences a system check message"],
+  "root determine action over a child": ["runs", "ZCL_OSD_RAPFLIGHT_R11_TEST, test/rap-r11.mjs: the singleton's Prepare runs Carrier~validateName on the carrier drafts (R11)"],
   "with draft": ["runs", "test/rap-r8.mjs, ZCL_OSD_RAP_R8_TEST: drafts kept in the draft tables, Edit / Activate / Discard over V4"],
   "use draft": ["runs", "test/rap-r10.mjs: the flight supplement and agency projections served with their base's drafts (a union of their own)"],
   "use action (draft)": ["runs", "test/rap-r10.mjs: Edit, Activate, Prepare through the projection; Discard as DELETE"],
@@ -63,7 +65,7 @@ export const SUPPORT = {
   "several pools": ["runs", "test/rap-r7.mjs, ZCL_OSD_RAP_R7_TEST: each entity's handlers in its own pool, every pool's saver called"],
   "persistent table": ["runs", "test/rap-serve.mjs"],
   "with additional save": ["runs", "test/rap-r7.mjs, ZCL_OSD_RAP_R7_TEST, ZCL_OSD_RAPFLIGHT_R7_TEST: the managed write, then the savers' save_modified (the flight travel's change log)"],
-  "with unmanaged save": ["runs", "test/rap-r7.mjs, ZCL_OSD_RAP_R7_TEST: no managed write, save_modified writes; read from the mapping table"],
+  "with unmanaged save": ["runs", "test/rap-r7.mjs, ZCL_OSD_RAP_R7_TEST: no managed write, save_modified writes; read from the mapping table, without one through the CDS view (R11)"],
   "etag master": ["runs", "test/rap-r4.mjs: ETag, 428, 412 over V2 and V4"],
   "etag dependent": ["ignored", "checked against the parent association (R5), not served: the child type gets no ETag"],
   "total etag": ["runs", "ZCL_OSD_RAP_R8_TEST: Activate refuses a draft whose active instance changed"],
@@ -89,7 +91,7 @@ export const SUPPORT = {
   "action parameter": ["refused", "rap-runtime-gen: action parameters"],
   "action result not $self": ["refused", "rap-runtime-gen: only $self results"],
   "determine action": ["runs", "test/rap-r6.mjs, ZCL_OSD_RAP_R6_TEST: members where their triggers hold, ( always ) always"],
-  "draft determine action": ["runs", "ZCL_OSD_RAP_R8_TEST, test/rap-r8.mjs: Prepare runs its validations on the draft (members of another entity are refused, R9)"],
+  "draft determine action": ["runs", "ZCL_OSD_RAP_R8_TEST, test/rap-r8.mjs: Prepare runs its validations on the draft; a root's, those of the entities below it too (R11)"],
   "function": ["refused", "bdef-gen: functions are outside R6"],
   "side effects": ["ignored", "parsed, nothing reads them"],
   "determination/validation": ["runs", "test/rap-serve.mjs"],
@@ -123,7 +125,7 @@ export function bdefConstructs(model) {
   if (model.unparsed.length) add("unparsed grammar", `${model.unparsed.length} statement(s)`);
   if (["managed", "projection", "interface"].includes(model.implementationType)) add(model.implementationType, "header");
   else if (model.implementationType) add(model.implementationType, "header");
-  if (model.withDraft) add(model.implementationType === "projection" ? "use draft" : "with draft", "header");
+  if (model.withDraft) add(["projection", "interface"].includes(model.implementationType) ? "use draft" : "with draft", "header");
   const pools = new Set(model.entities.map(e => (e.implementationClass ?? model.implementationClass ?? "").toUpperCase()).filter(Boolean));
   if (pools.size > 1) add("several pools", [...pools].join(", "));
   for (const e of model.entities) {
@@ -133,6 +135,7 @@ export function bdefConstructs(model) {
     if (e.draftQuery) add("draft table query", n);
     if (/^\//.test(e.alias ?? "")) add("namespaced alias", n);
     if ((e.options ?? []).some(o => o.kind === "extensible")) add("extensible", n);
+    for (const p of e.pragmas ?? []) add("pragma", `${n}: ${p}`);
     for (const o of e.options ?? []) if (o.kind === "additional save") add("with additional save", n);
       else if (o.kind === "unmanaged save") add("with unmanaged save", n);
     if (e.etag) add(`etag ${e.etag.kind}`, n);
@@ -172,7 +175,12 @@ export function bdefConstructs(model) {
       if (a.parameter) add("action parameter", `${n}~${a.name}`);
       if (a.result && a.result.type !== "$self") add("action result not $self", `${n}~${a.name}`);
     }
-    for (const a of e.determineActions) add(a.modifiers.includes("draft") ? "draft determine action" : "determine action", `${n}~${a.name}`);
+    for (const a of e.determineActions) {
+      add(a.modifiers.includes("draft") ? "draft determine action" : "determine action", `${n}~${a.name}`);
+      const own = [e.entity, e.alias].filter(Boolean).map(x => x.toUpperCase());
+      const others = (a.triggers ?? []).filter(t => t.name.includes("~") && !own.includes(t.name.split("~")[0].trim().toUpperCase()));
+      if (others.length) add("root determine action over a child", `${n}~${a.name}: ${others.map(t => t.name.replace(/\s+/g, "")).join(", ")}`);
+    }
     for (const f of e.functions) add("function", `${n}~${f.name}`);
     if (e.sideEffects.length) add("side effects", n);
     if (e.determinations.length || e.validations.length) add("determination/validation", `${n}: ${e.determinations.length} + ${e.validations.length}`);

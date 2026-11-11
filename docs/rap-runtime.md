@@ -1,4 +1,4 @@
-# The managed RAP runtime (R2 .. R10)
+# The managed RAP runtime (R2 .. R11)
 
 R2 of [the RAP plan](oracle-rap.md): a managed behavior definition runs. Its
 behavior pool's determinations, validations and action are called, its
@@ -600,6 +600,227 @@ attachment); the number ranges (here the highest saved ID + 1).
   a draft BO that renames an element.
 - A Fiori Elements app over the two services (sap.fe's requests are the
   ones R9 serves; not run against these services).
+
+### R11: the carrier singleton and the agency's interface BDEF -- all ten flight BDEFs run
+
+After R10 two of the ten behavior definitions of the flight reference
+scenario still stop (`node tools/rap-flight/constructs.mjs`): the carrier
+singleton -- `/DMO/I_CarriersLockSingleton_S` and its projection
+`/DMO/C_CarriersLockSingleton_S`, the "multi-inline edit" a business
+configuration maintenance object is generated as -- at unparsed grammar,
+and `/DMO/I_AgencyTP`, an interface BDEF. R11 is the design of both and of
+what stands behind their first walls, proven on the flight BOs themselves:
+the singleton edited as one draft over OData V4, its carriers changed,
+created and deleted below it and activated together; the interface BO used
+through EML.
+
+Measured first, by building each BDEF as far as it goes, wall after wall:
+
+| BDEF | what stops it, in the order the build meets it |
+| --- | --- |
+| `/DMO/I_AgencyTP` | `interface;` refused by name |
+| carrier singleton | the pragma `##DRAFT_OP_NOT_REQUIRED` in the root's header (the "unparsed grammar"); then the root view, a `left outer join` on `0 = 0` with `max( )` and the literal key `1` (no generated view: joins refused); `1 as CarrierSingletonID` in the carrier view, dropped silently (no column); the root's Prepare naming `Carrier~validateName` (another entity's validation); an unmanaged save with neither table nor mapping; the pool's EML |
+
+Nothing in this section was measured on a system; where the public RAP and
+CDS documentation states a rule the runtime follows it, and a choice it
+does not state is named **unmeasured**.
+
+### Interface BDEFs
+
+`interface; use draft; define behavior for /DMO/I_AgencyTP alias
+/DMO/Agency { use create; use update; use delete; use action Edit; ... }`
+over a view `provider contract transactional_interface as projection on
+/DMO/R_AgencyTP` is the stable layer of a BO that other BOs and consumers
+use: no behavior of its own, no service. Here it is **a projection without
+a service**: `bdef-gen.mjs` checks and types it exactly as a projection BDEF
+(R5, R10: every `use` must be declared by the base, `use draft` over a
+draft base, no pool of its own -- refused if it names one) and the registry
+answers its entities as projection entities. Its derived types are its
+own (`TYPE TABLE FOR CREATE /dmo/i_agencytp`), with one change that holds
+for every projection: an entity whose base is late-numbered carries `%pid`
+in `%pky`, so a consumer of the interface gets the instance's `%pid` in
+MAPPED.
+
+**EML over it runs on the base.** `MODIFY ENTITIES OF /dmo/i_agencytp`,
+`READ ENTITIES OF`, `COMMIT ENTITIES RESPONSE OF` go through
+`ZCL_OSD_RAP_EML=>ROUTE`: a BDEF with an adapter of its own is used as it
+is; one the registry knows as a projection (`ZIF_OSD_RAP_REGISTRY=>
+PROJECTIONS`) runs in its **base's** session -- the same transactional
+buffer, one save -- with the base entity, after the statement is checked
+against the interface's `use`s (an operation, action or association it does
+not use is refused by name). The rows and responses pass by component
+name, so routing is refused rather than mapped wrongly where names differ:
+a projection that renames an element (the managed travel's processor
+projection), whose response alias is not its base's, or that has an augment
+(the supplement's projection; EML here does not call a projection's pool).
+`/DMO/I_AgencyTP` renames nothing and keeps `/DMO/Agency`, so it routes.
+**Unmeasured**: what a system answers for EML on a projection that
+renames, and whether the interface's own (empty) authorization layer would
+change a message.
+
+### The singleton root
+
+```
+define root view entity /DMO/I_CarriersLockSingleton_S
+  as select from I_Language
+    left outer join /dmo/carrier as carr on 0 = 0
+  composition [0..*] of /DMO/I_Carrier_S as _Airline
+{ key 1 as CarrierSingletonID, max (carr.last_changed_at) as LastChangedAtMax, _Airline }
+where I_Language.Language = $session.system_language
+```
+
+One row: the logon language's row of `I_Language` (a system has one for
+every logon language), joined to every carrier on a condition that always
+holds, aggregated without GROUP BY. Its key is a literal; its other
+element is the latest change of any carrier, which is the BO's `total
+etag`. No SQL view of this runtime can carry it (no join with an
+aggregate, no literal column), and none is generated: `tools/cds-computed.mjs`
+recognises **this shape and only this one** -- one `left outer join T as t
+on <n> = <n>`, a WHERE (if any) `<source>.<f> = $session.system_language`,
+no GROUP BY, elements that are literals, `max | min | sum | count` over a
+column of `T`, and associations -- and writes its source class
+(`ZIF_STG_CDS_SOURCE`) as a **computed view**: each read answers the one
+row, the literals and one Open SQL `SELECT MAX( last_changed_at ) FROM
+/dmo/carrier`. `I_Language` itself is not read (it is a released view this
+tree does not have); the row exists for the logon language by definition.
+A condition on the root is decided before the read (below); one on the
+aggregate is refused. A projection of it (`/DMO/C_CarriersLockSingleton_S`)
+is computed the same way under its own element names.
+
+The root has no table: `with unmanaged save`, no `persistent table`, no
+`mapping for`. R7 refused that ("reading through the CDS view is outside
+R7"); since R11 such an entity **reads its saved instance through its CDS
+view's source class**, columns named as the elements, and writes nothing
+(its saver's `save_modified` is empty upstream). Its draft table
+`/dmo/d_carr_lock` holds the root's draft.
+
+### Constant elements
+
+`1 as CarrierSingletonID` in `/DMO/I_Carrier_S` (and the key of the root)
+is a **constant element**: every row has it, no column holds it. Before R11
+`cds2ddic.mjs` dropped such an element without a word (a literal is no
+column name). Now:
+
+- **Its type is the system's**: an integer literal is the smallest integer
+  type that holds it (`1` is INT1 -- the flight's draft tables say so,
+  `CARRIERSINGLETONID INT1`), a string literal CHAR of its length. Over
+  OData INT1 is `Edm.Byte`.
+- **The generated SQL view leaves it out**; the view's source class fills it
+  into every row after the read, and decides a condition on it before the
+  SELECT (`ZCL_STG_CDS_CONST=>DECIDE`): a conjunct `NAME = <literal>` at the
+  top level is dropped when it holds and makes the answer empty when it does
+  not; a constant named in any other way (inside OR, another operator) is
+  refused, not sent to a SELECT whose view has no such column. That is what
+  a navigation from the root to its carriers writes (`CARRIERSINGLETONID =
+  '1'`), and what the RAP runtime writes for the root's key.
+- **The RAP model knows it** (`ZIF_OSD_RAP_BO=>TY_FIELD-CONSTANT`): an
+  active instance read from its table gets it; a pair of an association
+  whose target is a constant holds for all saved instances or for none, so
+  the root's `_Airline` reaches every carrier; a draft row has it in its
+  draft table's column like any element.
+- **A draft entity's union reads its active rows through the source class**
+  when its view has a constant or is computed, so both rules apply there
+  too; a projection of a view with a constant inherits the constant.
+
+### A root's Prepare runs the validations of the entities below it
+
+`draft determine action Prepare { validation Carrier~validateName;
+validation Carrier~validateCurrencyCode; }` on the root names the
+validations of the child entity. R6 refused a member of another entity;
+since R11 a determine action **of a root** may name a validation or
+determination of any entity of the BDEF (`ty_member-entity`), and it runs
+for that entity's instances in the tree below each instance the action is
+executed for (the draft tree R8 builds for Activate). A child's determine
+action naming another entity's member stays refused. The singleton's
+Prepare therefore checks every carrier draft; Activate runs the carriers'
+validations on save as before (they are triggered by the changed fields).
+
+### Edit, Activate and Discard of the singleton
+
+Nothing new in the draft protocol (R8, R9): Edit on the active root drafts
+the root and, through the composition, every carrier (the constant pair
+holds for all of them); a carrier draft is changed with PATCH, created
+through `_Airline` of the root's draft, deleted with DELETE (its `delete (
+features : instance )` asks the pool, which disables it for a carrier with
+a connection); Activate writes the changed, created and deleted carriers to
+`/dmo/carrier` through the managed save and calls the root's empty
+`save_modified`; Discard removes the root's draft and every carrier draft.
+The root's lock is the BO's lock: one editor of all carriers at a time,
+which is what the singleton is for. **Unmeasured**: the root's `total etag`
+after an Activate (here the root's next read computes the new maximum; a
+system's ETag handling of a computed root may differ), and
+`Activate optimized`, which is accepted and runs as Activate.
+
+### The pragma
+
+`##DRAFT_OP_NOT_REQUIRED` after the root's header silences the system's
+syntax check message that a draft root without `create`, `update` and
+`delete` lacks the draft operations; `bdef-parse.mjs` keeps an entity
+header's pragmas (`pragmas`) and they change nothing.
+
+### Built and proven
+
+- **Generators.** `tools/cds-computed.mjs` (new: constant elements, the
+  singleton root and its source class), `cds2ddic.mjs` (uses it; a
+  projection of a constant or of a computed view), `bdef-parse.mjs` (header
+  pragmas), `bdef-gen.mjs` (interface BDEFs as projections, `%pid` in a late
+  base's projection types, a root's determine action over the entities
+  below it), `rap-runtime-gen.mjs` (an unmanaged save read through its view,
+  `ls_field-constant`, `ls_member-entity`, a union read through the source
+  class, the registry's `projections`), `srvd-gen.mjs` (`Edm.Byte`,
+  `Edm.Int16`).
+- **Runtime.** `ZCL_STG_CDS_CONST` (new, with its unit test);
+  `ZCL_OSD_RAP_RUNTIME` (`fill_constants`, the constant pair, members of
+  another entity in `determine_action`); `ZCL_OSD_RAP_EML=>ROUTE`;
+  `ZIF_OSD_RAP_REGISTRY=>PROJECTIONS`; the SADL data provider leaves a
+  constant element to the read (no calculating class, not refused in a
+  condition).
+- **Pack.** The four BDEFs, the four views and `/DMO/UI_CARRIERS_S` are
+  fetched; the singleton's pool `/dmo/bp_i_carrierslocksingle_s` is in the
+  overlay (EML targets declared, `DISCARDING DUPLICATES MAPPING ... EXCEPT
+  *` a loop, the test classes dropped; [rap-flight-pack.md](rap-flight-pack.md)).
+- **Tests.** `ZCL_OSD_RAPFLIGHT_R11_TEST` -- the interface (4): a draft
+  through the interface activated to its final key, update and delete, one
+  transaction with the base, the routing refusals; the singleton (6): the
+  computed root, Edit drafting every carrier, a change activated, a carrier
+  created and deleted below the draft, Prepare running `Carrier~validateName`
+  and the refused Activate, the disabled delete of a carrier in use.
+  `test/rap-r11.mjs`: the pragma and the literal types, the generated
+  interface and singleton, and over V4 the root and its carriers, Edit +
+  change + create + Prepare + Activate (and back), a refused Activate and
+  Discard. `ZCL_STG_CDS_CONST`'s own unit test.
+
+### The measurement: the flight BDEFs before and after
+
+`node tools/rap-flight/constructs.mjs`, first wall per behavior definition:
+
+| BDEF | after R10 | after R11 |
+| --- | --- | --- |
+| `/DMO/I_AgencyTP` | interface BDEF | **runs** (on its base, through EML) |
+| `/DMO/I_CarriersLockSingleton_S` | unparsed grammar | **runs** |
+| `/DMO/C_CarriersLockSingleton_S` | its base's grammar | **runs**, served as `/DMO/UI_CARRIERS_S` |
+| the other seven | runs / accepted | unchanged |
+
+All ten BDEFs of the scenario run; refused construct rows: 4 before, 0
+after (see the PR's REPORT for the whole table).
+
+### Unmeasured
+
+The root's ETag after Activate; EML on a projection that renames; whether
+a system keeps the literal's INT1 in a service's `$metadata` (`Edm.Byte`
+here, from the draft tables' INT1); the order in which a root's Prepare
+runs the members of different entities (here: the action's entity, then
+each other entity, in the order declared).
+
+### Not in R11
+
+- Joins in general: only the singleton root's shape is computed; any other
+  join stays refused.
+- EML on a projection that renames an element or has an augment.
+- A Fiori Elements app over `/DMO/UI_CARRIERS_S` (its requests are the
+  ones R9 serves; not run against this service).
+- `I_Language`, `I_Currency` and `I_CurrencyStdVH` as views (the currency
+  value help of the carrier projection is not served).
 
 ## Not in R2c
 
