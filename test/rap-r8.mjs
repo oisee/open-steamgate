@@ -19,7 +19,7 @@ const write = {"content-type": "application/json", "x-csrf-token": "open-steamga
 const LATEST = encodeURIComponent("IsActiveEntity eq false or SiblingEntity/IsActiveEntity eq null");
 const LATEST_AND = rest => encodeURIComponent(`(IsActiveEntity eq false or SiblingEntity/IsActiveEntity eq null) and ${rest}`);
 // the draft tables and the admin table of src/rap the demo's BDEF needs
-const trip = () => [...walk("src/rap_r8"), "src/rap/zosd_draft_adm.tabl.xml", "src/rap/zosd_i_draftadm.ddls.asddls", "src/rap/zosd_i_draftadm.ddls.xml"].filter(f => /\.(abap|xml|asbdef|asddls|srvdsrv)$/.test(f))
+const trip = () => [...walk("src/rap_r8"), "src/rap/zosd_draft_adm.tabl.xml", "src/rap_draftadm/zosd_i_draftadm.ddls.asddls", "src/rap_draftadm/zosd_i_draftadm.ddls.xml"].filter(f => /\.(abap|xml|asbdef|asddls|srvdsrv)$/.test(f))
   .map(f => ({filename: basename(f), contents: readFileSync(f, "utf8")}));
 const pools = files => files.filter(f => /\.clas\.(locals_imp\.)?abap$/.test(f.filename));
 const build = files => {

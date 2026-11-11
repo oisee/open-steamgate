@@ -52,8 +52,13 @@ test("system status: the object page over the running tree", async ({page}) => {
   expect(await digits(http)).toContain(String(PORT));
 
   // Services: the ICF paths the runtime answers
+  // (each launchpad app is a row too, and the apps' /app/flp.html# paths sort
+  // first: when they fill the first page, grow the table until one shows)
   const service = section("Services").locator(".sapMListTblRow").filter({hasText: /\/sap\//}).first();
-  await expect(service).toBeVisible();
+  await expect(async () => {
+    if (!(await service.isVisible())) await section("Services").getByRole("button", {name: /^More/}).click();
+    await expect(service).toBeVisible({timeout: 2000});
+  }).toPass({timeout: 30_000});
   expect(await service.innerText()).toMatch(/(^|[\t\n])\/sap\//);
 
   // Packs: the content packs layered into the build

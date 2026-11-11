@@ -96,7 +96,7 @@ function edm(type, where) {
 const yamlString = s => JSON.stringify(String(s));
 
 // R9: the CDS view a draft-enabled service serves its draft administrative
-// data from (src/rap/zosd_i_draftadm.ddls.asddls, over ZOSD_DRAFT_ADM), the
+// data from (src/rap_draftadm/zosd_i_draftadm.ddls.asddls, over ZOSD_DRAFT_ADM), the
 // entity set and type it is served as, and the OData type of each element
 // where the CDS type alone does not say it (docs/rap-runtime.md, R9;
 // unmeasured: a system's set and type names and Edm.Guid for the UUID)

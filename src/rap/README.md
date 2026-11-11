@@ -21,8 +21,8 @@ serves (through the generated `zif_stg_cds_draft_source` classes).
 R9: the owner of a draft -- `INPROCESSBYUSER` is the request's user
 (`src/logon`), another user's change, Activate, Discard, Resume, Prepare or
 Edit of it is refused (FAILED `locked`) and the union serves a user only
-their own drafts; the draft administrative data served as an entity
-(`ZOSD_I_DRAFTADM`, `zcl_osd_draft_adm_calc` for the `*ByMe` flags).
+their own drafts; the draft administrative data is served as an entity
+by `src/rap_draftadm`.
 
 - `zcl_osd_rap_runtime` - the runtime; `for_bdef( 'ZI_...' )` to start;
   `active( )` names the runtime whose handler runs, where EML inside a
@@ -40,8 +40,6 @@ their own drafts; the draft administrative data served as an entity
   `zif_stg_sadl_behavior` of `src/sadl/`)
 - `zcl_osd_rap_draft` - R8: active and draft rows merged with their flags
 - `zosd_draft_adm` - R8: the draft administrative data, one row per draft of a root
-- `zosd_i_draftadm` - R9: the view a draft service serves it through as `DraftAdministrativeData`
-- `zcl_osd_draft_adm_calc` - R9: its virtual elements (descriptions, `DraftIsCreatedByMe` and siblings)
 - `zcx_osd_rap`, `zcl_osd_rap_message`
 - `cl_abap_behv`, `cl_abap_behavior_handler`, `cl_abap_behavior_saver`,
   `if_abap_behv`, `if_abap_behv_message` - clean-room bases and constants a
