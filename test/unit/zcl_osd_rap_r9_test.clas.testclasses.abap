@@ -229,3 +229,34 @@ CLASS ltcl_owner IMPLEMENTATION.
   ENDMETHOD.
 
 ENDCLASS.
+
+* src/logon: ENTER takes the user of a Basic credential, LEAVE ends it
+CLASS ltcl_logon DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
+  PRIVATE SECTION.
+    METHODS teardown.
+    METHODS basic_user_until_leave FOR TESTING RAISING cx_static_check.
+    METHODS no_credential_is_sy_uname FOR TESTING RAISING cx_static_check.
+ENDCLASS.
+
+CLASS ltcl_logon IMPLEMENTATION.
+
+  METHOD teardown.
+    zcl_osd_logon=>leave( ).
+  ENDMETHOD.
+
+  METHOD basic_user_until_leave.
+    zcl_osd_logon=>enter( |Basic { cl_http_utility=>encode_base64( 'bob:secret' ) }| ).
+    cl_abap_unit_assert=>assert_equals( act = zcl_osd_logon=>user( ) exp = 'BOB' ).
+    zcl_osd_logon=>leave( ).
+    cl_abap_unit_assert=>assert_equals( act = zcl_osd_logon=>user( ) exp = sy-uname ).
+  ENDMETHOD.
+
+  METHOD no_credential_is_sy_uname.
+    zcl_osd_logon=>set( 'ALICE' ).
+    zcl_osd_logon=>enter( '' ).
+    cl_abap_unit_assert=>assert_equals( act = zcl_osd_logon=>user( ) exp = sy-uname ).
+    zcl_osd_logon=>enter( 'Bearer abc' ).
+    cl_abap_unit_assert=>assert_equals( act = zcl_osd_logon=>user( ) exp = sy-uname ).
+  ENDMETHOD.
+
+ENDCLASS.

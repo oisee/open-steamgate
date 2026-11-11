@@ -103,6 +103,8 @@ CLASS zcl_stg_http_handler IMPLEMENTATION.
     ENDIF.
     server->response->set_status( code   = ls_response-status
                                   reason = ls_response-reason ).
+* R9: the request's user ends with the request
+    zcl_osd_logon=>leave( ).
   ENDMETHOD.
 
 ENDCLASS.

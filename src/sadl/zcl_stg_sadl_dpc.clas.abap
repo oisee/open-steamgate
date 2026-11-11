@@ -261,6 +261,13 @@ CLASS zcl_stg_sadl_dpc IMPLEMENTATION.
     ENDIF.
     rv_known = abap_true.
     split_flags( EXPORTING it_key_tab = is_path-key_tab IMPORTING et_key_tab = lt_keys CHANGING ct_flags = lt_flags ).
+* the source first, in its own version and as this user sees it: no
+* source, no sibling (critic MUST 2 on #915; the facade answers 404)
+    lr_data = read_versions( is_entity = ls_source iv_where = key_where( lt_keys ) it_orderby = lt_none it_flags = lt_flags ).
+    ASSIGN lr_data->* TO <lt_data>.
+    IF lines( <lt_data> ) = 0.
+      RETURN.
+    ENDIF.
     IF lv_nav = 'SIBLINGENTITY'.
 * the same key, the other version
       LOOP AT lt_flags ASSIGNING <ls_flag> WHERE property = 'ISACTIVEENTITY'.
@@ -282,8 +289,6 @@ CLASS zcl_stg_sadl_dpc IMPLEMENTATION.
     ENDIF.
 * the admin row of the instance's draft: a draft's own, an active
 * instance's when it has one (its DRAFTUUID), none otherwise
-    lr_data = read_versions( is_entity = ls_source iv_where = key_where( lt_keys ) it_orderby = lt_none it_flags = lt_flags ).
-    ASSIGN lr_data->* TO <lt_data>.
     READ TABLE <lt_data> INDEX 1 ASSIGNING <ls_row>.
     IF sy-subrc <> 0.
       RETURN.

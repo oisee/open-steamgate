@@ -1547,13 +1547,20 @@ A draft belongs to a user. On a system that user is `SY-UNAME`, from the
 logon; here there is no logon and one `SY-UNAME` per process, so R9 adds
 **`src/logon`** (`ZCL_OSD_LOGON`): the HTTP fronts set the request's user
 from the user name of its `Authorization: Basic` header (the password is not
-checked -- identification, not authentication); without one it is
-`SY-UNAME` as before, and so it is for EML and ABAP Unit
-(`ZCL_OSD_LOGON=>SET` switches it in a test).
+checked: this is **identification, not authentication** -- anyone who
+names ALICE acts as ALICE, as with the rest of this tree's HTTP, which has
+no authentication and binds to loopback by default). The fronts clear it
+again when the request is answered, so without a credential, and outside a
+request (EML, ABAP Unit, jobs), it is `SY-UNAME` as before
+(`ZCL_OSD_LOGON=>SET` switches it in a test). `SY-UNAME` itself is not
+changed: locks, enqueue owners, logs and the system identity keep it.
 
 - The admin row's `CREATEDBYUSER`, `INPROCESSBYUSER` and
-  `LASTCHANGEDBYUSER` are that user, and so is a BO's own `lastChangedBy`
-  field.
+  `LASTCHANGEDBYUSER` are that user.
+- So are the managed administrative `*_BY` fields (`@Semantics.user.createdBy`,
+  `lastChangedBy`, `localInstanceLastChangedBy`) of **every** managed RAP BO
+  written over OData, draft-enabled or not: a request with Bob's Basic
+  credential stamps `BOB` where it stamped `SY-UNAME` before.
 - **The owner lock.** A change of a draft instance (update, delete, create
   by association below it), and Activate, Discard, Resume and Prepare of
   it, by any user other than its `INPROCESSBYUSER`, is refused: FAILED with
@@ -1572,6 +1579,9 @@ checked -- identification, not authentication); without one it is
   `SiblingEntity` null). **Unmeasured**: the status a system answers for
   another user's draft by key (404 here) and for the refused Edit (400 here,
   as every RAP refusal since R5).
+- A navigation from a source that is not there -- a version that does not
+  exist, or another user's draft -- is a 404; a source that is there
+  without the related entity is a 204 (`null` in an expand).
 - No expiry: a draft holds its instance until it is activated or discarded,
   so "Unsaved Changes by Another User" (a draft whose exclusive lock has run
   out, `InProcessByUser` empty) never occurs; the filter is served and

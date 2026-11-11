@@ -102,6 +102,8 @@ CLASS zcl_osd_v4_http IMPLEMENTATION.
     ENDLOOP.
     server->response->set_cdata( ls_response-body ).
     server->response->set_status( code = ls_response-status reason = ls_response-reason ).
+* R9: the request's user ends with the request
+    zcl_osd_logon=>leave( ).
   ENDMETHOD.
 
   METHOD dispatch.
@@ -360,6 +362,21 @@ CLASS zcl_osd_v4_http IMPLEMENTATION.
       APPEND ls_path TO lo_context->mt_navigation_path.
     ENDIF.
     lo_dpc = zcl_oao_registry=>create_dpc( lo_model->ms_service-name ).
+* R9: Set(key)/SiblingEntity and Set(key)/DraftAdministrativeData of a
+* draft BO: a source that is not there (or is another user's draft) is a
+* 404, a source without the related entity a 204 (OData 4.01 Part 1,
+* 9.1.4 and 11.2.7; critic MUST 2 on #915)
+    IF lo_source IS BOUND AND iv_method = 'GET'
+        AND ( ls_nav-name = 'SiblingEntity' OR ls_nav-name = 'DraftAdministrativeData' ).
+      lo_dpc->get_entity( EXPORTING iv_entity_name = ls_source-entity_type iv_entity_set_name = ls_source-name
+        iv_source_name = ls_source-entity_type it_key_tab = lo_source->mo_context->mt_key_tab
+        it_navigation_path = lo_source->mo_context->mt_navigation_path
+        io_tech_request_context = lo_source->mo_context IMPORTING er_entity = lr_data ).
+      IF lr_data IS NOT BOUND.
+        zcl_osd_v4_query=>fail( iv_text = 'Entity not found' iv_status = 404 ).
+      ENDIF.
+      CLEAR lr_data.
+    ENDIF.
 * an entity a sticky session holds is read and changed in the session
     IF lo_query->ms_request-key_string IS NOT INITIAL AND lo_source IS NOT BOUND.
       lr_buffer = zcl_osd_v4_sticky=>buffered( it_headers = it_headers iv_service = lo_model->ms_service-name

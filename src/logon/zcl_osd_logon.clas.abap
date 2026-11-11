@@ -16,12 +16,16 @@ CLASS zcl_osd_logon DEFINITION
 * for the draft's owner (ZOSD_DRAFT_ADM-INPROCESSBYUSER).
 *
 * A class static outlives the request here, so ENTER sets it on every
-* request, with or without a credential.
+* request, with or without a credential, and LEAVE clears it when the
+* request is answered: a call outside a request is SY-UNAME again (a request
+* that dumps skips LEAVE; the next request's ENTER resets it).
 
   PUBLIC SECTION.
     CLASS-METHODS enter
       IMPORTING
         iv_authorization TYPE string.
+
+    CLASS-METHODS leave.
 
     CLASS-METHODS user
       RETURNING
@@ -54,6 +58,10 @@ CLASS zcl_osd_logon IMPLEMENTATION.
     lv_plain = cl_http_utility=>decode_base64( lv_token ).
     SPLIT lv_plain AT ':' INTO lv_name lv_secret.
     gv_user = to_upper( condense( lv_name ) ).
+  ENDMETHOD.
+
+  METHOD leave.
+    CLEAR gv_user.
   ENDMETHOD.
 
   METHOD user.

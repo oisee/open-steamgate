@@ -167,14 +167,17 @@ test("Editing Status: own drafts, drafts of another user, unchanged", async ({pa
   const search = page.getByLabel(/^Description/).locator("visible=true").first();
   await search.fill(`${tag}*`);
   await search.press("Enter");
+  // pick a value of the Editing Status field and run the search: opening,
+  // choosing and checking the field's value are retried together, since the
+  // list can close between seeing the option and clicking it (critic on #915)
   const pick = async (status) => {
+    const field = page.locator('[id$="DraftEditingStatus-inner-inner"]');
     const option = page.getByRole("option").filter({hasText: new RegExp(`^${status.replace(/[()]/g, "\\$&")}$`)}).locator("visible=true").first();
-    // the arrow toggles the list: open it until the option shows
     await expect(async () => {
       if (!(await option.isVisible())) await page.locator('[id$="DraftEditingStatus-inner-vhi"]').click();
-      await expect(option).toBeVisible({timeout: 2000});
-    }).toPass();
-    await option.click();
+      await option.click({timeout: 2000});
+      await expect(field).toHaveValue(status, {timeout: 2000});
+    }).toPass({timeout: 30_000});
     await page.getByRole("button", {name: "Go"}).click();
   };
   const shows = async (rows) => {

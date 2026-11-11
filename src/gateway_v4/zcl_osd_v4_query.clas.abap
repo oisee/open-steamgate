@@ -163,7 +163,9 @@ CLASS zcl_osd_v4_query IMPLEMENTATION.
       ELSEIF lv_in = abap_false AND lv_depth = 0 AND lv_char = space.
         IF lv_off + 5 <= lv_len AND substring( val = iv_text off = lv_off len = 5 ) = ` and `.
           lv_part = substring( val = iv_text off = lv_start len = lv_off - lv_start ).
-          CONDENSE lv_part.
+* only the ends: a literal keeps its blanks (critic MUST 1 on #915)
+          SHIFT lv_part LEFT DELETING LEADING space.
+          SHIFT lv_part RIGHT DELETING TRAILING space.
           APPEND lv_part TO et_parts.
           lv_off = lv_off + 5.
           lv_start = lv_off.
@@ -178,7 +180,8 @@ CLASS zcl_osd_v4_query IMPLEMENTATION.
       fail( 'Unbalanced filter' ).
     ENDIF.
     lv_part = substring( val = iv_text off = lv_start ).
-    CONDENSE lv_part.
+    SHIFT lv_part LEFT DELETING LEADING space.
+    SHIFT lv_part RIGHT DELETING TRAILING space.
     APPEND lv_part TO et_parts.
   ENDMETHOD.
 
@@ -276,7 +279,10 @@ CLASS zcl_osd_v4_query IMPLEMENTATION.
       APPEND ls_option TO ls_flag-select_options.
       APPEND ls_flag TO mo_context->mt_draft_filter.
     ENDLOOP.
-    cv_filter = lv_rest.
+* nothing taken out: the filter stays exactly as it came
+    IF mo_context->mt_draft_filter IS NOT INITIAL.
+      cv_filter = lv_rest.
+    ENDIF.
   ENDMETHOD.
 
   METHOD split.
@@ -574,20 +580,31 @@ CLASS zcl_osd_v4_query IMPLEMENTATION.
           FIND |({ gc_draft_latest })| IN ls_opt-value.
           IF sy-subrc = 0.
             mo_context->mv_draft_latest = abap_true.
-            REPLACE ALL OCCURRENCES OF |({ gc_draft_latest })| IN ls_opt-value WITH ``.
-            CONDENSE ls_opt-value.
-* X and (L) and Y leaves X and and Y: one AND of the two goes with it
-            FIND ` and and ` IN ls_opt-value.
+* taken out with one AND beside it, by text that never reaches into a
+* literal: X and (L) and Y is X and Y (critic MUST 1 on #915: no CONDENSE,
+* a literal keeps its blanks)
+            DO.
+              FIND |({ gc_draft_latest }) and | IN ls_opt-value.
+              IF sy-subrc = 0.
+                REPLACE FIRST OCCURRENCE OF |({ gc_draft_latest }) and | IN ls_opt-value WITH ``.
+                CONTINUE.
+              ENDIF.
+              FIND | and ({ gc_draft_latest })| IN ls_opt-value.
+              IF sy-subrc = 0.
+                REPLACE FIRST OCCURRENCE OF | and ({ gc_draft_latest })| IN ls_opt-value WITH ``.
+                CONTINUE.
+              ENDIF.
+              EXIT.
+            ENDDO.
+            SHIFT ls_opt-value LEFT DELETING LEADING space.
+            SHIFT ls_opt-value RIGHT DELETING TRAILING space.
+            IF ls_opt-value = |({ gc_draft_latest })|.
+              CLEAR ls_opt-value.
+            ENDIF.
+            FIND |({ gc_draft_latest })| IN ls_opt-value.
             IF sy-subrc = 0.
-              REPLACE FIRST OCCURRENCE OF ` and and ` IN ls_opt-value WITH ` and `.
-            ELSEIF strlen( ls_opt-value ) >= 4 AND substring( val = ls_opt-value len = 4 ) = `and `.
-              ls_opt-value = substring( val = ls_opt-value off = 4 ).
-            ELSEIF strlen( ls_opt-value ) >= 4 AND substring( val = ls_opt-value off = strlen( ls_opt-value ) - 4 ) = ` and`.
-              ls_opt-value = substring( val = ls_opt-value len = strlen( ls_opt-value ) - 4 ).
-            ELSEIF ls_opt-value IS NOT INITIAL.
               fail( iv_text = 'The draft list filter is understood alone or AND-ed with the others' iv_status = 501 ).
             ENDIF.
-            CONDENSE ls_opt-value.
           ENDIF.
           IF ls_opt-value CS '/'.
             draft_paths( EXPORTING is_set = is_set CHANGING cv_filter = ls_opt-value ).

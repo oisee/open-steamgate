@@ -205,6 +205,48 @@ describe("RAP R9 draft for Fiori Elements V4", function () {
     assert.ok(plain);
   });
 
+  it("a navigation from a source that is not there, or is another user's draft, is 404 (critic MUST 2 on #915)", async () => {
+    const fresh = await newDraft("Only a draft");
+    for (const nav of ["SiblingEntity", "DraftAdministrativeData"]) {
+      assert.equal((await get(`Trip${key(fresh, true)}/${nav}`)).status, 404, `no active instance: ${nav}`);
+      assert.equal((await get(`Trip${key(fresh, false)}/${nav}`, "bob")).status, 404, `another user's draft: ${nav}`);
+    }
+    assert.equal((await get(`Trip${key(fresh, false)}/SiblingEntity`)).status, 204, "the owner's draft without an active instance");
+    assert.equal((await get(`Trip${key(fresh, false)}/DraftAdministrativeData`)).status, 200);
+    const id = await activeTrip("Held by alice", true);
+    assert.equal((await get(`Trip${key(id, false)}/SiblingEntity`, "bob")).status, 404, "bob does not reach alice's draft's sibling");
+    assert.equal((await get(`Trip${key(id, true)}/SiblingEntity`, "bob")).status, 204, "the active instance is there, its sibling is not bob's");
+    for (const x of [fresh, id]) assert.equal((await discard(x)).status, 204);
+  });
+
+  it("keeps the blanks of a filter literal, with and without the draft conditions (critic MUST 1 on #915)", async () => {
+    const text = `A  /  B ${Date.now()}`;
+    const id = await newDraft(text);
+    const ids = async (filter, user = "alice") => {
+      const res = await get(`Trip?$filter=${encodeURIComponent(filter)}`, user);
+      assert.equal(res.status, 200, `${filter}: ${JSON.stringify(res.body)}`);
+      return res.body.value.map(t => t.trip_uuid);
+    };
+    assert.deepEqual(await ids(`description eq '${text}'`), [id]);
+    assert.deepEqual(await ids(`${STATUS.all} and description eq '${text}'`), [id]);
+    assert.deepEqual(await ids(`description eq '${text}' and ${STATUS.all}`), [id]);
+    assert.deepEqual(await ids(`${STATUS.ownDraft} and description eq '${text}'`), [id]);
+    assert.equal((await act(id, false, "Activate")).status, 200);
+    assert.equal((await act(id, true, "Edit", "alice", JSON.stringify({PreserveChanges: true}))).status, 200);
+    assert.deepEqual(await ids(`${STATUS.lockedByOther} and description eq '${text}'`, "bob"), [id]);
+    assert.deepEqual(await ids(`(${STATUS.lockedByOther}) and (description eq '${text}')`, "bob"), [id]);
+    assert.equal((await discard(id)).status, 204);
+  });
+
+  it("the request's user ends with the request: a call outside one is SY-UNAME again (critic on #915)", async () => {
+    const abap = globalThis.abap;
+    assert.ok(abap?.Classes?.ZCL_OSD_LOGON, "the server runs inline in this process");
+    assert.equal((await get("Trip?$top=1", "bob")).status, 200);
+    const user = String((await abap.Classes.ZCL_OSD_LOGON.user()).get()).trim();
+    assert.equal(user, String(abap.builtin.sy.get().uname.get()).trim());
+    assert.notEqual(user, "BOB");
+  });
+
   it("refuses the draft navigations in a filter it cannot keep (501)", async () => {
     for (const filter of [
       "DraftAdministrativeData/InProcessByUser ne ''",
