@@ -514,6 +514,80 @@ the pinned transpiler does not lower written as the calls it stands for,
 and an `I_Country` stand-in table the agency's validation reads, filled by
 the seed class from the generated agencies and customers.
 
+### Built and proven
+
+- **Generators.** `tools/cds-path.mjs` (path elements, their class),
+  `bdef-gen.mjs` (namespaced identifiers, `use draft`, `field ( modify )`,
+  augment, `draft table ... query`, MAPPED LATE / `%pre` / `%tmp`),
+  `rap-runtime-gen.mjs` (late numbering, `extensible`, a projection's union
+  and augment class, the registry's `modify` / `union` / `augment`),
+  `lower-derived.mjs` (`adjust_numbers REDEFINITION`), `srvd-gen.mjs` (a
+  draft projection's service, `Edm.Binary`).
+- **Runtime.** `ZCL_OSD_RAP_RUNTIME`: `late_key`, `late_numbers` (the
+  savers' `adjust_numbers` between check_before_save and save), `final_key`,
+  `augment`; `ZCL_OSD_RAP_SADL`: a projection over a draft base (its union,
+  the version carried to the base), the augment of create and update, the
+  final key in a create's and an Activate's answer; `ZCL_STG_CDS_PATH`.
+- **One runtime defect met on the way** (ANORMALIES
+  `ANOMALY-2026-11-11-update-include-group`): the runtime's `UPDATE dbtab
+  FROM TABLE` of a table with a named include (every flight draft table)
+  answers 4; the generated table class replaces the row instead.
+- **Tests.** `ZCL_OSD_RAPFLIGHT_R10_TEST` (8, on the flight BOs): the
+  supplement's numbering by category, Prepare and Activate, a validation
+  stopping Activate with the draft kept, Edit + change + Discard; the
+  agency's preliminary key, Activate drawing the final key, a refused
+  Activate numbering nothing, an active create numbered late.
+  `test/rap-r10.mjs` (12): the generated types, lowering, model, union,
+  augment and service; over V4 the supplement draft created with its
+  description through the augment, changed, prepared and activated (the
+  text activated with it), a refused Activate and Discard, Edit + change +
+  Discard with the list filter, V2 reads, an agency draft activated to its
+  final key, a refused agency. `test/cds-path.mjs` (3).
+
+### The measurement: the flight BDEFs before and after
+
+`node tools/rap-flight/constructs.mjs`, first wall per behavior definition:
+
+| BDEF | after R9 | after R10 |
+| --- | --- | --- |
+| `/DMO/I_SUPPLEMENT` | accepted (not built or served) | **runs** (built, served through its projection) |
+| `/DMO/C_SUPPLEMENT` | a projection's `field ( modify )`, then `use draft` | **runs**, served as `/DMO/UI_SUPPLEMENT` |
+| `/DMO/R_AGENCYTP` | namespaced response aliases, then late numbering | **runs** |
+| `/DMO/C_AGENCYTP` | the base's wall | **runs**, served as `/DMO/UI_AGENCY` |
+| `/DMO/I_AGENCYTP` | interface BDEF | unchanged |
+| carrier singleton x2 | unparsed singleton grammar | unchanged |
+| `/DMO/I_TRAVEL_M` and its 2 projections | accepted | accepted |
+
+Constructs whose verdict changed: `use draft` (3), `late numbering`,
+`saver adjust_numbers`: refused -> runs; new in the table: `use action
+(draft)`, `field ( modify )`, `use create/update ( augment )`, `FOR MODIFY
+augment`, `namespaced alias` (runs), `draft table query`, `extensible`
+(ignored). Refusals over the ten BDEFs: 12 rows before, 4 after (the
+singleton grammar and the interface BDEF).
+
+### Unmeasured
+
+Nothing of R10 was checked on a system. In particular: the preliminary
+key of a late-numbered draft (a system may keep the key initial and name
+the draft by `%pid` / `DRAFTUUID`; what its V4 key then is); the order of
+an augment and the base operation, and the messages of a failing augment
+(`RELATING TO` is not run); what a supplement's or agency's V4 `$metadata`
+on a system says (`Core.Computed`, value helps, the text and the
+attachment); the number ranges (here the highest saved ID + 1).
+
+### Not in R10
+
+- `I_Country` / `I_Currency` are table stand-ins, so `CountryName` and the
+  value helps' texts through them are not served; value helps of the
+  projections (`@Consumption.valueHelpDefinition`) and metadata extensions
+  (`.ddlx`) are not read.
+- The interface BDEF `/DMO/I_AGENCYTP`, the carrier singleton, `with
+  collaborative draft`, precheck, EML `CONVERT KEY`.
+- Late numbering of a child or of an entity with children; a projection of
+  a draft BO that renames an element.
+- A Fiori Elements app over the two services (sap.fe's requests are the
+  ones R9 serves; not run against these services).
+
 ## Not in R2c
 
 Service bindings, `Edm.Guid` for UUID keys, a
