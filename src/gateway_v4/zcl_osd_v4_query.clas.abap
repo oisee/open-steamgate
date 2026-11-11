@@ -67,6 +67,15 @@ CLASS zcl_osd_v4_query DEFINITION PUBLIC CREATE PUBLIC.
       RAISING zcx_stg_error.
 * Set() -- empty parentheses, which only an operation without parameters may carry
     DATA mv_empty_parens TYPE abap_bool.
+* R9: the top-level conjuncts of a filter (outside quotes and parentheses),
+* and whether it has a top-level or
+    CLASS-METHODS conjuncts IMPORTING iv_text TYPE string
+      EXPORTING et_parts TYPE string_table ev_or TYPE abap_bool RAISING zcx_stg_error.
+* R9: the Fiori Elements V4 "Editing Status" conditions through SiblingEntity
+* and DraftAdministrativeData taken out of the filter into
+* mo_context->mt_draft_filter (docs/rap-runtime.md, R9)
+    METHODS draft_paths IMPORTING is_set TYPE zcl_stg_model_info=>ty_entity_set
+      CHANGING cv_filter TYPE string RAISING zcx_stg_error.
 ENDCLASS.
 
 CLASS zcl_osd_v4_query IMPLEMENTATION.
@@ -126,6 +135,153 @@ CLASS zcl_osd_v4_query IMPLEMENTATION.
 * Op() is an operation without parameters; Set() is refused when the keys are read
         mv_empty_parens = abap_true.
       ENDIF.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD conjuncts.
+    DATA lv_off TYPE i.
+    DATA lv_len TYPE i.
+    DATA lv_start TYPE i.
+    DATA lv_char TYPE c LENGTH 1.
+    DATA lv_in TYPE abap_bool.
+    DATA lv_depth TYPE i.
+    DATA lv_part TYPE string.
+    CLEAR: et_parts, ev_or.
+    lv_len = strlen( iv_text ).
+    WHILE lv_off < lv_len.
+      lv_char = iv_text+lv_off(1).
+      IF lv_char = |'|.
+        IF lv_in = abap_true.
+          lv_in = abap_false.
+        ELSE.
+          lv_in = abap_true.
+        ENDIF.
+      ELSEIF lv_in = abap_false AND lv_char = '('.
+        lv_depth = lv_depth + 1.
+      ELSEIF lv_in = abap_false AND lv_char = ')'.
+        lv_depth = lv_depth - 1.
+      ELSEIF lv_in = abap_false AND lv_depth = 0 AND lv_char = space.
+        IF lv_off + 5 <= lv_len AND substring( val = iv_text off = lv_off len = 5 ) = ` and `.
+          lv_part = substring( val = iv_text off = lv_start len = lv_off - lv_start ).
+* only the ends: a literal keeps its blanks (critic MUST 1 on #915)
+          SHIFT lv_part LEFT DELETING LEADING space.
+          SHIFT lv_part RIGHT DELETING TRAILING space.
+          APPEND lv_part TO et_parts.
+          lv_off = lv_off + 5.
+          lv_start = lv_off.
+          CONTINUE.
+        ELSEIF lv_off + 4 <= lv_len AND substring( val = iv_text off = lv_off len = 4 ) = ` or `.
+          ev_or = abap_true.
+        ENDIF.
+      ENDIF.
+      lv_off = lv_off + 1.
+    ENDWHILE.
+    IF lv_in = abap_true OR lv_depth <> 0.
+      fail( 'Unbalanced filter' ).
+    ENDIF.
+    lv_part = substring( val = iv_text off = lv_start ).
+    SHIFT lv_part LEFT DELETING LEADING space.
+    SHIFT lv_part RIGHT DELETING TRAILING space.
+    APPEND lv_part TO et_parts.
+  ENDMETHOD.
+
+  METHOD draft_paths.
+* The conditions sap.fe sends for the Editing Status filter field (captured
+* from SAPUI5 1.120, docs/rap-runtime.md R9), each a top-level conjunct:
+*   SiblingEntity/IsActiveEntity eq null      no version of it this user sees
+*   DraftAdministrativeData/InProcessByUser ne null   there is admin data
+*   DraftAdministrativeData/InProcessByUser ne ''     ... held by someone
+*   DraftAdministrativeData/InProcessByUser eq ''     admin data held by nobody
+* A navigation to nothing is null and a comparison with null is false
+* except eq null / ne null, so ne '' alone would be true without admin data:
+* it is taken only beside ne null. Anything else through either navigation,
+* or under a top-level or, stays in the filter and is refused (501).
+    DATA lt_parts TYPE string_table.
+    DATA lt_top TYPE string_table.
+    DATA lt_inner TYPE string_table.
+    DATA lv_len TYPE i.
+    DATA lv_part TYPE string.
+    DATA lv_or TYPE abap_bool.
+    DATA lv_rest TYPE string.
+    DATA lv_sep TYPE string.
+    DATA lv_ne_null TYPE abap_bool.
+    DATA ls_flag TYPE /iwbep/s_mgw_select_option.
+    DATA ls_option TYPE /iwbep/s_cod_select_option.
+    DATA ls_nav TYPE zcl_stg_model_info=>ty_nav.
+
+    READ TABLE is_set-navs INTO ls_nav WITH KEY name = 'SiblingEntity'.
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+    READ TABLE is_set-navs INTO ls_nav WITH KEY name = 'DraftAdministrativeData'.
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+    conjuncts( EXPORTING iv_text = cv_filter IMPORTING et_parts = lt_top ev_or = lv_or ).
+    IF lv_or = abap_true.
+      RETURN.
+    ENDIF.
+* a parenthesized group of ANDs is the same ANDs (sap.fe groups by field)
+    LOOP AT lt_top INTO lv_part.
+      lv_len = strlen( lv_part ).
+      IF lv_len > 2 AND lv_part(1) = '(' AND substring( val = lv_part off = lv_len - 1 ) = ')'.
+        TRY.
+            conjuncts( EXPORTING iv_text = substring( val = lv_part off = 1 len = lv_len - 2 )
+                       IMPORTING et_parts = lt_inner ev_or = lv_or ).
+          CATCH zcx_stg_error.
+            lv_or = abap_true.
+        ENDTRY.
+        IF lv_or = abap_false.
+          APPEND LINES OF lt_inner TO lt_parts.
+          CONTINUE.
+        ENDIF.
+      ENDIF.
+      APPEND lv_part TO lt_parts.
+    ENDLOOP.
+    LOOP AT lt_parts INTO lv_part.
+      IF lv_part = `DraftAdministrativeData/InProcessByUser ne null`.
+        lv_ne_null = abap_true.
+      ENDIF.
+    ENDLOOP.
+    ls_option-sign = 'I'.
+    LOOP AT lt_parts INTO lv_part.
+      CLEAR: ls_flag, ls_option-low.
+      ls_option-option = 'EQ'.
+      CASE lv_part.
+        WHEN `SiblingEntity/IsActiveEntity eq null`.
+          ls_flag-property = 'SIBLINGENTITY'.
+        WHEN `SiblingEntity/IsActiveEntity ne null`.
+          ls_flag-property = 'SIBLINGENTITY'.
+          ls_option-low = abap_true.
+        WHEN `DraftAdministrativeData/InProcessByUser ne null`.
+          ls_flag-property = 'DRAFTADMIN'.
+          ls_option-low = abap_true.
+        WHEN `DraftAdministrativeData/InProcessByUser eq null`.
+          ls_flag-property = 'DRAFTADMIN'.
+        WHEN `DraftAdministrativeData/InProcessByUser ne ''`.
+          IF lv_ne_null = abap_true.
+            ls_flag-property = 'INPROCESSBYUSER'.
+            ls_option-option = 'NE'.
+          ENDIF.
+        WHEN `DraftAdministrativeData/InProcessByUser eq ''`.
+          ls_flag-property = 'DRAFTADMIN'.
+          ls_option-low = abap_true.
+          APPEND ls_option TO ls_flag-select_options.
+          APPEND ls_flag TO mo_context->mt_draft_filter.
+          CLEAR: ls_flag, ls_option-low.
+          ls_flag-property = 'INPROCESSBYUSER'.
+      ENDCASE.
+      IF ls_flag-property IS INITIAL.
+        lv_rest = lv_rest && lv_sep && lv_part.
+        lv_sep = ` and `.
+        CONTINUE.
+      ENDIF.
+      APPEND ls_option TO ls_flag-select_options.
+      APPEND ls_flag TO mo_context->mt_draft_filter.
+    ENDLOOP.
+* nothing taken out: the filter stays exactly as it came
+    IF mo_context->mt_draft_filter IS NOT INITIAL.
+      cv_filter = lv_rest.
     ENDIF.
   ENDMETHOD.
 
@@ -424,25 +580,40 @@ CLASS zcl_osd_v4_query IMPLEMENTATION.
           FIND |({ gc_draft_latest })| IN ls_opt-value.
           IF sy-subrc = 0.
             mo_context->mv_draft_latest = abap_true.
-            REPLACE ALL OCCURRENCES OF |({ gc_draft_latest })| IN ls_opt-value WITH ``.
-            CONDENSE ls_opt-value.
-* X and (L) and Y leaves X and and Y: one AND of the two goes with it
-            FIND ` and and ` IN ls_opt-value.
+* taken out with one AND beside it, by text that never reaches into a
+* literal: X and (L) and Y is X and Y (critic MUST 1 on #915: no CONDENSE,
+* a literal keeps its blanks)
+            DO.
+              FIND |({ gc_draft_latest }) and | IN ls_opt-value.
+              IF sy-subrc = 0.
+                REPLACE FIRST OCCURRENCE OF |({ gc_draft_latest }) and | IN ls_opt-value WITH ``.
+                CONTINUE.
+              ENDIF.
+              FIND | and ({ gc_draft_latest })| IN ls_opt-value.
+              IF sy-subrc = 0.
+                REPLACE FIRST OCCURRENCE OF | and ({ gc_draft_latest })| IN ls_opt-value WITH ``.
+                CONTINUE.
+              ENDIF.
+              EXIT.
+            ENDDO.
+            SHIFT ls_opt-value LEFT DELETING LEADING space.
+            SHIFT ls_opt-value RIGHT DELETING TRAILING space.
+            IF ls_opt-value = |({ gc_draft_latest })|.
+              CLEAR ls_opt-value.
+            ENDIF.
+            FIND |({ gc_draft_latest })| IN ls_opt-value.
             IF sy-subrc = 0.
-              REPLACE FIRST OCCURRENCE OF ` and and ` IN ls_opt-value WITH ` and `.
-            ELSEIF strlen( ls_opt-value ) >= 4 AND substring( val = ls_opt-value len = 4 ) = `and `.
-              ls_opt-value = substring( val = ls_opt-value off = 4 ).
-            ELSEIF strlen( ls_opt-value ) >= 4 AND substring( val = ls_opt-value off = strlen( ls_opt-value ) - 4 ) = ` and`.
-              ls_opt-value = substring( val = ls_opt-value len = strlen( ls_opt-value ) - 4 ).
-            ELSEIF ls_opt-value IS NOT INITIAL.
               fail( iv_text = 'The draft list filter is understood alone or AND-ed with the others' iv_status = 501 ).
             ENDIF.
-            CONDENSE ls_opt-value.
           ENDIF.
-          IF to_lower( ls_opt-value ) CS 'siblingentity'.
+          IF ls_opt-value CS '/'.
+            draft_paths( EXPORTING is_set = is_set CHANGING cv_filter = ls_opt-value ).
+          ENDIF.
+          IF to_lower( ls_opt-value ) CS 'siblingentity' OR to_lower( ls_opt-value ) CS 'draftadministrativedata'.
             fail( iv_text = 'A SiblingEntity filter other than the draft list filter is not implemented' iv_status = 501 ).
           ENDIF.
-          IF mo_context->mv_draft_latest = abap_true AND ls_opt-value IS INITIAL.
+          IF ( mo_context->mv_draft_latest = abap_true OR mo_context->mt_draft_filter IS NOT INITIAL )
+              AND ls_opt-value IS INITIAL.
             CONTINUE.
           ENDIF.
           mo_context->mv_filter_string = filter( ls_opt-value ).

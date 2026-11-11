@@ -21,7 +21,7 @@ const systemForm = () => walk("src/rap_demo").filter(f => /\.(abap|xml|asbdef|as
 // lean on the LUW buffer, the CDS source interface and open-abap-core; those
 // are dependencies here, checked but not the subject (`npm run lint` lints
 // them as source).
-const base = () => [...walk("src/rap"), ...walk("src/luw"), "src/sadl/zif_stg_cds_source.intf.abap"]
+const base = () => [...walk("src/rap"), ...walk("src/luw"), ...walk("src/logon"), "src/sadl/zif_stg_cds_source.intf.abap"]
   .filter(f => /\.(abap|xml)$/.test(f)).map(f => ({filename: basename(f), contents: readFileSync(f, "utf8")}));
 const coreFiles = () => walk(join(libraryPath(resolve("."), "open-abap-core"), "src"))
   .filter(f => !/[\\/]tcp[\\/]/.test(f) && /\.(abap|xml)$/.test(f)).map(f => ({filename: basename(f), contents: readFileSync(f, "utf8")}));

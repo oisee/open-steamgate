@@ -9,6 +9,17 @@ CLASS zcl_osd_rap_draft DEFINITION PUBLIC FINAL CREATE PUBLIC.
 * table, read without the request's condition: an active row has a draft
 * (HasDraftEntity, the latest-version filter) whether or not that draft
 * matches the condition; without it the matching drafts are asked.
+*
+* R9 (docs/rap-runtime.md, "Who sees a draft"): a draft is its owner's. The
+* drafts of other users are not served (the request's user is
+* ZCL_OSD_LOGON=>USER; the owner the admin row's creator or processor);
+* their active instances still say HasDraftEntity and name the draft's
+* admin row (DraftAdministrativeData: who holds it). Each row also carries
+* what the Fiori Elements filters ask through a navigation: SIBLINGENTITY
+* (the other version is there for this user: an active row's own draft, a
+* draft's active instance), DRAFTADMIN (there is admin data) and
+* INPROCESSBYUSER. IV_LATEST keeps each instance once for this user: its
+* own draft, else the active instance.
   PUBLIC SECTION.
     CLASS-METHODS union
       IMPORTING
@@ -31,6 +42,15 @@ CLASS zcl_osd_rap_draft DEFINITION PUBLIC FINAL CREATE PUBLIC.
       RETURNING
         VALUE(rv_match) TYPE abap_bool.
   PRIVATE SECTION.
+* R9: SIBLINGENTITY, DRAFTADMIN, INPROCESSBYUSER of a served row (a row
+* type without them is left as it is)
+    CLASS-METHODS set_admin
+      IMPORTING
+        is_drafted_admin TYPE abap_bool
+        iv_holder        TYPE syuname
+        iv_sibling       TYPE abap_bool
+      CHANGING
+        cs_row           TYPE any.
     CLASS-METHODS key_text
       IMPORTING
         is_row         TYPE any
@@ -54,6 +74,22 @@ CLASS zcl_osd_rap_draft IMPLEMENTATION.
       ENDIF.
       rv_text = rv_text && |{ strlen( lv_text ) }:{ lv_text }|.
     ENDLOOP.
+  ENDMETHOD.
+
+  METHOD set_admin.
+    FIELD-SYMBOLS <lv_to> TYPE any.
+    ASSIGN COMPONENT 'SIBLINGENTITY' OF STRUCTURE cs_row TO <lv_to>.
+    IF sy-subrc = 0.
+      <lv_to> = iv_sibling.
+    ENDIF.
+    ASSIGN COMPONENT 'DRAFTADMIN' OF STRUCTURE cs_row TO <lv_to>.
+    IF sy-subrc = 0.
+      <lv_to> = is_drafted_admin.
+    ENDIF.
+    ASSIGN COMPONENT 'INPROCESSBYUSER' OF STRUCTURE cs_row TO <lv_to>.
+    IF sy-subrc = 0.
+      <lv_to> = iv_holder.
+    ENDIF.
   ENDMETHOD.
 
   METHOD matches.
@@ -106,11 +142,24 @@ CLASS zcl_osd_rap_draft IMPLEMENTATION.
   METHOD union.
     TYPES:
       BEGIN OF ty_draft_key,
-        key  TYPE string,
-        uuid TYPE x LENGTH 16,
+        key    TYPE string,
+        uuid   TYPE x LENGTH 16,
+        admin  TYPE abap_bool,
+        holder TYPE syuname,
+        mine   TYPE abap_bool,
       END OF ty_draft_key.
+    TYPES:
+      BEGIN OF ty_admin,
+        draftuuid       TYPE zosd_draft_adm-draftuuid,
+        createdbyuser   TYPE zosd_draft_adm-createdbyuser,
+        inprocessbyuser TYPE zosd_draft_adm-inprocessbyuser,
+      END OF ty_admin.
     DATA lt_drafted TYPE SORTED TABLE OF ty_draft_key WITH UNIQUE KEY key.
     DATA ls_drafted TYPE ty_draft_key.
+    DATA lt_admin   TYPE SORTED TABLE OF ty_admin WITH UNIQUE KEY draftuuid.
+    DATA ls_admin   TYPE ty_admin.
+    DATA lv_me      TYPE syuname.
+    DATA lv_key     TYPE string.
     DATA lv_line    TYPE string.
     DATA lv_field   TYPE string.
     DATA lv_dir     TYPE string.
@@ -134,12 +183,23 @@ CLASS zcl_osd_rap_draft IMPLEMENTATION.
       ASSIGN ir_draft->* TO <lt_known>.
     ENDIF.
 
+    lv_me = zcl_osd_logon=>user( ).
+    SELECT draftuuid createdbyuser inprocessbyuser FROM zosd_draft_adm
+      INTO CORRESPONDING FIELDS OF TABLE lt_admin.
     LOOP AT <lt_known> ASSIGNING <ls_in>.
       CLEAR ls_drafted.
       ls_drafted-key = key_text( is_row = <ls_in> it_keys = it_keys ).
       ASSIGN COMPONENT 'DRAFTADMINISTRATIVEDATAUUID' OF STRUCTURE <ls_in> TO <lv_from>.
       IF sy-subrc = 0.
         ls_drafted-uuid = <lv_from>.
+      ENDIF.
+* R9: without an admin row (not written yet) the draft is nobody else's
+      ls_drafted-mine = abap_true.
+      READ TABLE lt_admin INTO ls_admin WITH TABLE KEY draftuuid = ls_drafted-uuid.
+      IF sy-subrc = 0.
+        ls_drafted-admin  = abap_true.
+        ls_drafted-holder = ls_admin-inprocessbyuser.
+        ls_drafted-mine   = boolc( ls_admin-createdbyuser = lv_me OR ls_admin-inprocessbyuser = lv_me ).
       ENDIF.
       INSERT ls_drafted INTO TABLE lt_drafted.
     ENDLOOP.
@@ -156,10 +216,21 @@ CLASS zcl_osd_rap_draft IMPLEMENTATION.
         <lv_to> = abap_true.
         ASSIGN COMPONENT 'DRAFTUUID' OF STRUCTURE <ls_row> TO <lv_to>.
         <lv_to> = ls_drafted-uuid.
+        set_admin( EXPORTING is_drafted_admin = ls_drafted-admin iv_holder = ls_drafted-holder
+                             iv_sibling = ls_drafted-mine CHANGING cs_row = <ls_row> ).
       ENDIF.
     ENDLOOP.
-* the drafts: HasActiveEntity as the draft table keeps it
+* the drafts: HasActiveEntity as the draft table keeps it; R9: another
+* user's draft is not served
     LOOP AT <lt_draft> ASSIGNING <ls_in>.
+      lv_key = key_text( is_row = <ls_in> it_keys = it_keys ).
+      CLEAR ls_drafted.
+      READ TABLE lt_drafted INTO ls_drafted WITH TABLE KEY key = lv_key.
+      IF sy-subrc <> 0.
+        ls_drafted-mine = abap_true.
+      ELSEIF ls_drafted-mine = abap_false.
+        CONTINUE.
+      ENDIF.
       APPEND INITIAL LINE TO <lt_rows> ASSIGNING <ls_row>.
       MOVE-CORRESPONDING <ls_in> TO <ls_row>.
       ASSIGN COMPONENT 'ISACTIVEENTITY' OF STRUCTURE <ls_row> TO <lv_to>.
@@ -171,6 +242,9 @@ CLASS zcl_osd_rap_draft IMPLEMENTATION.
         ASSIGN COMPONENT 'DRAFTUUID' OF STRUCTURE <ls_row> TO <lv_to>.
         <lv_to> = <lv_from>.
       ENDIF.
+      ASSIGN COMPONENT 'HASACTIVEENTITY' OF STRUCTURE <ls_row> TO <lv_from>.
+      set_admin( EXPORTING is_drafted_admin = ls_drafted-admin iv_holder = ls_drafted-holder
+                           iv_sibling = boolc( <lv_from> IS NOT INITIAL ) CHANGING cs_row = <ls_row> ).
     ENDLOOP.
 
     IF it_flags IS NOT INITIAL OR iv_latest = abap_true.
@@ -178,8 +252,10 @@ CLASS zcl_osd_rap_draft IMPLEMENTATION.
       WHILE lv_index > 0.
         READ TABLE <lt_rows> INDEX lv_index ASSIGNING <ls_row>.
         IF iv_latest = abap_true.
-          ASSIGN COMPONENT 'HASDRAFTENTITY' OF STRUCTURE <ls_row> TO <lv_from>.
-          IF <lv_from> IS NOT INITIAL.
+* an active row whose draft this user sees gives way to the draft
+          ASSIGN COMPONENT 'ISACTIVEENTITY' OF STRUCTURE <ls_row> TO <lv_from>.
+          ASSIGN COMPONENT 'SIBLINGENTITY' OF STRUCTURE <ls_row> TO <lv_to>.
+          IF <lv_from> IS NOT INITIAL AND <lv_to> IS NOT INITIAL.
             DELETE <lt_rows> INDEX lv_index.
             lv_index = lv_index - 1.
             CONTINUE.

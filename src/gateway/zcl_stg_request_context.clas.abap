@@ -35,6 +35,11 @@ CLASS zcl_stg_request_context DEFINITION PUBLIC CREATE PUBLIC.
 * SiblingEntity/IsActiveEntity eq null): each instance once, its draft when
 * it has one (docs/rap-runtime.md, R8)
     DATA mv_draft_latest  TYPE abap_bool.
+* R9: the other draft conditions Fiori Elements V4 sends through the
+* navigations SiblingEntity and DraftAdministrativeData, as conditions on
+* the served rows' SIBLINGENTITY, DRAFTADMIN, INPROCESSBYUSER
+* (ZCL_OSD_RAP_DRAFT; docs/rap-runtime.md, R9)
+    DATA mt_draft_filter  TYPE /iwbep/t_mgw_select_option.
 
     METHODS get_sorting_order
       RETURNING
