@@ -3384,6 +3384,11 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
     lv_num = condense( lv_num ).
     lv_floor = repeat( val = '9' occ = lv_len - lv_tail ) && repeat( val = '0' occ = lv_tail - strlen( lv_num ) ) && lv_num.
     lv_text = iv_value.
+* a CHAR key holds letters too, and 'A99999' sorts after '999000': only a
+* value of digits alone can be one late_key drew (#917 follow-up)
+    IF lv_kind = 'C' AND NOT lv_text CO '0123456789'.
+      RETURN.
+    ENDIF.
     rv_on = boolc( strlen( lv_text ) = lv_len AND lv_text >= lv_floor ).
   ENDMETHOD.
 

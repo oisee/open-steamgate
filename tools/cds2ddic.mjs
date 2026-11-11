@@ -619,7 +619,7 @@ ${body("DELETE", `${cascadeDeletes(e, byName)}    DELETE FROM ${tab}
 // A DDIC table as a source: what a SEGW project maps an entity to with
 // "DDIC~<table>" (DS_TYPE 4). Same interface, static table name, and the
 // writes are real: the row type is the table, the keys are inside it.
-function tableSourceClass(t) {
+export function tableSourceClass(t) {
   const cls = classNameOf("zcl_stg_tab_", t.name).toLowerCase();
   const tab = t.name.toLowerCase();
   // `UPDATE dbtab FROM wa` makes the transpiler write one JS property access

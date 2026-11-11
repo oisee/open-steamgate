@@ -1,6 +1,7 @@
 CLASS ltcl_key DEFINITION DEFERRED.
 CLASS ltcl_stamp DEFINITION DEFERRED.
-CLASS zcl_osd_rap_runtime DEFINITION LOCAL FRIENDS ltcl_key ltcl_stamp.
+CLASS ltcl_preliminary DEFINITION DEFERRED.
+CLASS zcl_osd_rap_runtime DEFINITION LOCAL FRIENDS ltcl_key ltcl_stamp ltcl_preliminary.
 
 CLASS ltcl_key DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
 * The buffer, the conflict check and the delta all identify an instance by
@@ -118,6 +119,49 @@ CLASS ltcl_stamp IMPLEMENTATION.
     zcl_osd_rap_runtime=>gv_stamp = lv_saved.
     cl_abap_unit_assert=>assert_equals( act = lr_row->at exp = '21000101000000' ).
     cl_abap_unit_assert=>assert_equals( act = lr_row->at_l exp = '21000101000000' ).
+  ENDMETHOD.
+
+ENDCLASS.
+
+CLASS ltcl_preliminary DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
+* R10 (#917 follow-up): the preliminary range is the top 1000 values of the
+* key's type. A CHAR key may hold letters, and a letter sorts after every
+* digit: only a value of digits alone can be in the range
+  PRIVATE SECTION.
+    METHODS numc_range FOR TESTING RAISING cx_static_check.
+    METHODS char_digits_only FOR TESTING RAISING cx_static_check.
+ENDCLASS.
+
+CLASS ltcl_preliminary IMPLEMENTATION.
+
+  METHOD numc_range.
+    DATA lo_runtime TYPE REF TO zcl_osd_rap_runtime.
+    DATA lv_numc    TYPE n LENGTH 6.
+
+    CREATE OBJECT lo_runtime.
+    lv_numc = '999999'.
+    cl_abap_unit_assert=>assert_true( lo_runtime->preliminary( lv_numc ) ).
+    lv_numc = '999000'.
+    cl_abap_unit_assert=>assert_true( lo_runtime->preliminary( lv_numc ) ).
+    lv_numc = '998999'.
+    cl_abap_unit_assert=>assert_false( lo_runtime->preliminary( lv_numc ) ).
+  ENDMETHOD.
+
+  METHOD char_digits_only.
+    DATA lo_runtime TYPE REF TO zcl_osd_rap_runtime.
+    DATA lv_char    TYPE c LENGTH 6.
+
+    CREATE OBJECT lo_runtime.
+    lv_char = '999500'.
+    cl_abap_unit_assert=>assert_true( act = lo_runtime->preliminary( lv_char ) msg = 'digits in the range' ).
+    lv_char = '998999'.
+    cl_abap_unit_assert=>assert_false( act = lo_runtime->preliminary( lv_char ) msg = 'digits below the range' ).
+    lv_char = 'ZZZZZZ'.
+    cl_abap_unit_assert=>assert_false( act = lo_runtime->preliminary( lv_char ) msg = 'letters sort after 999000' ).
+    lv_char = 'A99999'.
+    cl_abap_unit_assert=>assert_false( act = lo_runtime->preliminary( lv_char ) msg = 'one letter is enough' ).
+    lv_char = '9999X9'.
+    cl_abap_unit_assert=>assert_false( act = lo_runtime->preliminary( lv_char ) msg = 'a letter inside' ).
   ENDMETHOD.
 
 ENDCLASS.
