@@ -831,8 +831,11 @@ header's pragmas (`pragmas`) and they change nothing.
 | `/DMO/C_CarriersLockSingleton_S` | its base's grammar | **runs**, served as `/DMO/UI_CARRIERS_S` |
 | the other seven | runs / accepted | unchanged |
 
-All ten BDEFs of the scenario run; refused construct rows: 4 before, 0
-after (see the PR's REPORT for the whole table).
+All ten BDEFs of the scenario run. Constructs whose verdict changed:
+`interface` refused -> runs, `unparsed grammar` (the pragma) gone; new in
+the table: `pragma` (ignored), `root determine action over a child`
+(runs), `use draft` of the interface. Refused construct rows over the ten
+BDEFs: 4 before, 0 after.
 
 ### Unmeasured
 
