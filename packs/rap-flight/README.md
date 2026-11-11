@@ -21,8 +21,9 @@ these are to send upstream and then drop):
 
 - `ABP_LOCINST_LASTCHANGE_USER` (CHAR 12), used by eight tables
 - `SDRAFT_UUID` (RAW 16), the draft tables' key; they compile, no draft runs
-- `I_CURRENCY` and `I_COUNTRYTEXT` as plain tables with the columns the
-  scenario reads (`SELECT DISTINCT currency`, `country, countryname`)
+- `I_CURRENCY`, `I_COUNTRYTEXT` and (R10) `I_COUNTRY` as plain tables with
+  the columns the scenario reads (`SELECT DISTINCT currency`, `country,
+  countryname`, `country`)
 
 Copies of the two data generators, changed where this runtime differs from a
 system and nowhere else (every change is marked `OSD overlay` in the source):
@@ -71,8 +72,15 @@ Since RAP R7 the managed travel business object runs (docs/rap-flight-pack.md,
   the `I_CURRENCY` stand-in the travel's validations read;
 - `zcl_osd_rapflight_r7_test`, ABAP Unit over the travel's saver.
 
-The other business objects are what the RAP runtime cannot take yet (draft,
-the singleton grammar; see the document).
+Since RAP R10 the draft supplement and agency BOs run too (docs/rap-flight-pack.md,
+"R10"): their BDEFs, service definitions and consumption views are fetched,
+and the overlay carries the three pools `/dmo/bp_i_supplement`,
+`/dmo/bp_c_supplement` (the projection's augment) and `/dmo/bp_r_agencytp`
+(late numbering), each change marked `OSD overlay`; an `I_COUNTRY` stand-in
+filled by the seed class; and `zcl_osd_rapflight_r10_test`.
+
+The carrier singleton is what the RAP runtime cannot take yet (its grammar;
+see the document).
 
 Licence: upstream's files are Apache-2.0 (the repository's `LICENSES/` and
 `REUSE.toml`), and so are the copies in `src/` -- [LICENSE](LICENSE) says
