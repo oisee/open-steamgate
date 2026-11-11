@@ -73,11 +73,14 @@ test("list report: the latest version of each trip, through the draft list filte
   await expect(page.getByRole("button", {name: "Create"})).toBeVisible();
   await expect(page.getByRole("heading", {name: /^Trips/})).toBeVisible();
   expect(sent.some((r) => r.startsWith("GET " + V4 + "/$metadata"))).toBe(true);
-  await expect.poll(() => sent.some((r) => r.startsWith("GET Trip?$count=true&$filter=(IsActiveEntity eq false or SiblingEntity/IsActiveEntity eq null)"))).toBe(true);
+  // the latest version of each trip, with the admin data the draft indicator shows
+  await expect.poll(() => sent.some((r) => r.startsWith("GET Trip?$count=true&") &&
+    r.includes("$filter=(IsActiveEntity eq false or SiblingEntity/IsActiveEntity eq null)") &&
+    r.includes("$expand=DraftAdministrativeData($select=DraftUUID,InProcessByUser,InProcessByUserDescription,"))).toBe(true);
   expect(failed, failed.join("\n")).toEqual([]);
 });
 
-test("create a draft, change it, save it (Prepare + Activate)", async ({page, request}) => {
+test("create a draft, change it, add a leg, save it (Prepare + Activate)", async ({page, request}) => {
   const {sent, failed} = recorder(page);
   const text = `Fjords ${Date.now()}`;
   await page.goto("/app/trip4/index.html");
@@ -87,18 +90,31 @@ test("create a draft, change it, save it (Prepare + Activate)", async ({page, re
   const id = /trip_uuid='([0-9A-F]{32})'/.exec(page.url())[1];
   await expect(description(page)).toBeEditable();
   await change(page, text);
+  // a leg below the draft: POST through to_Legs, then PATCH of the draft leg
+  await page.getByRole("button", {name: "Create"}).locator("visible=true").first().click();
+  const destination = page.locator("table input").locator("visible=true").last();
+  await expect(destination).toBeEditable();
+  await expect(async () => {
+    await destination.fill("Bergen");
+    await destination.press("Tab");
+    await expect.poll(() => sent.some((r) => r.startsWith("PATCH Leg(")), {timeout: 3000}).toBe(true);
+  }).toPass({timeout: 30_000});
   expect((await api(request, "GET", `/Trip${key(id, true)}`)).status, "not active before Save").toBe(404);
   await save(page).click();
   await expect(page.getByRole("button", {name: "Edit"})).toBeVisible();
-  await expect(page).toHaveURL(new RegExp(`IsActiveEntity=true`));
+  // the active trip, by its semantic key (Common.SemanticKey: trip_uuid) after a create
+  await expect(page).toHaveURL(new RegExp(`#/Trip\\((trip_uuid=)?'${id}'`));
 
   expect(sent.some((r) => r === "POST Trip"), sent.join("\n")).toBe(true);
   expect(sent.some((r) => r.startsWith(`GET Trip${key(id, false)}?`) && r.includes("$expand=DraftAdministrativeData("))).toBe(true);
   expect(sent.some((r) => r === `PATCH Trip${key(id, false)}`)).toBe(true);
   expect(sent.some((r) => r === `POST Trip${key(id, false)}/ZUI_RAP_DTRIP.Prepare`)).toBe(true);
   expect(sent.some((r) => r.startsWith(`POST Trip${key(id, false)}/ZUI_RAP_DTRIP.Activate`))).toBe(true);
+  expect(sent.some((r) => r === `POST Trip${key(id, false)}/to_Legs`)).toBe(true);
   const trip = await api(request, "GET", `/Trip${key(id, true)}`);
   expect(trip.body).toMatchObject({description: text, status: "N", IsActiveEntity: true, HasDraftEntity: false});
+  const legs = await api(request, "GET", `/Trip${key(id, true)}/to_Legs`);
+  expect(legs.body.value.map((l) => [l.destination, l.IsActiveEntity])).toEqual([["Bergen", true]]);
   expect((await api(request, "GET", `/Trip${key(id, false)}`)).status, "the draft is gone").toBe(404);
   expect(failed, failed.join("\n")).toEqual([]);
 });
@@ -171,6 +187,9 @@ test("Editing Status: own drafts, drafts of another user, unchanged", async ({pa
   };
   await page.getByRole("button", {name: "Go"}).click();
   await shows(["mine", "unchanged", "locked"]);
+  // the draft indicator beside the semantic key: mine is a draft, ALICE holds the other
+  await expect(page.getByRole("row").filter({hasText: `${tag} mine`}).getByText("Draft", {exact: true})).toBeVisible();
+  await expect(page.getByRole("row").filter({hasText: `${tag} locked`}).getByText("Locked by ALICE")).toBeVisible();
   await pick("Own Draft");
   await shows(["mine"]);
   await pick("Locked by Another User");
@@ -196,6 +215,21 @@ test("Editing Status: own drafts, drafts of another user, unchanged", async ({pa
   expect((await api(request, "DELETE", `/Trip${key(locked, false)}`, {user: "alice"})).status).toBe(204);
   expect((await api(request, "DELETE", `/Trip${key(own.body.trip_uuid, false)}`)).status).toBe(204);
   expect(unchanged).toBeTruthy();
+});
+
+test("delete an active trip from the list", async ({page, request}) => {
+  const {sent, failed} = recorder(page);
+  const text = `Gone ${Date.now()}`;
+  const id = await activeTrip(request, text);
+  await page.goto("/app/trip4/index.html");
+  const row = page.getByRole("row").filter({hasText: text});
+  await row.getByRole("checkbox").click();
+  await page.getByRole("button", {name: "Delete"}).locator("visible=true").first().click();
+  await page.locator(".sapMDialog").getByRole("button", {name: "Delete"}).click();
+  await expect(row).toBeHidden();
+  expect(sent.some((r) => r === `DELETE Trip${key(id, true)}`), sent.join("\n")).toBe(true);
+  expect((await api(request, "GET", `/Trip${key(id, true)}`)).status).toBe(404);
+  expect(failed, failed.join("\n")).toEqual([]);
 });
 
 test("the launchpad tile opens the draft app", async ({page}) => {
