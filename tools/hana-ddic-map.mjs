@@ -11,14 +11,20 @@
 // The mapping is faithful to what DD03L carries and to this tree's
 // conventions, which were read off its fixtures rather than invented:
 //
-//   - INTLEN is derived, the way tools/segw-tables.mjs and
-//     tools/dsl-l3-remote.mjs derive it: LENG x 2 for the character types
-//     (C/N/D/T -- so DATS 16 and TIMS 12, as
-//     src/webgui/zosd_revision_s.tabl.xml spells them), the byte count for
-//     RAW/LRAW/LCHR, 1/2/4/8 for INT1/INT2/INT4/INT8, (LENG+1)/2 rounded up
-//     for packed, 8 for the string/lob references (g/y) and FLTP. A type
-//     with no rule here is refused by name, not guessed at -- the rule
-//     hana-client's own TYPE_CODES table states.
+//   - INTTYPE and INTLEN are DD03L's own columns, carried for every field,
+//     resolved or not: they are read from there and preferred over anything
+//     derived. Only what DD03L leaves blank is derived -- INTLEN by the
+//     rules further down, the way tools/segw-tables.mjs and
+//     tools/dsl-l3-remote.mjs derive it (LENG x 2 for the character types
+//     C/N/D/T -- so DATS 16 and TIMS 12, as
+//     src/webgui/zosd_revision_s.tabl.xml spells them; the byte count for
+//     RAW/LRAW/LCHR; 1/2/4/8 for INT1/INT2/INT4/INT8; (LENG+1)/2 rounded up
+//     for packed; 8 for the string/lob references (g/y) and FLTP), INTTYPE
+//     from the DATATYPE's letter. A type with no rule here is refused by
+//     name, not guessed at -- the rule hana-client's own TYPE_CODES table
+//     states. The descriptor carries which half of the pair it had to
+//     derive (inttypeFrom/intlenFrom: "dd03l" or "derived"), and the probe
+//     prints the derived fields by name.
 //   - a field typed by a data element carries ROLLNAME and COMPTYPE E
 //     beside its resolved types, which is what a system's own abapGit
 //     export writes. An element with no type of its own resolves through
@@ -66,24 +72,55 @@ export function ddicField(row, refs = {}) {
     return "";
   };
   const datatype = pick(row.datatype, element?.datatype, domain?.datatype).toUpperCase();
-  // the ABAP letters are case-significant: lower-case g is STRING, y is
-  // XSTRING, b and s the small integers -- never folded
-  const inttype = pick(row.inttype, element?.inttype, domain?.inttype);
-  const digits = Number(pick(row.leng, element?.leng, domain?.leng) || 0);
-  const decimals = Number(pick(row.decimals, element?.decimals, domain?.decimals) || 0);
   if (datatype === "") {
     throw new Error(`hana-ddic-map: ${fieldname} has no type of its own and its data element ${rollname === "" ? "(none named)" : rollname} resolves to nothing`);
   }
+  // INTTYPE and INTLEN are DD03L's own columns, for every field, resolved
+  // or not -- so DD03L is the source and the element/domain hops fill only
+  // what a blank leaves. (DD04L and DD01L do not carry the pair at all;
+  // asking DD04L for INTTYPE was the guessed column the probe's first run
+  // against a real system died on -- the measured column lists are pinned
+  // by test/hana-ddic-probe.mjs.) The ABAP letters are case-significant:
+  // lower-case g is STRING, y is XSTRING, b and s the small integers --
+  // never folded.
+  const inttypeOwn = String(row.inttype ?? "").trim();
+  const inttype = inttypeOwn !== "" ? inttypeOwn : (INTTYPE_OF[datatype] ?? "");
+  const inttypeFrom = inttypeOwn !== "" ? "dd03l" : (INTTYPE_OF[datatype] !== undefined ? "derived" : undefined);
+  const digits = Number(pick(row.leng, element?.leng, domain?.leng) || 0);
+  const decimals = Number(pick(row.decimals, element?.decimals, domain?.decimals) || 0);
+  const intlenOwn = String(row.intlen ?? "").trim();
+  const intlen = intlenOwn !== ""
+    ? (/^\d+$/.test(intlenOwn) ? pad(Number(intlenOwn)) : intlenOwn)
+    : intlenOf(fieldname, datatype, inttype, digits);
+  const intlenFrom = intlenOwn !== "" ? "dd03l" : "derived";
   return {
     fieldname, key, notnull, ...(rollname === "" ? {} : {rollname}),
-    datatype, inttype, leng: pad(digits), intlen: intlenOf(fieldname, datatype, inttype, digits),
+    datatype, inttype, inttypeFrom, leng: pad(digits), intlen, intlenFrom,
     ...(decimals > 0 ? {decimals: pad(decimals)} : {}),
   };
 }
 
-/** INTLEN from the type, per the rules in the module comment. DD03L's
- *  INTTYPE is the ABAP letter (I for INT4, b/s for INT1/INT2, 8 for INT8),
- *  the DATATYPE the dictionary's own name; either is enough. */
+// the ABAP letter a DATATYPE implies, consulted only when DD03L leaves
+// INTTYPE blank. The letters are the ones the INTLEN rules below already
+// state, so a derived letter and a derived INTLEN stay consistent with each
+// other (LCHR under X, as that rule has always had it). A DATATYPE not
+// named here leaves INTTYPE empty rather than guessed at.
+const INTTYPE_OF = {
+  CHAR: "C", CLNT: "C", CUKY: "C", UNIT: "C",
+  NUMC: "N", ACCP: "N",
+  DATS: "D", TIMS: "T",
+  DEC: "P", CURR: "P", QUAN: "P",
+  INT1: "b", INT2: "s", INT4: "I", INT8: "8",
+  RAW: "X", LRAW: "X", LCHR: "X",
+  STRG: "g", SSTR: "g",
+  RSTR: "y", RAWSTRING: "y",
+  FLTP: "F",
+};
+
+/** INTLEN from the type, per the rules in the module comment -- called only
+ *  when DD03L leaves its own INTLEN blank. The INTTYPE is the ABAP letter
+ *  (I for INT4, b/s for INT1/INT2, 8 for INT8), the DATATYPE the
+ *  dictionary's own name; either is enough. */
 function intlenOf(fieldname, datatype, inttype, digits) {
   if (["C", "N", "D", "T"].includes(inttype)) return pad(digits * 2);
   if (inttype === "I" || datatype === "INT4") return pad(4);

@@ -40,23 +40,29 @@ const quoted = (names) => names.map((n) => `'${n}'`).join(",");
 
 /** DD02L headers, DD03L fields, and the DD04L/DD01L rows the fields' data
  *  elements resolve through, in as many reads as there are DD* tables, not
- *  as many as there are fields. */
+ *  as many as there are fields. The column lists are measured, not guessed
+ *  -- SYS.TABLE_COLUMNS of a real schema, pinned as the fixture of
+ *  test/hana-ddic-probe.mjs, whose fake driver refuses a statement naming a
+ *  column the list does not carry (the first run against a real system died
+ *  on DD04L's INTTYPE, which lives on DD03L only). Every read is pinned to
+ *  the active version -- AS4LOCAL 'A', AS4VERS '0000' -- or a table with an
+ *  inactive version would yield its fields twice. */
 async function readTables(db, names) {
   const tables = new Map();
   for (const name of names) {
-    const head = await db.query(`SELECT TABNAME, TABCLASS, CLIDEP FROM DD02L WHERE TABNAME = '${name}' AND AS4LOCAL = 'A'`);
+    const head = await db.query(`SELECT TABNAME, TABCLASS, CLIDEP FROM DD02L WHERE TABNAME = '${name}' AND AS4LOCAL = 'A' AND AS4VERS = '0000'`);
     if (head.length === 0) {
       console.log(`hana-ddic-probe: ${name}: not in DD02L (no active version); skipped`);
       continue;
     }
-    const rows = await db.query(`SELECT POSITION, FIELDNAME, KEYFLAG, ROLLNAME, DATATYPE, LENG, DECIMALS, INTTYPE, NOTNULL FROM DD03L WHERE TABNAME = '${name}' AND AS4LOCAL = 'A' ORDER BY POSITION`);
+    const rows = await db.query(`SELECT POSITION, FIELDNAME, KEYFLAG, ROLLNAME, DATATYPE, LENG, DECIMALS, INTTYPE, INTLEN, NOTNULL FROM DD03L WHERE TABNAME = '${name}' AND AS4LOCAL = 'A' AND AS4VERS = '0000' ORDER BY POSITION`);
     tables.set(name, {head: head[0], rows});
   }
   const elements = new Map();
   const rollnames = [...new Set([...tables.values()].flatMap((t) =>
     t.rows.map((r) => String(r.rollname ?? "").toUpperCase())).filter((r) => r !== ""))];
   if (rollnames.length > 0) {
-    for (const row of await db.query(`SELECT ROLLNAME, DOMNAME, DATATYPE, LENG, DECIMALS, INTTYPE FROM DD04L WHERE ROLLNAME IN (${quoted(rollnames)}) AND AS4LOCAL = 'A'`)) {
+    for (const row of await db.query(`SELECT ROLLNAME, DOMNAME, DATATYPE, LENG, DECIMALS FROM DD04L WHERE ROLLNAME IN (${quoted(rollnames)}) AND AS4LOCAL = 'A' AND AS4VERS = '0000'`)) {
       elements.set(String(row.rollname).toUpperCase(), row);
     }
   }
@@ -64,13 +70,13 @@ async function readTables(db, names) {
   const domnames = [...new Set([...elements.values()].map((r) =>
     String(r.domname ?? "").toUpperCase()).filter((d) => d !== ""))];
   if (domnames.length > 0) {
-    for (const row of await db.query(`SELECT DOMNAME, DATATYPE, LENG, DECIMALS, INTTYPE FROM DD01L WHERE DOMNAME IN (${quoted(domnames)}) AND AS4LOCAL = 'A'`)) {
+    for (const row of await db.query(`SELECT DOMNAME, DATATYPE, LENG, DECIMALS FROM DD01L WHERE DOMNAME IN (${quoted(domnames)}) AND AS4LOCAL = 'A' AND AS4VERS = '0000'`)) {
       domains.set(String(row.domname).toUpperCase(), row);
     }
   }
   // the text the tree writes into DD02V; English, as DDLANGUAGE 'E'
   const texts = new Map();
-  for (const row of await db.query(`SELECT TABNAME, DDTEXT FROM DD02T WHERE TABNAME IN (${quoted(names)}) AND AS4LOCAL = 'A' AND DDLANGUAGE = 'E'`)) {
+  for (const row of await db.query(`SELECT TABNAME, DDTEXT FROM DD02T WHERE TABNAME IN (${quoted(names)}) AND AS4LOCAL = 'A' AND AS4VERS = '0000' AND DDLANGUAGE = 'E'`)) {
     texts.set(String(row.tabname).toUpperCase(), String(row.ddtext ?? ""));
   }
   return {tables, elements, domains, texts};
@@ -234,6 +240,15 @@ export async function run(args = process.argv.slice(2)) {
     const files = diff ? srcDdicFiles(process.cwd()) : undefined;
     let differences = 0;
     for (const [name, m] of mapped) {
+      // where INTTYPE/INTLEN came from, said out loud: the descriptor names
+      // the half of the pair it had to derive because DD03L left it blank
+      for (const f of m.fields) {
+        const derived = [
+          ...(f.inttypeFrom === "derived" ? ["INTTYPE derived from DATATYPE"] : []),
+          ...(f.intlenFrom === "derived" ? ["INTLEN derived from the type rules"] : []),
+        ].join(", ");
+        if (derived !== "") console.log(`hana-ddic-probe: ${name}: ${f.fieldname}: ${derived} (DD03L blank)`);
+      }
       const xml = tablXml(m);
       if (out !== undefined) {
         mkdirSync(out, {recursive: true});

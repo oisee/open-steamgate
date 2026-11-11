@@ -387,7 +387,16 @@ through the hana-client — the same `HANA_*` env, the same identifier
 folding and literal trim — and emits the tree's own abapGit `*.tabl.xml`
 per table. The DD03L → shape mapping is `tools/hana-ddic-map.mjs`, a pure
 function tested without a database (`test/hana-ddic-map.mjs`, fixtures
-`ZOSD_H1_*`). `--diff` compares against `src/**/<table>.tabl.xml` when
+`ZOSD_H1_*`). The DD* column lists are measured, not guessed —
+`SYS.TABLE_COLUMNS` of a real schema, pinned as the fixture of
+`test/hana-ddic-probe.mjs`, whose fake driver refuses any statement naming
+a column the list does not carry (the first run against a real system died
+on DD04L's INTTYPE, which lives on DD03L only) — and every read is pinned
+to the active version (`AS4LOCAL = 'A'`, `AS4VERS = '0000'`), so a table
+carrying an inactive version does not yield its fields twice. INTTYPE and
+INTLEN come from DD03L directly, for every field, resolved or not; only a
+blank is derived from the type rules, and the probe prints, per field,
+when that was. `--diff` compares against `src/**/<table>.tabl.xml` when
 present — field order, type, length, decimals, key flag — and exits 1 on
 any difference; `--mandt` says which tables have MANDT as the first key
 field. No HANA is reachable from CI: the probe is exercised with fixtures

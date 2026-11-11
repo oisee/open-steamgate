@@ -26,15 +26,18 @@ describe("the DD03L to abapGit TABL mapping", () => {
     {position: "10", fieldname: "ZOSD_H1_ELEM", keyflag: "", rollname: "ZOSD_H1_DTEL_CHAR", datatype: "", leng: "", decimals: "", inttype: "", notnull: ""},
     {position: "11", fieldname: "ZOSD_H1_VIA_DOMA", keyflag: "", rollname: "ZOSD_H1_DTEL_DOMA", datatype: "", leng: "", decimals: "", inttype: "", notnull: ""},
   ];
-  // DD04L rows for the elements the fields name (AS4LOCAL = 'A' read)
+  // DD04L and DD01L rows, shaped as the measured column lists read them:
+  // DATATYPE, LENG, DECIMALS (and DD04L's DOMNAME). No INTTYPE anywhere --
+  // that column lives on DD03L only, which is what the probe's first run
+  // against a real system taught (test/hana-ddic-probe.mjs pins the lists)
   const elements = new Map([
-    ["ZOSD_H1_DTEL_CHAR", {datatype: "CHAR", leng: "3", decimals: "0", inttype: "C"}],
+    ["ZOSD_H1_DTEL_CHAR", {datatype: "CHAR", leng: "3", decimals: "0"}],
     // a data element usually has no type of its own: it names a domain, and
     // the domain carries the type (the same hop tools/adt-documents.mjs makes)
-    ["ZOSD_H1_DTEL_DOMA", {datatype: "", leng: "", decimals: "", inttype: "", domname: "ZOSD_H1_DOMA_DEC"}],
+    ["ZOSD_H1_DTEL_DOMA", {datatype: "", leng: "", decimals: "", domname: "ZOSD_H1_DOMA_DEC"}],
   ]);
   const domains = new Map([
-    ["ZOSD_H1_DOMA_DEC", {datatype: "DEC", leng: "9", decimals: "2", inttype: "P"}],
+    ["ZOSD_H1_DOMA_DEC", {datatype: "DEC", leng: "9", decimals: "2"}],
   ]);
 
   it("maps every field, in POSITION order", () => {
@@ -70,12 +73,29 @@ describe("the DD03L to abapGit TABL mapping", () => {
     expect(byName.get("ZOSD_H1_HASH")).to.include({datatype: "RAW", leng: "000004", intlen: "000004"});
     // a string has no length: zero, and an 8-byte reference
     expect(byName.get("ZOSD_H1_MEMO")).to.include({datatype: "STRG", leng: "000000", intlen: "000008", inttype: "g"});
+    // where each half came from: these rows carry DD03L's own INTTYPE and
+    // leave its INTLEN blank, so only the INTLEN was derived
+    expect(byName.get("ZOSD_H1_CODE").inttypeFrom).to.equal("dd03l");
+    expect(byName.get("ZOSD_H1_CODE").intlenFrom).to.equal("derived");
   });
 
   it("resolves a field typed only by its data element, and through the domain", () => {
     const byName = new Map(ddicFields(dd03l, {elements, domains}).map((f) => [f.fieldname, f]));
     expect(byName.get("ZOSD_H1_ELEM")).to.include({datatype: "CHAR", leng: "000003", intlen: "000006", rollname: "ZOSD_H1_DTEL_CHAR"});
     expect(byName.get("ZOSD_H1_VIA_DOMA")).to.include({datatype: "DEC", leng: "000009", intlen: "000005", decimals: "000002", rollname: "ZOSD_H1_DTEL_DOMA"});
+  });
+
+  it("prefers DD03L's own INTTYPE and INTLEN; derives only what it leaves blank", () => {
+    const byName = new Map(ddicFields([
+      // CHAR leng 10 would derive C and 000020; DD03L's own pair is what the
+      // system says, and it wins
+      {position: "1", fieldname: "ZOSD_H1_OWN", keyflag: "", rollname: "", datatype: "CHAR", leng: "10", decimals: "0", inttype: "N", intlen: "000008", notnull: ""},
+      // the pair blank: derived from the DATATYPE and the type rules, and
+      // said to be derived
+      {position: "2", fieldname: "ZOSD_H1_BLANK", keyflag: "", rollname: "", datatype: "DEC", leng: "9", decimals: "2", inttype: "", intlen: "", notnull: ""},
+    ]).map((f) => [f.fieldname, f]));
+    expect(byName.get("ZOSD_H1_OWN")).to.include({inttype: "N", intlen: "000008", inttypeFrom: "dd03l", intlenFrom: "dd03l"});
+    expect(byName.get("ZOSD_H1_BLANK")).to.include({inttype: "P", intlen: "000005", inttypeFrom: "derived", intlenFrom: "derived"});
   });
 
   it("refuses a field whose type resolves to nothing, by name", () => {
