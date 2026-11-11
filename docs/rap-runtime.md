@@ -751,6 +751,18 @@ after an Activate (here the root's next read computes the new maximum; a
 system's ETag handling of a computed root may differ), and
 `Activate optimized`, which is accepted and runs as Activate.
 
+### One defect met on the way: a handler's keys had no `%is_draft`
+
+The generated adapter built the keys it hands a validation, determination
+or `FOR INSTANCE FEATURES` method from the instances' key fields only, so a
+handler's `READ ENTITIES ... WITH CORRESPONDING #( keys )` of a **draft**
+read the active instance (or nothing, for a new draft). The flight's draft
+validations in Prepare (R8, R10) therefore checked the wrong version and
+passed; the carrier singleton's tests showed it (a draft carrier without a
+name passed Prepare, the delete of a carrier in use was enabled). The keys
+carry `%is_draft` (and `%pid` of a late-numbered entity) now; R8, R9 and
+R10's tests stay green.
+
 ### The pragma
 
 `##DRAFT_OP_NOT_REQUIRED` after the root's header silences the system's
@@ -767,8 +779,10 @@ header's pragmas (`pragmas`) and they change nothing.
   base's projection types, a root's determine action over the entities
   below it), `rap-runtime-gen.mjs` (an unmanaged save read through its view,
   `ls_field-constant`, `ls_member-entity`, a union read through the source
-  class, the registry's `projections`), `srvd-gen.mjs` (`Edm.Byte`,
-  `Edm.Int16`).
+  class, the registry's `projections`, the handler keys' `%is_draft` and
+  `%pid`), `srvd-gen.mjs` (`Edm.Byte`, `Edm.Int16`, association names cut
+  to 40 characters); `tools/cds-table.mjs` holds the table classes,
+  moved out of `cds2ddic.mjs` as they were (its size budget).
 - **Runtime.** `ZCL_STG_CDS_CONST` (new, with its unit test);
   `ZCL_OSD_RAP_RUNTIME` (`fill_constants`, the constant pair, members of
   another entity in `determine_action`); `ZCL_OSD_RAP_EML=>ROUTE`;

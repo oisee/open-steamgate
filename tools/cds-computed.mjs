@@ -230,3 +230,38 @@ ${fields.join("\n")}
 </abapGit>
 `;
 }
+
+/** R11: the element of a view that has no source column: a literal (a
+ *  constant element) or, in the singleton root, an aggregate */
+export function computedElement(el, {children, nodeName, tokensOf, firstDirect, annos, isKey, alias, comps, edmOf, computed}) {
+  const lit = literalElement(el, {children, nodeName, tokensOf, annos, isKey});
+  if (lit?.skip) return lit;
+  if (lit) return lit.field;
+  const a = computed && firstDirect(el, "CDSAggregate") ? computed.aggregates.find((x) => x.name === (alias ?? "").toUpperCase()) : undefined;
+  if (!a) return undefined;
+  const count = a.fn === "COUNT";
+  const column = comps.get(a.column);
+  const label = annos.map((x) => /@EndUserText\.label:\s*'([^']*)'/.exec(x)?.[1]).find(Boolean);
+  return {name: a.name, element: alias, base: count ? "" : a.column, key: isKey, ...(count ? {edm: "Edm.Int32", maxlength: 0} : edmOf(column)),
+    typeABAP: count ? "i" : column?.toABAP?.(), ...(count ? {abapType: "i", virtual: true, calculatedBy: ""} : {}),
+    aggregate: a, label: label ?? a.name, annotations: annos};
+}
+
+/** R11: the parts of a generated source class's read for a view with
+ *  constant elements -- a condition on one is decided before the SELECT
+ *  (the view has no column for it), the value filled after it. Empty parts
+ *  for a view without one, so its class stays as it was */
+export function constantRead(e) {
+  const constants = constantsOf(e);
+  if (!constants.length) return {declare: "", data: "", decide: "", fields: "it_fields", fill: "", method: ""};
+  return {
+    declare: "    CLASS-METHODS constants\n      RETURNING\n        VALUE(rt_const) TYPE zcl_stg_cds_const=>tt_const.\n",
+    data: "    DATA lt_fields TYPE string_table.\n    FIELD-SYMBOLS <ls_row> TYPE any.\n",
+    decide: "    IF zcl_stg_cds_const=>decide( EXPORTING it_const = constants( ) CHANGING cv_where = lv_where ) = abap_false.\n"
+      + "      RETURN.\n    ENDIF.\n    lt_fields = it_fields.\n"
+      + constants.map((f) => `    DELETE lt_fields WHERE table_line = '${f.name}'.\n`).join(""),
+    fields: "lt_fields",
+    fill: "    LOOP AT <lt_data> ASSIGNING <ls_row>.\n      zcl_stg_cds_const=>fill( EXPORTING it_const = constants( ) CHANGING cs_row = <ls_row> ).\n    ENDLOOP.\n",
+    method: `\n  METHOD constants.\n${constantLines(constants)}  ENDMETHOD.\n`,
+  };
+}
