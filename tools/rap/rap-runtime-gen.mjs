@@ -155,6 +155,9 @@ function draftUnion(name, e, entity, bdef) {
            hasactiveentity TYPE c LENGTH 1,
            hasdraftentity  TYPE c LENGTH 1,
            draftuuid       TYPE x LENGTH 16,
+           siblingentity   TYPE c LENGTH 1,
+           draftadmin      TYPE c LENGTH 1,
+           inprocessbyuser TYPE c LENGTH 12,
            END OF ty_row.
     TYPES tt_row TYPE STANDARD TABLE OF ty_row WITH DEFAULT KEY.
     INTERFACES zif_stg_cds_source.

@@ -8,6 +8,8 @@ CLASS zcl_osd_v4_model DEFINITION PUBLIC CREATE PUBLIC.
              facets TYPE string,
 * set_as_etag in the MPC: the property is (part of) the entity's ETag
              is_etag TYPE abap_bool,
+* R9: neither creatable nor updatable in the MPC (a RAP readonly field)
+             is_computed TYPE abap_bool,
            END OF ty_property.
     TYPES ty_properties TYPE STANDARD TABLE OF ty_property WITH DEFAULT KEY.
     DATA ms_service TYPE zcl_stg_model_info=>ty_service READ-ONLY.
@@ -70,6 +72,7 @@ CLASS zcl_osd_v4_model IMPLEMENTATION.
     ENDIF.
     rs_info-edm_type = v4_type( io_property->mv_edm_type ).
     rs_info-is_etag = io_property->mv_etag.
+    rs_info-is_computed = boolc( io_property->mv_creatable = abap_false AND io_property->mv_updatable = abap_false ).
     IF io_property->mv_edm_type = 'Edm.DateTime' AND io_property->mv_display_format = 'Date'.
       rs_info-edm_type = 'Edm.Date'.
     ENDIF.
@@ -173,6 +176,8 @@ CLASS zcl_osd_v4_model IMPLEMENTATION.
     DATA lv_vocabulary TYPE string.
     DATA lv_line TYPE string.
     DATA lv_sticky TYPE string.
+    DATA lv_computed TYPE string.
+    DATA ls_key TYPE zcl_stg_model_info=>ty_property.
 
     lv_ns = xml( ms_service-namespace ).
 * Optimistic concurrency is announced through the Core vocabulary, which is
@@ -211,6 +216,25 @@ CLASS zcl_osd_v4_model IMPLEMENTATION.
       lv_core = lv_core &&
         '<edmx:Reference Uri="https://oasis-tcs.github.io/odata-vocabularies/vocabularies/Org.OData.Capabilities.V1.xml">' &&
         '<edmx:Include Namespace="Org.OData.Capabilities.V1" Alias="Capabilities"/></edmx:Reference>'.
+    ENDIF.
+* R9: on a draft-enabled entity type (IsActiveEntity in its key) a field
+* the client may neither create nor change is Core.Computed, as a RAP
+* service says of a readonly field (the managed key, the draft flags);
+* Fiori Elements asks for the non-computed keys before it creates a draft.
+* Unmeasured: the exact set a system annotates. Other services: unchanged
+    LOOP AT ms_service-entity_sets INTO ls_set.
+      READ TABLE ls_set-properties INTO ls_key WITH KEY name = 'IsActiveEntity' is_key = abap_true.
+      IF sy-subrc <> 0 OR lv_computed CS |"{ lv_ns }.{ xml( ls_set-entity_type ) }/|.
+        CONTINUE.
+      ENDIF.
+      LOOP AT mt_properties INTO ls_info WHERE entity_type = ls_set-entity_type AND is_computed = abap_true.
+        lv_computed = lv_computed && |<Annotations Target="{ lv_ns }.{ xml( ls_set-entity_type ) }/{ xml( ls_info-name ) }">| &&
+          '<Annotation Term="Core.Computed" Bool="true"/></Annotations>'.
+      ENDLOOP.
+    ENDLOOP.
+    IF lv_computed IS NOT INITIAL AND lv_core NS 'Org.OData.Core.V1'.
+      lv_core = '<edmx:Reference Uri="https://oasis-tcs.github.io/odata-vocabularies/vocabularies/Org.OData.Core.V1.xml">' &&
+        '<edmx:Include Namespace="Org.OData.Core.V1" Alias="Core"/></edmx:Reference>' && lv_core.
     ENDIF.
     lv_sticky = zcl_osd_v4_sticky=>actions_xml( me ).
     IF lv_sticky IS NOT INITIAL.
@@ -251,6 +275,10 @@ CLASS zcl_osd_v4_model IMPLEMENTATION.
         CLEAR lv_partner.
         LOOP AT ms_service-entity_sets INTO ls_target WHERE entity_type = ls_nav-target_type.
           LOOP AT ls_target-navs INTO ls_back WHERE association = ls_nav-association AND target_type = ls_set-entity_type.
+* R9: a navigation of a type to itself (a draft's SiblingEntity) is not its own partner
+            IF ls_back-name = ls_nav-name AND ls_target-entity_type = ls_set-entity_type.
+              CONTINUE.
+            ENDIF.
             lv_partner = | Partner="{ xml( ls_back-name ) }"|.
             EXIT.
           ENDLOOP.
@@ -283,6 +311,6 @@ CLASS zcl_osd_v4_model IMPLEMENTATION.
       rv_xml = rv_xml && zcl_osd_v4_sticky=>set_annotation( io_model = me is_set = ls_set ).
       rv_xml = rv_xml && '</EntitySet>'.
     ENDLOOP.
-    rv_xml = rv_xml && '</EntityContainer>' && lv_vocabulary && '</Schema></edmx:DataServices></edmx:Edmx>'.
+    rv_xml = rv_xml && '</EntityContainer>' && lv_vocabulary && lv_computed && '</Schema></edmx:DataServices></edmx:Edmx>'.
   ENDMETHOD.
 ENDCLASS.
