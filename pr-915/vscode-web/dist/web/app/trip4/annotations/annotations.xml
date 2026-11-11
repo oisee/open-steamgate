@@ -16,6 +16,10 @@
   <edmx:DataServices>
     <Schema Namespace="osd.trip4.annotations" xmlns="http://docs.oasis-open.org/odata/ns/edm">
       <Annotations Target="ZUI_RAP_DTRIP.TripType">
+        <!-- the field sap.fe shows the draft indicator beside (Draft, Locked by ...) -->
+        <Annotation Term="Common.SemanticKey">
+          <Collection><PropertyPath>trip_uuid</PropertyPath></Collection>
+        </Annotation>
         <Annotation Term="UI.HeaderInfo">
           <Record Type="UI.HeaderInfoType">
             <PropertyValue Property="TypeName" String="Trip"/>
@@ -30,6 +34,7 @@
         </Annotation>
         <Annotation Term="UI.LineItem">
           <Collection>
+            <Record Type="UI.DataField"><PropertyValue Property="Value" Path="trip_uuid"/></Record>
             <Record Type="UI.DataField"><PropertyValue Property="Value" Path="description"/></Record>
             <Record Type="UI.DataField"><PropertyValue Property="Value" Path="status"/></Record>
           </Collection>
@@ -58,6 +63,9 @@
             </PropertyValue>
           </Record>
         </Annotation>
+      </Annotations>
+      <Annotations Target="ZUI_RAP_DTRIP.TripType/trip_uuid">
+        <Annotation Term="Common.Label" String="Trip"/>
       </Annotations>
       <Annotations Target="ZUI_RAP_DTRIP.TripType/description">
         <Annotation Term="Common.Label" String="Description"/>
