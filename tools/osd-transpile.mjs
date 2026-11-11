@@ -195,7 +195,9 @@ export function listFiles(root, config) {
   let skipped = 0;
   for (const folder of folders) {
     for (const filename of walk(resolve(root, folder))) {
-      if (isSourceIdentity(filename) || system && [".osd-layer.json", ".abapgit.xml"].includes(basename(filename))) {
+      // DSL navigation metadata (*.trace.meta.json) is volatile and no object:
+      // never read here, so it never names a generation (osd-build hashOf)
+      if (isSourceIdentity(filename) || /\.trace\.meta\.json$/i.test(filename) || system && [".osd-layer.json", ".abapgit.xml"].includes(basename(filename))) {
         skipped++;
       } else if (include.length > 0 && matchesSourcePath(root, filename, include, system) === false) {
         skipped++;
