@@ -763,6 +763,22 @@ name passed Prepare, the delete of a carrier in use was enabled). The keys
 carry `%is_draft` (and `%pid` of a late-numbered entity) now; R8, R9 and
 R10's tests stay green.
 
+### Two wire defects met on the way
+
+- **A namespaced service's navigation and `$expand` over V4** answered
+  "Not a V4 service path": the provider builds a path of its own for the
+  source of a navigation and for each expanded target, and wrote the
+  service name unescaped (`/sap/opu/odata4/sap//DMO/UI_CARRIERS_S/...`),
+  whose slashes end the name at `/DMO`. It is escaped as it came in now
+  (`ZCL_OSD_V4_HTTP`); the R10 services had never been navigated.
+- **Discard of a draft root without `delete`**: sap.fe discards a draft
+  with DELETE on it, and the singleton's root has no delete. A draft
+  root's entity set takes DELETE (`srvd-gen.mjs`), the SADL bridge lets a
+  projection's draft DELETE through as the used Discard, and the active
+  root's DELETE is still refused by the runtime ("has no delete", 4xx).
+  **Not in R11**: `Capabilities.DeleteRestrictions` saying so in
+  `$metadata`, which sap.fe would read to hide Delete on the active root.
+
 ### The pragma
 
 `##DRAFT_OP_NOT_REQUIRED` after the root's header silences the system's
