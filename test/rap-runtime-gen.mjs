@@ -85,7 +85,8 @@ describe("RAP managed runtime generator (R2)", () => {
     for (const [suffix, from, to, error] of [
       [".asbdef", "managed implementation", "unmanaged implementation", /only managed/],
       [".asbdef", "lock master", "early numbering\nlock master", /early numbering without a FOR NUMBERING/],
-      [".asbdef", "lock master", "late numbering\nlock master", /late numbering .* is outside R4/],
+      // R10: late numbering runs, given a saver that redefines adjust_numbers
+      [".asbdef", "lock master", "late numbering\nlock master", /late numbering needs a saver redefining adjust_numbers/],
       [".asbdef", "update;", "update ( features : instance );", /features : instance without a FOR INSTANCE FEATURES method/],
       [".asbdef", "create;", "create ( features : instance );", /global features are outside R4/],
       [".asbdef", "lock master", "etag master Missing\nlock master", /etag master Missing is no element/],

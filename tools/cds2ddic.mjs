@@ -628,12 +628,10 @@ function tableSourceClass(t) {
   // the runtime's init imports every module, so one such table makes the
   // whole output unusable (six tables of packs/rap-flight, 2026-11-08 -- a
   // green build said nothing about it; the modules only fail to load). Those
-  // R10: those tables replace the row (DELETE by key, INSERT): the runtime's
-  // UPDATE turns every component into a SET, the named include's group too,
-  // and answers 4 (ANORMALIES "ANOMALY-2026-11-11-update-include-group")
+  // R10: they replace the row, DELETE by key + INSERT; the runtime's UPDATE
+  // answers 4 (ANOMALY-2026-11-11-update-include-group)
   const spellable = (t.components ?? t.fields.map((f) => f.name.toLowerCase()))
     .every((c) => /^[a-z0-9_]+$/.test(c));
-  const declare = "";
   const update = spellable
     ? `    UPDATE ${tab} FROM ls_row.`
     : `    DELETE FROM ${tab}
@@ -690,7 +688,7 @@ CLASS ${cls} IMPLEMENTATION.
 
   METHOD zif_stg_cds_source~update.
     DATA ls_row TYPE ${tab}.
-${declare}
+
     MOVE-CORRESPONDING is_line TO ls_row.
 ${update}
     rv_subrc = sy-subrc.
