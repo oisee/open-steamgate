@@ -1,8 +1,9 @@
 // The warm compiler's deadline: sized to the prime's tree, scaled by the
 // runner's measured speed, bounded, and overridable (tools/warm-deadline/).
 import {expect} from "chai";
-import {CEILING_MS, FACTOR_CEILING, OPERATION_MS, PRIME_FLOOR_MS, PRIME_MS_PER_FILE, REFERENCE_CALIBRATION_MS,
-  calibrate, describe as said, scaled, speed, warmDeadline} from "../tools/warm-deadline/warm-deadline.mjs";
+import {CEILING_MS, FACTOR_CEILING, OPERATION_CEILING_MS, OPERATION_MS, PRIME_FLOOR_MS, PRIME_MS_PER_FILE,
+  REFERENCE_CALIBRATION_MS, SAVE_WAIT_CEILING_MS, SAVE_WAIT_MS, calibrate, calibrateAsync, describe as said, saveWait,
+  scaled, speed, warmDeadline} from "../tools/warm-deadline/warm-deadline.mjs";
 
 const at = ms => () => ms;
 
@@ -25,6 +26,26 @@ describe("warm deadline: sized to the work and the runner", () => {
     const crawling = warmDeadline({kind: "prime", files: 100000, env: {}, measure: at(REFERENCE_CALIBRATION_MS * 100)});
     expect(crawling.factor).to.equal(FACTOR_CEILING);
     expect(crawling.ms).to.equal(CEILING_MS);
+  });
+  it("bounds what a person waits for apart from the prime's lifetime", () => {
+    const crawling = at(REFERENCE_CALIBRATION_MS * 100);
+    expect(warmDeadline({kind: "operation", env: {}, measure: crawling}).ms).to.equal(OPERATION_CEILING_MS);
+    expect(saveWait({env: {}, measure: at(REFERENCE_CALIBRATION_MS)}).ms).to.equal(SAVE_WAIT_MS);
+    expect(saveWait({env: {}, measure: at(REFERENCE_CALIBRATION_MS * 2)}).ms).to.equal(2 * SAVE_WAIT_MS);
+    expect(saveWait({env: {}, measure: crawling}).ms).to.equal(SAVE_WAIT_CEILING_MS);
+    expect(saveWait({store: {warmSaveWaitMs: 7}, env: {OSD_WARM_SAVE_WAIT_MS: "9"}}).ms).to.equal(7);
+    expect(saveWait({env: {OSD_WARM_SAVE_WAIT_MS: "9"}}).ms).to.equal(9);
+    expect(SAVE_WAIT_CEILING_MS).to.be.lessThan(CEILING_MS);
+  });
+  it("calibrates on a serving event loop without holding it", async () => {
+    // a timer due every 5 ms keeps firing while the calibration runs
+    let longest = 0, last = performance.now();
+    const tick = setInterval(() => { const now = performance.now(); longest = Math.max(longest, now - last); last = now; }, 5);
+    const ms = await calibrateAsync();
+    clearInterval(tick);
+    expect(ms).to.be.greaterThan(0);
+    // one chunk is a tenth of a round; allow a slow, shared host its margin
+    expect(longest, `longest gap ${longest.toFixed(1)} ms for a ${ms.toFixed(1)} ms calibration`).to.be.lessThan(ms / 2);
   });
   it("takes an explicit store value first, then the environment", () => {
     const env = {OSD_WARM_DEADLINE_MS: "1234", OSD_WARM_PRIME_DEADLINE_MS: "5678", OSD_WARM_SPEED_FACTOR: "3"};

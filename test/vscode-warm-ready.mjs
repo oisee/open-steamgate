@@ -67,6 +67,13 @@ describe("warm startup: ready means the front answers during priming", function 
       // slower shows here as a shrinking margin before it shows as a failure.
       for (const line of log.split("\n").filter(l => /warm: (prime |primed )/.test(l))) console.log(line.trim());
       expect(final.warm.state, final.warm.reason ?? log.slice(-2000)).to.equal("primed");
+      // A performance signal apart from the (generous) availability deadline:
+      // the prime's time per input file per unit of measured slowdown. Seen
+      // 2.9 (CI), 5.4 (4-core workstation), 5.7 (same, one contended core);
+      // twice the worst of those fails, so a compiler regression still shows.
+      const timing = log.match(/warm: prime took \d+ ms of its \d+ ms deadline \(\d+ input files, speed factor [\d.]+, ([\d.]+) ms per file per factor\)/);
+      expect(timing, "the front logs the prime's time against its deadline").to.not.equal(null);
+      expect(Number(timing[1]), timing[0]).to.be.lessThan(11.5);
       // The first classrun imported its module before the swap. A later run
       // must execute the live class table, rather than that cached export.
       const file = join(dir, "src/classrun/zcl_osd_classrun_demo.clas.abap");

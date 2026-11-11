@@ -2,7 +2,7 @@ import {warnWarmPin} from "./osd-warm-capabilities.mjs";
 import {acceptView, captureView} from "./osd-store-compile-view.mjs";
 import {waitVerifier} from "./osd-warm-verification.mjs";
 import {verifyNext} from "./osd-store-verify.mjs";
-import {describe, warmDeadline} from "./warm-deadline/warm-deadline.mjs";
+import {describe, measureSpeed, warmDeadline} from "./warm-deadline/warm-deadline.mjs";
 // Background priming belongs to the compiler process, never the HTTP front.
 export function warmUp(store) {
   const w = store.warm();
@@ -16,6 +16,9 @@ export function warmUp(store) {
   w.primeDue = false;
   clearTimeout(w.reprime);
   w.priming = (async () => {
+    // The runner's speed sizes the prime's deadline. Measured here, in
+    // chunks that yield to requests, before the compiler competes for CPU.
+    await measureSpeed();
     const {WarmCompilerProcess} = await import("./osd-warm-process.mjs");
     if (w.closed === true) { w.priming = undefined; return undefined; }
     // primed on the build view: inactive objects as their active copies
@@ -86,6 +89,7 @@ export async function closeWarm(store) {
 export async function warmOperation(store, work, {kind = "operation", files = 0} = {}) {
   const w = store.warm();
   let timer;
+  await measureSpeed();
   const deadline = warmDeadline({kind, files, store});
   const ms = deadline.ms;
   if (kind === "prime") console.log(`warm: prime deadline ${describe(deadline)} for ${files} input files`);
@@ -95,7 +99,14 @@ export async function warmOperation(store, work, {kind = "operation", files = 0}
       timer = setTimeout(() => reject(Object.assign(new Error(`warm compiler exceeded ${describe(deadline)}`),
         {code: "WARM_UNAVAILABLE"})), ms);
     })]);
-    if (kind === "prime") console.log(`warm: prime took ${Math.round(performance.now() - started)} ms of its ${ms} ms deadline`);
+    if (kind === "prime") {
+      const took = performance.now() - started;
+      // per input file and per unit of speed factor: comparable across
+      // runners and tree sizes (test/vscode-warm-ready.mjs bounds it)
+      const normal = files > 0 ? took / (files * (deadline.factor ?? 1)) : 0;
+      console.log(`warm: prime took ${Math.round(took)} ms of its ${ms} ms deadline` +
+        ` (${files} input files, speed factor ${(deadline.factor ?? 1).toFixed(2)}, ${normal.toFixed(2)} ms per file per factor)`);
+    }
     return result;
   } catch (error) {
     if (error.code === "WARM_UNAVAILABLE") {

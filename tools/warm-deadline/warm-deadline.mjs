@@ -9,10 +9,16 @@ export const OPERATION_MS = 30000;
 // 37.8 s for 6924 input files (5.5 ms each) on the reference machine
 // (README.md). Three times that, so a hung compiler is still caught.
 export const PRIME_MS_PER_FILE = 16;
-// Never below the bound every host had before the prime was sized, never
-// above what a person would still wait for before a save goes cold.
+// Never below the bound every host had before the prime was sized. The
+// prime runs in the background, so its own ceiling is long; what a person
+// waits for is bounded separately (SAVE_WAIT_MS, OPERATION_CEILING_MS).
 export const PRIME_FLOOR_MS = 30000;
 export const CEILING_MS = 15 * 60000;
+export const OPERATION_CEILING_MS = 2 * 60000;
+// How long a save waits for a running prime before it builds cold and lets
+// the prime go on: about 1.6x a normal prime of today's tree.
+export const SAVE_WAIT_MS = 60000;
+export const SAVE_WAIT_CEILING_MS = 3 * 60000;
 // The calibration below takes this long, as the best of three rounds, on the
 // machine PRIME_MS_PER_FILE was measured on. A runner that needs longer for
 // the same work is that much slower, and so is its prime.
@@ -30,39 +36,74 @@ const positive = value => {
 // built and split, small objects allocated, JSON and a hash. It reads the
 // speed the host gives this process now, contention included, which is what
 // the prime will get. Best of three rounds, so a GC pause or the JIT warming
-// up does not count as a slow machine.
+// up does not count as a slow machine. A round is ten chunks of ~6 ms.
+const CHUNKS = 10;
+let sink = 0;
+function chunk(k) {
+  const started = performance.now();
+  const parts = [];
+  for (let i = 0; i < 2000; i++) parts.push(`DATA lv_${i} TYPE i VALUE ${i * 7 + k}.`);
+  const text = parts.join("\n");
+  const tokens = text.split(/\s+/).map((s, i) => ({s, i, u: s.toUpperCase()}));
+  sink += JSON.parse(JSON.stringify(tokens)).length + createHash("sha1").update(text).digest()[0];
+  return performance.now() - started;
+}
+
+// For a process that serves nothing (a test harness): all at once.
 export function calibrate(rounds = 3) {
   let best = Infinity;
-  let sink = 0;
   for (let r = 0; r < rounds; r++) {
-    const started = performance.now();
-    for (let k = 0; k < 10; k++) {
-      const parts = [];
-      for (let i = 0; i < 2000; i++) parts.push(`DATA lv_${i} TYPE i VALUE ${i * 7 + k}.`);
-      const text = parts.join("\n");
-      const tokens = text.split(/\s+/).map((s, i) => ({s, i, u: s.toUpperCase()}));
-      sink += JSON.parse(JSON.stringify(tokens)).length + createHash("sha1").update(text).digest()[0];
-    }
-    best = Math.min(best, performance.now() - started);
+    let round = 0;
+    for (let k = 0; k < CHUNKS; k++) round += chunk(k);
+    best = Math.min(best, round);
   }
-  if (sink < 0) throw new Error("unreachable");
+  return best;
+}
+
+// For the HTTP front: the same work, yielding to the event loop after every
+// chunk, so a request waits at most one chunk (~6 ms, more on a slow host).
+// Only the chunks' own time is counted, not the requests served in between.
+export async function calibrateAsync(rounds = 3) {
+  let best = Infinity;
+  for (let r = 0; r < rounds; r++) {
+    let round = 0;
+    for (let k = 0; k < CHUNKS; k++) {
+      round += chunk(k);
+      await new Promise(resolve => setImmediate(resolve));
+    }
+    best = Math.min(best, round);
+  }
   return best;
 }
 
 let measured;
+let measuring;
+const factorOf = ms => ({factor: clamp(ms / REFERENCE_CALIBRATION_MS, FACTOR_FLOOR, FACTOR_CEILING), source: "calibration", calibrationMs: ms});
+const forcedOf = env => {
+  const forced = positive(env.OSD_WARM_SPEED_FACTOR);
+  return forced === undefined ? undefined : {factor: clamp(forced, FACTOR_FLOOR, FACTOR_CEILING), source: "OSD_WARM_SPEED_FACTOR"};
+};
 // The runner-speed factor: 1 on a machine like the reference or faster,
 // above 1 on a slower one, clamped to [FACTOR_FLOOR, FACTOR_CEILING].
 // OSD_WARM_SPEED_FACTOR sets it outright (a CI job that knows its runner).
+// Measured once per process; synchronously only if nothing measured it yet.
 export function speed(env = process.env, measure = calibrate) {
-  const forced = positive(env.OSD_WARM_SPEED_FACTOR);
-  if (forced !== undefined) return {factor: clamp(forced, FACTOR_FLOOR, FACTOR_CEILING), source: "OSD_WARM_SPEED_FACTOR"};
+  const forced = forcedOf(env);
+  if (forced !== undefined) return forced;
   if (measure === calibrate && measured !== undefined) return measured;
-  const ms = measure();
-  const result = {factor: clamp(ms / REFERENCE_CALIBRATION_MS, FACTOR_FLOOR, FACTOR_CEILING), source: "calibration", calibrationMs: ms};
+  const result = factorOf(measure());
   if (measure === calibrate) measured = result;
   return result;
 }
-
+// The front's way: measured off the event loop's critical path, then cached
+// for the synchronous speed() and warmDeadline() calls that follow.
+export async function measureSpeed(env = process.env) {
+  const forced = forcedOf(env);
+  if (forced !== undefined) return forced;
+  if (measured !== undefined) return measured;
+  measuring ??= calibrateAsync().then(ms => (measured = factorOf(ms)));
+  return measuring;
+}
 // A test harness that waits for a host to start and prime scales its own
 // timeouts by the same factor, so the warm deadline is never the longer wait.
 export function scaled(ms, env = process.env) {
@@ -80,9 +121,24 @@ export function warmDeadline({kind, files = 0, store = {}, env = process.env, me
   const fixed = positive(kind === "prime" ? env.OSD_WARM_PRIME_DEADLINE_MS : env.OSD_WARM_DEADLINE_MS);
   if (fixed !== undefined) return {ms: fixed, source: kind === "prime" ? "OSD_WARM_PRIME_DEADLINE_MS" : "OSD_WARM_DEADLINE_MS"};
   const s = speed(env, measure);
-  const base = kind === "prime" ? Math.max(PRIME_FLOOR_MS, files * PRIME_MS_PER_FILE) : OPERATION_MS;
-  return {ms: Math.round(clamp(base * s.factor, kind === "prime" ? PRIME_FLOOR_MS : OPERATION_MS, CEILING_MS)),
+  const prime = kind === "prime";
+  const base = prime ? Math.max(PRIME_FLOOR_MS, files * PRIME_MS_PER_FILE) : OPERATION_MS;
+  return {ms: Math.round(clamp(base * s.factor, prime ? PRIME_FLOOR_MS : OPERATION_MS, prime ? CEILING_MS : OPERATION_CEILING_MS)),
     source: s.source, factor: s.factor, calibrationMs: s.calibrationMs, base};
+}
+
+// How long a save waits for a running prime before it gives up on warm for
+// this build and builds cold; the prime goes on and serves later saves.
+// store.warmSaveWaitMs, then OSD_WARM_SAVE_WAIT_MS, then 60 s x factor
+// within [60 s, 3 min].
+export function saveWait({store = {}, env = process.env, measure = calibrate} = {}) {
+  const explicit = positive(store.warmSaveWaitMs);
+  if (explicit !== undefined) return {ms: explicit, source: "store.warmSaveWaitMs"};
+  const fixed = positive(env.OSD_WARM_SAVE_WAIT_MS);
+  if (fixed !== undefined) return {ms: fixed, source: "OSD_WARM_SAVE_WAIT_MS"};
+  const s = speed(env, measure);
+  return {ms: Math.round(clamp(SAVE_WAIT_MS * s.factor, SAVE_WAIT_MS, SAVE_WAIT_CEILING_MS)),
+    source: s.source, factor: s.factor, calibrationMs: s.calibrationMs, base: SAVE_WAIT_MS};
 }
 
 export function describe(d) {
