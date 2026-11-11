@@ -16,6 +16,7 @@ import {generationSystem} from "../tools/osd-system.mjs";
 import {hashOf, inputsOf} from "../tools/osd-build.mjs";
 import {publicProvenance, verifyTreeArtefact} from "../tools/osd-public-tree.mjs";
 import {verifyPublicArtefact} from "../tools/osd-provenance.mjs";
+import {makeReadRecord, readEntry} from "../tools/osd-read-record.mjs";
 import {registry, listening} from "./helpers/oci-registry.mjs";
 
 import {toolCommand, setHostedLeakScanner} from "../tools/osd-host.mjs";
@@ -831,8 +832,11 @@ describe("public entry points refuse a tree that is not the public live generati
     expect(tree()).to.deep.equal(before);
   };
   const live = () => {
-    const hash = hashOf(fixture, inputsOf(fixture));
+    const named = new Map(), source = join(fixture, "src/zpublic.prog.abap");
+    const hash = hashOf(fixture, inputsOf(fixture), {digests: named});
     put(`build/by-input/${hash}/manifest.json`, JSON.stringify({hash, systemDigest: null, systemPrivate: false, provenance: []}));
+    // a valid read record: what the build read, inside what the hash named
+    put(`build/by-input/${hash}/reads.json`, JSON.stringify(makeReadRecord(fixture, named, [readEntry(fixture, source, readFileSync(source))])));
     put(`build/by-input/${hash}/output/init.mjs`, "public\n");
     symlinkSync(`by-input/${hash}`, join(fixture, "build/live"));
     symlinkSync("build/live/output", join(fixture, "output"));
@@ -910,6 +914,7 @@ describe("public entry points refuse a tree that is not the public live generati
     const result = spawnSync(process.execPath, ["scripts/build-preview.mjs"], {cwd: fixture, encoding: "utf8"});
     expect(result.stderr).not.to.match(STALE);
     expect(result.stderr).not.to.match(PRIVATE);
+    expect(result.stderr, "past the public gate, not stopped by it").not.to.match(/read record|READ_RECORD|UNKNOWN_PRIVACY/);
   });
 
   // P3: the binary is stamped from the tree it was built from (root), not
