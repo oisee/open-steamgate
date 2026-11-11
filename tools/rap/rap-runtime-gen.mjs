@@ -824,6 +824,17 @@ ${registry.map(r => `    APPEND ${lit(r.bdef)} TO rt_bdef.\n`).join("")}  ENDMET
 ${projections.map(projectionCase).join("")}    ENDCASE.
   ENDMETHOD.
 
+  METHOD zif_osd_rap_registry~projections.
+* R11: the entities of one projection or interface BDEF (EML over it)
+    DATA ls_projection TYPE zif_osd_rap_registry=>ty_projection.
+    CASE to_upper( iv_bdef ).
+${[...new Set(projections.map(x => x.bdef))].sort().map(b => `      WHEN ${lit(b)}.
+` + projections.filter(x => x.bdef === b).map(x =>
+  `        ls_projection = zif_osd_rap_registry~projection( ${lit(x.entity)} ).
+        APPEND ls_projection TO rt_projection.
+`).join("")).join("")}    ENDCASE.
+  ENDMETHOD.
+
 ENDCLASS.
 `;
   return outputs;

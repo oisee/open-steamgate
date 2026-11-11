@@ -56,4 +56,14 @@ INTERFACE zif_osd_rap_registry PUBLIC.
     RETURNING
       VALUE(rs_projection) TYPE ty_projection.
 
+* R11: every entity of a projection or interface BDEF, as PROJECTION answers
+* each; empty when IV_BDEF is none (EML over an interface BDEF runs on its
+* base, ZCL_OSD_RAP_EML)
+  TYPES tt_projection TYPE STANDARD TABLE OF ty_projection WITH DEFAULT KEY.
+  METHODS projections
+    IMPORTING
+      iv_bdef              TYPE csequence
+    RETURNING
+      VALUE(rt_projection) TYPE tt_projection.
+
 ENDINTERFACE.
