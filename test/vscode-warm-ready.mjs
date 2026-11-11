@@ -9,12 +9,15 @@ import {join} from "node:path";
 import {randomUUID} from "node:crypto";
 import {build} from "../tools/osd-build.mjs";
 import {copyRuntimeRoot} from "./helpers/runtime-root.mjs";
+import {scaled, speed} from "../tools/warm-deadline/warm-deadline.mjs";
 
 const {waitForServing} = createRequire(import.meta.url)("../editors/vscode/launcher.js");
 const {Osd} = createRequire(import.meta.url)("../editors/vscode/lib.js");
 
 describe("warm startup: ready means the front answers during priming", function () {
-  this.timeout(180000);
+  // The host start and the full prime both scale with the runner's speed.
+  console.log(`runner speed factor ${speed().factor.toFixed(2)} (${speed().source})`);
+  this.timeout(scaled(180000));
   it("answers serving within 1 s and a classrun within 2 s immediately after Start resolves", async () => {
     const dir = copyRuntimeRoot();
     const port = Number(process.env.STG_PORT ?? 3030);
@@ -60,6 +63,9 @@ describe("warm startup: ready means the front answers during priming", function 
         await new Promise(resolve => setTimeout(resolve, 100));
         final = await fetch(`${base}/osd/serving`, {signal: AbortSignal.timeout(2000)}).then(r => r.json());
       }
+      // The prime's own time against its deadline: a runner that grows
+      // slower shows here as a shrinking margin before it shows as a failure.
+      for (const line of log.split("\n").filter(l => /warm: (prime |primed )/.test(l))) console.log(line.trim());
       expect(final.warm.state, final.warm.reason ?? log.slice(-2000)).to.equal("primed");
       // The first classrun imported its module before the swap. A later run
       // must execute the live class table, rather than that cached export.

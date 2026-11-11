@@ -2,6 +2,7 @@ import {warnWarmPin} from "./osd-warm-capabilities.mjs";
 import {acceptView, captureView} from "./osd-store-compile-view.mjs";
 import {waitVerifier} from "./osd-warm-verification.mjs";
 import {verifyNext} from "./osd-store-verify.mjs";
+import {describe, warmDeadline} from "./warm-deadline/warm-deadline.mjs";
 // Background priming belongs to the compiler process, never the HTTP front.
 export function warmUp(store) {
   const w = store.warm();
@@ -29,7 +30,7 @@ export function warmUp(store) {
       for (;;) {
         const view = await captureView(store);
         try {
-          const r = await warmOperation(store, () => w.compiler.prime(view));
+          const r = await warmOperation(store, () => w.compiler.prime(view), {kind: "prime", files: view.digests?.length ?? 0});
           await acceptView(store, view, new Set(), undefined, true);
           // The synchronous activation validator keeps its own publication
           // registry in the source host. Prime it before admitting hot edits;
@@ -79,15 +80,23 @@ export async function closeWarm(store) {
 
 // A dead/silent compiler is an optimization failure. Reap it before a cold
 // build takes over the shared build lock, and keep later publications cold.
-export async function warmOperation(store, work) {
+// The deadline is sized to the work and to the host's measured speed
+// (tools/warm-deadline/README.md); the prime logs what it took against it,
+// so a real slowdown shows as a shrinking margin rather than as nothing.
+export async function warmOperation(store, work, {kind = "operation", files = 0} = {}) {
   const w = store.warm();
   let timer;
+  const deadline = warmDeadline({kind, files, store});
+  const ms = deadline.ms;
+  if (kind === "prime") console.log(`warm: prime deadline ${describe(deadline)} for ${files} input files`);
+  const started = performance.now();
   try {
-    const ms = store.warmDeadlineMs ?? 30000;
-    return await Promise.race([Promise.resolve().then(work), new Promise((_, reject) => {
-      timer = setTimeout(() => reject(Object.assign(new Error(`warm compiler exceeded ${ms} ms`),
+    const result = await Promise.race([Promise.resolve().then(work), new Promise((_, reject) => {
+      timer = setTimeout(() => reject(Object.assign(new Error(`warm compiler exceeded ${describe(deadline)}`),
         {code: "WARM_UNAVAILABLE"})), ms);
     })]);
+    if (kind === "prime") console.log(`warm: prime took ${Math.round(performance.now() - started)} ms of its ${ms} ms deadline`);
+    return result;
   } catch (error) {
     if (error.code === "WARM_UNAVAILABLE") {
       w.disabled = true;
