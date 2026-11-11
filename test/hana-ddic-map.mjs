@@ -106,6 +106,45 @@ describe("the DD03L to abapGit TABL mapping", () => {
     expect(error?.message).to.include("ZOSD_H1_NO_DTEL");
   });
 
+  it("carries a CURR/QUAN field's reference as DD03L says it: REFTABLE, PRECFIELD, REFFIELD", () => {
+    // a currency amount points at the CUKY field its currency is read from,
+    // a quantity at the UNIT field; DD03L carries the reference as REFTABLE
+    // plus REFFIELD, and PRECFIELD beside it as DD03L's own position marker.
+    // Without them the emitted XML is a packed field with no reference: it
+    // does not round-trip against what a system's own abapGit export writes,
+    // and --diff cannot see reference drift on the most common SAP field
+    // kinds (the critic round's SHOULD 3).
+    const rows = [
+      {position: "1", fieldname: "MANDT", keyflag: "X", rollname: "MANDT", datatype: "CLNT", leng: "3", decimals: "0", inttype: "C", notnull: "X"},
+      {position: "2", fieldname: "ZOSD_H1_AMT", keyflag: "", rollname: "", datatype: "CURR", leng: "13", decimals: "2", inttype: "P", intlen: "000007", notnull: "", reftable: "ZOSD_H1_REF", reffield: "ZOSD_H1_WAERS"},
+      {position: "3", fieldname: "ZOSD_H1_WAERS", keyflag: "", rollname: "", datatype: "CUKY", leng: "5", decimals: "0", inttype: "C", notnull: ""},
+      {position: "4", fieldname: "ZOSD_H1_QTY", keyflag: "", rollname: "", datatype: "QUAN", leng: "13", decimals: "3", inttype: "P", intlen: "000007", notnull: "", reftable: "ZOSD_H1_REF", preffield: "ZOSD_H1_AMT", reffield: "ZOSD_H1_UNIT"},
+      {position: "5", fieldname: "ZOSD_H1_UNIT", keyflag: "", rollname: "", datatype: "UNIT", leng: "3", decimals: "0", inttype: "C", notnull: ""},
+    ];
+    const byName = new Map(ddicFields(rows).map((f) => [f.fieldname, f]));
+    expect(byName.get("ZOSD_H1_AMT")).to.include({datatype: "CURR", intlen: "000007", reftable: "ZOSD_H1_REF", reffield: "ZOSD_H1_WAERS"});
+    expect(byName.get("ZOSD_H1_QTY")).to.include({datatype: "QUAN", reftable: "ZOSD_H1_REF", preffield: "ZOSD_H1_AMT", reffield: "ZOSD_H1_UNIT"});
+    // what the row leaves blank stays absent: an empty tag would drift from
+    // what a system's own export writes
+    expect(byName.get("ZOSD_H1_WAERS")).to.not.have.property("reffield");
+    expect(byName.get("ZOSD_H1_WAERS")).to.not.have.property("preffield");
+    // the XML, in DD03P's own component order: INTLEN, then the reference,
+    // then NOTNULL
+    const xml = tablXml({name: "ZOSD_H1_REF", text: "reference fixture table", fields: ddicFields(rows)});
+    expect(xml).to.match(/<FIELDNAME>ZOSD_H1_AMT<\/FIELDNAME>[\s\S]*?<INTLEN>000007<\/INTLEN>\s*<REFTABLE>ZOSD_H1_REF<\/REFTABLE>\s*<REFFIELD>ZOSD_H1_WAERS<\/REFFIELD>/);
+    expect(xml).to.match(/<FIELDNAME>ZOSD_H1_QTY<\/FIELDNAME>[\s\S]*?<REFTABLE>ZOSD_H1_REF<\/REFTABLE>\s*<PRECFIELD>ZOSD_H1_AMT<\/PRECFIELD>\s*<REFFIELD>ZOSD_H1_UNIT<\/REFFIELD>/);
+  });
+
+  it("names an .INCLUDE row's structure in the refusal, from DD03L's PRECFIELD", () => {
+    // ddicFields reads PRECFIELD for the include's name -- the same column
+    // the mapping carries for ordinary rows, and the one
+    // tools/dsl-ddic.mjs reads for key includes
+    const rows = [{position: "1", fieldname: ".INCLUDE", preffield: "ZOSD_H1_SUB"}];
+    let error;
+    try { ddicFields(rows); } catch (e) { error = e; }
+    expect(error?.message).to.include("ZOSD_H1_SUB");
+  });
+
   it("says which tables have MANDT as the first key field", () => {
     expect(mandtFirstKey(ddicFields(dd03l, {elements, domains}))).to.equal(true);
     const noClient = ddicFields([

@@ -120,6 +120,53 @@ export function statementKind(sql) {
   return (/^[A-Za-z]+/.exec(sql.slice(i))?.[0] ?? "").toUpperCase();
 }
 
+/** A top-level `;`: the text carries more than the one statement.
+ *
+ *  A kind is the first word of the first statement, so
+ *  `SELECT 1; DROP TABLE "T"` reads as a SELECT and walks past the guard --
+ *  measured, the critic round's smuggle probe, over exec and prepare. HANA
+ *  itself answers a multi-statement string with a syntax error, so nothing
+ *  executed; but this client's promise is to refuse before the driver sees
+ *  anything at all, and the separator is what breaks it. Quote- and
+ *  comment-aware, like foldIdentifiers above: a `;` counts only outside the
+ *  single-quoted literals ('' an escaped quote), outside the double-quoted
+ *  identifiers, and outside SQL's line and block comments. The guard
+ *  refuses such a text as kind "multi" before the kind of its first word
+ *  is read. */
+export function isMultiStatement(sql) {
+  let i = 0;
+  while (i < sql.length) {
+    const c = sql[i];
+    if (c === "'") {                       // a literal: skip it whole
+      i += 1;
+      while (i < sql.length) {
+        if (sql[i] === "'" && sql[i + 1] === "'") { i += 2; continue; }
+        if (sql[i] === "'") { i += 1; break; }
+        i += 1;
+      }
+      continue;
+    }
+    if (c === '"') {                       // a quoted identifier
+      const close = sql.indexOf('"', i + 1);
+      i = close === -1 ? sql.length : close + 1;
+      continue;
+    }
+    if (c === "-" && sql[i + 1] === "-") { // a line comment, to its end
+      const nl = sql.indexOf("\n", i);
+      i = nl === -1 ? sql.length : nl + 1;
+      continue;
+    }
+    if (c === "/" && sql[i + 1] === "*") { // a block comment
+      const end = sql.indexOf("*/", i + 2);
+      i = end === -1 ? sql.length : end + 2;
+      continue;
+    }
+    if (c === ";") return true;
+    i += 1;
+  }
+  return false;
+}
+
 /** a row of the seam is flat: number | string | Uint8Array | null */
 function plain(value, dataType) {
   if (typeof value === "bigint") return Number(value);
@@ -358,12 +405,17 @@ export class HanaDatabaseClient {
    *    DROP, ALTER, TRUNCATE, CALL, and any word not on the allowed list --
    *    is refused with code `HANA_READONLY` and the kind in the message.
    *    The statement text never travels with it: it may carry data.
+   *  - and a text carrying a top-level `;` is refused as kind "multi"
+   *    before the kind of its first word is even read: a kind is the first
+   *    word of the FIRST statement, and that word says nothing about the
+   *    second one (`SELECT 1; DROP TABLE "T"` measured walking past as a
+   *    SELECT -- the critic round's smuggle probe, exec and prepare).
    *
    *  Without the mode this is a pass-through: STG_DB=hana's own path has to
    *  keep issuing CREATE TABLE and the seed. */
   #guard(sql) {
     if (this.readOnly !== true) return;
-    const kind = statementKind(sql);
+    const kind = isMultiStatement(sql) ? "multi" : statementKind(sql);
     if (kind === "SELECT" || kind === "SET" || kind === "COMMIT" || kind === "ROLLBACK") return;
     const error = new Error(`HANA_READONLY: ${kind === "" ? "statement" : kind} refused in read-only mode (HANA_EXISTING_SCHEMA=1 without OSD_HANA_WRITE=1); the statement was not sent to the database`);
     error.code = "HANA_READONLY";

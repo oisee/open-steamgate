@@ -1,5 +1,5 @@
 import {expect} from "chai";
-import {HanaDatabaseClient, statementKind} from "../tools/hana-client.mjs";
+import {HanaDatabaseClient, isMultiStatement, statementKind} from "../tools/hana-client.mjs";
 
 // The read-only guard of the existing-schema mode (docs/db-backends.md,
 // "Existing schema, read-only").
@@ -131,6 +131,104 @@ describe("the HANA read-only guard", () => {
     try { await db.native({sql: `INSERT INTO "T" VALUES (1)`, expect: "none"}); } catch (e) { error = e; }
     expect(error?.code).to.equal("HANA_READONLY");
     expect(fake.seen).to.deep.equal([]);
+  });
+
+  // a driver with the prepared-statement path a real hdb client answers on,
+  // for the tests that must prove the guard fires before prepare(). The
+  // older fake above has no prepare, so query() takes the plain exec path
+  // there -- both channels of this client need their own proof.
+  const fakePrepDriver = () => {
+    const seen = [];
+    const stmt = {exec: (params, cb) => cb(undefined, []), drop: (cb) => cb(undefined)};
+    const client = {
+      exec: (sql, cb) => { seen.push(sql); cb(undefined, [{A: 1}]); },
+      prepare: (sql, cb) => { seen.push(`prepare: ${sql}`); cb(undefined, stmt); },
+      commit: (cb) => { seen.push("<COMMIT>"); cb(undefined); },
+      rollback: (cb) => { seen.push("<ROLLBACK>"); cb(undefined); },
+    };
+    return {seen, client};
+  };
+
+  it("refuses a smuggled second statement: a top-level ; is kind multi", async () => {
+    // the guard reads kinds, and a kind is the first word of the FIRST
+    // statement -- `SELECT 1; DROP TABLE "T"` walked past it as a SELECT and
+    // reached the driver (the critic round's smuggle probe measured it over
+    // exec and prepare; HANA answers a multi-statement string with a syntax
+    // error, but the promise is to refuse before the driver sees anything
+    // at all). One statement per text on this channel: a text carrying a
+    // top-level ; is refused whole, before its first word is even read.
+    for (const [say, call, driver] of [
+      ["exec", (db) => db.execute(`SELECT 1; DROP TABLE "ZOSD_H1_T"`), fakeDriver],
+      ["exec, query()", (db) => db.query(`SELECT 1; DROP TABLE "ZOSD_H1_T"`), fakeDriver],
+      ["prepare, query()", (db) => db.query(`SELECT 1; DROP TABLE "ZOSD_H1_T"`), fakePrepDriver],
+      ["prepare, native()", (db) => db.native({sql: `SELECT 1; DROP TABLE "ZOSD_H1_T"`, expect: "none"}), fakePrepDriver],
+    ]) {
+      const db = new HanaDatabaseClient({existingSchema: true});
+      const fake = driver();
+      db.client = fake.client;
+      let error;
+      try { await call(db); } catch (e) { error = e; }
+      expect(error?.code, say).to.equal("HANA_READONLY");
+      expect(error.message, say).to.include("multi");
+      expect(fake.seen, `${say}: nothing reached the driver`).to.deep.equal([]);
+    }
+  });
+
+  it("a ; inside a literal, an identifier or a comment is not a second statement", () => {
+    expect(isMultiStatement(`SELECT 'a;b' FROM "ZOSD_H1_T"`)).to.equal(false);
+    expect(isMultiStatement(`SELECT "A;B" FROM "ZOSD_H1_T"`)).to.equal(false);
+    expect(isMultiStatement(`SELECT 1 FROM "ZOSD_H1_T" -- a note; with a semicolon\n`)).to.equal(false);
+    expect(isMultiStatement(`SELECT 1 FROM "ZOSD_H1_T" /* a note; with one */`)).to.equal(false);
+    expect(isMultiStatement(`SELECT 1; DROP TABLE "T"`)).to.equal(true);
+    expect(isMultiStatement(`SELECT 1 FROM "ZOSD_H1_T";`)).to.equal(true);
+  });
+
+  // One refusal test per method the first round left mutation-invisible
+  // (the critic's table: removing #guard from any of these four left the
+  // suite green). Each is verified below, under the exact mutation, to go
+  // RED when its method's #guard call is removed.
+  it("query() refuses a non-SELECT before it folds or prepares", async () => {
+    const db = new HanaDatabaseClient({existingSchema: true});
+    const fake = fakePrepDriver();
+    db.client = fake.client;
+    let error;
+    try { await db.query(`DELETE FROM "ZOSD_H1_T"`); } catch (e) { error = e; }
+    expect(error?.code).to.equal("HANA_READONLY");
+    expect(error.message).to.include("DELETE");
+    expect(fake.seen, "nothing was folded through to the driver").to.deep.equal([]);
+  });
+
+  it("checkSelect() refuses a non-SELECT before it prepares", async () => {
+    const db = new HanaDatabaseClient({existingSchema: true});
+    const fake = fakePrepDriver();
+    db.client = fake.client;
+    let error;
+    try { await db.checkSelect(`INSERT INTO "ZOSD_H1_T" ("A") VALUES (1)`); } catch (e) { error = e; }
+    expect(error?.code).to.equal("HANA_READONLY");
+    expect(error.message).to.include("INSERT");
+    expect(fake.seen).to.deep.equal([]);
+  });
+
+  it("defineRelation() refuses the CREATE VIEW of a plain relation", async () => {
+    const db = new HanaDatabaseClient({existingSchema: true});
+    const fake = fakeDriver();
+    db.client = fake.client;
+    let error;
+    try { await db.defineRelation({name: "zosd_h1_rel", sql: `SELECT "A" FROM "ZOSD_H1_T"`}); } catch (e) { error = e; }
+    expect(error?.code).to.equal("HANA_READONLY");
+    expect(error.message).to.include("CREATE");
+    expect(fake.seen, "the CREATE VIEW never reached the driver").to.deep.equal([]);
+  });
+
+  it("dropRelation() refuses its DROP", async () => {
+    const db = new HanaDatabaseClient({existingSchema: true});
+    const fake = fakeDriver();
+    db.client = fake.client;
+    let error;
+    try { await db.dropRelation({kind: "definition", ref: `"ZOSD_H1_S"."ZOSD_H1_REL"`}); } catch (e) { error = e; }
+    expect(error?.code).to.equal("HANA_READONLY");
+    expect(error.message).to.include("DROP");
+    expect(fake.seen, "the DROP never reached the driver").to.deep.equal([]);
   });
 
   it("OSD_HANA_WRITE=1 lifts the guard", async () => {

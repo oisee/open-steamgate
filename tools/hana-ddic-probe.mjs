@@ -8,8 +8,9 @@
 //   --tables A,B,C   the tables to read (DD02L, DD03L, DD04L, DD01L, DD02T)
 //   --out <dir>      write <table>.tabl.xml there; without it, print the XML
 //   --diff           compare with src/**/<table>.tabl.xml when present:
-//                    field order, type, length, decimals, key flag; exit 1
-//                    on any difference
+//                    field order, type, length, decimals, key flag, a
+//                    CURR/QUAN field's reference (REFTABLE/REFFIELD) and
+//                    PRECFIELD; exit 1 on any difference
 //   --mandt          say which of the tables have MANDT as the first key
 //                    field
 //
@@ -55,7 +56,7 @@ async function readTables(db, names) {
       console.log(`hana-ddic-probe: ${name}: not in DD02L (no active version); skipped`);
       continue;
     }
-    const rows = await db.query(`SELECT POSITION, FIELDNAME, KEYFLAG, ROLLNAME, DATATYPE, LENG, DECIMALS, INTTYPE, INTLEN, NOTNULL FROM DD03L WHERE TABNAME = '${name}' AND AS4LOCAL = 'A' AND AS4VERS = '0000' ORDER BY POSITION`);
+    const rows = await db.query(`SELECT POSITION, FIELDNAME, KEYFLAG, ROLLNAME, DATATYPE, LENG, DECIMALS, INTTYPE, INTLEN, REFTABLE, PRECFIELD, REFFIELD, NOTNULL FROM DD03L WHERE TABNAME = '${name}' AND AS4LOCAL = 'A' AND AS4VERS = '0000' ORDER BY POSITION`);
     tables.set(name, {head: head[0], rows});
   }
   const elements = new Map();
@@ -118,6 +119,9 @@ function fileFields(xml, files) {
       datatype: tagOf(block, "DATATYPE").toUpperCase(),
       leng: tagOf(block, "LENG"),
       decimals: tagOf(block, "DECIMALS"),
+      reftable: tagOf(block, "REFTABLE").toUpperCase(),
+      preffield: tagOf(block, "PRECFIELD").toUpperCase(),
+      reffield: tagOf(block, "REFFIELD").toUpperCase(),
       unresolved: "",
     };
     if (field.fieldname === "" || field.fieldname.startsWith(".")) continue;
@@ -154,6 +158,9 @@ function reportDiff(name, mapped, files, say) {
     datatype: f.datatype,
     leng: f.leng,
     decimals: f.decimals ?? "",
+    reftable: f.reftable ?? "",
+    preffield: f.preffield ?? "",
+    reffield: f.reffield ?? "",
   }));
   let differences = 0;
   const say1 = (text) => { say(`hana-ddic-probe: ${name}: ${text}`); differences += 1; };
@@ -181,6 +188,9 @@ function reportDiff(name, mapped, files, say) {
       ["length", other.leng.replace(/^0+(?=\d)/, ""), one.leng.replace(/^0+(?=\d)/, "")],
       ["decimals", other.decimals.replace(/^0+(?=\d)/, "") || "0", one.decimals.replace(/^0+(?=\d)/, "") || "0"],
       ["key flag", other.key ? "X" : "", one.key ? "X" : ""],
+      ["reference table", other.reftable, one.reftable],
+      ["reference field", other.reffield, one.reffield],
+      ["preceding field", other.preffield, one.preffield],
     ]) {
       if (a !== b) say1(`${one.fieldname}: ${what}: the file says ${a === "" ? "(none)" : a}, DDIC says ${b === "" ? "(none)" : b}`);
     }

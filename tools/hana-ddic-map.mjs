@@ -25,6 +25,15 @@
 //     states. The descriptor carries which half of the pair it had to
 //     derive (inttypeFrom/intlenFrom: "dd03l" or "derived"), and the probe
 //     prints the derived fields by name.
+//   - a CURR/QUAN field carries the field its value is measured in:
+//     REFTABLE plus REFFIELD name the currency/unit field, and PRECFIELD
+//     is DD03L's own position marker (for an .INCLUDE row it names the
+//     include). DD03L is the only source -- neither DD04L nor DD01L knows
+//     the table the field sits in -- and what the row leaves blank stays
+//     absent, the way a system's own abapGit export writes it (DD03P's
+//     component order: after INTLEN, before NOTNULL). Without them the
+//     field went out packed with no reference at all: the XML did not
+//     round-trip and --diff could not see reference drift.
 //   - a field typed by a data element carries ROLLNAME and COMPTYPE E
 //     beside its resolved types, which is what a system's own abapGit
 //     export writes. An element with no type of its own resolves through
@@ -93,9 +102,20 @@ export function ddicField(row, refs = {}) {
     ? (/^\d+$/.test(intlenOwn) ? pad(Number(intlenOwn)) : intlenOwn)
     : intlenOf(fieldname, datatype, inttype, digits);
   const intlenFrom = intlenOwn !== "" ? "dd03l" : "derived";
+  // the reference a CURR/QUAN field carries, exactly as DD03L says it --
+  // REFTABLE and REFFIELD point at the currency/unit field, PRECFIELD is
+  // the position marker (and an .INCLUDE row's name; ddicFields reads it
+  // below). Blank stays absent: an empty tag is drift against what a
+  // system's own export writes.
+  const reftable = String(row.reftable ?? "").toUpperCase();
+  const preffield = String(row.preffield ?? "").toUpperCase();
+  const reffield = String(row.reffield ?? "").toUpperCase();
   return {
     fieldname, key, notnull, ...(rollname === "" ? {} : {rollname}),
     datatype, inttype, inttypeFrom, leng: pad(digits), intlen, intlenFrom,
+    ...(reftable === "" ? {} : {reftable}),
+    ...(preffield === "" ? {} : {preffield}),
+    ...(reffield === "" ? {} : {reffield}),
     ...(decimals > 0 ? {decimals: pad(decimals)} : {}),
   };
 }
@@ -144,7 +164,7 @@ export function ddicFields(rows, refs = {}) {
   for (const row of [...(rows ?? [])].sort((a, b) => (Number(a.position) || 0) - (Number(b.position) || 0))) {
     const name = String(row.fieldname ?? "").toUpperCase();
     if (name.startsWith(".")) {
-      includes.push(name === ".INCLUDE" ? String(row.prefield ?? "(no name)") : name);
+      includes.push(name === ".INCLUDE" ? String(row.preffield ?? "(no name)") : name);
       continue;
     }
     const field = ddicField(row, refs);
@@ -175,6 +195,9 @@ export function tablXml(table) {
       ADMINFIELD: "0",
       INTTYPE: f.inttype,
       INTLEN: f.intlen,
+      ...(f.reftable !== undefined ? {REFTABLE: f.reftable} : {}),
+      ...(f.preffield !== undefined ? {PRECFIELD: f.preffield} : {}),
+      ...(f.reffield !== undefined ? {REFFIELD: f.reffield} : {}),
       ...(f.notnull ? {NOTNULL: "X"} : {}),
       DATATYPE: f.datatype,
       LENG: f.leng,

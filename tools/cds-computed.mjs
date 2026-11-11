@@ -197,8 +197,9 @@ const xmlText = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").re
  *  CONTFLAG and the DD09L technical settings -- which is what the DDIC probe
  *  of the existing-schema mode emits (tools/hana-ddic-probe.mjs). A field
  *  may also carry its DD03P tags directly in `f.dd03p` (the mapping's own
- *  order: KEYFLAG, ROLLNAME, COMPTYPE, ADMINFIELD, INTTYPE, INTLEN, NOTNULL,
- *  DATATYPE, LENG, DECIMALS, MASK); without it, spelled as before. */
+ *  order: KEYFLAG, ROLLNAME, COMPTYPE, ADMINFIELD, INTTYPE, INTLEN,
+ *  REFTABLE, PRECFIELD, REFFIELD, NOTNULL, DATATYPE, LENG, DECIMALS, MASK);
+ *  without it, spelled as before. */
 export function structureXml(e, {transport = false} = {}) {
   const builtin = (f) => {
     const m = /^c LENGTH (\d+)$/.exec(f.abapType ?? "");

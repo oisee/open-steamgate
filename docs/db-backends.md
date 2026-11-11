@@ -371,10 +371,24 @@ Allowed beside SELECT: `SET` (connect()'s own session statement) and
 statement could open a transaction, so both degenerate to the no-op their
 early return already is. Refused by kind: INSERT, UPDATE, DELETE, MERGE,
 UPSERT, CREATE, DROP, ALTER, TRUNCATE, CALL — and anything else, WITH
-included. `insert()`/`update()`/`delete()` re-throw the refusal instead of
+included. A text carrying more than one statement — a top-level `;` outside
+the literals and comments — is refused as kind `multi` before the kind of
+its first word is even read: `SELECT 1; DROP TABLE …` is two statements,
+and the first word says nothing about the second.
+`insert()`/`update()`/`delete()` re-throw the refusal instead of
 answering subrc 4: "refused" is not "no such row". The native channel
 (`defineRelation`, `native`, `dropRelation`) is refused the same way — a
 lowered SQLScript write is a write.
+
+One door this does not close: `tools/amdp-destination.mjs` builds its own
+raw `hdb` client — its deploy issues `CREATE SCHEMA`, `DROP PROCEDURE`/
+`FUNCTION` and `CREATE PROCEDURE`/`FUNCTION` through it, not through the
+`HanaDatabaseClient` — so an AMDP deployed while the mode is on writes
+without ever meeting the guard. Nothing in the mode's flow deploys AMDP
+today, and the destination is not routed through the chokepoint yet;
+gating that is part of the slice that first runs AMDP against an existing
+schema. Until then the read-only promise covers what reaches
+`HanaDatabaseClient`, and nothing beyond it.
 
 The probe:
 
@@ -397,7 +411,9 @@ carrying an inactive version does not yield its fields twice. INTTYPE and
 INTLEN come from DD03L directly, for every field, resolved or not; only a
 blank is derived from the type rules, and the probe prints, per field,
 when that was. `--diff` compares against `src/**/<table>.tabl.xml` when
-present — field order, type, length, decimals, key flag — and exits 1 on
-any difference; `--mandt` says which tables have MANDT as the first key
+present — field order, type, length, decimals, key flag, and the reference
+a CURR/QUAN field carries (REFTABLE/REFFIELD, PRECFIELD, straight from
+DD03L) — and exits 1 on any difference; `--mandt` says which tables have
+MANDT as the first key
 field. No HANA is reachable from CI: the probe is exercised with fixtures
 and fake drivers, and run against a system by hand.
