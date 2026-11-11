@@ -152,7 +152,7 @@ describe("RAP R10 the flight's draft BOs over OData V4", function () {
     assert.match(res.body, /<PropertyRef Name="IsActiveEntity"\/>/);
     assert.match(res.body, /<Property Name="SupplementDescription"/);
     assert.match(res.body, /<Action Name="Activate" IsBound="true"/);
-    assert.match(res.body, /Common\.DraftRoot/);
+    assert.match(res.body, /Common\.v1\.DraftRoot/);
   });
 
   it("creates a supplement draft with its description (augment), changes it, activates it", async () => {

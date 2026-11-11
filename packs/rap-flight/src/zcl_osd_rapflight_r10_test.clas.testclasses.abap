@@ -59,10 +59,15 @@ CLASS ltcl_supplement IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD commit.
-* COMMIT ENTITIES
-    zcl_osd_rap_eml=>commit( EXPORTING iv_bdef = co_bdef
-                             IMPORTING ev_saved = rv_saved
-                             CHANGING cs_failed = ms_failed cs_reported = ms_reported ).
+* COMMIT ENTITIES; a failed save is the test's failure, with its reason
+    DATA lx_error TYPE REF TO zcx_osd_rap.
+    TRY.
+        zcl_osd_rap_eml=>commit( EXPORTING iv_bdef = co_bdef
+                                 IMPORTING ev_saved = rv_saved
+                                 CHANGING cs_failed = ms_failed cs_reported = ms_reported ).
+      CATCH zcx_osd_rap INTO lx_error.
+        cl_abap_unit_assert=>fail( lx_error->get_text( ) ).
+    ENDTRY.
   ENDMETHOD.
 
   METHOD new_draft.
@@ -244,10 +249,15 @@ CLASS ltcl_agency IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD commit.
-* COMMIT ENTITIES
-    zcl_osd_rap_eml=>commit( EXPORTING iv_bdef = co_bdef
-                             IMPORTING ev_saved = rv_saved
-                             CHANGING cs_failed = ms_failed cs_reported = ms_reported ).
+* COMMIT ENTITIES; a failed save is the test's failure, with its reason
+    DATA lx_error TYPE REF TO zcx_osd_rap.
+    TRY.
+        zcl_osd_rap_eml=>commit( EXPORTING iv_bdef = co_bdef
+                                 IMPORTING ev_saved = rv_saved
+                                 CHANGING cs_failed = ms_failed cs_reported = ms_reported ).
+      CATCH zcx_osd_rap INTO lx_error.
+        cl_abap_unit_assert=>fail( lx_error->get_text( ) ).
+    ENDTRY.
   ENDMETHOD.
 
   METHOD create.
