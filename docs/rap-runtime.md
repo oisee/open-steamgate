@@ -1435,6 +1435,9 @@ a draft.
 
 ### Not in R8 (R9)
 
+R9 (below) did the navigations, the admin entity, the "locked by another
+user" filter, the app, and the owner part of the third item; the rest stays.
+
 - `SiblingEntity` and `DraftAdministrativeData` as navigation properties
   (the admin data is written, not served), and the admin entity's
   `DraftIsCreatedByMe`-style fields; the "locked by another user" list
@@ -1451,6 +1454,167 @@ a draft.
 - V2 draft beyond the key: the function import names a V2 client expects
   and `Common.DraftRoot` over V2 (measured first);
 - the flight's draft BOs (supplement, agency, carrier) built and served.
+
+## R9: draft for a real Fiori Elements V4 app
+
+R8 shaped the V4 draft wire after what Fiori Elements is documented to send;
+R9 runs the app. `webapp/trip4` is a Fiori Elements V4 list report and
+object page over the R8 trip demo `ZUI_RAP_DTRIP`, with nothing
+draft-specific in it: sap.fe runs its own draft flow because the set is a
+`Common.DraftRoot`. The requests it sends were captured from the running app
+(SAPUI5 1.120.50, the version every app here bootstraps) and are each
+served; `test/e2e/trip4.spec.mjs` drives it -- open the list, Create (a
+draft), change a field, add a leg, Save (Prepare + Activate), Edit an active
+trip, change it, Save; Edit, change, Discard; delete from the list; every
+"Editing Status" value; another user's lock; the launchpad tile.
+
+Nothing in this section was measured on a system either: the A4H capture of
+a RAP draft service's V4 `$metadata` and a Fiori Elements trace against it
+still waits for Alice's go ([oracle-draft.md](oracle-draft.md)). Where the
+client decides (the request it sends) the capture is the authority; where
+the server decides (names, types, status codes, who sees what) the choice is
+named and marked **unmeasured**.
+
+### What sap.fe sends, and what answers it
+
+`$select`/`$expand` lists shortened; `(k,false)` is
+`(trip_uuid='<32 hex>',IsActiveEntity=false)`. Every request but the
+metadata and the token goes in a multipart `$batch`.
+
+| Step | Request | Served by |
+| --- | --- | --- |
+| start | `GET $metadata?sap-language=EN`, `HEAD /` (token) | R8 |
+| list | `GET Trip?$count=true&$select=HasActiveEntity,HasDraftEntity,IsActiveEntity,...&$filter=(IsActiveEntity eq false or SiblingEntity/IsActiveEntity eq null)&$expand=DraftAdministrativeData($select=DraftUUID,InProcessByUser,InProcessByUserDescription,LastChangedByUser,LastChangedByUserDescription)&$skip=0&$top=30` | R8 filter; **R9** the expand (the draft indicator: "Draft", "Locked by ALICE") |
+| Create | `POST Trip` with `{}` | R8 (no key dialog: **R9** `Core.Computed` on the key) |
+| object page | `GET Trip(k,false)?$select=...&$expand=DraftAdministrativeData($select=DraftIsCreatedByMe,DraftUUID,InProcessByUser)`; `GET Trip(k,false)?$select=DraftAdministrativeData&$expand=DraftAdministrativeData(...)` (a navigation property in `$select`); `GET Trip(k,false)/to_Legs?$count=true&$select=...&$skip=0&$top=10` | **R9** the expands; the rest R8 |
+| field change | `PATCH Trip(k,false)` | R8 |
+| leg | `POST Trip(k,false)/to_Legs`, then `PATCH Leg(k,false)` | R8 |
+| Save | `POST Trip(k,false)/ZUI_RAP_DTRIP.Prepare` and `POST Trip(k,false)/ZUI_RAP_DTRIP.Activate?$select=...&$expand=DraftAdministrativeData(...)` in one change set; then `GET Trip(k,true)?$select=DraftAdministrativeData&$expand=...` and the legs | R8 actions; **R9** the expands |
+| after a create | the active trip by its semantic key, `#/Trip('<uuid>')` | the app's `Common.SemanticKey` |
+| Edit | `POST Trip(k,true)/ZUI_RAP_DTRIP.Edit?$select=...&$expand=...` (`{"PreserveChanges":true}`) | R8; **R9** the owner |
+| Discard | `GET Trip(k,false)/SiblingEntity`, then `DELETE Trip(k,false)`, then `GET Trip(k,true)` | **R9** `SiblingEntity`; R8 the DELETE |
+| delete in the list | `DELETE Trip(k,true)` | R5 |
+| Editing Status | the six filters below | **R9** |
+
+Not seen in the captured flows, so not built for them: a call of `Resume`
+(the action is served since R8), `Discard` as an action (the DELETE replaces
+it), a read of its own for the draft indicator's popover (the list's expand
+already carries the admin data).
+
+### `SiblingEntity` and `DraftAdministrativeData`
+
+`srvd-gen.mjs` gives every entity of a draft BO two navigation properties,
+both to 0..1, neither a CDS association, resolved by the SADL data provider
+(`zcl_stg_sadl_dpc`, `draft_navigation`):
+
+- **`SiblingEntity`**: the other version of the same instance -- a draft's
+  active instance, an active instance's draft. Of the user's own draft only
+  (below); nothing (204, `null` in an expand) when there is none. It is not
+  its own `Partner` in `$metadata`.
+- **`DraftAdministrativeData`**: the admin row of the instance's draft, of
+  a draft and of an active instance that has one (also another user's: that
+  is how the list says "Locked by ALICE"); nothing otherwise.
+
+The admin data is an entity set of the service, `DraftAdministrativeData`
+of type `DraftAdministrativeDataType` (**unmeasured**: a system's set and
+type names, and whether the UUID is `Edm.Guid`; here `Edm.String` of 32 hex
+digits like every RAW16 key), read through `ZOSD_I_DRAFTADM`, a view over
+`ZOSD_DRAFT_ADM` under the element names of the public draft vocabulary:
+`DraftUUID`, `DraftEntityType`, `CreationDateTime`, `CreatedByUser`,
+`LastChangeDateTime`, `LastChangedByUser`, `InProcessByUser` (columns), and
+the virtual elements `CreatedByUserDescription`,
+`LastChangedByUserDescription`, `InProcessByUserDescription` (the user name:
+there is no user master) and `DraftIsCreatedByMe`, `DraftIsLastChangedByMe`,
+`DraftIsProcessedByMe` (`Edm.Boolean`, against the request's user), filled
+by `ZCL_OSD_DRAFT_ADM_CALC`. The two date-times are `Edm.DateTimeOffset`
+over the `DEC 21,7` columns. Not served: `ProcessingStartDateTime`,
+`EnqueueStartDateTime`, `DraftAccessType`, `DraftIsKeptByUser` (sap.fe 1.120
+did not ask for them).
+
+### `Core.Computed`
+
+sap.fe asks for every key that is not `Core.Computed` in a dialog before it
+creates a draft -- here `trip_uuid` and `IsActiveEntity`, which nobody can
+type. On a draft-enabled entity type (`IsActiveEntity` in its key) the V4
+facade now annotates each property the model makes neither creatable nor
+updatable `Core.Computed`: the managed key, the readonly fields, the draft
+flags. Other services are unchanged (**unmeasured**: the exact set a system
+annotates; RAP's documented mapping of `readonly` is `Core.Computed`).
+
+### The owner
+
+A draft belongs to a user. On a system that user is `SY-UNAME`, from the
+logon; here there is no logon and one `SY-UNAME` per process, so R9 adds
+**`src/logon`** (`ZCL_OSD_LOGON`): the HTTP fronts set the request's user
+from the user name of its `Authorization: Basic` header (the password is not
+checked -- identification, not authentication); without one it is
+`SY-UNAME` as before, and so it is for EML and ABAP Unit
+(`ZCL_OSD_LOGON=>SET` switches it in a test).
+
+- The admin row's `CREATEDBYUSER`, `INPROCESSBYUSER` and
+  `LASTCHANGEDBYUSER` are that user, and so is a BO's own `lastChangedBy`
+  field.
+- **The owner lock.** A change of a draft instance (update, delete, create
+  by association below it), and Activate, Discard, Resume and Prepare of
+  it, by any user other than its `INPROCESSBYUSER`, is refused: FAILED with
+  cause `locked`, REPORTED "trip ... is a draft of user ALICE". Edit of an
+  active instance another user has a draft of is refused the same way ("...
+  is locked by user ALICE"); the owner's own second Edit stays R8's
+  `conflict`. The owner goes on -- changes, Resume, Activate, Discard -- as
+  before. `ZCL_OSD_RAP_R9_TEST`.
+- **Who sees a draft.** The draft-enabled union (`ZCL_OSD_RAP_DRAFT`)
+  serves a user their own drafts only (created by or in process by them).
+  Another user's draft is not read, not reachable through `SiblingEntity`
+  and so not changed over OData: a GET, PATCH, DELETE or action on it is a
+  404. Its active instance still says `HasDraftEntity` true and names the
+  draft's admin data. That is what the Editing Status values of sap.fe
+  presuppose (an active instance "locked by another user" has
+  `SiblingEntity` null). **Unmeasured**: the status a system answers for
+  another user's draft by key (404 here) and for the refused Edit (400 here,
+  as every RAP refusal since R5).
+- No expiry: a draft holds its instance until it is activated or discarded,
+  so "Unsaved Changes by Another User" (a draft whose exclusive lock has run
+  out, `InProcessByUser` empty) never occurs; the filter is served and
+  answers nothing. Taking over another user's draft is not built.
+
+### The Editing Status filter
+
+Captured from the filter bar's "Editing Status" field:
+
+| Value | `$filter` sap.fe sends | Here |
+| --- | --- | --- |
+| All | `(IsActiveEntity eq false or SiblingEntity/IsActiveEntity eq null)` | R8's latest-version condition, per user since R9 |
+| All (Hiding Drafts) | `IsActiveEntity eq true` | a flag (R8) |
+| Unchanged | `IsActiveEntity eq true and HasDraftEntity eq false` | flags (R8) |
+| Own Draft | `IsActiveEntity eq false` | a flag; only own drafts are served |
+| Locked by Another User | `IsActiveEntity eq true and SiblingEntity/IsActiveEntity eq null and DraftAdministrativeData/InProcessByUser ne '' and DraftAdministrativeData/InProcessByUser ne null` | **R9** |
+| Unsaved Changes by Another User | `IsActiveEntity eq true and SiblingEntity/IsActiveEntity eq null and DraftAdministrativeData/InProcessByUser eq ''` | **R9** (empty: no expiry) |
+
+The V4 facade (`ZCL_OSD_V4_QUERY`, `draft_paths`) takes the navigation
+conditions out of the filter when they are top-level conjuncts (also inside
+a parenthesized group of ANDs) and hands them to the data provider as
+conditions on three columns of the union's rows: `SIBLINGENTITY` (the other
+version is there for this user), `DRAFTADMIN` (there is admin data) and
+`INPROCESSBYUSER`. A navigation to nothing is null, and a comparison with
+null is false except `eq null` / `ne null`, so `InProcessByUser ne ''`
+alone (true without admin data) is taken only beside `ne null`; any other
+condition through either navigation, or one under a top-level `or`, stays
+501.
+
+### Not in R9
+
+- The A4H oracle: a RAP draft service's V4 `$metadata` and an sap.fe trace
+  against it (pending Alice's go); everything marked unmeasured above.
+- The lock's expiry, Resume taking it back, taking over another user's
+  draft, `with collaborative draft`; a durable enqueue.
+- The rest of R8's list: `use draft` and projection draft actions, Prepare
+  members of another entity, `with additional implementation`, draft action
+  features, early and late numbering of drafts, `DRAFTFIELDCHANGES`, the
+  `.INCLUDE` of the admin structure, V2 draft beyond the key, the flight's
+  draft BOs.
+- Side effects, value helps and messages of a draft app beyond what sap.fe
+  showed here; UI annotations from metadata extensions (the app carries a
+  local annotation file).
 
 ## Not in R2
 

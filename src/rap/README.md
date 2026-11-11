@@ -1,4 +1,4 @@
-# Managed RAP runtime (R2, R2a, R3, R4, R5, R6, R8)
+# Managed RAP runtime (R2, R2a, R3, R4, R5, R6, R8, R9)
 
 Runs a managed behavior definition handler-direct, and the EML statements
 over it:
@@ -18,6 +18,11 @@ tables with their admin columns and `zosd_draft_adm`, the draft actions
 Edit, Activate, Discard, Resume (and Prepare as a determine action), and
 `zcl_osd_rap_draft`, the union of active and draft rows a draft entity
 serves (through the generated `zif_stg_cds_draft_source` classes).
+R9: the owner of a draft -- `INPROCESSBYUSER` is the request's user
+(`src/logon`), another user's change, Activate, Discard, Resume, Prepare or
+Edit of it is refused (FAILED `locked`) and the union serves a user only
+their own drafts; the draft administrative data served as an entity
+(`ZOSD_I_DRAFTADM`, `zcl_osd_draft_adm_calc` for the `*ByMe` flags).
 
 - `zcl_osd_rap_runtime` - the runtime; `for_bdef( 'ZI_...' )` to start;
   `active( )` names the runtime whose handler runs, where EML inside a
@@ -35,15 +40,18 @@ serves (through the generated `zif_stg_cds_draft_source` classes).
   `zif_stg_sadl_behavior` of `src/sadl/`)
 - `zcl_osd_rap_draft` - R8: active and draft rows merged with their flags
 - `zosd_draft_adm` - R8: the draft administrative data, one row per draft of a root
+- `zosd_i_draftadm` - R9: the view a draft service serves it through as `DraftAdministrativeData`
+- `zcl_osd_draft_adm_calc` - R9: its virtual elements (descriptions, `DraftIsCreatedByMe` and siblings)
 - `zcx_osd_rap`, `zcl_osd_rap_message`
 - `cl_abap_behv`, `cl_abap_behavior_handler`, `cl_abap_behavior_saver`,
   `if_abap_behv`, `if_abap_behv_message` - clean-room bases and constants a
   behavior pool writes against
 
-Uses `src/luw/` (the delta, and `ZCL_OSD_LUW_HOLD`: whether a batch holds the LUW) and the generated table classes of `gen/cds/`.
+Uses `src/logon/` (the request's user, R9), `src/luw/` (the delta, and `ZCL_OSD_LUW_HOLD`: whether a batch holds the LUW) and the generated table classes of `gen/cds/`.
 Tests: `test/unit/zcl_osd_rap_test` (ABAP Unit, over `src/rap_demo/`),
 `test/unit/zcl_osd_rap_r5_test` (the tree, over `src/rap_r5/`), `test/rap-r5.mjs`,
 `test/unit/zcl_osd_rap_r6_test` (the actions, over `src/rap_r6/`), `test/rap-r6.mjs`,
 `test/unit/zcl_osd_rap_r8_test` (draft, over `src/rap_r8/`), `test/rap-r8.mjs`,
+`test/unit/zcl_osd_rap_r9_test` (the owner), `test/rap-r9.mjs`, `test/e2e/trip4.spec.mjs`,
 `test/unit/zcl_osd_rap_eml_test` (the EML facade), `test/rap-runtime-gen.mjs`, `test/rap-serve.mjs` (the OData wire). Contract and limits:
 [docs/rap-runtime.md](../../docs/rap-runtime.md).
