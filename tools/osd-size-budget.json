@@ -378,6 +378,10 @@
    "lines": 1425,
    "reason": "lowered 2026-10-02: the YAML line index went to tools/dsl-yaml-lines.mjs; holds the range: of L3 slice 3a"
   },
+  "tools/hana-client.mjs": {
+   "lines": 1026,
+   "reason": "H1 fix round 2, 2026-11-11: grew past the default mjs ceiling of 1000 by the multi-statement guard: isMultiStatement, the quote- and comment-aware walker beside statementKind, so #guard refuses a text carrying a top-level `;` as kind \"multi\" before the first word is read (the critic round's smuggle finding, measured reaching the driver over exec and prepare). The file is the one HANA DatabaseClient -- the dialect rewrites, the literal trim and the read-only guard with their measured history live together on purpose; carving it into a package of its own is not this fix round's work."
+  },
   "tools/gogen/emit-constructors.ts": {
    "lines": 32,
    "reason": "Typed gogen phase 1: renamed the JavaScript leaf with erasable declarations; preserve an explicit size ceiling for the TypeScript path."
