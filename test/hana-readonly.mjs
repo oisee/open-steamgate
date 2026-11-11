@@ -139,7 +139,15 @@ describe("the HANA read-only guard", () => {
   // there -- both channels of this client need their own proof.
   const fakePrepDriver = () => {
     const seen = [];
-    const stmt = {exec: (params, cb) => cb(undefined, []), drop: (cb) => cb(undefined)};
+    // the statement carries the result metadata a real prepare answers with:
+    // defineRelation()'s materialised branch types its CREATE COLUMN TABLE
+    // from it, so the with-params arm below reaches the guard that must
+    // refuse it
+    const stmt = {
+      exec: (params, cb) => cb(undefined, []),
+      drop: (cb) => cb(undefined),
+      resultSetMetadata: [{columnName: "A", dataType: 3, length: 10, fraction: 0}],
+    };
     const client = {
       exec: (sql, cb) => { seen.push(sql); cb(undefined, [{A: 1}]); },
       prepare: (sql, cb) => { seen.push(`prepare: ${sql}`); cb(undefined, stmt); },
@@ -218,6 +226,32 @@ describe("the HANA read-only guard", () => {
     expect(error?.code).to.equal("HANA_READONLY");
     expect(error.message).to.include("CREATE");
     expect(fake.seen, "the CREATE VIEW never reached the driver").to.deep.equal([]);
+  });
+
+  it("defineRelation() refuses the CREATE COLUMN TABLE of a materialised relation", async () => {
+    // both materialised branches build their statement as a CREATE COLUMN
+    // TABLE -- straight from the body when it carries no values, typed from
+    // the prepare's own metadata when it does -- each with its own #guard
+    // call. Both stayed mutation-invisible until fix round 3 (the critic's
+    // M3b: removing both left the suite green); the mutation harness
+    // (../red-fix3-mutations.log) proves this test bites each guard alone
+    // and both together. The body's own prepare may reach the driver in the
+    // with-params arm -- that read is how HANA works the types out, and a
+    // prepare writes nothing; the CREATE COLUMN TABLE must not.
+    for (const [say, call, reached] of [
+      ["no params", (db) => db.defineRelation({name: "zosd_h1_mat", sql: `SELECT "A" FROM "ZOSD_H1_T"`, materialise: "the divergence instrument"}), []],
+      ["with params", (db) => db.defineRelation({name: "zosd_h1_mat", sql: `SELECT "A" FROM "ZOSD_H1_T" WHERE "B" = ?`, params: [{isNull: false, value: 1}], materialise: "the divergence instrument"}),
+        [`prepare: SELECT "A" FROM "ZOSD_H1_T" WHERE "B" = ?`]],
+    ]) {
+      const db = new HanaDatabaseClient({existingSchema: true});
+      const fake = fakePrepDriver();
+      db.client = fake.client;
+      let error;
+      try { await call(db); } catch (e) { error = e; }
+      expect(error?.code, say).to.equal("HANA_READONLY");
+      expect(error.message, say).to.include("CREATE");
+      expect(fake.seen, `${say}: only the body's prepare may reach the driver`).to.deep.equal(reached);
+    }
   });
 
   it("dropRelation() refuses its DROP", async () => {

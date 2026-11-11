@@ -1,6 +1,6 @@
 import {expect} from "chai";
 import {createRequire} from "node:module";
-import {existsSync, mkdtempSync, rmSync} from "node:fs";
+import {existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {run} from "../tools/hana-ddic-probe.mjs";
@@ -93,6 +93,11 @@ describe("the DDIC probe's reads name only measured columns", () => {
       {POSITION: "1", FIELDNAME: "MANDT", KEYFLAG: "X", ROLLNAME: "MANDT", DATATYPE: "CLNT", LENG: "3", DECIMALS: "0", INTTYPE: "C", INTLEN: "000006", NOTNULL: "X"},
       {POSITION: "2", FIELDNAME: "ZOSD_H1_KEY", KEYFLAG: "X", ROLLNAME: "", DATATYPE: "CHAR", LENG: "10", DECIMALS: "0", INTTYPE: "C", INTLEN: "000020", NOTNULL: "X"},
       {POSITION: "3", FIELDNAME: "ZOSD_H1_ELEM", KEYFLAG: "", ROLLNAME: "ZOSD_H1_DTEL", DATATYPE: "", LENG: "", DECIMALS: "", INTTYPE: "", INTLEN: "", NOTNULL: ""},
+      // a QUAN with its reference, keyed as a real DD03L row is: the three
+      // reference columns travel through query(), which folds every key to
+      // lower case on the way out -- PRECFIELD arrives at the map as
+      // `precfield`, not as the `preffield` the map read until fix round 3
+      {POSITION: "4", FIELDNAME: "ZOSD_H1_QTY", KEYFLAG: "", ROLLNAME: "", DATATYPE: "QUAN", LENG: "13", DECIMALS: "3", INTTYPE: "P", INTLEN: "000007", NOTNULL: "", REFTABLE: "ZOSD_H1_REF", PRECFIELD: "ZOSD_H1_ELEM", REFFIELD: "ZOSD_H1_UNIT"},
     ],
     DD04L: [{ROLLNAME: "ZOSD_H1_DTEL", DOMNAME: "ZOSD_H1_DOMA", DATATYPE: "", LENG: "", DECIMALS: ""}],
     DD01L: [{DOMNAME: "ZOSD_H1_DOMA", DATATYPE: "DEC", LENG: "9", DECIMALS: "2"}],
@@ -195,6 +200,12 @@ describe("the DDIC probe's reads name only measured columns", () => {
       // the run was the real run: XML written, MANDT answered
       expect(existsSync(join(out, "zosd_h1_probe.tabl.xml")), "--out wrote the table").to.equal(true);
       expect(lines.join("\n")).to.include("MANDT as the first key field: yes");
+      // the reference columns travel from DD03L through the client into the
+      // XML: PRECFIELD was read misspelled (`row.preffield`) until fix
+      // round 3, so the tag never appeared however the row arrived
+      const xmlText = readFileSync(join(out, "zosd_h1_probe.tabl.xml"), "utf8");
+      expect(xmlText, "--out carries PRECFIELD from the client's row").to.include("<PRECFIELD>ZOSD_H1_ELEM</PRECFIELD>");
+      expect(xmlText, "--out carries REFTABLE from the client's row").to.include("<REFTABLE>ZOSD_H1_REF</REFTABLE>");
       // where INTTYPE/INTLEN came from, said out loud: ZOSD_H1_ELEM's DD03L
       // row leaves both blank, so they were derived and the probe says so;
       // the other two fields carry DD03L's own values and are not mentioned
@@ -205,5 +216,86 @@ describe("the DDIC probe's reads name only measured columns", () => {
     } finally {
       rmSync(out, {recursive: true, force: true});
     }
+  });
+
+  // the file side of a --diff run. The clean fixture is what a system's own
+  // abapGit export writes: every field resolved, and MANDT's block carrying
+  // DATATYPE/LENG the way an export does (this tree's own writer spells the
+  // client field shorter -- the --out output of the run above). The drift
+  // fixture plants one wrong PRECFIELD into it and changes nothing else.
+  const CLEAN_XML = `<?xml version="1.0" encoding="utf-8"?>
+<abapGit version="v1.0.0" serializer="LCL_OBJECT_TABL" serializer_version="v1.0.0">
+ <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
+  <asx:values>
+   <DD02V><TABNAME>ZOSD_H1_PROBE</TABNAME><TABCLASS>TRANSP</TABCLASS><DDTEXT>probe fixture table</DDTEXT></DD02V>
+   <DD03P_TABLE>
+    <DD03P><FIELDNAME>MANDT</FIELDNAME><KEYFLAG>X</KEYFLAG><ROLLNAME>MANDT</ROLLNAME><ADMINFIELD>0</ADMINFIELD><NOTNULL>X</NOTNULL><COMPTYPE>E</COMPTYPE><DATATYPE>CLNT</DATATYPE><LENG>000003</LENG><MASK>  CLNT</MASK></DD03P>
+    <DD03P><FIELDNAME>ZOSD_H1_KEY</FIELDNAME><KEYFLAG>X</KEYFLAG><ADMINFIELD>0</ADMINFIELD><INTTYPE>C</INTTYPE><INTLEN>000020</INTLEN><NOTNULL>X</NOTNULL><DATATYPE>CHAR</DATATYPE><LENG>000010</LENG><MASK>  CHAR</MASK></DD03P>
+    <DD03P><FIELDNAME>ZOSD_H1_ELEM</FIELDNAME><ROLLNAME>ZOSD_H1_DTEL</ROLLNAME><ADMINFIELD>0</ADMINFIELD><INTTYPE>P</INTTYPE><INTLEN>000005</INTLEN><DATATYPE>DEC</DATATYPE><LENG>000009</LENG><DECIMALS>000002</DECIMALS><MASK>  DEC</MASK></DD03P>
+    <DD03P><FIELDNAME>ZOSD_H1_QTY</FIELDNAME><ADMINFIELD>0</ADMINFIELD><INTTYPE>P</INTTYPE><INTLEN>000007</INTLEN><REFTABLE>ZOSD_H1_REF</REFTABLE><PRECFIELD>ZOSD_H1_ELEM</PRECFIELD><REFFIELD>ZOSD_H1_UNIT</REFFIELD><DATATYPE>QUAN</DATATYPE><LENG>000013</LENG><DECIMALS>000003</DECIMALS><MASK>  QUAN</MASK></DD03P>
+   </DD03P_TABLE>
+  </asx:values>
+ </asx:abap>
+</abapGit>
+`;
+  // the drift fixture plants one wrong PRECFIELD and nothing else. Its
+  // MANDT block is spelled the way this tree's own writer does (no
+  // DATATYPE), so the file side leaves the client field unresolved and the
+  // run reaches the planted drift instead of dying in the MANDT compare the
+  // clean fixture below exercises.
+  const DRIFT_XML = CLEAN_XML
+    .replace(
+      `<DD03P><FIELDNAME>MANDT</FIELDNAME><KEYFLAG>X</KEYFLAG><ROLLNAME>MANDT</ROLLNAME><ADMINFIELD>0</ADMINFIELD><NOTNULL>X</NOTNULL><COMPTYPE>E</COMPTYPE><DATATYPE>CLNT</DATATYPE><LENG>000003</LENG><MASK>  CLNT</MASK></DD03P>`,
+      `<DD03P><FIELDNAME>MANDT</FIELDNAME><KEYFLAG>X</KEYFLAG><ROLLNAME>MANDT</ROLLNAME><ADMINFIELD>0</ADMINFIELD><NOTNULL>X</NOTNULL><COMPTYPE>E</COMPTYPE></DD03P>`)
+    .replace(
+      "<PRECFIELD>ZOSD_H1_ELEM</PRECFIELD>",
+      "<PRECFIELD>ZOSD_H1_WRONG</PRECFIELD>");
+
+  // a --diff run over a planted src file. The probe walks src/ under
+  // process.cwd(), so the run happens in the fixture's own directory, with
+  // console.log captured the way the reads test does and the cwd restored
+  // before any assertion runs.
+  const diffRun = async (tablXml) => {
+    const root = mkdtempSync(join(tmpdir(), "hana-ddic-diff-"));
+    const cwd = process.cwd();
+    const lines = [];
+    const say = console.log;
+    mkdirSync(join(root, "src"), {recursive: true});
+    writeFileSync(join(root, "src", "zosd_h1_probe.tabl.xml"), tablXml);
+    let code;
+    try {
+      console.log = (line) => lines.push(String(line));
+      process.chdir(root);
+      code = await run(["--tables", "ZOSD_H1_PROBE", "--diff"]);
+    } finally {
+      process.chdir(cwd);
+      console.log = say;
+      rmSync(root, {recursive: true, force: true});
+    }
+    return {code, lines};
+  };
+
+  it("names a planted PRECFIELD drift: the file says X, DDIC says what the client delivered", async () => {
+    // the drift line must carry DDIC's own value, not "(none)": until fix
+    // round 3 the map dropped the client's precfield on the floor (it read
+    // the column misspelled), so a planted wrong one said "DDIC says (none)"
+    // and a planted-consistent file read as drift
+    const {code, lines} = await diffRun(DRIFT_XML);
+    expect(code, "the probe exits 1 on drift").to.equal(1);
+    expect(lines.join("\n"), "the planted PRECFIELD drift is named with DDIC's value")
+      .to.include("ZOSD_H1_QTY: preceding field: the file says ZOSD_H1_WRONG, DDIC says ZOSD_H1_ELEM");
+    expect(lines.filter((l) => l.includes("DDIC says")), "exactly the one planted drift").to.have.lengthOf(1);
+  });
+
+  it("a clean fixture matches -- MANDT first key included", async () => {
+    // MANDT's file block carries DATATYPE/LENG the way an export does, so
+    // the diff compares the client field fully. That compare is where the
+    // round-3 fix bit: the MANDT descriptor carried no leng, and
+    // `one.leng.replace` died with a TypeError before any comparison -- on
+    // the probe's main path, most real tables being client-dependent.
+    const {code, lines} = await diffRun(CLEAN_XML);
+    expect(code, "the clean fixture exits clean").to.equal(0);
+    expect(lines.filter((l) => l.includes("DDIC says")), "no drift line besides").to.deep.equal([]);
+    expect(lines.join("\n"), "the probe says matches").to.include("matches");
   });
 });

@@ -40,8 +40,11 @@
 //     its domain (DD04L -> DD01L), the hop tools/adt-documents.mjs
 //     documents and once missed.
 //   - MANDT is the one field with a shape of its own, as segw-tables writes
-//     it everywhere: KEYFLAG, ROLLNAME MANDT, ADMINFIELD 0, NOTNULL X,
-//     COMPTYPE E, and nothing else.
+//     it everywhere: the XML carries KEYFLAG, ROLLNAME MANDT, ADMINFIELD 0,
+//     NOTNULL X, COMPTYPE E, and nothing else. The descriptor beside it also
+//     carries the type DD03L names for the field (CLNT, LENG 3), because
+//     --diff compares the client field against a system's own export, whose
+//     DD03P does spell the type.
 //   - an .INCLUDE row is not a field; it is refused by name so a table is
 //     never emitted as the part of itself that happened to resolve (the
 //     partial-schema mistake tools/osd-type-graph.mjs records).
@@ -64,9 +67,17 @@ export function ddicField(row, refs = {}) {
   const rollname = String(row.rollname ?? "").toUpperCase();
   const elements = refs.elements instanceof Map ? refs.elements : new Map();
   const domains = refs.domains instanceof Map ? refs.domains : new Map();
-  // the client field, in the shape this tree writes it everywhere
+  // the client field, in the shape this tree writes it everywhere. The
+  // descriptor also carries what DD03L says of the field's type, which
+  // --diff compares: a system's own export spells DATATYPE/LENG on MANDT,
+  // the XML's tags block does not, and stays as it is.
   if (fieldname === "MANDT") {
+    const digits = Number(String(row.leng ?? "").trim() || 0);
+    const decimals = Number(String(row.decimals ?? "").trim() || 0);
     return {fieldname, key, notnull: true, mandt: true,
+      datatype: String(row.datatype ?? "").toUpperCase(),
+      leng: pad(digits),
+      ...(decimals > 0 ? {decimals: pad(decimals)} : {}),
       tags: {...(key ? {KEYFLAG: "X"} : {}), ROLLNAME: "MANDT", ADMINFIELD: "0", NOTNULL: "X", COMPTYPE: "E"}};
   }
   const element = elements.get(rollname);
@@ -108,13 +119,13 @@ export function ddicField(row, refs = {}) {
   // below). Blank stays absent: an empty tag is drift against what a
   // system's own export writes.
   const reftable = String(row.reftable ?? "").toUpperCase();
-  const preffield = String(row.preffield ?? "").toUpperCase();
+  const precfield = String(row.precfield ?? "").toUpperCase();
   const reffield = String(row.reffield ?? "").toUpperCase();
   return {
     fieldname, key, notnull, ...(rollname === "" ? {} : {rollname}),
     datatype, inttype, inttypeFrom, leng: pad(digits), intlen, intlenFrom,
     ...(reftable === "" ? {} : {reftable}),
-    ...(preffield === "" ? {} : {preffield}),
+    ...(precfield === "" ? {} : {precfield}),
     ...(reffield === "" ? {} : {reffield}),
     ...(decimals > 0 ? {decimals: pad(decimals)} : {}),
   };
@@ -164,7 +175,7 @@ export function ddicFields(rows, refs = {}) {
   for (const row of [...(rows ?? [])].sort((a, b) => (Number(a.position) || 0) - (Number(b.position) || 0))) {
     const name = String(row.fieldname ?? "").toUpperCase();
     if (name.startsWith(".")) {
-      includes.push(name === ".INCLUDE" ? String(row.preffield ?? "(no name)") : name);
+      includes.push(name === ".INCLUDE" ? String(row.precfield ?? "(no name)") : name);
       continue;
     }
     const field = ddicField(row, refs);
@@ -196,7 +207,7 @@ export function tablXml(table) {
       INTTYPE: f.inttype,
       INTLEN: f.intlen,
       ...(f.reftable !== undefined ? {REFTABLE: f.reftable} : {}),
-      ...(f.preffield !== undefined ? {PRECFIELD: f.preffield} : {}),
+      ...(f.precfield !== undefined ? {PRECFIELD: f.precfield} : {}),
       ...(f.reffield !== undefined ? {REFFIELD: f.reffield} : {}),
       ...(f.notnull ? {NOTNULL: "X"} : {}),
       DATATYPE: f.datatype,

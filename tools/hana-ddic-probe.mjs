@@ -120,7 +120,7 @@ function fileFields(xml, files) {
       leng: tagOf(block, "LENG"),
       decimals: tagOf(block, "DECIMALS"),
       reftable: tagOf(block, "REFTABLE").toUpperCase(),
-      preffield: tagOf(block, "PRECFIELD").toUpperCase(),
+      precfield: tagOf(block, "PRECFIELD").toUpperCase(),
       reffield: tagOf(block, "REFFIELD").toUpperCase(),
       unresolved: "",
     };
@@ -159,7 +159,7 @@ function reportDiff(name, mapped, files, say) {
     leng: f.leng,
     decimals: f.decimals ?? "",
     reftable: f.reftable ?? "",
-    preffield: f.preffield ?? "",
+    precfield: f.precfield ?? "",
     reffield: f.reffield ?? "",
   }));
   let differences = 0;
@@ -190,7 +190,7 @@ function reportDiff(name, mapped, files, say) {
       ["key flag", other.key ? "X" : "", one.key ? "X" : ""],
       ["reference table", other.reftable, one.reftable],
       ["reference field", other.reffield, one.reffield],
-      ["preceding field", other.preffield, one.preffield],
+      ["preceding field", other.precfield, one.precfield],
     ]) {
       if (a !== b) say1(`${one.fieldname}: ${what}: the file says ${a === "" ? "(none)" : a}, DDIC says ${b === "" ? "(none)" : b}`);
     }
