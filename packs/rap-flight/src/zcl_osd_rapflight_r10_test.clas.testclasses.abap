@@ -200,11 +200,20 @@ CLASS lcl_reversing DEFINITION FINAL.
 * The agency BO whose saver returns MAPPED LATE in reverse order: a valid
 * adjust_numbers may order its rows as it likes, %pre names each one (the
 * #917 critic's probe). Everything else is the generated adapter.
+* #917 follow-up: the other modes make the saver's answer wrong in one way
+* each, and the runtime's guard must refuse it -- P a final key in the
+* preliminary range, U a key an active agency has, D the same final key for
+* two instances, X a row dropped, I one %pid twice.
   PUBLIC SECTION.
     INTERFACES zif_osd_rap_bo.
-    METHODS constructor.
+    METHODS constructor
+      IMPORTING
+        iv_mode TYPE c DEFAULT 'R'
+        iv_key  TYPE /dmo/agency_id OPTIONAL.
   PRIVATE SECTION.
-    DATA mi_bo TYPE REF TO zif_osd_rap_bo.
+    DATA mi_bo   TYPE REF TO zif_osd_rap_bo.
+    DATA mv_mode TYPE c LENGTH 1.
+    DATA mv_key  TYPE /dmo/agency_id.
 ENDCLASS.
 
 CLASS lcl_reversing IMPLEMENTATION.
@@ -213,6 +222,8 @@ CLASS lcl_reversing IMPLEMENTATION.
     DATA li_registry TYPE REF TO zif_osd_rap_registry.
     CREATE OBJECT li_registry TYPE ('ZCL_OSD_RAP_REGISTRY').
     mi_bo = li_registry->get( '/DMO/R_AGENCYTP' ).
+    mv_mode = iv_mode.
+    mv_key = iv_key.
   ENDMETHOD.
 
   METHOD zif_osd_rap_bo~model.
@@ -251,19 +262,47 @@ CLASS lcl_reversing IMPLEMENTATION.
     FIELD-SYMBOLS <lt_late>   TYPE STANDARD TABLE.
     FIELD-SYMBOLS <lt_copy>   TYPE STANDARD TABLE.
     FIELD-SYMBOLS <ls_row>    TYPE any.
+    FIELD-SYMBOLS <lv_value>  TYPE any.
+    DATA lv_key TYPE /dmo/agency_id.
+    DATA lv_pid TYPE x LENGTH 16.
 
     mi_bo->adjust_numbers( io_saver = io_saver ir_mapped = ir_mapped ir_reported = ir_reported ).
     ASSIGN ir_mapped->* TO <ls_mapped>.
     ASSIGN COMPONENT '/DMO/AGENCY' OF STRUCTURE <ls_mapped> TO <lt_late>.
     CREATE DATA lr_copy LIKE <lt_late>.
     ASSIGN lr_copy->* TO <lt_copy>.
-    lv_line = lines( <lt_late> ).
-    WHILE lv_line > 0.
-      READ TABLE <lt_late> INDEX lv_line ASSIGNING <ls_row>.
-      APPEND <ls_row> TO <lt_copy>.
-      lv_line = lv_line - 1.
-    ENDWHILE.
-    <lt_late> = <lt_copy>.
+    CASE mv_mode.
+      WHEN 'R'.
+        lv_line = lines( <lt_late> ).
+        WHILE lv_line > 0.
+          READ TABLE <lt_late> INDEX lv_line ASSIGNING <ls_row>.
+          APPEND <ls_row> TO <lt_copy>.
+          lv_line = lv_line - 1.
+        ENDWHILE.
+        <lt_late> = <lt_copy>.
+      WHEN 'P' OR 'U'.
+        LOOP AT <lt_late> ASSIGNING <ls_row>.
+          ASSIGN COMPONENT 'AGENCYID' OF STRUCTURE <ls_row> TO <lv_value>.
+          <lv_value> = mv_key.
+        ENDLOOP.
+      WHEN 'D'.
+        READ TABLE <lt_late> INDEX 1 ASSIGNING <ls_row>.
+        ASSIGN COMPONENT 'AGENCYID' OF STRUCTURE <ls_row> TO <lv_value>.
+        lv_key = <lv_value>.
+        LOOP AT <lt_late> ASSIGNING <ls_row>.
+          ASSIGN COMPONENT 'AGENCYID' OF STRUCTURE <ls_row> TO <lv_value>.
+          <lv_value> = lv_key.
+        ENDLOOP.
+      WHEN 'X'.
+        DELETE <lt_late> INDEX lines( <lt_late> ).
+      WHEN 'I'.
+        READ TABLE <lt_late> INDEX 1 ASSIGNING <ls_row>.
+        ASSIGN COMPONENT '%PID' OF STRUCTURE <ls_row> TO <lv_value>.
+        lv_pid = <lv_value>.
+        READ TABLE <lt_late> INDEX 2 ASSIGNING <ls_row>.
+        ASSIGN COMPONENT '%PID' OF STRUCTURE <ls_row> TO <lv_value>.
+        <lv_value> = lv_pid.
+    ENDCASE.
   ENDMETHOD.
 
   METHOD zif_osd_rap_bo~call.
@@ -311,6 +350,16 @@ CLASS ltcl_agency DEFINITION FOR TESTING DURATION SHORT RISK LEVEL DANGEROUS FIN
     METHODS drafts_at_the_top_do_not_meet FOR TESTING RAISING cx_static_check.
     METHODS exhausted_range_writes_nothing FOR TESTING RAISING cx_static_check.
     METHODS mapping_by_pid_not_order FOR TESTING RAISING cx_static_check.
+    METHODS refuses_a_preliminary_key FOR TESTING RAISING cx_static_check.
+    METHODS refuses_a_key_in_use FOR TESTING RAISING cx_static_check.
+    METHODS refuses_a_duplicate_key FOR TESTING RAISING cx_static_check.
+    METHODS refuses_a_dropped_row FOR TESTING RAISING cx_static_check.
+    METHODS refuses_a_duplicated_pid FOR TESTING RAISING cx_static_check.
+    METHODS refused
+      IMPORTING
+        iv_mode   TYPE c
+        iv_key    TYPE /dmo/agency_id OPTIONAL
+        iv_reason TYPE csequence.
     METHODS keep
       IMPORTING
         iv_id   TYPE /dmo/agency_id
@@ -576,6 +625,69 @@ CLASS ltcl_agency IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( act = lv_count exp = 1 msg = 'the saver gave the first row the first number' ).
     SELECT COUNT(*) FROM /dmo/agency INTO @lv_count WHERE agency_id = @lv_n2 AND name = 'R10 second'.
     cl_abap_unit_assert=>assert_equals( act = lv_count exp = 1 ).
+  ENDMETHOD.
+
+  METHOD refused.
+* two active creates whose saver answers MAPPED LATE wrongly (lcl_reversing,
+* mode IV_MODE): the save is refused with IV_REASON and writes nothing
+    DATA lo_bo     TYPE REF TO lcl_reversing.
+    DATA lo_rap    TYPE REF TO zcl_osd_rap_runtime.
+    DATA lt_create TYPE tt_create.
+    DATA ls_create LIKE LINE OF lt_create.
+    DATA ls_mapped TYPE ty_mapped.
+    DATA lv_saved  TYPE abap_bool.
+    DATA lv_text   TYPE string.
+    DATA lv_count  TYPE i.
+    DATA lx_error  TYPE REF TO zcx_osd_rap.
+
+    CREATE OBJECT lo_bo EXPORTING iv_mode = iv_mode iv_key = iv_key.
+    lo_rap = zcl_osd_rap_runtime=>for_bo( lo_bo ).
+    ls_create-countrycode = mv_country.
+    ls_create-emailaddress = 'r10@agency.example'.
+    ls_create-%control-name = if_abap_behv=>mk-on.
+    ls_create-%control-countrycode = if_abap_behv=>mk-on.
+    ls_create-%control-emailaddress = if_abap_behv=>mk-on.
+    ls_create-%cid = 'G1'.
+    ls_create-name = 'R10 guard one'.
+    APPEND ls_create TO lt_create.
+    ls_create-%cid = 'G2'.
+    ls_create-name = 'R10 guard two'.
+    APPEND ls_create TO lt_create.
+    lo_rap->modify( EXPORTING iv_entity = '/dmo/agency' iv_operation = zcl_osd_rap_runtime=>co_operation-create it_rows = lt_create
+                    CHANGING cs_mapped = ls_mapped cs_failed = ms_failed cs_reported = ms_reported ).
+    cl_abap_unit_assert=>assert_initial( act = ms_failed msg = 'the creates are accepted' ).
+    TRY.
+        lo_rap->commit( IMPORTING ev_saved = lv_saved CHANGING cs_failed = ms_failed cs_reported = ms_reported ).
+      CATCH zcx_osd_rap INTO lx_error.
+        lv_saved = abap_false.
+        lv_text = lx_error->get_text( ).
+    ENDTRY.
+    lo_rap->rollback( ).
+    cl_abap_unit_assert=>assert_false( act = lv_saved msg = |mode { iv_mode }: the save is refused| ).
+    cl_abap_unit_assert=>assert_char_cp( act = lv_text exp = |*{ iv_reason }*| msg = |mode { iv_mode }: { lv_text }| ).
+    SELECT COUNT(*) FROM /dmo/agency INTO @lv_count WHERE name LIKE 'R10 guard %'.
+    cl_abap_unit_assert=>assert_equals( act = lv_count exp = 0 msg = |mode { iv_mode }: nothing written| ).
+  ENDMETHOD.
+
+  METHOD refuses_a_preliminary_key.
+    refused( iv_mode = 'P' iv_key = '999500' iv_reason = 'range of the preliminary keys' ).
+  ENDMETHOD.
+
+  METHOD refuses_a_key_in_use.
+* the highest saved agency: an active instance has it
+    refused( iv_mode = 'U' iv_key = mv_max iv_reason = 'in use' ).
+  ENDMETHOD.
+
+  METHOD refuses_a_duplicate_key.
+    refused( iv_mode = 'D' iv_reason = 'in use' ).
+  ENDMETHOD.
+
+  METHOD refuses_a_dropped_row.
+    refused( iv_mode = 'X' iv_reason = '1 rows for 2 instances' ).
+  ENDMETHOD.
+
+  METHOD refuses_a_duplicated_pid.
+    refused( iv_mode = 'I' iv_reason = '(%pid)' ).
   ENDMETHOD.
 
 ENDCLASS.

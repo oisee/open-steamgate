@@ -115,8 +115,20 @@ jobs:
       # growable heap for the service worker is the real fix (planned). Set
       # for the rest of the job, so every preview build (the sql.js one here
       # and the DuckDB one on main) sees the same packs as the generation.
+      # A failing node or an empty list must stop the job here: an empty
+      # OSD_WEB_PACKS would build a preview with no packs and look complete
+      # (#917 follow-up). `$( )` inside echo hides node's exit status, so
+      # the list is taken first, under set -e, and checked.
       - name: Choose the preview's packs
-        run: echo "OSD_WEB_PACKS=$(node --input-type=module -e "import {packsOf} from './tools/osd-packs.mjs'; console.log(packsOf(process.cwd()).map(p => p.name).filter(n => n !== 'rap-flight').join(','))")" >> "$GITHUB_ENV"
+        run: |
+          set -euo pipefail
+          packs="$(node --input-type=module -e "import {packsOf} from './tools/osd-packs.mjs'; console.log(packsOf(process.cwd()).map(p => p.name).filter(n => n !== 'rap-flight').join(','))")"
+          if [ -z "$packs" ]; then
+            echo "::error::no packs chosen for the preview"
+            exit 1
+          fi
+          echo "preview packs: $packs"
+          echo "OSD_WEB_PACKS=$packs" >> "$GITHUB_ENV"
       - run: npm run web:preview
       - name: Read the installed Playwright version
         id: playwright_version

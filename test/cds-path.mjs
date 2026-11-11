@@ -8,7 +8,7 @@
 import {expect} from "chai";
 import * as abaplint from "@abaplint/core";
 import {readFileSync} from "node:fs";
-import {parseDDLS} from "../tools/cds2ddic.mjs";
+import {parseDDLS, tableSourceClass} from "../tools/cds2ddic.mjs";
 import {resolveTree} from "../tools/cds-tree.mjs";
 import {pathClass} from "../tools/cds-path.mjs";
 
@@ -77,4 +77,44 @@ describe("CDS path elements (R10)", () => {
     expect(all.ZC_PTRAVEL.fields.some((x) => x.name === "ANYBOOKING")).to.equal(false);
     expect(all.ZC_PTRAVEL.droppedPaths[0].why).to.match(/is to-many \[0\.\.\*\] without a language condition/);
   });
+
+  // #917 follow-up: `[1]` is `[0..1]`. Read as `[1..*]` (the regex took the
+  // one number for the minimum) a path over it was refused as to-many
+  it("reads the cardinality [1] as [0..1], so a path over it is to-one", () => {
+    const all = views({ZC_PTRAVEL: TRAVEL, ZC_PBOOKING: BOOKING.replace("[1..1]", "[1]")});
+    const a = all.ZC_PBOOKING.associations.find((x) => x.alias === "_Travel");
+    expect([a.min, a.max]).to.deep.equal(["0", "1"]);
+    expect(all.ZC_PBOOKING.fields.some((x) => x.name === "TRAVELSTATUS"), "the path is served").to.equal(true);
+    const many = views({ZC_PTRAVEL: TRAVEL, ZC_PBOOKING: BOOKING.replace("[1..1]", "[*]")});
+    const m = many.ZC_PBOOKING.associations.find((x) => x.alias === "_Travel");
+    expect([m.min, m.max]).to.deep.equal(["0", "*"]);
+  });
 });
+
+// #917 follow-up: a table whose row has an include group (every draft
+// table's admin include, an append structure's /dmo/... group) is updated
+// with UPDATE ... SET over its named columns; UPDATE dbtab FROM answers 4 at
+// runtime (ANOMALY-2026-11-11-update-include-group), and DELETE + INSERT in
+// its place would be no UPDATE for a trigger or a foreign key
+describe("table classes of a table with an include group (R10)", () => {
+  const draft = {name: "/DMO/AGENCY_D", fields: [{name: "AGENCYID", key: true}, {name: "NAME"}, {name: "DRAFTUUID"}],
+    keyColumns: ["agencyid"], components: ["mandt", "agencyid", "name", "%admin", "draftuuid"], associations: []};
+  const method = (abap, name) => {
+    const start = abap.indexOf(`METHOD zif_stg_cds_source~${name}.`);
+    return abap.slice(start, abap.indexOf("ENDMETHOD.", start));
+  };
+
+  it("updates with UPDATE ... SET over the named columns, never DELETE + INSERT", () => {
+    const update = method(tableSourceClass(draft), "update");
+    expect(update).to.match(/UPDATE \/dmo\/agency_d SET name = ls_row-name\s+draftuuid = ls_row-draftuuid\s+WHERE agencyid = ls_row-agencyid\./);
+    expect(update).to.not.match(/\bDELETE\b/);
+    expect(update).to.not.match(/\bINSERT\b/);
+    expect(update).to.not.match(/UPDATE \S+ FROM/);
+  });
+
+  it("keeps UPDATE ... FROM for a table whose components are all plain names", () => {
+    const plain = {...draft, name: "ZSTG_PLAIN", components: ["mandt", "agencyid", "name", "draftuuid"]};
+    expect(method(tableSourceClass(plain), "update")).to.match(/UPDATE zstg_plain FROM ls_row\./);
+  });
+});
+

@@ -405,18 +405,49 @@ under a preliminary key, activated to its final key; a refused agency) and
 `ZCL_OSD_RAPFLIGHT_R10_TEST` (the same through the runtime with
 `%is_draft`, and an active agency created and numbered late).
 
+## R11: the agency's interface BDEF and the carrier singleton run
+
+Since RAP R11 ([rap-runtime.md](rap-runtime.md), "R11") all ten behavior
+definitions of the scenario run. `/DMO/I_AGENCYTP` (`interface; use
+draft;`) is typed as a projection of `/DMO/R_AGENCYTP` and used through EML
+in the base's transaction; the carrier singleton
+(`/DMO/I_CARRIERSLOCKSINGLETON_S`, `/DMO/C_CARRIERSLOCKSINGLETON_S`) is
+served as `/DMO/UI_CARRIERS_S` over V4: its root is a computed view (one
+row: the literal key 1 and `max( last_changed_at )` over `/dmo/carrier`),
+its carriers carry the constant `CarrierSingletonID`, and Edit drafts the
+root with every carrier.
+
+- **Fetched as they are**: the interface BDEF and its view, the singleton's
+  two BDEFs, its four views and `/DMO/UI_CARRIERS_S`.
+- **From the overlay**: the singleton's pool `/dmo/bp_i_carrierslocksingle_s`,
+  whole. In its `locals_imp`, each marked `OSD overlay`:
+
+| change | where | why |
+| --- | --- | --- |
+| `DEFINITION DEFERRED FOR TESTING` and the `FRIENDS` naming test classes dropped | the handler and the saver | the test classes are not fetched |
+| an EML target declared with its derived type, `WITH CORRESPONDING #( keys )` as a declared import table | every READ ENTITIES | abaplint types an inline EML target void |
+| `CORRESPONDING ... DISCARDING DUPLICATES MAPPING ... EXCEPT *` as a loop | the features, validateCurrencyCode | not parsed |
+
+- **The seed**: the `I_CURRENCY` stand-in also gets the carriers'
+  currencies, which the singleton's `validateCurrencyCode` looks up when
+  the carriers are activated.
+
+Tests: `test/rap-r11.mjs` (generators; V4: the root and its carriers,
+navigation and `$expand`, Edit + change + create below the draft + Prepare
++ Activate and back, a refused Activate and Discard) and
+`ZCL_OSD_RAPFLIGHT_R11_TEST` (the interface through EML; the singleton
+through the runtime with `%is_draft`).
+
 ## Not done
 
-- Of the scenario's business objects the managed travel (R7) and the
-  supplement and agency (R10) run; the carrier singleton stops at its
-  grammar, `/DMO/I_AGENCYTP` at the interface BDEF
-  (`node tools/rap-flight/constructs.mjs`). V2 `$metadata`
+- All of the scenario's business objects run: the managed travel (R7),
+  the supplement and agency (R10), the agency's interface BDEF and the
+  carrier singleton (R11) (`node tools/rap-flight/constructs.mjs`). V2 `$metadata`
   of the two travel services fails (ANORMALIES "RAP R7: a namespaced
   service's V2 $metadata"); V4's answers.
-- Of the service definitions (`srvd`) only `/DMO/UI_SUPPLEMENT` and
-  `/DMO/UI_AGENCY` are fetched (R10); the managed travel's two come from the
-  overlay without their value helps (R7), the carrier singleton's and the
-  readonly root's do not resolve, and the legacy base view is not this
+- Of the service definitions (`srvd`) `/DMO/UI_SUPPLEMENT` and
+  `/DMO/UI_AGENCY` are fetched (R10), `/DMO/UI_CARRIERS_S` (R11); the managed travel's two come from the
+  overlay without their value helps (R7), the readonly root's does not resolve, and the legacy base view is not this
   pack's service to publish. The bindings (`srvb`) are not read. The
   read-only views are served by the overlay's own YAML
   (`ZOSD_RAPFLIGHT_SRV`).

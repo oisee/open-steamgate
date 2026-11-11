@@ -652,6 +652,12 @@ CLASS zcl_osd_rap_runtime DEFINITION PUBLIC CREATE PRIVATE.
         ev_index  TYPE i
       RAISING
         zcx_osd_rap.
+* R11: the constant elements of an entity into a row read from its table
+    METHODS fill_constants
+      IMPORTING
+        is_entity TYPE zif_osd_rap_bo=>ty_entity
+      CHANGING
+        cs_row    TYPE any.
 * R5: the root instance of the instance IV_INDEX (0 when it is gone)
     METHODS root_of
       IMPORTING
@@ -1161,7 +1167,21 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
       CHECK sy-subrc = 0.
       <lv_to> = <lv_from>.
     ENDLOOP.
+    IF is_draft( is_keys ) = abap_false.
+      fill_constants( EXPORTING is_entity = is_entity CHANGING cs_row = <ls_row> ).
+    ENDIF.
     set_draft( EXPORTING iv_on = is_draft( is_keys ) CHANGING cs_row = <ls_row> ).
+  ENDMETHOD.
+
+  METHOD fill_constants.
+    DATA ls_field TYPE zif_osd_rap_bo=>ty_field.
+    FIELD-SYMBOLS <lv_value> TYPE any.
+    LOOP AT is_entity-fields INTO ls_field WHERE constant IS NOT INITIAL.
+      ASSIGN COMPONENT ls_field-name OF STRUCTURE cs_row TO <lv_value>.
+      IF sy-subrc = 0.
+        <lv_value> = ls_field-constant.
+      ENDIF.
+    ENDLOOP.
   ENDMETHOD.
 
   METHOD fail.
@@ -1571,6 +1591,7 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
 
     DATA lv_draft  TYPE abap_bool.
     DATA lv_column TYPE string.
+    DATA lv_none   TYPE abap_bool.
 
     ls_target = entity_of( is_assoc-target ).
     READ TABLE mt_inst INDEX iv_index INTO ls_src.
@@ -1585,6 +1606,14 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
         RAISE EXCEPTION TYPE zcx_osd_rap EXPORTING iv_reason = |{ ls_target-alias } has no field { ls_pair-target }|.
       ENDIF.
       lv_value = text_of( is_row = <ls_src> iv_component = ls_pair-source ).
+* R11: a constant of the target has no column in its table: every saved
+* instance has it, so the pair holds for all of them or for none
+      IF ls_field-constant IS NOT INITIAL AND lv_draft = abap_false.
+        IF condense( lv_value ) <> condense( ls_field-constant ).
+          lv_none = abap_true.
+        ENDIF.
+        CONTINUE.
+      ENDIF.
       REPLACE ALL OCCURRENCES OF `'` IN lv_value WITH `''`.
       IF lv_where IS NOT INITIAL.
         lv_where = lv_where && ` AND `.
@@ -1596,7 +1625,7 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
       lv_where = lv_where && lv_column && ` = '` && lv_value && `'`.
     ENDLOOP.
 * an instance created in this transaction has nothing saved below it
-    IF ls_src-created = abap_false.
+    IF ls_src-created = abap_false AND lv_none = abap_false.
       IF lv_draft = abap_true.
         TRY.
             CREATE OBJECT li_source TYPE (ls_target-draft_source).
@@ -1622,6 +1651,9 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
           CHECK sy-subrc = 0.
           <lv_to> = <lv_from>.
         ENDLOOP.
+        IF lv_draft = abap_false.
+          fill_constants( EXPORTING is_entity = ls_target CHANGING cs_row = <ls_row> ).
+        ENDIF.
         set_draft( EXPORTING iv_on = lv_draft CHANGING cs_row = <ls_row> ).
         lv_key = key_of( is_entity = ls_target is_row = <ls_row> ).
         IF index_of( iv_entity = ls_target-name iv_key = lv_key ) = 0.
@@ -2364,6 +2396,14 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
     DATA lr_rows     TYPE REF TO data.
     DATA lv_kind     TYPE zif_osd_rap_bo=>ty_flag.
     DATA lv_found    TYPE abap_bool.
+    DATA ls_owner    TYPE zif_osd_rap_bo=>ty_entity.
+    DATA lt_roots    TYPE int4_table.
+    DATA lt_tree     TYPE string_table.
+    DATA lv_tree_done TYPE abap_bool.
+    DATA lv_entry    TYPE string.
+    DATA lv_name     TYPE string.
+    DATA lv_text     TYPE string.
+    DATA lv_index    TYPE i.
     FIELD-SYMBOLS <lt_rows> TYPE STANDARD TABLE.
     FIELD-SYMBOLS <ls_row>  TYPE any.
 
@@ -2375,33 +2415,68 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
         lv_kind = 'V'.
       ENDIF.
       LOOP AT is_callable-members INTO ls_member WHERE kind = lv_kind.
+* R11: a member of another entity (the carrier singleton's Prepare runs
+* Carrier~validateName) runs for that entity's instances below the keyed ones
+        ls_owner = is_entity.
+        IF ls_member-entity IS NOT INITIAL AND ls_member-entity <> is_entity-name.
+          ls_owner = entity_of( ls_member-entity ).
+        ENDIF.
         lv_found = abap_false.
-        LOOP AT is_entity-callables INTO ls_member_c WHERE kind = lv_kind AND name = ls_member-name.
+        LOOP AT ls_owner-callables INTO ls_member_c WHERE kind = lv_kind AND name = ls_member-name.
           lv_found = abap_true.
           EXIT.
         ENDLOOP.
         IF lv_found = abap_false.
           RAISE EXCEPTION TYPE zcx_osd_rap EXPORTING iv_reason =
-            |{ is_entity-alias }~{ is_callable-name }: no member { ls_member-name }|.
+            |{ is_entity-alias }~{ is_callable-name }: no member { ls_owner-alias }~{ ls_member-name }|.
         ENDIF.
-        lr_rows = mo_bo->new_rows( is_entity-name ).
+        lr_rows = mo_bo->new_rows( ls_owner-name ).
         ASSIGN lr_rows->* TO <lt_rows>.
-        LOOP AT mt_inst INTO ls_inst WHERE entity = is_entity-name.
-          READ TABLE it_keys TRANSPORTING NO FIELDS WITH KEY table_line = ls_inst-key.
-          IF sy-subrc <> 0.
-            CONTINUE.
-          ENDIF.
+        IF ls_owner-name = is_entity-name.
+          LOOP AT mt_inst INTO ls_inst WHERE entity = is_entity-name.
+            READ TABLE it_keys TRANSPORTING NO FIELDS WITH KEY table_line = ls_inst-key.
+            IF sy-subrc <> 0.
+              CONTINUE.
+            ENDIF.
 * R8: Prepare checks a draft whole (unmeasured: a system tracks the
 * draft's changed fields and may run fewer)
-          IF ls_member-always = abap_false AND NOT ls_inst-key CP 'D|*'
-              AND triggered( is_callable = ls_member_c is_inst = ls_inst ) = abap_false.
-            CONTINUE.
+            IF ls_member-always = abap_false AND NOT ls_inst-key CP 'D|*'
+                AND triggered( is_callable = ls_member_c is_inst = ls_inst ) = abap_false.
+              CONTINUE.
+            ENDIF.
+            ASSIGN ls_inst-row->* TO <ls_row>.
+            APPEND <ls_row> TO <lt_rows>.
+          ENDLOOP.
+        ELSE.
+          IF lv_tree_done = abap_false.
+            lv_tree_done = abap_true.
+            LOOP AT mt_inst INTO ls_inst WHERE entity = is_entity-name AND state <> co_operation-delete.
+              lv_index = sy-tabix.
+              READ TABLE it_keys TRANSPORTING NO FIELDS WITH KEY table_line = ls_inst-key.
+              IF sy-subrc = 0.
+                APPEND lv_index TO lt_roots.
+              ENDIF.
+            ENDLOOP.
+            LOOP AT lt_roots INTO lv_index.
+              draft_tree( EXPORTING is_entity = is_entity iv_index = lv_index CHANGING ct_tree = lt_tree ).
+            ENDLOOP.
           ENDIF.
-          ASSIGN ls_inst-row->* TO <ls_row>.
-          APPEND <ls_row> TO <lt_rows>.
-        ENDLOOP.
+          LOOP AT lt_tree INTO lv_entry.
+            SPLIT lv_entry AT '|' INTO lv_name lv_text.
+            CHECK lv_name = ls_owner-name.
+            lv_index = lv_text.
+            READ TABLE mt_inst INDEX lv_index INTO ls_inst.
+            CHECK sy-subrc = 0 AND ls_inst-state <> co_operation-delete.
+            IF ls_member-always = abap_false AND NOT ls_inst-key CP 'D|*'
+                AND triggered( is_callable = ls_member_c is_inst = ls_inst ) = abap_false.
+              CONTINUE.
+            ENDIF.
+            ASSIGN ls_inst-row->* TO <ls_row>.
+            APPEND <ls_row> TO <lt_rows>.
+          ENDLOOP.
+        ENDIF.
         IF lines( <lt_rows> ) > 0.
-          invoke( EXPORTING is_entity = is_entity is_callable = ls_member_c ir_rows = lr_rows
+          invoke( EXPORTING is_entity = ls_owner is_callable = ls_member_c ir_rows = lr_rows
                   CHANGING cs_failed = cs_failed cs_reported = cs_reported ).
         ENDIF.
       ENDLOOP.
@@ -3384,6 +3459,11 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
     lv_num = condense( lv_num ).
     lv_floor = repeat( val = '9' occ = lv_len - lv_tail ) && repeat( val = '0' occ = lv_tail - strlen( lv_num ) ) && lv_num.
     lv_text = iv_value.
+* a CHAR key holds letters too, and 'A99999' sorts after '999000': only a
+* value of digits alone can be one late_key drew (#917 follow-up)
+    IF lv_kind = 'C' AND NOT lv_text CO '0123456789'.
+      RETURN.
+    ENDIF.
     rv_on = boolc( strlen( lv_text ) = lv_len AND lv_text >= lv_floor ).
   ENDMETHOD.
 

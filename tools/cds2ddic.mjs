@@ -25,6 +25,9 @@ import {libraryPath} from "./osd-lib-path.mjs";
 import {compositionsOf, namespaced, projectedAssociations, projectionBase, redirectOf, resolveTree} from "./cds-tree.mjs";
 import {castType, edmOf} from "./cds-types.mjs";
 import {pathClass, pathElement} from "./cds-path.mjs";
+import {computedElement, computedSourceClass, constantRead, singletonOf, structureXml} from "./cds-computed.mjs";
+import {parseTABL, tableSourceClass} from "./cds-table.mjs";
+export {tableSourceClass} from "./cds-table.mjs";
 
 const OUT = "gen/cds";
 // **The libraries this generator resolves types against, and they have to be
@@ -75,7 +78,11 @@ export function parseDDLS(obj, reg, depth = 0) {
   if (!select) return {name, skip: "no select"};
   const sources = isProjection ? [projected.source]
     : find(select, "CDSSource").map((s) => tokensOf(s).replace(/\s+as\s+\w+$/i, "").trim().toUpperCase());
-  if (find(select, "CDSJoin").length > 0 || sources.length !== 1) return {name, skip: "joins are not supported yet"};
+  // R11: the singleton root (a left outer join on 0 = 0 with aggregates and
+  // literals, one row) is computed by its source class (tools/cds-computed.mjs)
+  const computed = isProjection ? projected.computed : singletonOf(select, {find, children, nodeName, tokensOf, firstDirect, reg, name});
+  if (computed?.skip) return computed;
+  if (!computed && (find(select, "CDSJoin").length > 0 || sources.length !== 1)) return {name, skip: "joins are not supported yet"};
   // **A WHERE was read and thrown away, and that was wrong in both
   // directions.** The generated DDIC view carries `DD26V` (the table) and
   // `DD27P` (the fields) and no selection condition at all, so a filtered
@@ -87,11 +94,11 @@ export function parseDDLS(obj, reg, depth = 0) {
   //
   // Refused at generation rather than at runtime, because the author is here
   // and the reader of a wrong row is not (2026-09-19, B.1).
-  if (find(select, "CDSWhere").length > 0) {
+  if (!computed && find(select, "CDSWhere").length > 0) {
     return {name, skip: "a WHERE in the view is not carried yet: the DDIC view would return every row, " +
       "and a write through it could insert a row the view cannot show"};
   }
-  const source = sources[0].replace(/\s+/g, "");
+  const source = computed && !isProjection ? computed.table : sources[0].replace(/\s+/g, "");
   const table = reg.getObject("TABL", source) ?? reg.getObject("VIEW", source);
   const comps = new Map();
   for (const c of table?.parseType(reg)?.getComponents?.() ?? []) comps.set(c.name.toUpperCase(), c.type);
@@ -161,7 +168,15 @@ export function parseDDLS(obj, reg, depth = 0) {
         ...t.edm, abapType: t.abap, casted: true, label: label ?? fieldName, annotations: annos});
       continue;
     }
-    if (!srcName) continue;
+    // R11: a literal (`key 1 as CarrierSingletonID`) is a constant element,
+    // an aggregate of the singleton root a computed one (cds-computed.mjs)
+    if (!srcName) {
+      const f = computedElement(el, {children, nodeName, tokensOf, firstDirect, annos, isKey, alias, comps, edmOf,
+        computed: isProjection ? undefined : computed});
+      if (f?.skip) return {name, skip: f.skip};
+      if (f) fields.push(f);
+      continue;
+    }
     // R10: `_Assoc._Next.Element as X [: localized]`, a calculated element
     // (tools/cds-path.mjs)
     if (srcName.startsWith("_") && srcName.includes(".")) {
@@ -176,6 +191,13 @@ export function parseDDLS(obj, reg, depth = 0) {
     if (/[()+\-*\/]/.test(srcName) || /^'/.test(srcName)) continue; // expressions: not yet
     const fieldName = (alias ?? srcName.split(".").pop()).toUpperCase();
     let baseField = srcName.split(".").pop().toUpperCase();
+    // R11: a constant of the view below stays a constant
+    const constant = isProjection ? projected.fields.find((f) => f.name === baseField && f.constant !== undefined) : undefined;
+    if (constant) {
+      fields.push({...constant, name: fieldName, element: alias ?? srcName.split(".").pop(), key: isKey || constant.key,
+        annotations: [...annos, ...(constant.annotations ?? [])], fromElement: constant.name});
+      continue;
+    }
     const below = isProjection ? projected.fields.find((f) => f.name === baseField && !f.virtual && f.base) : undefined;
     if (isProjection && below === undefined) return {name, skip: `${fieldName}: ${baseField} is no column element of ${projected.name}`};
     if (below) baseField = below.base;
@@ -185,7 +207,8 @@ export function parseDDLS(obj, reg, depth = 0) {
     const typeABAP = below?.typeABAP ?? (column && !/Void|Unknown/.test(column.constructor.name) && !column.containsVoid?.() ? column.toABAP?.() : undefined);
     const label = annos.map((a) => /@EndUserText\.label:\s*'([^']*)'/.exec(a)?.[1]).find(Boolean) ?? (below && below.label !== below.name ? below.label : undefined);
     fields.push({name: fieldName, element: alias ?? srcName.split(".").pop(), base: baseField, key: isKey, ...t, typeABAP, label: label ?? fieldName,
-      annotations: below ? [...annos, ...(below.annotations ?? [])] : annos, ...(below ? {fromElement: below.name} : {})});
+      annotations: below ? [...annos, ...(below.annotations ?? [])] : annos, ...(below ? {fromElement: below.name} : {}),
+      ...(below?.aggregate ? {aggregate: below.aggregate} : {})});
   }
 
   const associations = [];
@@ -246,7 +269,7 @@ export function parseDDLS(obj, reg, depth = 0) {
   };
   if (fields.length === 0) return {name, skip: `no field of ${source} could be resolved (is the source a view or table of this tree?)`};
   return {name, sqlView, source, fields, associations, exposedAssociations,
-    viewAnnotations, label, write, ...(isProjection ? {projectionOf: projected.name} : {})};
+    viewAnnotations, label, write, ...(isProjection ? {projectionOf: projected.name} : {}), ...(computed ? {computed} : {})};
 }
 
 /** The fields of the generated SQL view, in order. A CDS SQL view over a
@@ -503,11 +526,13 @@ ${virtual.length === 0 ? "    TYPES: " : `    TYPES: ${virtual.map((f) => `${f.n
 `;
   const writable = e.write?.writable === true;
   const parts = childrenMethod(e, byName);
+  // R11: constant elements (cds-computed.mjs)
+  const k = constantRead(e);
   return `CLASS ${cls} DEFINITION PUBLIC CREATE PUBLIC.
 * generated by tools/cds2ddic.mjs from ${e.name} - do not edit
   PUBLIC SECTION.
 ${rowDecl}    INTERFACES zif_stg_cds_source.
-${parts.declare}${writable ? `  PRIVATE SECTION.
+${parts.declare}${k.declare}${writable ? `  PRIVATE SECTION.
     METHODS to_base
       IMPORTING
         is_line       TYPE any
@@ -519,7 +544,7 @@ CLASS ${cls} IMPLEMENTATION.
 
   METHOD zif_stg_cds_source~read.
     DATA lv_where TYPE string.
-    FIELD-SYMBOLS <lt_data> TYPE STANDARD TABLE.
+${k.data}    FIELD-SYMBOLS <lt_data> TYPE STANDARD TABLE.
 
     CREATE DATA rr_data TYPE tt_row.
     ASSIGN rr_data->* TO <lt_data>.
@@ -527,21 +552,21 @@ CLASS ${cls} IMPLEMENTATION.
 * an empty condition is every row on a system; '1 = 1' in its place is
 * CX_SY_DYNAMIC_OSQL_SEMANTICS there (measured on A4H, docs/osql-where.md)
     lv_where = iv_where.
-
-    IF it_fields IS INITIAL.
+${k.decide}
+    IF ${k.fields} IS INITIAL.
       SELECT * FROM ${view}
         INTO CORRESPONDING FIELDS OF TABLE <lt_data>
         WHERE (lv_where)
         ORDER BY (it_orderby).
     ELSE.
-      SELECT (it_fields) FROM ${view}
+      SELECT (${k.fields}) FROM ${view}
         INTO CORRESPONDING FIELDS OF TABLE <lt_data>
         WHERE (lv_where)
         GROUP BY (it_groupby)
         ORDER BY (it_orderby).
     ENDIF.
-  ENDMETHOD.
-
+${k.fill}  ENDMETHOD.
+${k.method}
   METHOD zif_stg_cds_source~create_line.
     CREATE DATA rr_line TYPE ty_row.
   ENDMETHOD.
@@ -616,119 +641,6 @@ ${body("DELETE", `${cascadeDeletes(e, byName)}    DELETE FROM ${tab}
       WHERE ${w.keyColumns.map((k) => `${k.toLowerCase()} = ls_row-${k.toLowerCase()}`).join("\n        AND ")}.`)}`;
 }
 
-// A DDIC table as a source: what a SEGW project maps an entity to with
-// "DDIC~<table>" (DS_TYPE 4). Same interface, static table name, and the
-// writes are real: the row type is the table, the keys are inside it.
-function tableSourceClass(t) {
-  const cls = classNameOf("zcl_stg_tab_", t.name).toLowerCase();
-  const tab = t.name.toLowerCase();
-  // `UPDATE dbtab FROM wa` makes the transpiler write one JS property access
-  // per component of the row (`ls_row.get().<name>.get()`), which is not
-  // JavaScript for a component an append structure names `/dmo/...` or a
-  // draft table's admin include names `%...`: the module does not parse, and
-  // the runtime's init imports every module, so one such table makes the
-  // whole output unusable (six tables of packs/rap-flight, 2026-11-08 -- a
-  // green build said nothing about it; the modules only fail to load). Those
-  // R10: they UPDATE ... SET over the columns, each named (the runtime's
-  // UPDATE FROM sets every component, the include's group too, and answers
-  // 4: ANOMALY-2026-11-11-update-include-group)
-  const spellable = (t.components ?? t.fields.map((f) => f.name.toLowerCase()))
-    .every((c) => /^[a-z0-9_]+$/.test(c));
-  const keys = new Set(t.keyColumns);
-  const set = t.fields.map((f) => f.name.toLowerCase()).filter((c) => !keys.has(c));
-  const update = spellable || !set.length
-    ? `    UPDATE ${tab} FROM ls_row.`
-    : `    UPDATE ${tab} SET ${set.map((c) => `${c} = ls_row-${c}`).join("\n        ")}
-      WHERE ${t.keyColumns.map((k) => `${k} = ls_row-${k}`).join("\n        AND ")}.`;
-  return `CLASS ${cls} DEFINITION PUBLIC CREATE PUBLIC.
-* generated by tools/cds2ddic.mjs from table ${t.name} - do not edit
-  PUBLIC SECTION.
-    INTERFACES zif_stg_cds_source.
-ENDCLASS.
-
-CLASS ${cls} IMPLEMENTATION.
-
-  METHOD zif_stg_cds_source~read.
-    DATA lv_where TYPE string.
-    FIELD-SYMBOLS <lt_data> TYPE STANDARD TABLE.
-
-    CREATE DATA rr_data TYPE STANDARD TABLE OF ${tab}.
-    ASSIGN rr_data->* TO <lt_data>.
-
-* an empty condition is every row on a system; '1 = 1' in its place is
-* CX_SY_DYNAMIC_OSQL_SEMANTICS there (measured on A4H, docs/osql-where.md)
-    lv_where = iv_where.
-
-    IF it_fields IS INITIAL.
-      SELECT * FROM ${tab}
-        INTO TABLE <lt_data>
-        WHERE (lv_where)
-        ORDER BY (it_orderby).
-    ELSE.
-      SELECT (it_fields) FROM ${tab}
-        INTO CORRESPONDING FIELDS OF TABLE <lt_data>
-        WHERE (lv_where)
-        GROUP BY (it_groupby)
-        ORDER BY (it_orderby).
-    ENDIF.
-  ENDMETHOD.
-
-  METHOD zif_stg_cds_source~create_line.
-    CREATE DATA rr_line TYPE ${tab}.
-  ENDMETHOD.
-
-  METHOD zif_stg_cds_source~insert.
-    DATA ls_row TYPE ${tab}.
-
-    MOVE-CORRESPONDING is_line TO ls_row.
-    INSERT ${tab} FROM ls_row.
-    rv_subrc = sy-subrc.
-  ENDMETHOD.
-
-  METHOD zif_stg_cds_source~update.
-    DATA ls_row TYPE ${tab}.
-
-    MOVE-CORRESPONDING is_line TO ls_row.
-${update}
-    rv_subrc = sy-subrc.
-  ENDMETHOD.
-
-  METHOD zif_stg_cds_source~delete.
-* by the primary key, spelled out: DELETE dbtab FROM wa reads as an internal
-* table statement to the transpiler
-    DATA ls_row TYPE ${tab}.
-
-    MOVE-CORRESPONDING is_line TO ls_row.
-    DELETE FROM ${tab}
-      WHERE ${t.keyColumns.map((k) => `${k} = ls_row-${k}`).join("\n        AND ")}.
-    rv_subrc = sy-subrc.
-  ENDMETHOD.
-
-ENDCLASS.
-`;
-}
-
-// the registry entity of a table: fields and keys from its DDIC definition
-function parseTABL(obj, reg) {
-  const type = obj.parseType(reg);
-  if (!type || type.constructor?.name !== "StructureType") return undefined;
-  const keys = new Set((obj.listKeys?.(reg) ?? []).map((k) => k.toUpperCase()));
-  const keyColumns = type.getComponents().filter((c) => keys.has(c.name.toUpperCase())).map((c) => c.name.toLowerCase());
-  const fields = [];
-  for (const c of type.getComponents()) {
-    const name = c.name.toUpperCase();
-    if (name === "MANDT" || name === "CLIENT") continue;
-    if (c.type?.constructor?.name === "StructureType") continue;
-    fields.push({name, key: keys.has(name), ...edmOf(c.type), label: name, annotations: []});
-  }
-  return {name: obj.getName().toUpperCase(), sqlView: obj.getName().toUpperCase(), label: obj.getDescription?.() ?? obj.getName(),
-    viewAnnotations: [], fields, associations: [], table: true, keyColumns,
-    // every component of the parsed type, includes and groups among them: the
-    // names a statement the transpiler expands per component has to be able
-    // to write (an append structure names one /dmo/..., a draft table's admin
-    // include names one %...)
-    components: type.getComponents().map((c) => c.name.toLowerCase())};
-}
 
 function q(s) { return "'" + String(s ?? "").replaceAll("'", "''") + "'"; }
 function bt(s) { return "`" + String(s ?? "").replaceAll("`", "``") + "`"; }
@@ -1070,6 +982,13 @@ export function main() {
   }
   for (const e of views) {
     entities.push(e);
+    // R11: a singleton root has no SQL view; its source class computes it
+    if (e.computed) {
+      write(classNameOf("zcl_stg_cds_", e.sqlView).toLowerCase() + ".clas.abap", computedSourceClass(e));
+      write(fileOf(e.name) + ".tabl.xml", structureXml(e));
+      console.log(`cds2ddic: ${e.name} -> computed (${e.fields.length} fields: ${e.computed.aggregates.map((a) => `${a.fn}( ${a.column} )`).join(", ")} over ${e.computed.table})`);
+      continue;
+    }
     write(fileOf(e.sqlView) + ".view.xml", viewXml(e));
     // on a system the CDS entity name is a type and a select source of its own
     // (SELECT FROM zc_stg_travel, TYPES x TYPE zc_stg_travel); the SQL view is
