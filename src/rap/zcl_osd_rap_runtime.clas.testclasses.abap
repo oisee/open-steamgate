@@ -96,6 +96,7 @@ CLASS ltcl_stamp IMPLEMENTATION.
     DATA ls_field   TYPE zif_osd_rap_bo=>ty_field.
     DATA ls_inst    TYPE zcl_osd_rap_runtime=>ty_inst.
     DATA lr_row     TYPE REF TO ty_row.
+    DATA lv_saved   TYPE timestampl.
 
     CREATE OBJECT lo_runtime.
     ls_field-name = 'AT'.
@@ -109,7 +110,12 @@ CLASS ltcl_stamp IMPLEMENTATION.
     lr_row->at_l = '20991231235959.9999999'.
     ls_inst-row = lr_row.
     APPEND ls_inst TO lo_runtime->mt_inst.
+    lv_saved = zcl_osd_rap_runtime=>gv_stamp.
     lo_runtime->stamp( is_entity = ls_entity iv_index = 1 iv_create = abap_false ).
+* the last stamp given is process-wide: left at 2100 it would carry every
+* later stamp of this process past the year 2100 (found by R10's flight
+* draft tests running after this one, "Invalid time value")
+    zcl_osd_rap_runtime=>gv_stamp = lv_saved.
     cl_abap_unit_assert=>assert_equals( act = lr_row->at exp = '21000101000000' ).
     cl_abap_unit_assert=>assert_equals( act = lr_row->at_l exp = '21000101000000' ).
   ENDMETHOD.
