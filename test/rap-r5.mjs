@@ -111,7 +111,7 @@ describe("RAP R5 compositions and projections (generator)", () => {
   it("refuses what R5 leaves out, by name", () => {
     const files = demo();
     assert.equal(refusal(files), "accepted");
-    assert.match(refusal(swap(files, "zi_rap_order.bdef.asbdef", "association _Order;", "association _Order { with draft; }")), /with draft; \} is outside R5/);
+    assert.match(refusal(swap(files, "zi_rap_order.bdef.asbdef", "association _Order;", "association _Order { with draft; }")), /with draft; \} in a behavior definition without with draft/);
     assert.match(refusal(swap(files, "zi_rap_order.bdef.asbdef", "lock dependent by _Order", "lock master")), /lock master on a child/);
     assert.match(refusal(swap(files, "zi_rap_order.bdef.asbdef", "lock dependent by _Order", "lock dependent by _Other")), /which the behavior definition does not declare/);
     assert.match(refusal(swap(files, "zi_rap_order.bdef.asbdef", "  association _Order;\n", "")), /lock dependent by _Order, which the behavior definition does not declare/);

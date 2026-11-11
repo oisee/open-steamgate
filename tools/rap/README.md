@@ -17,6 +17,11 @@ projection entities ([R5](../../docs/rap-runtime.md)).
 R6: internal, factory and determine actions (`checkAction` in `bdef-gen.mjs`;
 a determine action joins the actions marked `determine`, its members become
 the model's `members`), and a dependency by an association to an ancestor.
+R8: draft (`checkAction` and `checkDraft` in `bdef-gen.mjs`; the runtime's
+contract -- draft tables, the mandatory draft actions -- refused by
+`rap-runtime-gen.mjs`, which also writes the union class of each draft
+entity, `zcl_rap_<hash>_d<n>`); `srvd-gen.mjs` serves a draft entity with the
+key `IsActiveEntity` and `Common.DraftRoot` / `DraftNode`.
 `srvd-gen.mjs` (called by `bdef-gen.mjs`) reads service definitions
 (`*.srvd.srvdsrv`) into `gen/rap/<srvd>.stg.yaml`, which `stg-compile --all`
 compiles into a service ([R2c](../../docs/rap-runtime.md#serving-r2c)).

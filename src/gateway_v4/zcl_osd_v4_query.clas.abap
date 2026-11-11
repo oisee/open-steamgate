@@ -1,5 +1,7 @@
 CLASS zcl_osd_v4_query DEFINITION PUBLIC CREATE PUBLIC.
   PUBLIC SECTION.
+* R8: the list filter Fiori Elements V4 sends over a draft-enabled set
+    CONSTANTS gc_draft_latest TYPE string VALUE `IsActiveEntity eq false or SiblingEntity/IsActiveEntity eq null`.
     DATA ms_request TYPE zcl_stg_url=>ty_request.
     DATA mo_context TYPE REF TO zcl_stg_request_context.
 * $expand=nav(opt;opt;...): the navigation property and the options inside
@@ -407,6 +409,42 @@ CLASS zcl_osd_v4_query IMPLEMENTATION.
             APPEND ls_order TO mo_context->mt_orderby.
           ENDLOOP.
         WHEN '$filter'.
+* R8: the draft list filter of Fiori Elements V4 (each instance once: its
+* draft when it has one, else the active instance) is a navigation path
+* the select-options cannot hold; it is taken out and handed on as what it
+* means (docs/rap-runtime.md, R8)
+* Only that spelling, alone or AND-ed with the rest (FIND and REPLACE are
+* case-sensitive, as OData names are); any other SiblingEntity path is 501
+* (bare inside a longer filter it would bind as A or (B and ...), so only
+* the parenthesized form is taken out of one)
+          IF ls_opt-value = gc_draft_latest.
+            mo_context->mv_draft_latest = abap_true.
+            CLEAR ls_opt-value.
+          ENDIF.
+          FIND |({ gc_draft_latest })| IN ls_opt-value.
+          IF sy-subrc = 0.
+            mo_context->mv_draft_latest = abap_true.
+            REPLACE ALL OCCURRENCES OF |({ gc_draft_latest })| IN ls_opt-value WITH ``.
+            CONDENSE ls_opt-value.
+* X and (L) and Y leaves X and and Y: one AND of the two goes with it
+            FIND ` and and ` IN ls_opt-value.
+            IF sy-subrc = 0.
+              REPLACE FIRST OCCURRENCE OF ` and and ` IN ls_opt-value WITH ` and `.
+            ELSEIF strlen( ls_opt-value ) >= 4 AND substring( val = ls_opt-value len = 4 ) = `and `.
+              ls_opt-value = substring( val = ls_opt-value off = 4 ).
+            ELSEIF strlen( ls_opt-value ) >= 4 AND substring( val = ls_opt-value off = strlen( ls_opt-value ) - 4 ) = ` and`.
+              ls_opt-value = substring( val = ls_opt-value len = strlen( ls_opt-value ) - 4 ).
+            ELSEIF ls_opt-value IS NOT INITIAL.
+              fail( iv_text = 'The draft list filter is understood alone or AND-ed with the others' iv_status = 501 ).
+            ENDIF.
+            CONDENSE ls_opt-value.
+          ENDIF.
+          IF to_lower( ls_opt-value ) CS 'siblingentity'.
+            fail( iv_text = 'A SiblingEntity filter other than the draft list filter is not implemented' iv_status = 501 ).
+          ENDIF.
+          IF mo_context->mv_draft_latest = abap_true AND ls_opt-value IS INITIAL.
+            CONTINUE.
+          ENDIF.
           mo_context->mv_filter_string = filter( ls_opt-value ).
           validate_literals( is_set = is_set io_model = io_model ).
           CREATE OBJECT lo_parser EXPORTING
@@ -599,6 +637,16 @@ CLASS zcl_osd_v4_query IMPLEMENTATION.
           ENDIF.
           REPLACE ALL OCCURRENCES OF '-' IN lv_value WITH ''.
           ls_key-value = to_upper( lv_value ).
+        WHEN 'Edm.Boolean'.
+* a draft-enabled RAP entity's IsActiveEntity (docs/rap-runtime.md, R8):
+* the internal form is ABAP's, X or initial
+          IF lv_value = 'true'.
+            ls_key-value = abap_true.
+          ELSEIF lv_value = 'false'.
+            CLEAR ls_key-value.
+          ELSE.
+            fail( 'Expected a V4 Boolean literal' ).
+          ENDIF.
         WHEN OTHERS.
           FIND REGEX '^-?[0-9]+(\.[0-9]+)?$' IN lv_value.
           IF sy-subrc <> 0.

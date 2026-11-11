@@ -36,6 +36,7 @@
     "test/rap-r5.mjs",
     "test/rap-r6.mjs",
     "test/rap-r7.mjs",
+    "test/rap-r8.mjs",
     "test/rap-flight-travel.mjs"
   ],
   "_odata-v4": "Gateway ownership: V4 wire suite belongs beside V2 wire tests.",
@@ -44,5 +45,6 @@
   "_rap-r5": "Gateway ownership: the RAP R5 wire suite (compositions, projections, navigation writes) needs the transpiled gateway beside rap-r4.",
   "_rap-r6": "Gateway ownership: the RAP R6 wire suite (internal, determine and factory actions) needs the transpiled gateway beside rap-r5.",
   "_rap-r7": "Gateway ownership: the RAP R7 wire suite (savers, additional and unmanaged save, several pools) needs the transpiled gateway beside rap-r6.",
+  "_rap-r8": "Gateway ownership: the RAP R8 wire suite (draft over V4) needs the transpiled gateway beside rap-r7.",
   "_rap-flight-travel": "Gateway ownership: RAP R7's flight travel BO served from packs/rap-flight needs the transpiled gateway with the pack beside rap-r7."
 }

@@ -1,4 +1,4 @@
-# The managed RAP runtime (R2 .. R7)
+# The managed RAP runtime (R2 .. R8)
 
 R2 of [the RAP plan](oracle-rap.md): a managed behavior definition runs. Its
 behavior pool's determinations, validations and action are called, its
@@ -1098,6 +1098,359 @@ of every operation, `FOR READ`), `with unmanaged save` without a mapping
 table, reading an entity through its CDS view in the buffer's place,
 secondary keys `id` / `entity` on the other derived tables, V2 `$metadata`
 of a namespaced service (ANORMALIES), and draft.
+
+## R8: draft
+
+After R7 draft is the first wall of 7 of the 10 flight behavior
+definitions (`node tools/rap-flight/constructs.mjs`): `with draft` in the
+header of the supplement, agency and carrier BOs and of their projections,
+and behind it `draft table`, `total etag`, `draft action`, `draft determine
+action Prepare` and `association _x { with draft; }`. R8 is the design of
+draft as a whole, and the smallest slice of it that runs end to end: a
+draft-enabled root with one child, created as a draft, edited, activated
+and discarded over OData V4, and EML with `%is_draft` for create, update
+and read.
+
+Nothing in this section was measured on a system. Where the public RAP
+documentation (the BDEF reference's "with draft", "draft table", "total
+etag", "draft action", the ABAP keyword documentation of `%is_draft`, the
+development guide's "Draft-Enabling the Managed Business Object", linked
+from [oracle-rap.md](oracle-rap.md)) states a rule, the runtime follows it;
+where it does not, the runtime makes a choice and this section names it,
+marked **unmeasured**. The draft oracle ([oracle-draft.md](oracle-draft.md))
+is the BOPF/SADL V2 draft of the SEGW era; its wire capture is still to be
+made, and the RAP flight draft services (`/DMO/UI_SUPPLEMENT`'s V4 binding
+among them) are the capture R9 needs from A4H.
+
+### The BDEF grammar
+
+All of it is already parsed by `tools/rap/bdef-parse.mjs` (R0); what R8
+changes is what the generators accept.
+
+| Construct | Where | Meaning | R8 |
+| --- | --- | --- | --- |
+| `with draft;` | header | the BO has a draft version of every entity | runs |
+| `with collaborative draft;` | header | several users on one draft | refused (R9+) |
+| `draft table t` | entity | where the entity's draft instances are kept | runs, required with `with draft` |
+| `draft table t query v` | entity | a draft query view | refused |
+| `total etag f` | root | the field whose change marks a change of the whole BO; checked on Activate | runs (the check below) |
+| `draft action Edit;` | root | copy the active instance and its composition tree into a new draft | runs |
+| `draft action Activate [optimized];` | root | write the draft into the active instance and delete the draft | runs (`optimized` accepted, no effect) |
+| `draft action Discard;` | root | delete the draft | runs |
+| `draft action Resume [with additional implementation];` | root | take up an existing draft again | runs as "return the draft" (below); `with additional implementation` refused |
+| `draft determine action Prepare { validation v; ... }` | root | run the listed validations on the draft | runs for the root's own validations; `Entity~validation` of another entity refused (R9) |
+| `association _x { create; with draft; }` | composition | the association reaches the target's draft when the source is a draft | runs (it is how a draft child is created and read) |
+| `use draft;`, `use action Edit;` ... | projection | the projection serves its base's draft | refused (R9) |
+| `draft action ( features : instance ) Edit` and other options | root | feature control of a draft action | refused |
+
+A `with draft` BDEF must declare `Edit`, `Activate`, `Discard` and
+`Prepare` (the documentation calls them mandatory for a draft BO, `Resume`
+optional); the generator refuses one without them.
+
+### Draft tables and the admin data
+
+A draft table has one column per **CDS element** of the entity, named as
+the element (`SupplementID` becomes `SUPPLEMENTID`), not as the active
+table's column -- that is the shape of the flight's `/DMO/SUPPL_D` beside
+`/DMO/SUPPLEMENT` (`supplement_id`), and why the active table needs the
+`mapping for` and the draft table does not. On a system the draft table
+then includes the structure the documentation names for its admin fields
+(`sych_bdl_draft_admin_inc`; the flight's draft tables, e.g. `/DMO/SUPPL_D`
+in [abap-platform-refscen-flight](https://github.com/SAP-samples/abap-platform-refscen-flight),
+include it). `open-abap-core`, a library of this build, carries a stand-in
+of that structure, which is how the flight's draft tables resolve here. The
+R8 demo's draft tables declare the admin columns themselves (the generated
+table classes are not tried on an `.INCLUDE` yet), under the include's
+field names and the stand-in's types:
+
+| Column | Here |
+| --- | --- |
+| `DRAFTENTITYCREATIONDATETIME` | stamped when the draft instance is created |
+| `DRAFTENTITYLASTCHANGEDATETIME` | stamped on each change of the draft instance |
+| `DRAFTADMINISTRATIVEDATAUUID` | the draft's admin row (one per draft of a root, shared by its children) |
+| `DRAFTENTITYOPERATIONCODE` | `C` created as a draft, `U` an Edit of an active instance, `D` deleted in the draft (unmeasured: the codes; here only C and U are written, a deleted draft child is deleted from the draft table) |
+| `HASACTIVEENTITY` | `X` when the draft was made by Edit of an active instance |
+| `DRAFTFIELDCHANGES` | not kept (R9; the stand-in has it as RSTR) |
+
+The stand-in's types (`DEC 21,7`, RAW 16, CHAR 1) are not measured against a
+system here: **unmeasured**.
+
+The draft **administrative data** -- who created the draft, who changed it
+last and when, who holds it (in process by) -- is one row per draft of a
+root on a system, in a framework table read through
+`I_DraftAdministrativeData` (the oracle's V2 `DraftAdministrativeData`
+entity, [oracle-draft.md](oracle-draft.md) section 2.2). Here it is
+`ZOSD_DRAFT_ADM`, a table of this tree: `DRAFTUUID` (RAW 16, key),
+`DRAFTENTITYTYPE` (the root's CDS name), `CREATEDBYUSER`,
+`CREATIONDATETIME`, `LASTCHANGEDBYUSER`, `LASTCHANGEDATETIME`,
+`INPROCESSBYUSER`. The runtime writes it in the save: a row when a root's
+draft is created (by create or Edit), the last-changed pair when any
+instance of the draft changes, and deletes it with the draft (Activate,
+Discard).
+
+### `%is_draft` and the instance identity
+
+`%is_draft` is a component of `%tky` of every derived type of a draft BO
+(R1 already generated it, `x LENGTH 1`, `if_abap_behv=>mk-on` for a draft).
+The runtime makes it part of the instance's identity: the draft and the
+active instance with the same key are two instances of the buffer. A read,
+update, delete or action names which one by `%is_draft`; an instance read
+from the database comes from the draft table when `%is_draft` is on and
+from the active table otherwise. A create with `%is_draft` on creates a
+draft instance; managed numbering draws its key as for an active one, and
+Activate keeps it, so draft and active share the key (the documentation's
+rule for managed UUID keys; early numbering of drafts is R9).
+
+### Draft instances in the save sequence
+
+`COMMIT ENTITIES` (or the OData request's own save) writes a draft
+instance into its draft table, not into the active one. For draft
+instances:
+
+- determinations **on modify** run as for active ones;
+- determinations **on save** and validations do not run (they run when the
+  draft is activated, on the active instances it writes);
+- field control: `readonly` is checked, `mandatory` is not (a draft may be
+  incomplete; Activate checks it on the active instance);
+- the savers' `save_modified` gets no draft instances (the request names
+  active instances only);
+- the draft's admin row is written (above).
+
+### The draft actions
+
+| Action | On | What the runtime does |
+| --- | --- | --- |
+| `Edit` | an active root (`%is_draft` off) | refused when a draft of the instance exists (conflict). Otherwise copies the root and its composition tree into draft instances (`HASACTIVEENTITY` X), creates the admin row with the caller in process, and answers the draft root |
+| `Activate` | a draft root | first everything that can refuse it, with the buffer untouched: the total ETag, the lock of the active root, every mandatory field of the tree (a refused Activate changes nothing, so a `COMMIT ENTITIES` after it saves nothing). Then for each instance of the draft's tree: updates the active instance it was made from (every field flagged) or creates it; deletes the active children the draft no longer has; deletes the draft and its admin row. Then the save sequence checks the active instances as for any modify: a validation that fails stops the save, nothing is written, the draft stays. Answers the active root |
+| `Discard` | a draft root | deletes the draft instances of the tree and the admin row (whether a system answers a result or EML `RESULT` for it is **unmeasured**) |
+| `Resume` | a draft root | answers the draft root (and refuses one that does not exist). On a system it re-acquires the exclusive lock of an expired draft; here no lock expires (below). Its import and result shape is **unmeasured** until the A4H oracle |
+| `Prepare` | a draft root | runs the validations its `draft determine action` lists on the draft instances, with their messages in REPORTED; it changes nothing |
+
+**`total etag`.** Edit copies the root's total ETag field into the draft;
+changes to the draft do not stamp it (only the `etag master` field, the
+local one, moves while drafting). Activate compares the draft's value with
+the active instance's: different means the active instance changed after
+Edit, and Activate fails with a conflict. That is the documentation's
+purpose of the total ETag (an optimistic check over the whole BO between
+Edit and Activate); how a system words the failure is **unmeasured**.
+
+### Locks: exclusive on edit, optimistic while drafting
+
+On a system, Edit takes an **exclusive** (durable, enqueue) lock on the
+active instance that outlives the request, held by the draft's owner until
+Activate or Discard, released after an expiry time, after which the draft
+is still there but only optimistically locked: Resume takes the lock again
+if the active instance is unchanged (total ETag). Here:
+
+- the request that runs Edit, Activate or Discard holds the R5 lock of the
+  root (`EZOSD_RAP_LOCK`) for its own duration, as every write does;
+- the durable part is **the draft itself**: while a draft of an instance
+  exists, an update, delete or action on the active instance is refused
+  (FAILED, cause `locked`) and a second Edit is refused (cause `conflict`).
+  There is no owner check (no user switch in this tree's requests) and no
+  expiry, so Resume never has a lock to take back; the expiry and the
+  owner (`INPROCESSBYUSER`) are R9 and **unmeasured**. Said plainly: **the
+  lock is per instance, not per user** -- the draft holds the active
+  instance against every writer, its own creator included, and any client
+  may change, activate or discard any draft;
+- the optimistic part is the total ETag check on Activate (above).
+- over OData a refusal (`conflict` for a second Edit or a stale total ETag,
+  `locked` for a write to a held active instance) is a 400 business error,
+  as every RAP refusal here (R5's follow-up: `/IWBEP/CX_MGW_BUSI_EXCEPTION`
+  carries no status). Whether a system answers 409 / 423 for them is
+  **unmeasured**.
+
+### EML
+
+`MODIFY ENTITIES ... CREATE / UPDATE / DELETE` with `%is_draft` in the
+rows, `READ ENTITIES ... WITH VALUE #( ( %is_draft = if_abap_behv=>mk-on
+... ) )` and `EXECUTE Edit / Activate / Discard / Resume / Prepare FROM`
+go through the same runtime calls as every other EML statement
+([rap-eml.md](rap-eml.md)); `%is_draft` is a component like the keys.
+`READ ENTITIES` of a draft reads the draft table when the instance is not
+in the buffer.
+
+### The OData V4 draft protocol (what Fiori Elements V4 sends)
+
+From the OData V4 vocabularies (`Common.DraftRoot`, `Common.DraftNode`)
+and UI5's V4 model and Fiori Elements V4 (`sap.fe.core`'s draft
+handling), which name the request flow; a RAP service's exact `$metadata`
+is **unmeasured** (the V4 binding of a flight draft service is the capture
+R9 needs):
+
+- every entity type of the BO gets the key `IsActiveEntity` (Edm.Boolean)
+  after its own keys, and the properties `HasActiveEntity` and
+  `HasDraftEntity` (Edm.Boolean), and the navigation properties
+  `DraftAdministrativeData` (to the admin entity) and `SiblingEntity` (the
+  other version of the same instance);
+- the root's entity set is annotated `Common.DraftRoot` with
+  `ActivationAction`, `EditAction`, `PreparationAction` (and, on newer
+  stacks, `DiscardAction`, `ResumeAction`); a child's with `Common.DraftNode`
+  and its `PreparationAction`. The values are the qualified names of bound
+  actions. RAP names them after the BDEF's draft actions (`Edit`,
+  `Activate`, `Prepare`, `Discard`, `Resume`); CAP names them `draftEdit`,
+  `draftActivate`, `draftPrepare`. Fiori Elements reads the names from the
+  annotation, so the choice is the server's; here they are the BDEF names.
+  `Edit` has the parameter `PreserveChanges` (Edm.Boolean);
+- the flow: `POST Set` with the new entity's fields creates a draft
+  (`IsActiveEntity` false in the answer); `PATCH Set(Key=..,IsActiveEntity=false)`
+  changes the draft; `POST Set(..,IsActiveEntity=false)/<ns>.Prepare`
+  then `POST Set(..,IsActiveEntity=false)/<ns>.Activate` saves (the answer
+  is the active entity; Fiori Elements navigates to it);
+  `POST Set(..,IsActiveEntity=true)/<ns>.Edit` with
+  `{"PreserveChanges":true}` starts editing; `DELETE
+  Set(..,IsActiveEntity=false)` discards (Fiori Elements V4 deletes the
+  draft root rather than calling Discard); a child of a draft is created by
+  `POST Set(..,IsActiveEntity=false)/_Child`;
+- the list report's "All" filter is `$filter=IsActiveEntity eq false or
+  SiblingEntity/IsActiveEntity eq null` (drafts, and the active instances
+  that have none), with `$expand=DraftAdministrativeData` for the draft
+  indicator.
+
+**V2** (Fiori Elements V2 over a RAP V2 binding, or BOPF draft in the SEGW
+era): the same key and the same three flags, `DraftAdministrativeData` and
+`SiblingEntity` as V2 navigations, the draft actions as function imports
+bound by `sap:action-for` (the oracle's `<Entity>Edit`, `<Entity>Activation`,
+`<Entity>Preparation`, `<Entity>Validation` for BOPF; RAP's names are
+**unmeasured**), and `Common.DraftRoot` with `ActivationAction`,
+`EditAction`, `PreparationAction` naming the function imports. Discard is
+`DELETE` of the draft there too.
+
+**Which first: V4.** Fiori Elements V4 is the client RAP's draft is made
+for, the V4 facade already has bound actions with the RAP behavior behind
+them (R2c, #875), and the V2 draft service differs in function import names
+nobody has measured yet. Because the V4 facade serves the V2 model, the
+model R8 builds (the key, the flags, the draft actions as operations of the
+service) is visible over V2 as well; what V2 lacks is checked against a
+capture first (R9).
+
+### How it is served here
+
+The served entity of a draft BO is the **union** of its active instances
+(the CDS view) and its drafts (the draft table), each row with the three
+flags and the draft's admin UUID. That union is a generated class per
+entity (`zif_stg_cds_source`, beside the BDEF's adapter), which the SADL
+data provider reads in place of the view when the behavior says the
+entity is draft-enabled; the flag conditions of a `$filter` and a key are
+taken out of the SQL and applied to the union (the view has no such
+columns), and the list report's "All" filter is recognised as the
+condition it stands for (`IsActiveEntity eq false or HasDraftEntity eq
+false`). Writes go to the behavior with `%is_draft` from the key: a POST to
+the set creates a draft, a PATCH, DELETE or action names the version by
+`IsActiveEntity`, and a DELETE of a draft root is Discard.
+
+### The slice R8 builds
+
+`src/rap_r8`: a root `ZI_RAP_DTRIP` (managed numbering, UUID key) with one
+composition child `ZI_RAP_DLEG`, `with draft`, draft tables, `total etag`,
+the five draft actions with `Prepare` running the root's validation, served
+as `ZUI_RAP_DTRIP` over V4, and an ABAP Unit test of the runtime with EML
+`%is_draft`. Everything else in this section that the slice does not
+exercise is R9 (the list below).
+
+### Built and proven
+
+On the trip demo ([`src/rap_r8`](../src/rap_r8/README.md)):
+
+- **Generators.** `bdef-gen.mjs` accepts `with draft`, `draft table`,
+  `total etag`, the four draft actions and `draft determine action Prepare`
+  of the root, `association ... { with draft; }`; it gives Edit, Activate
+  and Resume a `$self` result (unmeasured: a system's EML result of a draft
+  action). What only the runtime needs -- the draft table with a column per
+  CDS element and the admin columns, the four mandatory draft actions,
+  every association `with draft` -- is checked there and refused by
+  `rap-runtime-gen.mjs`, so the derived types of a BDEF without a draft
+  table still generate. The adapter's model carries `draft`, each entity's
+  draft table and table class, the root's `total_etag`, the draft actions as
+  callables of kind `E`, and a generated **union class** per entity
+  (`zcl_rap_<hash>_d<n>`, `zif_stg_cds_draft_source`).
+- **Runtime** (`ZCL_OSD_RAP_RUNTIME`, `ZCL_OSD_RAP_DRAFT`): `%is_draft` in
+  the instance identity (a draft's key is prefixed `D|`), reads and writes
+  of drafts in the draft table by element name, determinations on save and
+  validations skipped for drafts, mandatory checked on Activate, the draft's
+  admin columns and `ZOSD_DRAFT_ADM` written in the save, `save_modified`
+  given active instances only, and Edit, Activate, Discard, Resume as
+  described above. Prepare runs its listed validations on every draft
+  instance it is given, without their triggers (unmeasured: a system keeps
+  `DRAFTFIELDCHANGES` and may run fewer).
+- **Serving.** The SADL data provider reads a draft entity through its
+  union class: the CDS view's rows and the draft table's, both with the
+  request's SQL condition (the CDS elements are columns of both), merged with
+  `IsActiveEntity`, `HasActiveEntity`, `HasDraftEntity` -- an active row's
+  `HasDraftEntity` (and so the list filter) is taken from every draft's key,
+  not from the drafts that match the condition; the flag
+  conditions of a `$filter` or key are applied to the merged rows, and the
+  Fiori Elements list filter is recognised by the V4 facade
+  (`ZCL_OSD_V4_QUERY=>GC_DRAFT_LATEST`) and handed on as "each instance once,
+  its draft when it has one" -- in that spelling only, the whole filter or
+  parenthesized and AND-ed with the rest; any other `SiblingEntity` filter
+  is 501. A V4 key takes `IsActiveEntity=true|false`.
+  `ZCL_OSD_RAP_SADL` maps `IsActiveEntity` to `%is_draft` and back, creates
+  a draft for a POST to the root's set, discards for a DELETE of a draft
+  root, and answers Edit with the draft and Activate with the active
+  instance. The draft actions are bound actions named as in the BDEF
+  (Discard is not: it is the DELETE), and stg-compile writes
+  `Common.DraftRoot` (ActivationAction, EditAction, PreparationAction) on the
+  root's set and `Common.DraftNode` on the child's.
+- **Tests.** `ZCL_OSD_RAP_R8_TEST` (11): a draft created and read with EML
+  `%is_draft`, saved unvalidated into the draft tables with its admin row;
+  Activate (and the validation and the mandatory field that stop it); Edit,
+  a change of the draft, Activate; the draft holding the active instance
+  (second Edit a conflict, an update of the active one locked); Discard; a
+  leg deleted in the draft and so in the active tree; the total ETag
+  conflict; Resume and Prepare. `test/rap-r8.mjs`: the generator half and
+  the V4 flow Fiori Elements sends, from `$metadata` to Discard, and the V2
+  key.
+
+### The measurement: the flight BDEFs before and after
+
+`node tools/rap-flight/constructs.mjs`, first wall per behavior definition:
+
+| BDEF | after R7 | after R8 |
+| --- | --- | --- |
+| `/DMO/I_SUPPLEMENT` | `association { with draft; }` (draft) | **accepted** by the generators; not run or served here (its pool's early numbering of drafts, the projection `use draft`: R9) |
+| `/DMO/C_SUPPLEMENT` | the base's draft | a projection's field control other than readonly (`field ( modify )`), then `use draft` |
+| `/DMO/R_AGENCYTP` | `draft action Resume` | response aliases must be ABAP identifiers (namespaced aliases), then late numbering |
+| `/DMO/C_AGENCYTP` | the base's draft | the base's wall |
+| `/DMO/I_CARRIERSLOCKSINGLETON_S`, `/DMO/C_CARRIERSLOCKSINGLETON_S` | unparsed singleton grammar | unchanged |
+| `/DMO/I_AGENCYTP` | interface | unchanged |
+| `/DMO/I_TRAVEL_M` and its projections | accepted | accepted |
+
+Constructs whose verdict changed: `with draft` (4 BDEFs), `draft
+determine action` (3), `total etag` (3, ignored before): refused -> runs;
+new in the table: `draft table`, `draft action`, `association with draft`
+(3 each, runs), `use draft` (3, refused).
+
+### Unmeasured
+
+Nothing of R8 was checked on a system. In particular: the V4 `$metadata`
+of a RAP draft service (the action names, `SiblingEntity`,
+`DraftAdministrativeData` and their properties); the draft table's admin
+column types and `DRAFTENTITYOPERATIONCODE`'s values; what EML answers for
+a draft action (here a `$self` result); whether a system validates
+mandatory fields on Activate the way this runtime does; what Prepare runs
+for a draft without changes; how a system words the total ETag conflict
+and the "has a draft" lock; that a POST to a draft root's set always makes
+a draft.
+
+### Not in R8 (R9)
+
+- `SiblingEntity` and `DraftAdministrativeData` as navigation properties
+  (the admin data is written, not served), and the admin entity's
+  `DraftIsCreatedByMe`-style fields; the "locked by another user" list
+  filter;
+- the Fiori Elements V4 app over the service, run in a browser (the wire is
+  shaped and tested after what it sends, the app itself is not built);
+- the exclusive lock as a durable enqueue with an owner and an expiry, and
+  Resume taking it back; `with collaborative draft`;
+- `use draft` and the draft actions of a projection; Prepare members of
+  another entity (`Booking~validateCustomer`); `draft action ... with
+  additional implementation`; feature control of draft actions;
+- early and late numbering of drafts, `DRAFTFIELDCHANGES`, the draft
+  table's `.INCLUDE` of the admin structure;
+- V2 draft beyond the key: the function import names a V2 client expects
+  and `Common.DraftRoot` over V2 (measured first);
+- the flight's draft BOs (supplement, agency, carrier) built and served.
 
 ## Not in R2
 
