@@ -14,7 +14,9 @@ import {fieldControl, runtimeOutputs} from "./rap-runtime-gen.mjs";
 import {parseSrvd, serviceYaml} from "./srvd-gen.mjs";
 
 const upper = s => s.toUpperCase();
-const ident = s => /^[A-Z_%][A-Z0-9_%]*$/i.test(s);
+// R10: a namespaced name (/DMO/Agency) is an ABAP identifier too: a
+// component of a response is `reported-/dmo/agency` on a system
+const ident = s => /^(\/[A-Z0-9_]+\/)?[A-Z_%][A-Z0-9_%]*$/i.test(s);
 const digest = s => createHash("sha256").update(s).digest("hex").slice(0, 16);
 export function walk(dir) {
   if (!existsSync(dir)) return [];
@@ -117,7 +119,10 @@ function projectionOf(plan, planned, plans) {
   if (plan.base && plan.base !== base.p) throw new Error(`${plan.root}: a projection of two behavior definitions`);
   plan.base = base.p;
   planned.base = base.e;
-  for (const f of planned.fields) if (!f.from) throw new Error(`${entity.entity}.${f.name}: no base element`);
+  // R10: a path element (or another calculated element) has no base element:
+  // read-only unless the projection says field ( modify ), and then written
+  // by its augment (below)
+  for (const f of planned.fields) if (!f.from && !f.virtual) throw new Error(`${entity.entity}.${f.name}: no base element`);
   const b = base.e.entity;
   const bhas = op => b.operations.some(o => o.kind === op && !o.use);
   for (const op of entity.operations) {
@@ -139,11 +144,38 @@ function projectionOf(plan, planned, plans) {
     if (a.create && !own.create) throw new Error(`${entity.entity}: use association ${a.name} { create; }, which ${b.entity} does not allow`);
   }
   for (const g of entity.fields) {
-    if (g.attributes.some(x => x.name !== "readonly" || x.value)) throw new Error(`${entity.entity}: a projection's field control other than readonly is outside R5`);
+    if (g.attributes.some(x => !["readonly", "modify"].includes(x.name) || x.value)) throw new Error(`${entity.entity}: a projection's field control other than readonly and modify is outside R10`);
+    // R10: field ( modify ) makes an element the base cannot write
+    // changeable through the projection; only its augment can write it
+    for (const name of g.attributes.some(x => x.name === "modify") ? g.fields : []) {
+      const f = planned.fields.find(x => upper(x.name) === upper(name));
+      if (!f) throw new Error(`${entity.entity}: field ( modify ) ${name}, which is no element of ${view.name}`);
+      if (f.from) throw new Error(`${entity.entity}: field ( modify ) ${name}, an element of the base (it is changed through the base)`);
+    }
   }
+  // R10: use create ( augment ) / use update ( augment ): the projection's
+  // pool gets the request first and adds to it (MODIFY AUGMENTING ENTITIES)
+  planned.augment = entity.operations.filter(o => (o.options ?? []).some(x => x.name === "augment")).map(o => o.kind);
+  for (const o of entity.operations) for (const x of o.options ?? []) {
+    if (x.name !== "augment" || !["create", "update"].includes(o.kind)) throw new Error(`${entity.entity}: use ${o.kind} ( ${x.name} ) is outside R10`);
+  }
+  const modify = entity.fields.filter(g => g.attributes.some(x => x.name === "modify")).flatMap(g => g.fields);
+  if (modify.length && !planned.augment.length) throw new Error(`${entity.entity}: field ( modify ) without an augment to write it`);
   if (entity.determinations.length || entity.validations.length || entity.mappings.length || entity.persistentTable || entity.numbering)
     throw new Error(`${entity.entity}: a projection has no determinations, validations, mapping, table or numbering of its own`);
-  if (entity.implementationClass || plan.model.implementationClass) throw new Error(`${plan.root}: a projection's own behavior pool (augment, precheck) is outside R5`);
+  // R10: a projection's own pool is its augment; precheck and a projection's
+  // own actions stay outside
+  if ((entity.implementationClass || plan.model.implementationClass) && !planned.augment.length) throw new Error(`${plan.root}: a projection's own behavior pool without augment (precheck) is outside R10`);
+  if (planned.augment.length && !(entity.implementationClass || plan.model.implementationClass)) throw new Error(`${entity.entity}: augment without a behavior pool`);
+  // R10: use draft -- the projection serves its base's drafts
+  if (plan.model.withDraft && !base.p.model.withDraft) throw new Error(`${plan.root}: use draft over ${base.p.root}, which is not draft-enabled`);
+  if (!plan.model.withDraft && base.p.model.withDraft) throw new Error(`${plan.root}: a projection of the draft-enabled ${base.p.root} without use draft`);
+  if (plan.model.withDraft) {
+    // the draft rows are the base's draft table, whose columns are the base's
+    // element names: a projection that renames one is not served (R10)
+    const renamed = planned.fields.find(f => f.from && f.from !== f.name);
+    if (renamed) planned.draftRefusal = `${entity.entity}: ${renamed.name} renames ${renamed.from}; a projection of a draft business object that renames an element is outside R10`;
+  }
 }
 
 /** R5: what a projection entity serves, the base's behavior through its `use`s */
@@ -152,15 +184,18 @@ export function projectedBehavior(planned) {
   const used = op => entity.operations.some(o => o.kind === op);
   const baseControl = fieldControl(base.entity, base.fields);
   const control = new Map();
+  const modify = new Set(entity.fields.filter(g => g.attributes.some(x => x.name === "modify")).flatMap(g => g.fields).map(upper));
   for (const f of fields) {
-    const c = {...(baseControl.get(upper(f.from)) ?? {readonly: "", mandatory: "", numbering: false})};
-    if (entity.fields.some(g => g.fields.some(x => upper(x) === upper(f.name)))) c.readonly = "X";
+    const c = {...(baseControl.get(upper(f.from ?? "")) ?? {readonly: f.from ? "" : "X", mandatory: "", numbering: false})};
+    if (entity.fields.some(g => g.attributes.some(x => x.name === "readonly") && g.fields.some(x => upper(x) === upper(f.name)))) c.readonly = "X";
+    // R10: field ( modify ) on a calculated element: written by the augment
+    if (modify.has(upper(f.name))) c.readonly = "";
     control.set(upper(f.name), c);
   }
   const baseEtag = base.entity.etag?.kind === "master" ? base.entity.etag.field : undefined;
   return {create: used("create"), update: used("update"), delete: used("delete"), control,
     actions: entity.actions.map(a => a.name),
-    etag: entity.useEtag && baseEtag ? fields.find(f => upper(f.from) === upper(baseEtag))?.name : undefined};
+    etag: entity.useEtag && baseEtag ? fields.find(f => f.from && upper(f.from) === upper(baseEtag))?.name : undefined};
 }
 
 // R6: the action shapes that run -- instance actions, internal, factory and
@@ -244,7 +279,8 @@ export const DRAFT_ADMIN_COLUMNS = ["DRAFTENTITYCREATIONDATETIME", "DRAFTENTITYL
 // The derived types need none of it (%is_draft is all they add), so what the
 // runtime needs is recorded on the plan and refused by rap-runtime-gen.mjs
 function checkDraft(model, entity, planned, fields, reg, projection) {
-  if (projection) throw new Error(`${entity.entity}: a projection of a draft business object (use draft) is outside R8`);
+  // R10: a projection's draft is its base's (checked in projectionOf)
+  if (projection) return;
   try {
     draftContract(model, entity, planned, fields, reg);
   } catch (e) {
@@ -254,7 +290,9 @@ function checkDraft(model, entity, planned, fields, reg, projection) {
 function draftContract(model, entity, planned, fields, reg) {
   if (model.collaborativeDraft) throw new Error(`${entity.entity}: with collaborative draft is outside R8`);
   if (!entity.draftTable) throw new Error(`${entity.entity}: with draft needs a draft table`);
-  if (entity.draftQuery) throw new Error(`${entity.entity}: draft table ... query is outside R8`);
+  // R10: `draft table t query v` names a view over the draft table for
+  // reading drafts with the extension fields; this runtime reads the draft
+  // table itself, so the query view is accepted and not used
   const table = reg.getObject("TABL", entity.draftTable);
   if (!table) throw new Error(`${entity.entity}: missing draft table ${entity.draftTable}`);
   const columns = new Set((table.parseType(reg)?.getComponents?.() ?? []).map(c => upper(c.name)));
@@ -316,7 +354,7 @@ export function generate(files, dependencies = []) {
       const abap = f.abapType ?? sourceType;
       if (!ident(f.name) || !abap || /todo|unknown|void/i.test(abap)) throw new Error(`Unresolved CDS field ${name}.${f.name}`);
       return {name: f.name.toLowerCase(), type: abap, key: f.key, base: f.base, admin: adminOf(f.annotations ?? []),
-        from: f.fromElement ? f.fromElement.toLowerCase() : undefined};
+        from: f.fromElement ? f.fromElement.toLowerCase() : undefined, virtual: !!f.virtual, path: f.path};
     });
   };
   const outputs = {}, bindings = {}, plans = [];
@@ -337,6 +375,7 @@ export function generate(files, dependencies = []) {
     const iface = `zif_rap_${digest(upper(root))}`;
     let body = `INTERFACE ${iface} PUBLIC.\n`;
     const responses = new Map();
+    const lateOf = [];
     const requests = [], mappingsOf = [];
     const plan = {root, iface, model, entities: [], projection};
     plans.push(plan);
@@ -412,6 +451,21 @@ export function generate(files, dependencies = []) {
       }
       const path = ancestors.length && ancestors.every(a => ident(a.entity.alias ?? a.entity.entity));
       if (path) body += struct(`${p}_path`, ancestors.map(a => [(a.entity.alias ?? a.entity.entity).toLowerCase(), `${a.prefix}_tky`]));
+      // R10: late numbering -- the saver's adjust_numbers gets MAPPED LATE,
+      // per instance its preliminary identity (%pre: %pid and %tmp, the
+      // preliminary key it had in the interaction phase) and the final key
+      // (%key) it fills (docs/rap-runtime.md, R10)
+      if (entity.numbering === "late") {
+        body += struct(`${p}_pre`, [["%pid", "x LENGTH 16"], ["%tmp", `${p}_key`]]);
+        body += `  TYPES BEGIN OF ${p}_mapped_late.\n  INCLUDE TYPE ${p}_pre AS %pre.\n  INCLUDE TYPE ${p}_key AS %key.\n  TYPES END OF ${p}_mapped_late.\n`;
+        body += `  TYPES t_${p}_mapped_late TYPE STANDARD TABLE OF ${p}_mapped_late WITH DEFAULT KEY.\n`;
+        for (const ref of refs) {
+          bind("TABLE", "MAPPED LATE", ref, `${iface}=>t_${p}_mapped_late`);
+          bind("STRUCTURE", "MAPPED LATE", ref, `${iface}=>${p}_mapped_late`);
+        }
+        for (const ref of local) poolBind("MAPPED LATE", ref, `${iface}=>t_${p}_mapped_late`);
+        lateOf.push([(entity.alias ?? entity.entity).toLowerCase(), `t_${p}_mapped_late`]);
+      }
       for (const kind of ["CREATE", "UPDATE", "DELETE", "READ IMPORT", "READ RESULT", "MAPPED", "FAILED", "REPORTED", "LOCK", "KEY OF", "DETERMINATION", "VALIDATION"]) {
         if (["CREATE", "UPDATE", "DELETE"].includes(kind) && !entity.operations.some(o => upper(o.kind) === kind)) continue;
         const name = `${p}_${kind.toLowerCase().replaceAll(" ", "_")}`;
@@ -497,8 +551,16 @@ export function generate(files, dependencies = []) {
       const name = `r_${kind.toLowerCase()}`;
       body += struct(name, fields);
       // R7: a saver's LATE response is the EARLY type (docs/rap-runtime.md, R7)
-      for (const phase of ["", " EARLY", " LATE"]) bind("RESPONSE", kind + phase, root, `${iface}=>${name}`);
+      // R10: MAPPED LATE of a BDEF with late numbering is its own: the late
+      // entities' rows carry %pre and %key
+      const late = kind === "MAPPED" && lateOf.length;
+      for (const phase of ["", " EARLY", ...(late ? [] : [" LATE"])]) bind("RESPONSE", kind + phase, root, `${iface}=>${name}`);
       for (const pool of poolsOf(model)) bind(`POOL ${pool}`, "RESPONSE", kind, `${iface}=>${name}`);
+      if (late) {
+        body += struct("r_mapped_late", fields.map(([n, t]) => lateOf.find(([m]) => m === n) ?? [n, t]));
+        bind("RESPONSE", "MAPPED LATE", root, `${iface}=>r_mapped_late`);
+        for (const pool of poolsOf(model)) bind(`POOL ${pool}`, "RESPONSE", "MAPPED LATE", `${iface}=>r_mapped_late`);
+      }
     }
     // R7: the request of save_modified, and MAPPING FROM / TO ENTITY per entity
     if (requests.length) {
@@ -537,7 +599,11 @@ export function generate(files, dependencies = []) {
     // takes a POST (through the navigation) when a parent creates it
     const created = owner.p.entities.some(x => x.tree.assocs.some(a => a.create && a.target === upper(entity.entity)));
     const assocs = owner.e.tree.assocs;
-    if (owner.p.projection) return {view, fields, assocs, behavior: {...projectedBehavior(owner.e), create: projectedBehavior(owner.e).create || created}};
+    // R10: a projection of a draft BO (use draft) is served from a union of
+    // its own (its view's rows and its base's drafts), its root a DraftRoot
+    const projDraft = owner.p.projection && owner.p.model.withDraft ? {root: !owner.e.tree.parent,
+      union: `${owner.p.iface.replace(/^zif_/, "zcl_")}_d${owner.p.entities.indexOf(owner.e)}`} : undefined;
+    if (owner.p.projection) return {view, fields, assocs, draft: projDraft, behavior: {...projectedBehavior(owner.e), create: projectedBehavior(owner.e).create || created}};
     const has = op => entity.operations.some(o => o.kind === op && !o.use);
     // R8: a draft-enabled entity is served from its union class (active
     // and draft rows); the root gets the draft actions and DraftRoot

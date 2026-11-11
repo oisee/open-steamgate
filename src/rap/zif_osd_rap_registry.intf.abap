@@ -22,7 +22,10 @@ INTERFACE zif_osd_rap_registry PUBLIC.
 * entity it runs on, the field map (projection element NAME = base element
 * BASE), what it uses (CREATE, UPDATE, DELETE, ACTIONS, ASSOCS, and CREATES
 * for use association _x { create; }) and its own READONLY fields. Initial
-* when IV_ENTITY is no projection entity
+* when IV_ENTITY is no projection entity. R10: MODIFY the calculated
+* elements field ( modify ) lets the augment write, UNION the generated class
+* serving its active and draft rows (use draft), AUGMENT the generated class
+* (ZIF_OSD_RAP_AUGMENT) of use create / update ( augment )
   TYPES:
     BEGIN OF ty_map,
       name TYPE string,
@@ -43,6 +46,9 @@ INTERFACE zif_osd_rap_registry PUBLIC.
       creates     TYPE tt_name,
       fields      TYPE tt_map,
       readonly    TYPE tt_name,
+      modify      TYPE tt_name,
+      union       TYPE string,
+      augment     TYPE string,
     END OF ty_projection.
   METHODS projection
     IMPORTING

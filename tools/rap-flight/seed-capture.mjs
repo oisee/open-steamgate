@@ -44,8 +44,9 @@ export const TABLES = [
   "/dmo/trvl_stat", "/dmo/trvl_stat_t", "/dmo/oall_stat", "/dmo/oall_stat_t",
   "/dmo/book_stat", "/dmo/book_stat_t",
   "/dmo/travel_m", "/dmo/booking_m", "/dmo/booksuppl_m",
-  // the overlay's stand-in for I_Currency, filled by the seed class (R7)
-  "i_currency",
+  // the overlay's stand-ins for I_Currency (R7) and I_Country (R10),
+  // filled by the seed class
+  "i_currency", "i_country",
 ];
 
 /** abapGit's file name for a namespaced table: /dmo/travel -> #dmo#travel.tabu.json */

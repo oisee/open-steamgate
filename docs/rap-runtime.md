@@ -1,4 +1,4 @@
-# The managed RAP runtime (R2 .. R8)
+# The managed RAP runtime (R2 .. R10)
 
 R2 of [the RAP plan](oracle-rap.md): a managed behavior definition runs. Its
 behavior pool's determinations, validations and action are called, its
@@ -346,7 +346,262 @@ none (its BDEF declares no `etag master`), so the demo needs no
 no operation of the service (404, `Unknown operation`); a refusal of the
 behavior (FAILED, a validation) is 400 as over V2 (`test/rap-serve.mjs`).
 
-### Not in R2c
+### R10: the flight's draft BOs -- use draft, augment, late numbering
+
+After R9 the supplement and agency business objects of the flight reference
+scenario (`/DMO/I_SUPPLEMENT` with its projection `/DMO/C_SUPPLEMENT`,
+`/DMO/R_AGENCYTP` with `/DMO/C_AGENCYTP`) stop at four walls
+(`node tools/rap-flight/constructs.mjs`): a projection's `use draft` and its
+`use action Edit` ... `Prepare`; a projection's `field ( modify )` and its
+own pool (`use create ( augment )`); response aliases that are namespaced
+(`/DMO/Agency`, `reported-/dmo/agency`); and `late numbering`
+(`adjust_numbers`, `%pid`). Behind those: path elements in the projection
+views (`_SupplementText.Description as SupplementDescription : localized`),
+`draft table ... query`, `extensible`. R10 is the design of all of them and
+their slice, proven on the flight BOs themselves: create a draft, edit it,
+activate it, discard it, with their determinations, validations and early
+or late numbering, over OData V4 (and V2 data requests).
+
+Nothing in this section was measured on a system. Where the public RAP
+documentation (the BDEF reference's "use draft", "augment", "field (
+modify )", "late numbering", the ABAP keyword documentation of `%pid`,
+`%tmp`, `%pre` and `adjust_numbers`) states a rule, the runtime follows it;
+where it does not, the choice is named and marked **unmeasured**.
+
+### Path elements
+
+A CDS element `_A._B.Element as X [: localized]` reads `Element` of the
+view at the end of the to-one path. No column of the view's table holds it,
+so `tools/cds2ddic.mjs` makes it a **calculated element**: a component of the
+row (`ty_row`) that a generated class, `ZCL_STG_CDS_<view>_P`
+(`if_sadl_exit_calc_element_read`), fills after the read, exactly the way a
+virtual element is filled. `tools/cds-tree.mjs` (`resolvePaths`) walks the
+hops once every view is parsed: per hop the association (the view's own, or
+for a hop the view does not expose, the association of the view it projects
+or selects from, its pair sources renamed through the view), the target
+view, the pairs; `localized` -- and a filter `[1: Language =
+$session.system_language]` -- adds the target's language key
+(`@Semantics.language`) compared with the logon language. The element it
+ends in gives the type. A path that does not resolve (a hop into a released
+view this tree has only as a table stand-in, `I_Country`, `I_Currency`) is
+not served and the build says which hop broke -- what happened to every
+path element before R10, silently.
+
+A draft row (`ISACTIVEENTITY` initial) reads the first hop of its path from
+the target's **draft table** when the target is an entity of a
+draft-enabled BO (`ZCL_STG_CDS_PATH`, asking `ZCL_OSD_RAP_DRAFT`): the
+supplement draft's `SupplementDescription` is its draft text.
+
+### `use draft` and the draft actions of a projection
+
+A projection BDEF with `use draft` serves its base's drafts: the base must
+be draft-enabled, and a projection of a draft-enabled base must say `use
+draft` (both refused otherwise). `use action Edit` ... `Prepare` expose the
+base's draft actions, which run on the base as every used action does (R5).
+The projection entity gets a **union class of its own**
+(`zcl_rap_<projection>_d<n>`): the active rows from its view and the drafts
+from its **base's** draft table, whose columns are the base's element names;
+a projection that renames an element is therefore refused for draft (no
+flight projection does). Its calculated elements are components of the
+union's row, filled by the path class after the read. Over OData the
+projection's entity type gets `IsActiveEntity`, the flags, `SiblingEntity`
+and `DraftAdministrativeData` exactly as a base's (R8, R9), and its root set
+is the `Common.DraftRoot`. The SADL bridge maps a projection row onto its
+base's union row, so `IsActiveEntity` reaches the base's methods and
+answers come back with it.
+
+### `field ( modify )` and augment
+
+`field ( modify ) SupplementDescription` makes a calculated element of the
+projection changeable: the base cannot write it (it is the text child's
+`Description`), so the projection's own pool does, through `use create (
+augment )` / `use update ( augment )`. Rules here:
+
+- `field ( modify )` names a calculated element of the projection (one with
+  no base element); on a base element it is refused (it is changed through
+  the base). Without an augment it is refused.
+- The projection's pool may contain an augment only (`precheck` stays
+  refused). Its FOR MODIFY method takes `FOR CREATE` / `FOR UPDATE` of the
+  projection entity, typed by the projection's derived types; a generated
+  class (`ZIF_OSD_RAP_AUGMENT`) calls it.
+- Order -- **a deviation**: on a system the augment's requests are merged
+  into the request before the base handler runs, and an instance the
+  augment fails is taken out before the base processes it; `RELATING TO`
+  maps later failures of the augmenting requests back to the original rows
+  (SAP's documentation of operation augmentation). Here the base operation
+  runs first (the created instance is in the buffer under its `%cid`), then
+  the augment with the original rows -- `%cid`, `%is_draft`, the
+  projection's fields and `%control` -- while the base's transaction is
+  active (`ZCL_OSD_RAP_RUNTIME=>AUGMENT`), so its `MODIFY AUGMENTING
+  ENTITIES` (lowered by hand to the `ZCL_OSD_RAP_EML` calls in the overlay)
+  lands in the same transaction and is saved with it. A `%cid_ref` to the
+  created supplement resolves. Consequences: a create whose mandatory field
+  only the augment would supply is refused before the augment runs; a
+  failed augment fails the whole request (all or nothing), and its REPORTED
+  messages are the answer's text, not mapped to rows.
+
+### Namespaced aliases
+
+`define behavior for /DMO/R_AgencyTP alias /DMO/Agency`: the response
+components are `mapped-/dmo/agency`, `failed-/dmo/agency`,
+`reported-/dmo/agency`, the entity is `ENTITY /dmo/agency` in EML and the
+validations are `/DMO/validateName`. A namespaced name is an ABAP
+identifier (the transpiler writes such a component as `["/dmo/agency"]`,
+measured with a probe), so the generators accept it wherever they accepted
+an alias.
+
+### Late numbering
+
+`late numbering` draws the key in the save, in the saver's
+`adjust_numbers`, after every check has passed -- no gaps in a number range
+for a request that fails. The public contract: in the interaction phase an
+instance is identified by `%pid` (and `%tmp`, a preliminary key) in `%pky`;
+`adjust_numbers` gets `MAPPED LATE`, per instance `%pre` (`%pid`, `%tmp`)
+and `%key`, and fills `%key`.
+
+- **Types.** `%pid` (RAW 16) is part of `%pky` of a late-numbered entity
+  (R1 already). `TYPE STRUCTURE / TABLE FOR MAPPED LATE` of such an entity
+  is `%pre` (`%pid`, `%tmp` -- the key structure) and `%key`; `RESPONSE FOR
+  MAPPED LATE` of the BDEF has that row type for its late entities.
+- **The saver.** `METHODS adjust_numbers REDEFINITION.` is lowered like
+  `save_modified` (R7) to `CHANGING mapped TYPE RESPONSE FOR MAPPED LATE
+  reported TYPE RESPONSE FOR REPORTED LATE`; the clean-room base declares it
+  for the static check only. The runtime calls each saver that redefines it.
+- **The preliminary key (unmeasured).** A created instance of a
+  late-numbered entity gets a `%pid` (a UUID) and a **preliminary key**
+  from a reserved range, the top 1000 values of the key's type counting
+  down (`999999`, `999998`, ... `999000` for the agency's NUMC 6), skipping
+  every key an active instance, a draft or the buffer has. On a system the key fields may stay initial and
+  `%pid` alone names the instance in the interaction phase; here a key is
+  what the buffer and OData address, so one is given. It is what
+  `adjust_numbers` sees in `%tmp`; `%key` arrives initial.
+- **The final key is checked** (the #917 critic's collision: two drafts at
+  the top of a range, a final key landing on a live preliminary one and an
+  Activate silently replacing another agency). A row of MAPPED LATE is the
+  instance its `%pid` names, in any order; a missing, extra or duplicated
+  row, a final key in the reserved range, or one an active instance already
+  has (saved or in this transaction) fails the save -- it writes nothing.
+  The overlay's `adjust_numbers` draws below the reserved range and skips
+  any ID an agency or a draft has; an exhausted range leaves the key initial
+  and the save fails (a system's `RAISE SHORTDUMP`).
+- **Draft vs active.** A draft of a late-numbered entity keeps its
+  preliminary key for its whole life (on a system: the draft table's key is
+  the key plus `DRAFTUUID`, the draft's `%pid`). Activate creates the
+  active instance under that key, and the save's `adjust_numbers` draws the
+  final one; the draft is deleted with it. An Edit of an existing active
+  instance makes a draft under the final key (it has one), and its
+  Activate updates -- no numbering.
+- **After the save.** The runtime writes the final key into the instance
+  before the managed write and keeps the pairs (preliminary, final) of the
+  last save (`ZCL_OSD_RAP_RUNTIME=>FINAL_KEY`); the SADL bridge answers a
+  create and an Activate with the final key, so sap.fe navigates to the
+  saved agency. EML `CONVERT KEY` is not built: an EML caller reads the
+  final key from the database after `COMMIT ENTITIES`.
+- Late numbering of an entity with composition children (whose foreign
+  keys would have to move with it) or of a child, and of a key of more than
+  one field, is refused (no flight BO has one).
+
+### Smaller walls
+
+- `draft table t query v`: the query view (`/DMO/R_AgencyDraft`) reads the
+  draft table with extension fields; this runtime reads the draft table
+  itself, so the query is accepted and not used.
+- `extensible` (header block, entity, mapping, determine action): the BO
+  is open to extensions; nothing here extends it, so it changes nothing.
+- `mapping for t corresponding`: the elements not listed map by name (R7
+  already); `with additional save` inside the `extensible { }` block is an
+  extension point, not the BO's save.
+- A RAWSTRING element (`Attachment`) is `Edm.Binary` in the service.
+
+### The overlay
+
+The flight pack fetches the four BDEFs, the two service definitions
+(`/DMO/UI_SUPPLEMENT`, `/DMO/UI_AGENCY`) and the two projection views, and
+carries the three pools in its overlay (each change marked `OSD overlay`,
+listed in [rap-flight-pack.md](rap-flight-pack.md)): the number ranges
+(`cl_numberrange_runtime`) replaced by the highest saved ID + 1, the EML
+the pinned transpiler does not lower written as the calls it stands for,
+`DISCARDING DUPLICATES` and the secondary keys `draft` / `cid` spelled out,
+and an `I_Country` stand-in table the agency's validation reads, filled by
+the seed class from the generated agencies and customers.
+
+### Built and proven
+
+- **Generators.** `tools/cds-path.mjs` (path elements, their class),
+  `bdef-gen.mjs` (namespaced identifiers, `use draft`, `field ( modify )`,
+  augment, `draft table ... query`, MAPPED LATE / `%pre` / `%tmp`),
+  `rap-runtime-gen.mjs` (late numbering, `extensible`, a projection's union
+  and augment class, the registry's `modify` / `union` / `augment`),
+  `lower-derived.mjs` (`adjust_numbers REDEFINITION`), `srvd-gen.mjs` (a
+  draft projection's service, `Edm.Binary`).
+- **Runtime.** `ZCL_OSD_RAP_RUNTIME`: `late_key`, `late_numbers` (the
+  savers' `adjust_numbers` between check_before_save and save), `final_key`,
+  `augment`; `ZCL_OSD_RAP_SADL`: a projection over a draft base (its union,
+  the version carried to the base), the augment of create and update, the
+  final key in a create's and an Activate's answer; `ZCL_STG_CDS_PATH`.
+- **One runtime defect met on the way** (ANORMALIES
+  `ANOMALY-2026-11-11-update-include-group`): the runtime's `UPDATE dbtab
+  FROM TABLE` of a table with a named include (every flight draft table)
+  answers 4; the generated table class writes `UPDATE ... SET` over its
+  columns, each named, instead (a real UPDATE: triggers and foreign keys see
+  one).
+- **Tests.** `ZCL_OSD_RAPFLIGHT_R10_TEST` (8, on the flight BOs): the
+  supplement's numbering by category, Prepare and Activate, a validation
+  stopping Activate with the draft kept, Edit + change + Discard; the
+  agency's preliminary key, Activate drawing the final key, a refused
+  Activate numbering nothing, an active create numbered late.
+  `test/rap-r10.mjs` (12): the generated types, lowering, model, union,
+  augment and service; over V4 the supplement draft created with its
+  description through the augment, changed, prepared and activated (the
+  text activated with it), a refused Activate and Discard, Edit + change +
+  Discard with the list filter, V2 reads, an agency draft activated to its
+  final key, a refused agency. `test/cds-path.mjs` (3).
+
+### The measurement: the flight BDEFs before and after
+
+`node tools/rap-flight/constructs.mjs`, first wall per behavior definition:
+
+| BDEF | after R9 | after R10 |
+| --- | --- | --- |
+| `/DMO/I_SUPPLEMENT` | accepted (not built or served) | **runs** (built, served through its projection) |
+| `/DMO/C_SUPPLEMENT` | a projection's `field ( modify )`, then `use draft` | **runs**, served as `/DMO/UI_SUPPLEMENT` |
+| `/DMO/R_AGENCYTP` | namespaced response aliases, then late numbering | **runs** |
+| `/DMO/C_AGENCYTP` | the base's wall | **runs**, served as `/DMO/UI_AGENCY` |
+| `/DMO/I_AGENCYTP` | interface BDEF | unchanged |
+| carrier singleton x2 | unparsed singleton grammar | unchanged |
+| `/DMO/I_TRAVEL_M` and its 2 projections | accepted | accepted |
+
+Constructs whose verdict changed: `use draft` (3), `late numbering`,
+`saver adjust_numbers`: refused -> runs; new in the table: `use action
+(draft)`, `field ( modify )`, `use create/update ( augment )`, `FOR MODIFY
+augment`, `namespaced alias` (runs), `draft table query`, `extensible`
+(ignored). Refusals over the ten BDEFs: 12 rows before, 4 after (the
+singleton grammar and the interface BDEF).
+
+### Unmeasured
+
+Nothing of R10 was checked on a system. In particular: the preliminary
+key of a late-numbered draft (a system may keep the key initial and name
+the draft by `%pid` / `DRAFTUUID`; what its V4 key then is); the order of
+an augment and the base operation, and the messages of a failing augment
+(`RELATING TO` is not run); what a supplement's or agency's V4 `$metadata`
+on a system says (`Core.Computed`, value helps, the text and the
+attachment); the number ranges (here the highest saved ID + 1).
+
+### Not in R10
+
+- `I_Country` / `I_Currency` are table stand-ins, so `CountryName` and the
+  value helps' texts through them are not served; value helps of the
+  projections (`@Consumption.valueHelpDefinition`) and metadata extensions
+  (`.ddlx`) are not read.
+- The interface BDEF `/DMO/I_AGENCYTP`, the carrier singleton, `with
+  collaborative draft`, precheck, EML `CONVERT KEY`.
+- Late numbering of a child or of an entity with children; a projection of
+  a draft BO that renames an element.
+- A Fiori Elements app over the two services (sap.fe's requests are the
+  ones R9 serves; not run against these services).
+
+## Not in R2c
 
 Service bindings, `Edm.Guid` for UUID keys, a
 `$batch` changeset as one RAP transaction (each operation is its own save

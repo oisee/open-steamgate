@@ -53,6 +53,10 @@ CLASS lcl_fk IMPLEMENTATION.
                           ir_delete = ir_delete ir_reported = ir_reported ).
   ENDMETHOD.
 
+  METHOD zif_osd_rap_bo~adjust_numbers.
+    RETURN.
+  ENDMETHOD.
+
   METHOD zif_osd_rap_bo~call.
     mi_bo->call( io_handler = io_handler iv_entity = iv_entity iv_name = iv_name
                  ir_rows = ir_rows ir_keys = ir_keys ir_result = ir_result

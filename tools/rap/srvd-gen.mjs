@@ -85,6 +85,8 @@ function edm(type, where) {
   if ((m = /^c length (\d+)$/.exec(t)) || (m = /^n length (\d+)$/.exec(t))) return `String(${Number(m[1])})`;
   if ((m = /^x length (\d+)$/.exec(t))) return `String(${Number(m[1]) * 2})`;
   if (t === "string") return "String";
+  // R10: a large object (the flight agency's Attachment, RAWSTRING)
+  if (t === "xstring") return "Binary";
   if (t === "d") return "date";
   if (t === "t") return "Time";
   if (t === "i" || t === "int4") return "Int32";

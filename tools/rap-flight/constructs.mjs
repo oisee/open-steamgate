@@ -49,7 +49,13 @@ export const SUPPORT = {
   "projection": ["runs", "test/rap-r5.mjs: the order projection served over V2 and V4"],
   "interface": ["refused", "bdef-gen: interface BDEF"],
   "with draft": ["runs", "test/rap-r8.mjs, ZCL_OSD_RAP_R8_TEST: drafts kept in the draft tables, Edit / Activate / Discard over V4"],
-  "use draft": ["refused", "bdef-gen: a projection of a draft business object is outside R8"],
+  "use draft": ["runs", "test/rap-r10.mjs: the flight supplement and agency projections served with their base's drafts (a union of their own)"],
+  "use action (draft)": ["runs", "test/rap-r10.mjs: Edit, Activate, Prepare through the projection; Discard as DELETE"],
+  "field ( modify )": ["runs", "test/rap-r10.mjs: SupplementDescription, a path element, written by the projection's augment"],
+  "use create/update ( augment )": ["runs", "test/rap-r10.mjs: the supplement projection's augment creates and updates the text child"],
+  "draft table query": ["ignored", "R10: the query view is accepted, the draft table is read itself"],
+  "extensible": ["ignored", "R10: open to extensions; nothing here extends it"],
+  "namespaced alias": ["runs", "test/rap-r10.mjs, ZCL_OSD_RAPFLIGHT_R10_TEST: reported-/dmo/agency, ENTITY /dmo/agency"],
   "draft table": ["runs", "ZCL_OSD_RAP_R8_TEST: the draft's rows and admin columns"],
   "draft action": ["runs", "ZCL_OSD_RAP_R8_TEST, test/rap-r8.mjs: Edit, Activate, Discard, Resume"],
   "draft action with additional implementation": ["refused", "bdef-gen: draft action with additional implementation is outside R8"],
@@ -66,7 +72,7 @@ export const SUPPORT = {
   "authorization master": ["ignored", "no authorization checks"],
   "authorization dependent": ["ignored", "no authorization checks"],
   "early numbering": ["runs", "test/rap-r4.mjs: FOR NUMBERING draws the key"],
-  "late numbering": ["refused", "rap-runtime-gen: late numbering (adjust_numbers, %pid) is outside R4"],
+  "late numbering": ["runs", "ZCL_OSD_RAPFLIGHT_R10_TEST, test/rap-r10.mjs: %pid and a preliminary key, the final key from adjust_numbers in the save"],
   "numbering : managed": ["runs", "test/rap-serve.mjs"],
   "create/update/delete": ["runs", "test/rap-serve.mjs"],
   "update/delete ( features : instance )": ["runs", "test/rap-r4.mjs: disabled update and delete are 400"],
@@ -104,7 +110,8 @@ export const SUPPORT = {
   "FOR NUMBERING (create by association)": ["runs", "test/rap-r5.mjs, ZCL_OSD_RAP_R5_TEST: the items numbered 10, 20"],
   "FOR PRECHECK": ["refused", "lower-derived: PRECHECK"],
   "saver save_modified": ["runs", "test/rap-r7.mjs, ZCL_OSD_RAP_R7_TEST: lowered from REDEFINITION, called after the managed write"],
-  "saver adjust_numbers": ["refused", "late numbering (the phase is called, parameterless: R7)"],
+  "saver adjust_numbers": ["runs", "ZCL_OSD_RAPFLIGHT_R10_TEST: lowered from REDEFINITION with MAPPED LATE and REPORTED (R10)"],
+  "FOR MODIFY augment": ["runs", "test/rap-r10.mjs: the projection pool's augment, typed by the projection"],
 };
 
 const has = (opts, name, value) => (opts ?? []).some(o => o.name === name && (value === undefined || o.value === value));
@@ -123,6 +130,9 @@ export function bdefConstructs(model) {
     const n = e.alias ?? e.entity;
     if (e.persistentTable) add("persistent table", n);
     if (e.draftTable) add("draft table", n);
+    if (e.draftQuery) add("draft table query", n);
+    if (/^\//.test(e.alias ?? "")) add("namespaced alias", n);
+    if ((e.options ?? []).some(o => o.kind === "extensible")) add("extensible", n);
     for (const o of e.options ?? []) if (o.kind === "additional save") add("with additional save", n);
       else if (o.kind === "unmanaged save") add("with unmanaged save", n);
     if (e.etag) add(`etag ${e.etag.kind}`, n);
@@ -134,7 +144,10 @@ export function bdefConstructs(model) {
       if (g.attributes.some(a => a.name === "numbering" && a.value === "managed")) add("numbering : managed", n);
       if (g.attributes.some(a => a.name === "features")) add("field ( features : instance )", `${n}: ${g.fields.join(", ")}`);
       if (g.attributes.some(a => a.name === "readonly" || a.name === "mandatory")) add("field control readonly/mandatory", n);
+      if (g.attributes.some(a => a.name === "modify")) add("field ( modify )", `${n}: ${g.fields.join(", ")}`);
     }
+    for (const op of e.operations.filter(o => o.use && has(o.options, "augment"))) add("use create/update ( augment )", `${n}: ${op.kind}`);
+    for (const a of e.actions.filter(x => x.use && ["EDIT", "ACTIVATE", "DISCARD", "RESUME", "PREPARE"].includes(x.name.toUpperCase()) && model.withDraft)) add("use action (draft)", `${n}~${a.name}`);
     for (const op of e.operations.filter(o => !o.use)) {
       add("create/update/delete", `${n}: ${op.kind}`);
       if (has(op.options, "features", "instance")) add("update/delete ( features : instance )", `${n}: ${op.kind}`);
@@ -188,7 +201,7 @@ export function poolConstructs(sources) {
       if (/^REDEFINITION$/.test(words) && ["SAVE_MODIFIED", "ADJUST_NUMBERS"].includes(name.toUpperCase())) id = `saver ${name.toLowerCase()}`;
       else if (/^FOR DETERMINE /.test(words)) id = "FOR DETERMINE";
       else if (/^FOR VALIDATE /.test(words)) id = "FOR VALIDATE";
-      else if (/^FOR MODIFY /.test(words)) id = /\bFOR CREATE \S+\\/.test(words) ? "FOR MODIFY create by association" : "FOR MODIFY action";
+      else if (/^FOR MODIFY /.test(words)) id = /\bFOR CREATE \S+\\/.test(words) ? "FOR MODIFY create by association" : /\bFOR ACTION\b/.test(words) ? "FOR MODIFY action" : "FOR MODIFY augment";
       else if (/^FOR READ /.test(words)) id = /\bFOR READ \S+\\/.test(words) ? "FOR READ by association" : "FOR READ";
       else if (/^FOR LOCK /.test(words)) id = "FOR LOCK";
       else if (/^FOR (INSTANCE|GLOBAL) (FEATURES|AUTHORIZATION)/.test(words)) id = words.split(" ").slice(0, 3).join(" ");

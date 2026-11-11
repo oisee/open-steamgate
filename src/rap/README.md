@@ -1,4 +1,4 @@
-# Managed RAP runtime (R2, R2a, R3, R4, R5, R6, R8, R9)
+# Managed RAP runtime (R2, R2a, R3, R4, R5, R6, R8, R9, R10)
 
 Runs a managed behavior definition handler-direct, and the EML statements
 over it:
@@ -23,6 +23,12 @@ R9: the owner of a draft -- `INPROCESSBYUSER` is the request's user
 Edit of it is refused (FAILED `locked`) and the union serves a user only
 their own drafts; the draft administrative data is served as an entity
 by `src/rap_draftadm`.
+R10: late numbering (a preliminary key and `%pid` while drafting, the
+saver's `adjust_numbers` with MAPPED LATE in the save, `final_key( )` for
+the answer), a projection's `use draft` (a union of its own, the base's
+draft table) and its augment (`zif_osd_rap_augment`, run by `augment( )`
+with the base's transaction active), on the flight's supplement and agency
+BOs (`packs/rap-flight`).
 
 - `zcl_osd_rap_runtime` - the runtime; `for_bdef( 'ZI_...' )` to start;
   `active( )` names the runtime whose handler runs, where EML inside a
@@ -35,6 +41,8 @@ by `src/rap_draftadm`.
 - `zif_osd_rap_bo` - one BDEF: model and typed calls; implemented by the
   class `tools/rap/rap-runtime-gen.mjs` generates into `gen/rap/`
 - `zif_osd_rap_registry` - implemented by the generated `zcl_osd_rap_registry`
+- `zif_osd_rap_augment` - R10: a projection's augment, implemented by a
+  class `tools/rap/rap-runtime-gen.mjs` generates per projection BDEF
 - `zcl_osd_rap_sadl` - the runtime behind the SADL data provider: OData
   create, update, delete and actions of a RAP entity (R2c,
   `zif_stg_sadl_behavior` of `src/sadl/`)
@@ -51,5 +59,6 @@ Tests: `test/unit/zcl_osd_rap_test` (ABAP Unit, over `src/rap_demo/`),
 `test/unit/zcl_osd_rap_r6_test` (the actions, over `src/rap_r6/`), `test/rap-r6.mjs`,
 `test/unit/zcl_osd_rap_r8_test` (draft, over `src/rap_r8/`), `test/rap-r8.mjs`,
 `test/unit/zcl_osd_rap_r9_test` (the owner), `test/rap-r9.mjs`, `test/e2e/trip4.spec.mjs`,
+`packs/rap-flight` `zcl_osd_rapflight_r10_test` and `test/rap-r10.mjs` (the flight draft BOs, R10),
 `test/unit/zcl_osd_rap_eml_test` (the EML facade), `test/rap-runtime-gen.mjs`, `test/rap-serve.mjs` (the OData wire). Contract and limits:
 [docs/rap-runtime.md](../../docs/rap-runtime.md).

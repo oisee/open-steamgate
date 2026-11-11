@@ -110,6 +110,13 @@ jobs:
       # Keep the existing sql.js regression suite: the public Pages build
       # changes database, but it must not silently lose coverage of the
       # original browser runtime.
+      # The preview leaves rap-flight out (its seed is ~12 MB; with it the
+      # sql.js asm build's fixed 21 MB heap aborts with OOM, PR #917); a
+      # growable heap for the service worker is the real fix (planned). Set
+      # for the rest of the job, so every preview build (the sql.js one here
+      # and the DuckDB one on main) sees the same packs as the generation.
+      - name: Choose the preview's packs
+        run: echo "OSD_WEB_PACKS=$(node --input-type=module -e "import {packsOf} from './tools/osd-packs.mjs'; console.log(packsOf(process.cwd()).map(p => p.name).filter(n => n !== 'rap-flight').join(','))")" >> "$GITHUB_ENV"
       - run: npm run web:preview
       - name: Read the installed Playwright version
         id: playwright_version
@@ -149,7 +156,7 @@ jobs:
       # From Location"; docs/vscode-web.md). It is built after every check and
       # screenshot of the preview above: web:vscode transpiles its own pack
       # selection and rewrites web/generated/, never build/preview itself.
-      # Every pack the preview itself carries (OSD_WEB_PACKS=all), so the
+      # Every pack (OSD_WEB_PACKS=all, over the preview's own selection), so the
       # extension's launchpad shows the same tiles as this page's.
       - name: VS Code web extension
         run: |

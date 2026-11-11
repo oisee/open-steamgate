@@ -97,8 +97,11 @@ export function resolveProjections(views, byName) {
   return views;
 }
 
-/** both passes, in their order: the compositions, then the projections of them */
+/** both passes, in their order: the compositions, then the projections of
+ *  them; R10: then the path elements, which walk both */
+import {resolvePaths} from "./cds-path.mjs";
 export function resolveTree(views, byName) {
   resolveCompositions(views, byName);
-  return resolveProjections(views, byName);
+  resolveProjections(views, byName);
+  return resolvePaths(views, byName);
 }

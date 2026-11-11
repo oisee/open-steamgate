@@ -9,6 +9,7 @@ CLASS cl_abap_behavior_saver DEFINITION PUBLIC INHERITING FROM cl_abap_behv CREA
 *   (cleanup_finalize instead of the rest when finalize or
 *   check_before_save failed)
 *
+* R10: so has adjust_numbers (late numbering), the same way.
 * R7: save_modified (with additional / unmanaged save) has parameters typed
 * by the BDEF. It is declared below for abaplint's static check, which voids
 * them as it voids every parameter here; the build blanks that declaration
@@ -28,11 +29,17 @@ CLASS cl_abap_behavior_saver DEFINITION PUBLIC INHERITING FROM cl_abap_behv CREA
 
     METHODS check_before_save.
 
-    METHODS adjust_numbers.
-
     METHODS save.
 
 * LINT-ONLY begin
+* R10: adjust_numbers has the BDEF's MAPPED LATE and REPORTED; like
+* save_modified it is declared here for the static check only, and a pool's
+* REDEFINITION becomes a typed declaration of its own in the build
+    METHODS adjust_numbers
+      CHANGING
+        mapped   TYPE any
+        reported TYPE any.
+
     METHODS save_modified
       IMPORTING
         create   TYPE any
@@ -58,6 +65,7 @@ CLASS cl_abap_behavior_saver IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD adjust_numbers.
+* LINT-ONLY: blanked in the build with its declaration (see the header)
     RETURN.
   ENDMETHOD.
 
