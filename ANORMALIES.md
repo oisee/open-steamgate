@@ -4560,7 +4560,7 @@ Not an anomaly, recorded for porting: on 7.58, `FIND ... REGEX` (POSIX) raises a
 - Expected SAP behaviour: the row with the work area's key is updated, sy-subrc 0
 - Actual open-abap behaviour: `updateDatabase` makes a SET of every top-level component of the structure (`Object.keys`), the include group among them; the row is not updated and sy-subrc is 4 (not narrowed further: the generated `FROM wa` form does not even parse as JavaScript, see the R7 pack entry)
 - Impact on open-steamgate: every update of a flight draft (the draft tables include the admin structure) and of an active agency (its append) failed
-- Smallest safe workaround: `tools/cds2ddic.mjs` writes the update of such a table as DELETE by key + INSERT of the row
+- Smallest safe workaround: `tools/cds2ddic.mjs` writes the update of such a table as `UPDATE dbtab SET col = wa-col ... WHERE key = wa-key` over its flattened columns (still one UPDATE for the database, its triggers and foreign keys); a first version replaced the row by DELETE + INSERT, which the #917 critic showed fires DELETE/INSERT triggers instead of UPDATE
 - Upstream issue: needs an issue (abaplint/transpiler runtime) with a reproducer, after a critic pass
 - Regression-test location: `ZCL_OSD_RAPFLIGHT_R10_TEST` (EDITS_AND_DISCARDS), `test/rap-r10.mjs`
 - Upstream version containing a fix: unknown

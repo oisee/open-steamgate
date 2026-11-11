@@ -293,6 +293,16 @@ function augmentClass(cls, plan, entities, files) {
           CHANGING
             ${group("changing").map(g => g.replace(/= (ls_\w+)$/, `= $1_${p}`)).join("\n            ")}.
         ev_failed = lines( ls_failed_${p}-${(entity.alias ?? entity.entity).toLowerCase()} ).
+        LOOP AT ls_reported_${p}-${(entity.alias ?? entity.entity).toLowerCase()} INTO ls_rep_${p}.
+          IF ls_rep_${p}-%msg IS BOUND.
+            TRY.
+                lo_msg ?= ls_rep_${p}-%msg.
+                APPEND lo_msg->get_text( ) TO et_messages.
+              CATCH cx_sy_move_cast_error.
+                CONTINUE.
+            ENDTRY.
+          ENDIF.
+        ENDLOOP.
 `;
   }
   const decl = entities.map(({prefix: p, entity}) => {
@@ -302,6 +312,7 @@ function augmentClass(cls, plan, entities, files) {
     DATA ls_mapped_${p} TYPE ${iface}=>r_mapped.
     DATA ls_failed_${p} TYPE ${iface}=>r_failed.
     DATA ls_reported_${p} TYPE ${iface}=>r_reported.
+    DATA ls_rep_${p} LIKE LINE OF ls_reported_${p}-${(entity.alias ?? entity.entity).toLowerCase()}.
     FIELD-SYMBOLS <lt_c${p}> LIKE lt_create_${p}.
     FIELD-SYMBOLS <lt_u${p}> LIKE lt_update_${p}.
 `;
@@ -322,6 +333,7 @@ ${tables}    ENDCASE.
 
   METHOD zif_osd_rap_augment~augment.
     DATA lo_handler TYPE REF TO object.
+    DATA lo_msg TYPE REF TO if_message.
     DATA lv_name TYPE string.
 ${decl}
     CASE to_upper( iv_entity ).

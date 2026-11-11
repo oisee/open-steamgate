@@ -188,7 +188,8 @@ CLASS zcl_osd_rap_runtime DEFINITION PUBLIC CREATE PRIVATE.
         ir_create  TYPE REF TO data OPTIONAL
         ir_update  TYPE REF TO data OPTIONAL
       EXPORTING
-        ev_failed  TYPE i
+        ev_failed   TYPE i
+        et_messages TYPE string_table
       RAISING
         zcx_osd_rap.
 
@@ -289,6 +290,12 @@ CLASS zcl_osd_rap_runtime DEFINITION PUBLIC CREATE PRIVATE.
         cs_row    TYPE any
       RAISING
         zcx_osd_rap.
+* R10: whether a key value is one late_key could have drawn
+    METHODS preliminary
+      IMPORTING
+        iv_value     TYPE simple
+      RETURNING
+        VALUE(rv_on) TYPE abap_bool.
 * R10: the save's adjust_numbers: MAPPED LATE of every created active
 * instance of a late-numbered entity to the savers, the final keys back
     METHODS late_numbers
@@ -3038,7 +3045,6 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
 * R10: adjust_numbers of the savers that redefine it, with MAPPED LATE of
 * the instances created under a preliminary key (late numbering)
     APPEND 'ADJUST_NUMBERS' TO mt_trace.
-    late_numbers( CHANGING cs_reported = cs_reported ).
 
     APPEND 'SAVE' TO mt_trace.
 * R7: a failure in the save ends the transaction here: the LUW is rolled
@@ -3048,6 +3054,8 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
 * A saver's failure is the caller's to show (BUSINESS), a refused database
 * write a technical error.
     TRY.
+* R10: inside the save's failure handling: a mapping refused here writes nothing
+        late_numbers( CHANGING cs_reported = cs_reported ).
         persist( ).
         save_savers( CHANGING cs_reported = cs_reported ).
       CATCH zcx_osd_rap INTO lx_error.
@@ -3101,7 +3109,7 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
     APPEND me TO gt_active.
     TRY.
         io_augment->augment( EXPORTING iv_entity = iv_entity ir_create = ir_create ir_update = ir_update
-                             IMPORTING ev_failed = ev_failed ).
+                             IMPORTING ev_failed = ev_failed et_messages = et_messages ).
       CATCH cx_root INTO lx_error.
         lv_top = lines( gt_active ).
         DELETE gt_active INDEX lv_top.
@@ -3167,6 +3175,9 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
     IF lv_tail > 9.
       lv_tail = 9.
     ENDIF.
+    IF lv_tail < 4.
+      RAISE EXCEPTION TYPE zcx_osd_rap EXPORTING iv_reason = |late numbering of { is_entity-name }: a key of { lv_tail } digits leaves no room for the preliminary keys (the top 1000)|.
+    ENDIF.
     DO 1000 TIMES.
       lv_k = sy-index - 1.
       lv_int = 1.
@@ -3210,9 +3221,15 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
     DATA ls_late   TYPE ty_late.
     DATA lt_index  TYPE STANDARD TABLE OF i WITH DEFAULT KEY.
     DATA lv_index  TYPE i.
-    DATA lv_row    TYPE i.
     DATA lv_any    TYPE abap_bool.
+    DATA lv_hits   TYPE i.
+    DATA lv_final  TYPE string.
+    DATA lt_finals TYPE string_table.
+    DATA lr_probe  TYPE REF TO data.
     FIELD-SYMBOLS <ls_inst>   TYPE ty_inst.
+    FIELD-SYMBOLS <ls_any>    TYPE any.
+    FIELD-SYMBOLS <ls_probe>  TYPE any.
+    FIELD-SYMBOLS <lv_pid>    TYPE any.
     FIELD-SYMBOLS <ls_mapped> TYPE any.
     FIELD-SYMBOLS <lt_late>   TYPE STANDARD TABLE.
     FIELD-SYMBOLS <ls_late>   TYPE any.
@@ -3267,29 +3284,107 @@ CLASS zcl_osd_rap_runtime IMPLEMENTATION.
         CHECK sy-subrc = 0.
         mo_bo->adjust_numbers( io_saver = lo_saver ir_mapped = lr_mapped ir_reported = lr_rep ).
       ENDLOOP.
-* the final keys back into the instances: their rows are what the save writes
+* the final keys back into the instances: their rows are what the save
+* writes. A row of MAPPED LATE is the instance its %pid names, whatever the
+* order the saver left the rows in; a row for no instance, an instance with
+* no row or two, a final key that is a preliminary one or that an active
+* instance (saved or in this transaction) already has fails the save, which
+* then writes nothing (docs/rap-runtime.md, R10)
+      IF lines( <lt_late> ) <> lines( lt_index ).
+        RAISE EXCEPTION TYPE zcx_osd_rap EXPORTING iv_reason = |adjust_numbers of { ls_entity-alias }: { lines( <lt_late> ) } rows for { lines( lt_index ) } instances|.
+      ENDIF.
+      CLEAR lt_finals.
       LOOP AT lt_index INTO lv_index.
-        lv_row = sy-tabix.
         READ TABLE mt_inst INDEX lv_index ASSIGNING <ls_inst>.
-        READ TABLE <lt_late> INDEX lv_row ASSIGNING <ls_late>.
         ASSIGN <ls_inst>-row->* TO <ls_row>.
-        CLEAR ls_late.
-        ls_late-entity = ls_entity-name.
-        ls_late-pre = <ls_inst>-key.
+        ASSIGN COMPONENT '%PID' OF STRUCTURE <ls_row> TO <lv_pid>.
+        lv_hits = 0.
+        LOOP AT <lt_late> ASSIGNING <ls_any>.
+          ASSIGN COMPONENT '%PID' OF STRUCTURE <ls_any> TO <lv_from>.
+          IF sy-subrc = 0 AND <lv_from> = <lv_pid>.
+            lv_hits = lv_hits + 1.
+            ASSIGN <ls_any> TO <ls_late>.
+          ENDIF.
+        ENDLOOP.
+        IF lv_hits <> 1.
+          RAISE EXCEPTION TYPE zcx_osd_rap EXPORTING iv_reason = |adjust_numbers of { ls_entity-alias }: { lv_hits } rows for the instance { <ls_inst>-key } (%pid)|.
+        ENDIF.
+        lr_probe = new_row( ls_entity ).
+        ASSIGN lr_probe->* TO <ls_probe>.
         LOOP AT ls_entity-fields INTO ls_field WHERE key = abap_true.
           ASSIGN COMPONENT ls_field-name OF STRUCTURE <ls_late> TO <lv_from>.
           IF sy-subrc <> 0 OR <lv_from> IS INITIAL.
             RAISE EXCEPTION TYPE zcx_osd_rap EXPORTING iv_reason = |adjust_numbers gave { ls_entity-alias } { <ls_inst>-key } no final key|.
           ENDIF.
+          ASSIGN COMPONENT ls_field-name OF STRUCTURE <ls_probe> TO <lv_to>.
+          <lv_to> = <lv_from>.
+          IF preliminary( <lv_from> ) = abap_true.
+            RAISE EXCEPTION TYPE zcx_osd_rap EXPORTING iv_reason = |adjust_numbers gave { ls_entity-alias } { <ls_inst>-key } the final key { <lv_from> }, which is in the range of the preliminary keys|.
+          ENDIF.
+        ENDLOOP.
+        lv_final = key_of( is_entity = ls_entity is_row = <ls_probe> ).
+        READ TABLE lt_finals TRANSPORTING NO FIELDS WITH KEY table_line = lv_final.
+        IF sy-subrc = 0 OR index_of( iv_entity = ls_entity-name iv_key = lv_final ) > 0
+            OR select_row( is_entity = ls_entity is_keys = <ls_probe> ) IS NOT INITIAL.
+          RAISE EXCEPTION TYPE zcx_osd_rap EXPORTING iv_reason = |adjust_numbers gave { ls_entity-alias } { <ls_inst>-key } the final key { lv_final }, which is in use|.
+        ENDIF.
+        APPEND lv_final TO lt_finals.
+        CLEAR ls_late.
+        ls_late-entity = ls_entity-name.
+        ls_late-pre = <ls_inst>-key.
+        LOOP AT ls_entity-fields INTO ls_field WHERE key = abap_true.
+          ASSIGN COMPONENT ls_field-name OF STRUCTURE <ls_probe> TO <lv_from>.
           ASSIGN COMPONENT ls_field-name OF STRUCTURE <ls_row> TO <lv_to>.
           <lv_to> = <lv_from>.
         ENDLOOP.
-        <ls_inst>-key = key_of( is_entity = ls_entity is_row = <ls_row> ).
+        <ls_inst>-key = lv_final.
         ls_late-row = <ls_inst>-row.
         APPEND ls_late TO mt_late.
         APPEND |LATE { ls_entity-alias } { ls_late-pre } -> { <ls_inst>-key }| TO mt_trace.
       ENDLOOP.
     ENDLOOP.
+  ENDMETHOD.
+
+  METHOD preliminary.
+* whether a key value is in the range late_key draws preliminary keys from:
+* the top 1000 values of the key's type
+    DATA lv_kind  TYPE c LENGTH 1.
+    DATA lv_len   TYPE i.
+    DATA lv_tail  TYPE i.
+    DATA lv_int   TYPE i.
+    DATA lv_num   TYPE string.
+    DATA lv_floor TYPE string.
+    DATA lv_text  TYPE string.
+
+    DESCRIBE FIELD iv_value TYPE lv_kind OUTPUT-LENGTH lv_len.
+    IF lv_kind <> 'N' AND lv_kind <> 'C' AND lv_kind <> 'I'.
+      RETURN.
+    ENDIF.
+    IF lv_kind = 'I'.
+      lv_len = 9.
+    ENDIF.
+    lv_tail = lv_len.
+    IF lv_tail > 9.
+      lv_tail = 9.
+    ENDIF.
+    lv_int = 1.
+    DO lv_tail TIMES.
+      lv_int = lv_int * 10.
+    ENDDO.
+    lv_int = lv_int - 1000.
+    IF lv_int < 0.
+      lv_int = 0.
+    ENDIF.
+    IF lv_kind = 'I'.
+      lv_num = iv_value.
+      rv_on = boolc( CONV i( iv_value ) >= lv_int ).
+      RETURN.
+    ENDIF.
+    lv_num = lv_int.
+    lv_num = condense( lv_num ).
+    lv_floor = repeat( val = '9' occ = lv_len - lv_tail ) && repeat( val = '0' occ = lv_tail - strlen( lv_num ) ) && lv_num.
+    lv_text = iv_value.
+    rv_on = boolc( strlen( lv_text ) = lv_len AND lv_text >= lv_floor ).
   ENDMETHOD.
 
   METHOD final_key.

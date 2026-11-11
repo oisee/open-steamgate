@@ -527,6 +527,8 @@ CLASS zcl_osd_rap_sadl IMPLEMENTATION.
     DATA ls_map     TYPE zif_osd_rap_registry=>ty_map.
     DATA lv_field   TYPE string.
     DATA lv_failed  TYPE i.
+    DATA lt_msgs    TYPE string_table.
+    DATA lv_text    TYPE string.
     DATA lx_error   TYPE REF TO zcx_osd_rap.
     FIELD-SYMBOLS <lt_tab>  TYPE STANDARD TABLE.
     FIELD-SYMBOLS <ls_new>  TYPE any.
@@ -581,18 +583,24 @@ CLASS zcl_osd_rap_sadl IMPLEMENTATION.
     TRY.
         IF iv_kind = 'CREATE'.
           io_runtime->augment( EXPORTING io_augment = li_augment iv_entity = ls_proj-entity ir_create = lr_tab
-                               IMPORTING ev_failed = lv_failed ).
+                               IMPORTING ev_failed = lv_failed et_messages = lt_msgs ).
         ELSE.
           io_runtime->augment( EXPORTING io_augment = li_augment iv_entity = ls_proj-entity ir_update = lr_tab
-                               IMPORTING ev_failed = lv_failed ).
+                               IMPORTING ev_failed = lv_failed et_messages = lt_msgs ).
         ENDIF.
       CATCH zcx_osd_rap INTO lx_error.
         io_runtime->rollback( ).
         technical( lx_error ).
     ENDTRY.
+* the augment's own messages are the answer (RELATING TO is not run, so
+* they are not mapped to the request's rows: docs/rap-runtime.md, R10)
     IF lv_failed > 0.
       io_runtime->rollback( ).
-      refuse( |{ ls_proj-alias }: the augment of the { to_lower( iv_kind ) } failed| ).
+      lv_text = concat_lines_of( table = lt_msgs sep = `; ` ).
+      IF lv_text IS INITIAL.
+        lv_text = |{ ls_proj-alias }: the augment of the { to_lower( iv_kind ) } failed|.
+      ENDIF.
+      refuse( lv_text ).
     ENDIF.
   ENDMETHOD.
 

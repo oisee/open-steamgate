@@ -16,13 +16,15 @@ INTERFACE zif_osd_rap_augment PUBLIC.
       VALUE(rr_table) TYPE REF TO data.
 
 * call the augment with the request's create and update rows (either may be
-* unbound); EV_FAILED the rows it put into FAILED
+* unbound); EV_FAILED the rows it put into FAILED, ET_MESSAGES the texts
+* of the messages it put into REPORTED
   METHODS augment
     IMPORTING
-      iv_entity TYPE csequence
-      ir_create TYPE REF TO data OPTIONAL
-      ir_update TYPE REF TO data OPTIONAL
+      iv_entity   TYPE csequence
+      ir_create   TYPE REF TO data OPTIONAL
+      ir_update   TYPE REF TO data OPTIONAL
     EXPORTING
-      ev_failed TYPE i.
+      ev_failed   TYPE i
+      et_messages TYPE string_table.
 
 ENDINTERFACE.

@@ -288,16 +288,34 @@ CLASS lsc_agency IMPLEMENTATION.
 
     " OSD overlay: cl_numberrange_runtime=>number_get with QUANTITY and the
     " return codes is not what this runtime's class offers, and /DMO/AGNCY has
-    " no interval here: the numbers follow the highest agency ID saved
-    " (unmeasured against a system's interval). The warning and the
-    " exhausted range (return codes 1 to 3) do not occur
-    SELECT MAX( agency_id ) FROM /dmo/agency INTO @agency_id_max.
+    " no interval here: the numbers follow the highest agency ID saved below
+    " the runtime's preliminary keys (the top 1000 of the range, 999000 and
+    " up), skipping any ID an agency or a draft already has (unmeasured
+    " against a system's interval). An exhausted range leaves the ID initial,
+    " and the runtime refuses the save (in place of RAISE SHORTDUMP)
+    CONSTANTS preliminary_floor TYPE /dmo/agency_id VALUE '999000'.
+    DATA in_use TYPE i.
+    SELECT MAX( agency_id ) FROM /dmo/agency WHERE agency_id < @preliminary_floor INTO @agency_id_max.
 
     " Set Agency ID
     LOOP AT mapped-/dmo/agency ASSIGNING FIELD-SYMBOL(<agency>). " USING KEY entity" WHERE agencyid IS INITIAL.
       IF <agency>-agencyid IS INITIAL. " If condition necessary?
-        agency_id_max += 1.
-        <agency>-agencyid = agency_id_max.
+        DO.
+          agency_id_max += 1.
+          IF agency_id_max >= preliminary_floor.
+            EXIT.
+          ENDIF.
+          SELECT COUNT(*) FROM /dmo/agency WHERE agency_id = @agency_id_max INTO @in_use.
+          IF in_use = 0.
+            SELECT COUNT(*) FROM /dmo/agency_d WHERE agencyid = @agency_id_max INTO @in_use.
+          ENDIF.
+          IF in_use = 0.
+            EXIT.
+          ENDIF.
+        ENDDO.
+        IF agency_id_max < preliminary_floor.
+          <agency>-agencyid = agency_id_max.
+        ENDIF.
 
         " Read table mapped assign
       ENDIF.

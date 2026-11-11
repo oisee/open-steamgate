@@ -196,6 +196,84 @@ CLASS ltcl_supplement IMPLEMENTATION.
 
 ENDCLASS.
 
+CLASS lcl_reversing DEFINITION FINAL.
+* The agency BO whose saver returns MAPPED LATE in reverse order: a valid
+* adjust_numbers may order its rows as it likes, %pre names each one (the
+* #917 critic's probe). Everything else is the generated adapter.
+  PUBLIC SECTION.
+    INTERFACES zif_osd_rap_bo.
+    METHODS constructor.
+  PRIVATE SECTION.
+    DATA mi_bo TYPE REF TO zif_osd_rap_bo.
+ENDCLASS.
+
+CLASS lcl_reversing IMPLEMENTATION.
+
+  METHOD constructor.
+    DATA li_registry TYPE REF TO zif_osd_rap_registry.
+    CREATE OBJECT li_registry TYPE ('ZCL_OSD_RAP_REGISTRY').
+    mi_bo = li_registry->get( '/DMO/R_AGENCYTP' ).
+  ENDMETHOD.
+
+  METHOD zif_osd_rap_bo~model.
+    rs_model = mi_bo->model( ).
+  ENDMETHOD.
+
+  METHOD zif_osd_rap_bo~new_rows.
+    rr_rows = mi_bo->new_rows( iv_entity ).
+  ENDMETHOD.
+
+  METHOD zif_osd_rap_bo~new_table.
+    rr_table = mi_bo->new_table( iv_entity = iv_entity iv_kind = iv_kind iv_action = iv_action ).
+  ENDMETHOD.
+
+  METHOD zif_osd_rap_bo~new_response.
+    rr_response = mi_bo->new_response( iv_kind ).
+  ENDMETHOD.
+
+  METHOD zif_osd_rap_bo~new_result.
+    rr_result = mi_bo->new_result( iv_entity = iv_entity iv_action = iv_action ).
+  ENDMETHOD.
+
+  METHOD zif_osd_rap_bo~new_request.
+    rr_request = mi_bo->new_request( iv_kind ).
+  ENDMETHOD.
+
+  METHOD zif_osd_rap_bo~save_modified.
+    mi_bo->save_modified( io_saver = io_saver ir_create = ir_create ir_update = ir_update
+                          ir_delete = ir_delete ir_reported = ir_reported ).
+  ENDMETHOD.
+
+  METHOD zif_osd_rap_bo~adjust_numbers.
+    DATA lr_copy TYPE REF TO data.
+    DATA lv_line TYPE i.
+    FIELD-SYMBOLS <ls_mapped> TYPE any.
+    FIELD-SYMBOLS <lt_late>   TYPE STANDARD TABLE.
+    FIELD-SYMBOLS <lt_copy>   TYPE STANDARD TABLE.
+    FIELD-SYMBOLS <ls_row>    TYPE any.
+
+    mi_bo->adjust_numbers( io_saver = io_saver ir_mapped = ir_mapped ir_reported = ir_reported ).
+    ASSIGN ir_mapped->* TO <ls_mapped>.
+    ASSIGN COMPONENT '/DMO/AGENCY' OF STRUCTURE <ls_mapped> TO <lt_late>.
+    CREATE DATA lr_copy LIKE <lt_late>.
+    ASSIGN lr_copy->* TO <lt_copy>.
+    lv_line = lines( <lt_late> ).
+    WHILE lv_line > 0.
+      READ TABLE <lt_late> INDEX lv_line ASSIGNING <ls_row>.
+      APPEND <ls_row> TO <lt_copy>.
+      lv_line = lv_line - 1.
+    ENDWHILE.
+    <lt_late> = <lt_copy>.
+  ENDMETHOD.
+
+  METHOD zif_osd_rap_bo~call.
+    mi_bo->call( io_handler = io_handler iv_entity = iv_entity iv_name = iv_name
+                 ir_rows = ir_rows ir_keys = ir_keys ir_result = ir_result
+                 ir_failed = ir_failed ir_reported = ir_reported ir_mapped = ir_mapped ).
+  ENDMETHOD.
+
+ENDCLASS.
+
 CLASS ltcl_agency DEFINITION FOR TESTING DURATION SHORT RISK LEVEL DANGEROUS FINAL.
   PRIVATE SECTION.
     CONSTANTS co_bdef TYPE string VALUE '/DMO/R_AGENCYTP'.
@@ -218,6 +296,7 @@ CLASS ltcl_agency DEFINITION FOR TESTING DURATION SHORT RISK LEVEL DANGEROUS FIN
       IMPORTING
         iv_draft      TYPE abap_bool
         iv_email      TYPE csequence DEFAULT 'r10@agency.example'
+        iv_name       TYPE csequence DEFAULT 'R10 agency'
       RETURNING
         VALUE(rs_key) TYPE ty_mapped.
     METHODS activate
@@ -229,6 +308,18 @@ CLASS ltcl_agency DEFINITION FOR TESTING DURATION SHORT RISK LEVEL DANGEROUS FIN
     METHODS activate_draws_the_final_key FOR TESTING RAISING cx_static_check.
     METHODS activation_validates FOR TESTING RAISING cx_static_check.
     METHODS active_create_numbers_late FOR TESTING RAISING cx_static_check.
+    METHODS drafts_at_the_top_do_not_meet FOR TESTING RAISING cx_static_check.
+    METHODS exhausted_range_writes_nothing FOR TESTING RAISING cx_static_check.
+    METHODS mapping_by_pid_not_order FOR TESTING RAISING cx_static_check.
+    METHODS keep
+      IMPORTING
+        iv_id   TYPE /dmo/agency_id
+        iv_name TYPE csequence.
+    METHODS first_key
+      IMPORTING
+        is_mapped    TYPE ty_mapped
+      RETURNING
+        VALUE(rv_id) TYPE /dmo/agency_id.
 ENDCLASS.
 
 CLASS ltcl_agency IMPLEMENTATION.
@@ -244,7 +335,7 @@ CLASS ltcl_agency IMPLEMENTATION.
     zcl_osd_rap_eml=>rollback( ).
     zcl_osd_rap_eml=>reset( ).
     DELETE FROM /dmo/agency WHERE agency_id > @mv_max.
-    DELETE FROM /dmo/agency_d WHERE name = 'R10 agency'.
+    DELETE FROM /dmo/agency_d WHERE name LIKE 'R10 %'.
     COMMIT WORK.
   ENDMETHOD.
 
@@ -271,7 +362,7 @@ CLASS ltcl_agency IMPLEMENTATION.
     IF iv_draft = abap_true.
       ls_create-%is_draft = if_abap_behv=>mk-on.
     ENDIF.
-    ls_create-name = 'R10 agency'.
+    ls_create-name = iv_name.
     ls_create-countrycode = mv_country.
     ls_create-emailaddress = iv_email.
     APPEND ls_create TO lt_create.
@@ -367,6 +458,124 @@ CLASS ltcl_agency IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( act = lv_final exp = 1 ).
     SELECT COUNT(*) FROM /dmo/agency INTO @DATA(lv_pre) WHERE agency_id = @ls_line-agencyid.
     cl_abap_unit_assert=>assert_equals( act = lv_pre exp = 0 ).
+  ENDMETHOD.
+
+  METHOD keep.
+* an active agency written straight into the table, as a seed row would be
+    DATA ls_row TYPE /dmo/agency.
+    ls_row-agency_id = iv_id.
+    ls_row-name = iv_name.
+    ls_row-country_code = mv_country.
+    ls_row-email_address = 'kept@agency.example'.
+    INSERT /dmo/agency FROM @ls_row.
+    COMMIT WORK.
+  ENDMETHOD.
+
+  METHOD first_key.
+    DATA ls_line LIKE LINE OF is_mapped-/dmo/agency.
+    READ TABLE is_mapped-/dmo/agency INDEX 1 INTO ls_line.
+    rv_id = ls_line-agencyid.
+  ENDMETHOD.
+
+  METHOD drafts_at_the_top_do_not_meet.
+* the #917 critic's repro: an agency saved at 999997, two new drafts under
+* the preliminary keys above it, both activated. Before, the first took the
+* second's preliminary key as its final one and the second then replaced
+* the first. The final keys are drawn below the preliminary range now
+    DATA lv_first  TYPE /dmo/agency_id.
+    DATA lv_second TYPE /dmo/agency_id.
+    DATA lv_below  TYPE /dmo/agency_id.
+    DATA lv_n1     TYPE /dmo/agency_id.
+    DATA lv_n2     TYPE /dmo/agency_id.
+    DATA lv_count  TYPE i.
+
+    SELECT MAX( agency_id ) FROM /dmo/agency WHERE agency_id < '999000' INTO @lv_below.
+    lv_n1 = lv_below + 1.
+    lv_n2 = lv_below + 2.
+    keep( iv_id = '999997' iv_name = 'R10 kept' ).
+    lv_first = first_key( create( iv_draft = abap_true iv_name = 'R10 first' ) ).
+    cl_abap_unit_assert=>assert_true( act = commit( ) ).
+    lv_second = first_key( create( iv_draft = abap_true iv_name = 'R10 second' ) ).
+    cl_abap_unit_assert=>assert_true( act = commit( ) ).
+    cl_abap_unit_assert=>assert_equals( act = lv_first exp = '999999' ).
+    cl_abap_unit_assert=>assert_equals( act = lv_second exp = '999998' ).
+    activate( lv_first ).
+    cl_abap_unit_assert=>assert_true( act = commit( ) ).
+    activate( lv_second ).
+    cl_abap_unit_assert=>assert_true( act = commit( ) ).
+    SELECT COUNT(*) FROM /dmo/agency INTO @lv_count WHERE agency_id = @lv_n1 AND name = 'R10 first'.
+    cl_abap_unit_assert=>assert_equals( act = lv_count exp = 1 msg = 'the first, below the preliminary range' ).
+    SELECT COUNT(*) FROM /dmo/agency INTO @lv_count WHERE agency_id = @lv_n2 AND name = 'R10 second'.
+    cl_abap_unit_assert=>assert_equals( act = lv_count exp = 1 msg = 'the second, its own key' ).
+    SELECT COUNT(*) FROM /dmo/agency INTO @lv_count WHERE agency_id = '999997' AND name = 'R10 kept'.
+    cl_abap_unit_assert=>assert_equals( act = lv_count exp = 1 msg = 'the saved agency is untouched' ).
+  ENDMETHOD.
+
+  METHOD exhausted_range_writes_nothing.
+* the final range is used up (an agency at 998999, just below the
+* preliminary range): Activate's save fails and writes nothing, the draft stays
+    DATA lv_pre   TYPE /dmo/agency_id.
+    DATA lv_count TYPE i.
+    DATA lv_saved TYPE abap_bool.
+    DATA lx_error TYPE REF TO zcx_osd_rap.
+
+    keep( iv_id = '998999' iv_name = 'R10 kept' ).
+    lv_pre = first_key( create( abap_true ) ).
+    cl_abap_unit_assert=>assert_true( act = commit( ) ).
+    activate( lv_pre ).
+    TRY.
+        zcl_osd_rap_eml=>commit( EXPORTING iv_bdef = co_bdef
+                                 IMPORTING ev_saved = lv_saved
+                                 CHANGING cs_failed = ms_failed cs_reported = ms_reported ).
+      CATCH zcx_osd_rap INTO lx_error.
+        lv_saved = abap_false.
+    ENDTRY.
+    cl_abap_unit_assert=>assert_false( act = lv_saved msg = 'no final key: the save fails' ).
+    zcl_osd_rap_eml=>rollback( ).
+    SELECT COUNT(*) FROM /dmo/agency INTO @lv_count WHERE agency_id > @mv_max AND agency_id <> '998999'.
+    cl_abap_unit_assert=>assert_equals( act = lv_count exp = 0 msg = 'nothing written' ).
+    SELECT COUNT(*) FROM /dmo/agency_d INTO @lv_count WHERE agencyid = @lv_pre.
+    cl_abap_unit_assert=>assert_equals( act = lv_count exp = 1 msg = 'the draft stays' ).
+  ENDMETHOD.
+
+  METHOD mapping_by_pid_not_order.
+* two active creates, the saver's MAPPED LATE reversed: each instance gets
+* the key its %pid was given
+    DATA lo_bo     TYPE REF TO lcl_reversing.
+    DATA lo_rap    TYPE REF TO zcl_osd_rap_runtime.
+    DATA lt_create TYPE tt_create.
+    DATA ls_create LIKE LINE OF lt_create.
+    DATA ls_mapped TYPE ty_mapped.
+    DATA lv_saved  TYPE abap_bool.
+    DATA lv_below  TYPE /dmo/agency_id.
+    DATA lv_n1     TYPE /dmo/agency_id.
+    DATA lv_n2     TYPE /dmo/agency_id.
+    DATA lv_count  TYPE i.
+
+    SELECT MAX( agency_id ) FROM /dmo/agency WHERE agency_id < '999000' INTO @lv_below.
+    lv_n1 = lv_below + 1.
+    lv_n2 = lv_below + 2.
+    CREATE OBJECT lo_bo.
+    lo_rap = zcl_osd_rap_runtime=>for_bo( lo_bo ).
+    ls_create-countrycode = mv_country.
+    ls_create-emailaddress = 'r10@agency.example'.
+    ls_create-%control-name = if_abap_behv=>mk-on.
+    ls_create-%control-countrycode = if_abap_behv=>mk-on.
+    ls_create-%control-emailaddress = if_abap_behv=>mk-on.
+    ls_create-%cid = 'M1'.
+    ls_create-name = 'R10 first'.
+    APPEND ls_create TO lt_create.
+    ls_create-%cid = 'M2'.
+    ls_create-name = 'R10 second'.
+    APPEND ls_create TO lt_create.
+    lo_rap->modify( EXPORTING iv_entity = '/dmo/agency' iv_operation = zcl_osd_rap_runtime=>co_operation-create it_rows = lt_create
+                    CHANGING cs_mapped = ls_mapped cs_failed = ms_failed cs_reported = ms_reported ).
+    lo_rap->commit( IMPORTING ev_saved = lv_saved CHANGING cs_failed = ms_failed cs_reported = ms_reported ).
+    cl_abap_unit_assert=>assert_true( act = lv_saved ).
+    SELECT COUNT(*) FROM /dmo/agency INTO @lv_count WHERE agency_id = @lv_n1 AND name = 'R10 first'.
+    cl_abap_unit_assert=>assert_equals( act = lv_count exp = 1 msg = 'the saver gave the first row the first number' ).
+    SELECT COUNT(*) FROM /dmo/agency INTO @lv_count WHERE agency_id = @lv_n2 AND name = 'R10 second'.
+    cl_abap_unit_assert=>assert_equals( act = lv_count exp = 1 ).
   ENDMETHOD.
 
 ENDCLASS.

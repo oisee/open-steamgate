@@ -424,18 +424,21 @@ augment )` / `use update ( augment )`. Rules here:
   refused). Its FOR MODIFY method takes `FOR CREATE` / `FOR UPDATE` of the
   projection entity, typed by the projection's derived types; a generated
   class (`ZIF_OSD_RAP_AUGMENT`) calls it.
-- Order: on a system the augment runs before the base operation and its
-  requests are merged with the original. Here the base operation runs
-  first (the created instance is in the buffer under its `%cid`), then the
-  augment with the original rows -- `%cid`, `%is_draft`, the projection's
-  fields and `%control` -- while the base's transaction is active
-  (`ZCL_OSD_RAP_RUNTIME=>AUGMENT`), so its `MODIFY AUGMENTING ENTITIES`
-  (lowered by hand to the `ZCL_OSD_RAP_EML` calls in the overlay) lands in
-  the same transaction and is saved with it. A `%cid_ref` to the created
-  supplement resolves. `RELATING TO` (which maps the augmenting request's
-  messages to the original rows) is not run: a failed augment fails the
-  whole request. **Unmeasured**: the order, and a system's messages for a
-  failing augment.
+- Order -- **a deviation**: on a system the augment's requests are merged
+  into the request before the base handler runs, and an instance the
+  augment fails is taken out before the base processes it; `RELATING TO`
+  maps later failures of the augmenting requests back to the original rows
+  (SAP's documentation of operation augmentation). Here the base operation
+  runs first (the created instance is in the buffer under its `%cid`), then
+  the augment with the original rows -- `%cid`, `%is_draft`, the
+  projection's fields and `%control` -- while the base's transaction is
+  active (`ZCL_OSD_RAP_RUNTIME=>AUGMENT`), so its `MODIFY AUGMENTING
+  ENTITIES` (lowered by hand to the `ZCL_OSD_RAP_EML` calls in the overlay)
+  lands in the same transaction and is saved with it. A `%cid_ref` to the
+  created supplement resolves. Consequences: a create whose mandatory field
+  only the augment would supply is refused before the augment runs; a
+  failed augment fails the whole request (all or nothing), and its REPORTED
+  messages are the answer's text, not mapped to rows.
 
 ### Namespaced aliases
 
@@ -465,14 +468,22 @@ and `%key`, and fills `%key`.
   reported TYPE RESPONSE FOR REPORTED LATE`; the clean-room base declares it
   for the static check only. The runtime calls each saver that redefines it.
 - **The preliminary key (unmeasured).** A created instance of a
-  late-numbered entity gets a `%pid` (a UUID) and a **preliminary key**:
-  the largest value of the key's type counting down (`999999`, `999998`,
-  ... for the agency's NUMC 6), skipping every key an active instance, a
-  draft or the buffer has. On a system the key fields may stay initial and
+  late-numbered entity gets a `%pid` (a UUID) and a **preliminary key**
+  from a reserved range, the top 1000 values of the key's type counting
+  down (`999999`, `999998`, ... `999000` for the agency's NUMC 6), skipping
+  every key an active instance, a draft or the buffer has. On a system the key fields may stay initial and
   `%pid` alone names the instance in the interaction phase; here a key is
-  what the buffer and OData address, so one is given, and it cannot meet
-  the final keys, which count up from the number range. It is what
+  what the buffer and OData address, so one is given. It is what
   `adjust_numbers` sees in `%tmp`; `%key` arrives initial.
+- **The final key is checked** (the #917 critic's collision: two drafts at
+  the top of a range, a final key landing on a live preliminary one and an
+  Activate silently replacing another agency). A row of MAPPED LATE is the
+  instance its `%pid` names, in any order; a missing, extra or duplicated
+  row, a final key in the reserved range, or one an active instance already
+  has (saved or in this transaction) fails the save -- it writes nothing.
+  The overlay's `adjust_numbers` draws below the reserved range and skips
+  any ID an agency or a draft has; an exhausted range leaves the key initial
+  and the save fails (a system's `RAISE SHORTDUMP`).
 - **Draft vs active.** A draft of a late-numbered entity keeps its
   preliminary key for its whole life (on a system: the draft table's key is
   the key plus `DRAFTUUID`, the draft's `%pid`). Activate creates the
@@ -531,7 +542,9 @@ the seed class from the generated agencies and customers.
 - **One runtime defect met on the way** (ANORMALIES
   `ANOMALY-2026-11-11-update-include-group`): the runtime's `UPDATE dbtab
   FROM TABLE` of a table with a named include (every flight draft table)
-  answers 4; the generated table class replaces the row instead.
+  answers 4; the generated table class writes `UPDATE ... SET` over its
+  columns, each named, instead (a real UPDATE: triggers and foreign keys see
+  one).
 - **Tests.** `ZCL_OSD_RAPFLIGHT_R10_TEST` (8, on the flight BOs): the
   supplement's numbering by category, Prepare and Activate, a validation
   stopping Activate with the draft kept, Edit + change + Discard; the

@@ -413,12 +413,13 @@ under a preliminary key, activated to its final key; a refused agency) and
   (`node tools/rap-flight/constructs.mjs`). V2 `$metadata`
   of the two travel services fails (ANORMALIES "RAP R7: a namespaced
   service's V2 $metadata"); V4's answers.
-- The service definitions (`srvd`) are not fetched and the bindings
-  (`srvb`) are not read: main's R3 (#892) serves every service definition
-  it finds, six of the seven here refuse (the table above), and the one
-  that resolves, the legacy base view, is not this pack's service to
-  publish. The OData service here is the overlay's YAML, under a name of
-  ours.
+- Of the service definitions (`srvd`) only `/DMO/UI_SUPPLEMENT` and
+  `/DMO/UI_AGENCY` are fetched (R10); the managed travel's two come from the
+  overlay without their value helps (R7), the carrier singleton's and the
+  readonly root's do not resolve, and the legacy base view is not this
+  pack's service to publish. The bindings (`srvb`) are not read. The
+  read-only views are served by the overlay's own YAML
+  (`ZOSD_RAPFLIGHT_SRV`).
 - The `draft/`, `colldraft/`, `hierarchy/` and `unmanaged/` scenarios are
   not fetched; their counts above come from the clone, not from a build.
 - The ABAP Unit includes are not run.

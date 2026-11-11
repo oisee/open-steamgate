@@ -69,4 +69,12 @@ describe("CDS path elements (R10)", () => {
     expect(all.ZC_PBOOKING.fields.some((x) => x.name === "TRAVELSTATUS")).to.equal(false);
     expect(all.ZC_PBOOKING.droppedPaths).to.deep.equal([{name: "TRAVELSTATUS", why: "_Travel ends in ZC_NOWHERE, which is not a generated CDS view"}]);
   });
+
+  it("does not serve a path over a to-many hop without a language condition (an arbitrary row)", () => {
+    const all = views({ZC_PTRAVEL: `define view entity ZC_PTRAVEL as select from zstg_demo
+  association [0..*] to ZC_PBOOKING as _Booking on $projection.TravelId = _Booking.TravelId
+{ key travel_id as TravelId, status as Status, _Booking.BookingId as AnyBooking, _Booking }`, ZC_PBOOKING: BOOKING});
+    expect(all.ZC_PTRAVEL.fields.some((x) => x.name === "ANYBOOKING")).to.equal(false);
+    expect(all.ZC_PTRAVEL.droppedPaths[0].why).to.match(/is to-many \[0\.\.\*\] without a language condition/);
+  });
 });

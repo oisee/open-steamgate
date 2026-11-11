@@ -63,8 +63,11 @@ export function resolvePaths(views, byName) {
         if (!target || target.skip) { why = `${hop} ends in ${a.target}, which is not a generated CDS view`; break; }
         const pairs = (a.pairs ?? []).map((p) => ({source: rename(String(p.source).toUpperCase()), target: String(p.target).toUpperCase()}));
         if (!pairs.length || pairs.some((p) => !p.source)) { why = `${hop} of ${current.name} has no key pairs here`; break; }
-        steps.push({assoc: hop, target: target.name.toUpperCase(), sqlView: target.sqlView.toUpperCase(), pairs,
-          language: filter ? filter.toUpperCase() : f.path.localized ? language(target) : undefined});
+        const lang = filter ? filter.toUpperCase() : f.path.localized ? language(target) : undefined;
+        // a hop to many is one row only through the language (a text
+        // association); any other would read an arbitrary one of its rows
+        if (!lang && a.max !== undefined && a.max !== "1" && a.max !== "0") { why = `${hop} of ${current.name} is to-many [${a.min ?? "0"}..${a.max}] without a language condition`; break; }
+        steps.push({assoc: hop, target: target.name.toUpperCase(), sqlView: target.sqlView.toUpperCase(), pairs, language: lang});
         current = target;
       }
       const end = why ? undefined : (current.fields ?? []).find((x) => x.name === f.path.element && !x.virtual);
