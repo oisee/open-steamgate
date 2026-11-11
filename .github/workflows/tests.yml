@@ -405,6 +405,19 @@ jobs:
             npx playwright install --with-deps chromium
           fi
 
+      # **The generation the browser specs serve is not the one the build job
+      # packed.** playwright.config.mjs adds the demo/cockpit-fleet pack to
+      # OSD_PACKS, the pack is part of the generation's inputs, and the web
+      # server's start (ensureSourceBuild) therefore transpiled a second
+      # generation -- about 48 s -- inside Playwright's 60 s webServer wait,
+      # before it even listened. Measured on this job: 32-62 s from start to
+      # ready, 6 of 26 runs timed out, the tag run of vscode-v0.7.2620 among
+      # them; the second start in the same job (Portable AMDP below) reused
+      # that generation and was ready in about 12 s. Built here, outside the
+      # wait, with the same pack list the config hands the server.
+      - name: Build the generation the browser specs serve
+        run: OSD_PACKS=demo/cockpit-fleet node tools/osd-build.mjs
+
       - name: Launchpad, FCL, taxi F4 and APC smoke tests
         run: node scripts/run-e2e-isolated.mjs test/e2e/launchpad-navigation.spec.mjs test/e2e/fcl.spec.mjs test/e2e/listreport.spec.mjs test/e2e/taxi.spec.mjs test/e2e/zork.spec.mjs test/e2e/lsd.spec.mjs --config playwright.config.mjs
 
