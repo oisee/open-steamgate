@@ -4531,6 +4531,24 @@ Not an anomaly, recorded for porting: on 7.58, `FIND ... REGEX` (POSIX) raises a
 - Workaround: the overlay copies of the three pools; every edit is listed in docs/rap-flight-pack.md ("R7: the travel pools").
 - Upstream: candidates for abaplint/transpiler (CORRESPONDING DEEP / EXCEPT; the structure move) -- needs an issue each, with a reproducer, after a critic pass.
 
+## RAP R10: the flight draft pools against this transpiler (packs/rap-flight overlay)
+
+### ANOMALY-2026-11-11-rap-augmenting-eml -- MODIFY AUGMENTING ENTITIES is not lowered
+
+- Status: `workaround`
+- Discovery date: `2026-11-11`
+- Affected versions: the pinned `@abaplint/transpiler` (libs.lock.json), its RAP EML lowering
+- Affected ABAP statement, runtime API or adapter: `MODIFY AUGMENTING ENTITIES OF b ENTITY e CREATE BY \_a FROM t RELATING TO r BY rel`, `READ ENTITIES ... BY \_a FROM k LINK DATA(l)`; derived-table secondary keys `draft`, `cid` (`t[ KEY draft %tky = ... ]`)
+- Minimal ABAP reproducer: upstream `reuse/supplement/#dmo#bp_c_supplement.clas.locals_imp.abap` (abap-platform-refscen-flight at 5353cbeb)
+- Exact command used to run it: `npm run transpile` with the upstream pool in place of the overlay
+- Expected SAP behaviour: the augment's requests join the original request (public BDEF documentation, "augment")
+- Actual open-abap behaviour: the augmenting form and `BY \_assoc` are not lowered onto `KERNEL_RAP_EML`; the derived tables carry no `draft` / `cid` keys
+- Impact on open-steamgate: the supplement projection's augment (the text child behind `SupplementDescription`) needs an overlay
+- Smallest safe workaround: the overlay writes the `ZCL_OSD_RAP_EML` calls the statements stand for (`create_by`, `read_by`, `modify`) and reads by the key fields; `RELATING TO` (message mapping) is not run: a failed augment fails the whole request (docs/rap-runtime.md "R10")
+- Upstream issue: needs an issue (abaplint/transpiler, beside the `BY \_assoc` lowering of R5) after a critic pass
+- Regression-test location: `test/rap-r10.mjs` ("creates a supplement draft with its description (augment)")
+- Upstream version containing a fix: unknown
+
 ## RAP R7: a namespaced service's V2 $metadata (open-abap-odata handler)
 
 - Status: open; the data requests work, `$metadata` over V2 does not.

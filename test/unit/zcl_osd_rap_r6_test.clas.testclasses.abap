@@ -46,6 +46,10 @@ CLASS lcl_lazy IMPLEMENTATION.
                           ir_delete = ir_delete ir_reported = ir_reported ).
   ENDMETHOD.
 
+  METHOD zif_osd_rap_bo~adjust_numbers.
+    RETURN.
+  ENDMETHOD.
+
   METHOD zif_osd_rap_bo~call.
     IF to_upper( iv_name ) = 'COPYBILL'.
       RETURN.

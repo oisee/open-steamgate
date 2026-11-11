@@ -366,11 +366,51 @@ cascade, `acceptTravel` / `rejectTravel` through the approver projection)
 and `ZCL_OSD_RAPFLIGHT_R7_TEST` (the change log in `/dmo/log_travel`, the
 supplements in `/dmo/booksuppl_m`).
 
+## R10: the supplement and agency BOs run with draft
+
+Since RAP R10 ([rap-runtime.md](rap-runtime.md), "R10") the draft BOs of
+the reuse layer are built and served with their projections: the
+supplement (`/DMO/I_SUPPLEMENT`, `/DMO/C_SUPPLEMENT`, served as
+`/DMO/UI_SUPPLEMENT`) and the agency (`/DMO/R_AGENCYTP`, `/DMO/C_AGENCYTP`,
+served as `/DMO/UI_AGENCY`), over V4 at `/sap/opu/odata4/sap/%2FDMO%2FUI_...`
+and over V2 data requests.
+
+- **Fetched as they are**: the four BDEFs, the two service definitions and
+  the two consumption views (their path elements are served since R10, the
+  ones that reach `I_Country` / `I_Currency` -- table stand-ins here -- are
+  not, and the build says so). `/DMO/I_AGENCYTP` (an interface BDEF) and the
+  carrier singleton stay out.
+- **From the overlay**: the three pools, whole. What changes in the
+  `locals_imp` includes, each marked `OSD overlay`:
+
+| change | where | why |
+| --- | --- | --- |
+| `DEFINITION DEFERRED FOR TESTING` and the `FRIENDS` naming test classes dropped | all three | the test classes are not fetched |
+| an EML target declared with its derived type, `WITH CORRESPONDING #( keys )` as a declared import table | every READ ENTITIES | abaplint types an inline EML target void |
+| `CORRESPONDING ... DISCARDING DUPLICATES` as a loop | supplement, agency validations | not parsed |
+| `cl_numberrange_runtime=>number_get` replaced by the highest saved ID + 1 (the supplement's per category, over the active and the draft table) | supplement early numbering, agency `adjust_numbers` | this runtime's class has no QUANTITY / SUBOBJECT / return codes and the objects no interval (unmeasured against a system's interval) |
+| `LOOP ... GROUP BY` as a loop over the categories | supplement early numbering | the numbering per category, spelled out |
+| `MODIFY AUGMENTING ENTITIES ... RELATING TO` and `READ ENTITIES ... BY \_assoc ... LINK` written as the `ZCL_OSD_RAP_EML` calls they stand for; `RELATING TO` not run | supplement projection's augment | not lowered by the pinned transpiler (ANORMALIES "RAP R10") |
+| `KEY draft` / `KEY cid` reads by the key fields | supplement projection's augment | the derived tables have no such secondary keys here |
+| `ASSERT agency_id_max = number_range_key` dropped | agency `adjust_numbers` | no number range |
+
+- **The seed**: the seed class also fills an `I_COUNTRY` stand-in (the
+  released view `I_Country`, read by the agency's country validation) with
+  the countries of the generated agencies and customers.
+
+Tests: `test/rap-r10.mjs` (generators; V4: create a supplement draft with
+its description through the augment, change it, Prepare, Activate; a
+validation refusing Activate; Edit and Discard; V2 reads; an agency draft
+under a preliminary key, activated to its final key; a refused agency) and
+`ZCL_OSD_RAPFLIGHT_R10_TEST` (the same through the runtime with
+`%is_draft`, and an active agency created and numbered late).
+
 ## Not done
 
-- Of the scenario's business objects only the managed travel runs (R7,
-  above); the supplement, agency and carrier BOs stop at draft or at the
-  singleton grammar (`node tools/rap-flight/constructs.mjs`). V2 `$metadata`
+- Of the scenario's business objects the managed travel (R7) and the
+  supplement and agency (R10) run; the carrier singleton stops at its
+  grammar, `/DMO/I_AGENCYTP` at the interface BDEF
+  (`node tools/rap-flight/constructs.mjs`). V2 `$metadata`
   of the two travel services fails (ANORMALIES "RAP R7: a namespaced
   service's V2 $metadata"); V4's answers.
 - The service definitions (`srvd`) are not fetched and the bindings
