@@ -577,6 +577,14 @@ async function setupDatabase(abap, schemas, insert) {
     db = new HanaDatabaseClient({trace: process.env.STG_DB_TRACE === "1", ddicBinary});
     abap.context.databaseConnections["DEFAULT"] = traced(db);
     await db.connect();
+    // HANA_EXISTING_SCHEMA=1: a schema an SAP system already holds, read-only
+    // at first (docs/db-backends.md, "Existing schema, read-only"). The mode
+    // only skips -- everything below, the DDL, the seed, the drift checks and
+    // the pack reseed, assumes our tables are ours to make, which is exactly
+    // what the mode says is not so. connect() has refused fresh-and-existing
+    // and pointed the session at the schema; the client's guard refuses any
+    // write a caller still tries to send (tools/hana-client.mjs).
+    if (process.env.HANA_EXISTING_SCHEMA === "1") return;
     // Seed once per run, not once per connection. A run opens more than one
     // (the database client, and the AMDP destination holds its own), and both
     // used to build the whole schema. The connection that made the schema

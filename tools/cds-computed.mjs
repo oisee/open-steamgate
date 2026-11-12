@@ -190,8 +190,17 @@ const xmlText = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").re
 /** R11: the DDIC structure (TABL INTTAB) under the CDS name of a computed
  *  view: `TYPES x TYPE /dmo/i_carrierslocksingleton_s` resolves as on a
  *  system, where the CDS entity is a type. The constants are typed by their
- *  literal, an aggregate by the column it aggregates (COUNT: INT4) */
-export function structureXml(e) {
+ *  literal, an aggregate by the column it aggregates (COUNT: INT4)
+ *
+ *  This is the one TABL XML writer of the tree. With `transport` it spells a
+ *  transparent table instead of a structure -- TABCLASS, CLIDEP, MAINFLAG,
+ *  CONTFLAG and the DD09L technical settings -- which is what the DDIC probe
+ *  of the existing-schema mode emits (tools/hana-ddic-probe.mjs). A field
+ *  may also carry its DD03P tags directly in `f.dd03p` (the mapping's own
+ *  order: KEYFLAG, ROLLNAME, COMPTYPE, ADMINFIELD, INTTYPE, INTLEN,
+ *  REFTABLE, PRECFIELD, REFFIELD, NOTNULL, DATATYPE, LENG, DECIMALS, MASK);
+ *  without it, spelled as before. */
+export function structureXml(e, {transport = false} = {}) {
   const builtin = (f) => {
     const m = /^c LENGTH (\d+)$/.exec(f.abapType ?? "");
     if (m) return {INTTYPE: "C", INTLEN: pad(Number(m[1]) * 2), DATATYPE: "CHAR", LENG: pad(m[1])};
@@ -201,11 +210,11 @@ export function structureXml(e) {
       default: return {INTTYPE: "I", INTLEN: pad(4), DATATYPE: "INT4", LENG: pad(10)};
     }
   };
-  const fields = e.fields.filter((f) => f.constant !== undefined || f.aggregate).map((f) => {
+  const fields = e.fields.filter((f) => transport || f.constant !== undefined || f.aggregate).map((f) => {
     const d = f.aggregate?.dd03p;
-    const props = d?.ROLLNAME ? {ROLLNAME: d.ROLLNAME, COMPTYPE: "E"}
+    const props = f.dd03p ?? (d?.ROLLNAME ? {ROLLNAME: d.ROLLNAME, COMPTYPE: "E"}
       : d ? Object.fromEntries(["INTTYPE", "INTLEN", "DATATYPE", "LENG", "DECIMALS"].filter((k) => d[k] !== undefined).map((k) => [k, d[k]]))
-      : builtin(f);
+      : builtin(f));
     return `    <DD03P>
      <FIELDNAME>${f.name}</FIELDNAME>
 ${Object.entries(props).map(([k, v]) => `     <${k}>${xmlText(v)}</${k}>`).join("\n")}
@@ -218,11 +227,18 @@ ${Object.entries(props).map(([k, v]) => `     <${k}>${xmlText(v)}</${k}>`).join(
    <DD02V>
     <TABNAME>${e.name.toUpperCase()}</TABNAME>
     <DDLANGUAGE>E</DDLANGUAGE>
-    <TABCLASS>INTTAB</TABCLASS>
-    <DDTEXT>${xmlText(String(e.label ?? e.name).slice(0, 60))}</DDTEXT>
-    <EXCLASS>1</EXCLASS>
+    <TABCLASS>${transport ? "TRANSP" : "INTTAB"}</TABCLASS>
+${transport && e.clidep !== false ? "    <CLIDEP>X</CLIDEP>\n" : ""}    <DDTEXT>${xmlText(String(e.label ?? e.name).slice(0, 60))}</DDTEXT>
+${transport ? "    <MAINFLAG>X</MAINFLAG>\n    <CONTFLAG>A</CONTFLAG>\n" : ""}    <EXCLASS>1</EXCLASS>
    </DD02V>
-   <DD03P_TABLE>
+${transport ? `   <DD09L>
+    <TABNAME>${e.name.toUpperCase()}</TABNAME>
+    <AS4LOCAL>A</AS4LOCAL>
+    <TABKAT>0</TABKAT>
+    <TABART>APPL1</TABART>
+    <BUFALLOW>N</BUFALLOW>
+   </DD09L>
+` : ""}   <DD03P_TABLE>
 ${fields.join("\n")}
    </DD03P_TABLE>
   </asx:values>
