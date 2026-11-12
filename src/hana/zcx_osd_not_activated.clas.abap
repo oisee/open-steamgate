@@ -22,6 +22,13 @@ CLASS zcx_osd_not_activated IMPLEMENTATION.
   METHOD constructor.
     super->constructor( textid = textid previous = previous ).
     me->missing = missing.
+* The kernel-side signal (H5c round 5): a raise inside a $batch changeset is
+* swallowed by design -- zcl_stg_batch's CATCH cx_root answers an error part
+* -- so the signal leaves HERE, in the constructor, before any catch can see
+* the exception. A handler the host installed on globalThis.osdNotActivated
+* receives the names; without one the console says what is missing. Form 2
+* (OSD_LAZY, later) will turn the handler into a JS throw of its own.
+    WRITE '@KERNEL if (globalThis.osdNotActivated === undefined) { console.error("not activated: " + missing.get()); } else { globalThis.osdNotActivated(missing.get()); }'.
   ENDMETHOD.
 
   METHOD if_message~get_text.

@@ -793,7 +793,21 @@ earlier ones. After each merge the island's object count — classes,
 interfaces, tables — is compared with the previous iteration's: the count
 rides every iteration line, and a shrink aborts the run with both counts
 instead of letting a later "fixed point" validate a tree the service has
-vanished from.
+vanished from. Per kind since round 5: classes, interfaces and tables are
+each non-decreasing — a total that a second dump's new tables hold up
+while the classes walk away is still a lost island.
+
+The dictionary half has a writer of record since round 5: the converter
+master writes `.tabl`/`.dtel`/`.doma`/`.ttyp.xml` from the dump's DD* rows,
+and the layers carry them into the build through `hana-src-gen` alone.
+When the merged layers carry DDIC XML, the loop does **not** run
+`hana-ddic-gen --from-dump` on top of it — one log line says so — and the
+table counts read the layers' `*.tabl.xml` as much as `gen/hana-ddic`'s,
+so the shrink control does not go blind to tables with the converter as
+the writer. Without DDIC XML in the layers (older converter output) the
+DDIC merge runs as before. The cross-check — `hana-ddic-gen --from-dump
+--against <layers>`, comparing field lists and types, reporting
+divergences and never refusing — is a follow-up, not built.
 
 Only the **island** is classified. The service lives in `gen/hana-src/*`
 and `gen/hana-ddic/*`; findings whose file lies in `src/`, `packs/` or
@@ -865,7 +879,10 @@ the first finding that named it and how many validation passes have named
 it (`first_finding`, `iterations_requested`), recomputed each pass, so a
 gap a later round resolves leaves the file on its own; the merge-refusal
 gaps carry a `reason` and no `iterations_requested` — they were never
-asked. The loop's files sit
+asked. An `unhandled` kind in the dump manifest's `closure` — a request
+kind the dumper's closure does not follow — gaps the name with reason
+`unhandled by the dumper's closure`, unless a kind's `missing` already
+said does-not-exist or a later round resolved the name. The loop's files sit
 under `gen/hana-closure/` — `state.json` (the iteration, the current dump,
 every name asked with its kinds, its iteration and its first finding, the
 names `closure.missing` reported, the merge refusals recorded as gaps, and
@@ -910,12 +927,14 @@ prints the command. The request is written before any dumper round: its
 names are asked from that moment (`state.json`), the round stays pending,
 and the next run picks it up — with the dumper configured it executes the
 pending round; a hand-run dump is continued with `--dump <that directory>`,
-and names still unresolved there surface as gaps. `--dry-run` writes and
+and names still unresolved there surface as gaps, and a `--dump`
+continuation clears the pending round it supersedes (the next configured
+run must not re-execute an answered round into a directory the dumper
+refuses as non-empty). `--dry-run` writes and
 prints the request and stops; `--max-iterations <n>` bounds the dumper
 rounds of a run (default 10) and stops after writing the pending request.
-The merges' `--from-dump` needs PR #926 (`feat/hana-ddic-from-dump`);
-until that merges, a tool without the flag is refused with a message
-saying so.
+The merges' `--from-dump` is `hana-ddic-gen`'s dump mode (PR #926,
+merged); a tool without the flag is refused with a message saying so.
 
 No "fixed point" without a positive control. Bed run 4's: `npm run
 transpile` on the post-iteration tree exited 1 on a generator step with
@@ -959,7 +978,20 @@ replaces the bodies that do not resolve with one line:
 `zcx_osd_not_activated` (`src/hana/`, a `cx_no_check` subclass, so the stub
 carries no RAISING clause) answers `get_text( )` with
 `not activated here: needs <missing>` — the names, comma-joined, ~200
-characters at most. The stubbed source is written back into the island
+characters at most. The raise is also the one signal a catch cannot
+swallow. `$batch` runs a changeset's requests inside `CATCH cx_root`
+(`zcl_stg_batch`), so a stub raise on the bed surfaces only as an error
+part — nothing on the wire says what the island still waits for. The
+constructor therefore signals the kernel itself, through a
+`WRITE '@KERNEL …'` line: a handler the host installed on
+`globalThis.osdNotActivated` receives the missing names at construction —
+before any `CATCH` can see the exception — and without a handler the
+console carries `not activated: <missing>`. Form 2 (`OSD_LAZY`, later)
+will turn the handler into a JS throw of its own. The ABAP Unit test
+beside the class proves both paths over the built module: handler
+installed (it receives the names), handler absent (the console says
+them), and a raise that is immediately `CATCH`ed (the signal already
+left — the property `$batch` cannot defeat). The stubbed source is written back into the island
 file — generated content, so rewriting in place is what the merge does
 anyway — and recorded in `gen/hana-closure/closure-stubs.json` as
 `[{file, class, method, missing, finding}]`. Findings outside any method

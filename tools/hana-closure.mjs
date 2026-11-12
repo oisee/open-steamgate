@@ -77,14 +77,17 @@
 // the seed dump and every dump so far, later wins per object; the DDIC
 // accumulates by hana-ddic-gen's own write mode (per-file overlays). The
 // island's object count (classes+interfaces+tables) rides the iteration
-// line and never shrinks -- a shrink aborts with both counts (bed run 5).
+// line and never shrinks, per kind (classes, interfaces, tables) -- a
+// shrink aborts with both counts (bed run 5; per kind since round 5).
 // No fixed point without a positive control (bed run 4): the build runs
 // first -- exit 0 or non-zero-with-findings stands, non-zero with NO
 // findings aborts with the build's FAILED line.
 //
-// One iteration: merge the current dump into the inputs (hana-ddic-gen
-// --from-dump writes gen/hana-ddic, the converters' layers + hana-src-gen
-// --layers write gen/hana-src -- spawned through tools/osd-host.mjs's
+// One iteration: merge the current dump into the inputs (hana-src-gen
+// --layers writes gen/hana-src from ALL the layers dirs; gen/hana-ddic is
+// written by hana-ddic-gen --from-dump ONLY when the layers carry no DDIC
+// XML -- with the converter as the DDIC's writer of record the step is
+// skipped, one log line says so -- spawned through tools/osd-host.mjs's
 // toolCommandIn and scriptCommandIn, the way every tool a tool starts is;
 // the DDIC tool's --from-dump is PR #926, feat/hana-ddic-from-dump, and a
 // tool that does not know the flag is refused with a message saying so),
@@ -188,15 +191,11 @@
 // on the bed.
 import {copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
 import {spawnSync} from "node:child_process";
-import {fileURLToPath} from "node:url";
 import {join, resolve} from "node:path";
 import {runsAs} from "./osd-main.mjs";
-import {toolCommandIn} from "./osd-host.mjs";
 import {validationMessage} from "./hana-ddic-gen.mjs";
 import {islandClassPaths, stubBodies} from "./hana-closure-stubs.mjs";
-import {buildCheck, ensureLayers, islandObjectCount} from "./hana-closure-merge.mjs";
-
-const TOOLS = fileURLToPath(new URL(".", import.meta.url));
+import {buildCheck, ensureLayers, islandObjectCount, islandShrinkCheck, mergeInputs} from "./hana-closure-merge.mjs";
 
 // ------------------------------------------------------------ findings ----
 
@@ -271,7 +270,9 @@ export function classifyFindings(findings) {
   const ask = (name, kind, finding) => {
     if (/^[A-Z0-9_/#$]+$/.test(name) === false || seen.has(name)) return;
     seen.add(name);
-    names.push({name, kind, finding: finding.raw});
+    // the message rides beside the raw line: the SHLP decision reads the
+    // message only, never the raw's file name (round 5, critic r4 S-3)
+    names.push({name, kind, finding: finding.raw, message: finding.message});
   };
   for (const finding of findings) {
     const {message, fix, file} = finding;
@@ -371,8 +372,10 @@ const TADIR = ["TABL", "DTEL", "DOMA", "TTYP", "SHLP", "CLAS", "INTF", "FUGR", "
 /** the TADIR kinds a classified name is requested under. A `ddic` name has
  *  no kind of its own -- the transpiler's wording says only that the type
  *  is unknown -- so it is asked under every dictionary kind the dumper
- *  resolves by name: TABL, DTEL and TTYP, plus SHLP when the finding
- *  itself says search help. The dumper resolves what exists and reports
+ *  resolves by name: TABL, DTEL and TTYP, plus SHLP when the finding's
+ *  message says search help -- the message only, never the raw line (the
+ *  raw ends in the file name, and a file called *searchhelpexits* must not
+ *  classify). The dumper resolves what exists and reports
  *  the rest in its manifest's `closure.missing`, which the loop reads into
  *  the gaps. Pure. */
 export function tadirKinds(kind, finding) {
@@ -401,7 +404,7 @@ export function requestFor({iteration, generation, fresh, asked, gaps, deferred}
   };
   const requested = perKind();
   for (const n of fresh ?? []) {
-    for (const kind of tadirKinds(n.kind, n.finding)) {
+    for (const kind of tadirKinds(n.kind, n.message ?? n.finding)) {
       if (requested[kind].includes(n.name) === false) requested[kind].push(n.name);
     }
   }
@@ -424,7 +427,7 @@ export function requestFor({iteration, generation, fresh, asked, gaps, deferred}
   if (deferred !== undefined) {
     const list = perKind();
     for (const n of deferred) {
-      for (const kind of tadirKinds(n.kind, n.finding)) {
+      for (const kind of tadirKinds(n.kind, n.message ?? n.finding)) {
         if (list[kind].includes(n.name) === false) list[kind].push(n.name);
       }
     }
@@ -495,93 +498,6 @@ const loadState = (out) => {
 const saveState = (out, state) => {
   writeFileSync(join(out, "state.json"), JSON.stringify(state, null, 2) + "\n");
 };
-
-// a generator's refusal of one object, H5a's TABCLASS guard speaking
-// through hana-ddic-map (`hana-ddic-gen` exits 2 on it): the dictionary HAS
-// the object, the generator here cannot write it. The loop must not die on
-// the refusal -- the object is recorded as a gap and the merge continues
-// without it.
-const REFUSAL = /hana-ddic-map: (.+?): TABCLASS ([A-Za-z]+) is not written here/g;
-
-// a copy of the dump without the refused rows, for the retry: every file
-// verbatim but tables/DD02L.jsonl, which loses every row whose TABNAME a
-// refusal named (that is the table the TABCLASS refusal names). The merge
-// tools write per-file overlays, so re-running a step against the copy is
-// safe, and the loop's own dump stays the original -- the next delta dump
-// answers whether the object recurs.
-function filteredDump(root, dump, without) {
-  const skip = new Set(without.map((n) => n.toUpperCase()));
-  const dir = join(root, ".local", "hana-closure", "dump-filtered");
-  rmSync(dir, {recursive: true, force: true});
-  const copy = (from, to) => {
-    mkdirSync(to, {recursive: true});
-    for (const entry of readdirSync(from, {withFileTypes: true})) {
-      const source = join(from, entry.name);
-      const target = join(to, entry.name);
-      if (entry.isDirectory()) copy(source, target);
-      else copyFileSync(source, target);
-    }
-  };
-  copy(dump, dir);
-  const dd02l = join(dir, "tables", "DD02L.jsonl");
-  if (existsSync(dd02l) === true) {
-    const kept = readFileSync(dd02l, "utf8").split("\n").filter((line) => {
-      if (line.trim() === "") return false;
-      try {
-        return skip.has(String(JSON.parse(line).TABNAME ?? "").trim().toUpperCase()) === false;
-      } catch {
-        return true; // not this file's judge: the merge tool refuses bad lines by number
-      }
-    });
-    writeFileSync(dd02l, kept.length === 0 ? "" : kept.join("\n") + "\n");
-  }
-  return dir;
-}
-
-// the current dump into the build's inputs: gen/hana-ddic and gen/hana-src,
-// the two folders abap_transpile.json already lists before src/. Both tools
-// are tools of this tree, so they start through toolCommandIn -- in a
-// compiled binary that is `osd gen <name>`, not a path off import.meta.url
-// -- and their exits are this loop's failures -- except a refusal of one
-// object: that is parsed, the object joins the gaps, and the step retries
-// against a filtered copy of the dump (the refusal leaves when a dump the
-// merge handled carries the name again -- the generator wrote it at last).
-// A tool that does not know --from-dump yet (PR #926) is refused by its own
-// "unknown option", and the message says what it needs.
-function mergeInputs(root, dump, layersDirs, env, say) {
-  const steps = [
-    ["hana-ddic-gen.mjs", ["--from-dump", dump, "--out", join(root, "gen", "hana-ddic")]],
-    // the union of every dump so far: ALL the layers dirs, later wins per object
-    ["hana-src-gen.mjs", [...layersDirs.flatMap((d) => ["--layers", d]), "--out", join(root, "gen", "hana-src")]],
-  ];
-  const refused = new Map();
-  for (const [script, argv] of steps) {
-    const [command, ...args] = toolCommandIn(env, join(TOOLS, script), argv);
-    let stepDump = dump;
-    for (let attempt = 0; ; attempt++) {
-      say(`merge: ${script} ${script === "hana-src-gen.mjs" ? `--layers ${layersDirs.length} layer dir(s) (the union so far)` : `--from-dump ${stepDump}`}`);
-      const child = spawnSync(command, args.map((a) => (a === dump ? stepDump : a)), {cwd: root, env, stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64 * 1024 * 1024});
-      if (child.status === 0) break;
-      const tail = [child.stdout, child.stderr].filter(Boolean).join("\n").slice(-2000);
-      // the refusals this exit named that no earlier exit named
-      const fresh = [...tail.matchAll(REFUSAL)]
-        .map((m) => ({name: m[1].trim().toUpperCase(), tabclass: m[2].trim().toUpperCase(), line: m[0]}))
-        .filter((r) => refused.has(r.name) === false);
-      if (fresh.length === 0 || attempt >= 64) {
-        const hint = /unknown option/.test(tail)
-          ? `\nhana-closure: ${script} refused --from-dump: needs PR #926 (hana-ddic-gen --from-dump)`
-          : "";
-        throw new Error(`hana-closure: ${script} exited ${child.status ?? "on a signal"} merging ${stepDump}${tail === "" ? "" : `:\n${tail}`}${hint}`);
-      }
-      for (const r of fresh) {
-        refused.set(r.name, {name: r.name, kind: "TABL", reason: `unsupported TABCLASS ${r.tabclass}`, first_finding: r.line});
-        say(`merge: ${script} refuses ${r.name} (unsupported TABCLASS ${r.tabclass}) -- recorded as a gap, the merge continues without it`);
-      }
-      stepDump = filteredDump(root, dump, [...refused.keys()]);
-    }
-  }
-  return {refused: [...refused.values()]};
-}
 
 // the identity of the inputs the findings came from, for the request's
 // `generation`: the sha256 the dump->layers converter recorded of the
@@ -707,7 +623,13 @@ export async function run(args = process.argv.slice(2), options = {}) {
   if (dumpArg === undefined && state.dump === undefined) {
     throw new Error(`hana-closure: no dump known: pass --dump <dir> (the dump the build's inputs are made of)`);
   }
-  if (dumpArg !== undefined) state.dump = resolve(root, dumpArg);
+  if (dumpArg !== undefined) {
+    state.dump = resolve(root, dumpArg);
+    // a hand-run dump supersedes a pending round (critic r2's S-e; fourth
+    // round asked): left behind, the next configured run re-executes the
+    // answered round into an --out the dumper refuses as non-empty
+    delete state.pending;
+  }
   let dump = resolve(root, state.dump);
   saveState(out, state);
   const requestPath = join(out, "closure-request.json");
@@ -772,6 +694,18 @@ export async function run(args = process.argv.slice(2), options = {}) {
           }
         }
       }
+      // and the kinds the dumper's closure does not follow (FIX-1's dumper
+      // update): the name was asked, the dictionary existence is UNANSWERED
+      // -- a gap with the reason, unless a kind's missing already said
+      // does-not-exist (that is the stronger word) or a round resolved it
+      for (const [kind, list] of Object.entries(manifest.closure?.unhandled ?? {})) {
+        for (const name of list) {
+          const upper = String(name).trim().toUpperCase();
+          if (state.asked[upper] !== undefined && resolved.has(upper) === false && state.missing[upper] === undefined) {
+            state.missing[upper] = {kind, iteration: state.asked[upper].iteration, reason: "unhandled by the dumper's closure"};
+          }
+        }
+      }
       saveState(out, state);
     } catch {
       // no manifest, no closure: the findings are the only word
@@ -807,9 +741,7 @@ export async function run(args = process.argv.slice(2), options = {}) {
     // shrinks between iterations -- a shrink is a merge that lost objects,
     // and a fixed point over it is false (bed run 5's)
     const objects = islandObjectCount(root);
-    if (state.islandObjects !== undefined && objects.total < state.islandObjects.total) {
-      throw new Error(`hana-closure: the island shrank: ${state.islandObjects.total} -> ${objects.total} object(s) (classes+interfaces+tables, iteration ${state.iteration})`);
-    }
+    if (state.islandObjects !== undefined) islandShrinkCheck(state.islandObjects, objects, state.iteration);
     state.islandObjects = objects;
     saveState(out, state);
 
@@ -907,11 +839,13 @@ export async function run(args = process.argv.slice(2), options = {}) {
     const gaps = [];
     const gapOf = (name, kind, a) => {
       gapNames.add(name);
+      const reason = state.missing[name]?.reason;
       return {
         name,
         kind,
         first_finding: a.finding,
         iterations_requested: state.iteration - a.iteration + 2,
+        ...(reason !== undefined ? {reason} : {}),
       };
     };
     for (const n of names) {
@@ -961,7 +895,7 @@ export async function run(args = process.argv.slice(2), options = {}) {
     // hand-run dump + --dump continuation sees them as asked and gaps the
     // ones still unresolved; the round is pending until a dump answers it
     for (const n of fresh) {
-      state.asked[n.name] = {kinds: tadirKinds(n.kind, n.finding), iteration, finding: n.finding};
+      state.asked[n.name] = {kinds: tadirKinds(n.kind, n.message ?? n.finding), iteration, finding: n.finding};
     }
     state.iteration = iteration;
     state.pending = {iteration, dumpDir};

@@ -1,11 +1,13 @@
 import {expect} from "chai";
 import {appendFileSync, chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
+import {spawnSync} from "node:child_process";
 import {tmpdir} from "node:os";
 import {basename, join} from "node:path";
 import {fileURLToPath} from "node:url";
 import {classifyFindings, dumperCommand, islandBasenames, parseEnvFile, parseFindings, requestFor, run, tadirKinds} from "../tools/hana-closure.mjs";
 import {methodBlocks, stubBodies, stubNamesText} from "../tools/hana-closure-stubs.mjs";
-import {buildVerdict, islandObjectCount} from "../tools/hana-closure-merge.mjs";
+import {buildVerdict, islandObjectCount, islandShrinkCheck, layersDdicCount} from "../tools/hana-closure-merge.mjs";
+import {ddicFields, tablXml} from "../tools/hana-ddic-map.mjs";
 
 const REPO = fileURLToPath(new URL("..", import.meta.url));
 
@@ -97,6 +99,7 @@ describe("hana-closure: the dependency closure, by iteration", () => {
     expect(names.map((n) => [n.name, n.kind]), "every name, classified, in first-named order").to.deep.equal(want);
     // the first finding that named it rides along -- the gaps file quotes it
     expect(names[0].finding).to.include(`Database table or view "zosd_h5c_bpa" not found`);
+    expect(names[0].message, "the message rides beside the raw (the SHLP decision reads it)").to.equal(`Database table or view "zosd_h5c_bpa" not found`);
     expect(names[10].finding).to.include(`#zosd#gws_h5c_shexits.fugr.`);
     expect(cascades, "the cascade findings are counted, not named").to.equal(10);
     expect(unclassified, "every line was understood").to.deep.equal([]);
@@ -144,6 +147,11 @@ describe("hana-closure: the dependency closure, by iteration", () => {
       {name: "ZOSD_H5C_BPA", kind: "tabl", finding: "f"},
       {name: "IF_H5C_BO", kind: "intf", finding: "g"},
       {name: "ZOSD_H5C_SHLP_EXIT", kind: "ddic", finding: `"callcontrol" not found -- the search help exit's TABLES signature`},
+      // the message decides the SHLP extra kind, never the raw line: the
+      // raw ends in the file name, and this file is called *searchhelpexits*
+      {name: "ZOSD_H5C_FILEONLY", kind: "ddic",
+        finding: `unknown_types, Variable "LV_X" contains unknown: ZOSD_H5C_FILEONLY not found, lookup, #zosd#gws_h5c_searchhelpexits.fugr.#zosd#lgws_h5c$01.abap:5`,
+        message: `Variable "LV_X" contains unknown: ZOSD_H5C_FILEONLY not found`},
     ];
     const request = requestFor({iteration: 3, generation: "h5c_sha", fresh, asked, gaps});
     expect(Object.keys(request).sort(), "the exact key set").to.deep.equal(
@@ -154,10 +162,12 @@ describe("hana-closure: the dependency closure, by iteration", () => {
     expect(request.source).to.equal("transpile validate() findings");
     expect(Object.keys(request.requested), "the nine upper-case TADIR kinds").to.deep.equal(kinds);
     expect(Object.keys(request.seen)).to.deep.equal(kinds);
-    expect(request.requested.TABL).to.deep.equal(["ZOSD_H5C_BPA", "ZOSD_H5C_SHLP_EXIT"]);
-    expect(request.requested.DTEL).to.deep.equal(["ZOSD_H5C_SHLP_EXIT"]);
-    expect(request.requested.TTYP).to.deep.equal(["ZOSD_H5C_SHLP_EXIT"]);
+    expect(request.requested.TABL).to.deep.equal(["ZOSD_H5C_BPA", "ZOSD_H5C_SHLP_EXIT", "ZOSD_H5C_FILEONLY"]);
+    expect(request.requested.DTEL).to.deep.equal(["ZOSD_H5C_SHLP_EXIT", "ZOSD_H5C_FILEONLY"]);
+    expect(request.requested.TTYP).to.deep.equal(["ZOSD_H5C_SHLP_EXIT", "ZOSD_H5C_FILEONLY"]);
     expect(request.requested.SHLP).to.deep.equal(["ZOSD_H5C_SHLP_EXIT"]);
+    expect(request.requested.TABL).to.include("ZOSD_H5C_FILEONLY");
+    expect(request.requested.SHLP, "the file name alone never adds the SHLP kind").to.not.include("ZOSD_H5C_FILEONLY");
     expect(request.requested.INTF).to.deep.equal(["IF_H5C_BO"]);
     expect(request.requested.CLAS).to.deep.equal([]);
     // seen is what earlier iterations requested, per kind, so the dumper skips it
@@ -203,6 +213,33 @@ describe("hana-closure: the dependency closure, by iteration", () => {
     ].join("\n"))).to.deep.equal({HANA_HOST: "h5c.example", HANA_USER: "h5c_user", HANA_PASSWORD: "h5c_secret"});
   });
 
+  it("the fake dumper refuses a non-empty --out like the real one", () => {
+    // critic r2's S-5: the fake must fail where the real binary fails, or a
+    // re-executed pending round slides through a test green (the real
+    // dumper refuses the answered directory: prepareOut's "is not empty")
+    const root = mkdtempSync(join(tmpdir(), "hana-closure-fakedumper-"));
+    try {
+      writeFileSync(join(root, "fake-dumper.mjs"), fakeDumperSource());
+      chmodSync(join(root, "fake-dumper.mjs"), 0o755);
+      mkdirSync(join(root, "req"), {recursive: true});
+      writeFileSync(join(root, "req", "closure-request.json"), JSON.stringify({schema: 1, requested: {}}));
+      const argv = (out) => [join(root, "fake-dumper.mjs"), "hana", "dump",
+        "--host", "h5c.example", "--user", "h5c_user", "--schema", "h5c_schema",
+        "--provenance", "p", "--ddic-closure", join(root, "req", "closure-request.json"),
+        "--out", out, "--allow-in-repo"];
+      mkdirSync(join(root, "out-full"), {recursive: true});
+      writeFileSync(join(root, "out-full", "manifest.json"), "{}\n");
+      const full = spawnSync(process.execPath, argv(join(root, "out-full")));
+      expect(full.status, "the real one refuses a non-empty --out").to.equal(3);
+      expect(String(full.stderr)).to.include("not empty");
+      const fresh = spawnSync(process.execPath, argv(join(root, "out-new")));
+      expect(fresh.status, "an empty --out goes through").to.equal(0);
+      expect(existsSync(join(root, "out-new", "manifest.json"))).to.equal(true);
+    } finally {
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
+
   it("the island's basenames come out of gen/hana-src/** and gen/hana-ddic/*, never out of src/", () => {
     const root = mkdtempSync(join(tmpdir(), "hana-closure-island-"));
     try {
@@ -235,11 +272,50 @@ describe("hana-closure: the dependency closure, by iteration", () => {
       for (const f of ["zosd_h5c_head.tabl.xml", "zosd_h5c_el.dtel.xml", "zosd_h5c_head2.tabl.xml"]) {
         writeFileSync(join(root, "gen", "hana-ddic", f), "x");
       }
+      // round 5: the layers carry .tabl.xml too when the converter is the
+      // DDIC's writer of record; a stem both folders carry is one object
+      for (const f of ["zosd_h5c_layer.tabl.xml", "zosd_h5c_head2.tabl.xml", "zosd_h5c_layer.dtel.xml"]) {
+        writeFileSync(join(root, "gen", "hana-src", "001-h5c", "src", f), "x");
+      }
       // the class's locals include and xml are the same object; dtel and prog
       // are not in the count (classes+interfaces+tables, the shrink assert's
       // unit)
-      expect(islandObjectCount(root)).to.deep.equal({clas: 2, intf: 1, tabl: 2, total: 5});
+      expect(islandObjectCount(root)).to.deep.equal({clas: 2, intf: 1, tabl: 3, total: 6});
       expect(islandObjectCount(join(root, "nowhere"))).to.deep.equal({clas: 0, intf: 0, tabl: 0, total: 0});
+    } finally {
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
+
+  it("the shrink assert is per kind: tables holding a total up is still a lost island", () => {
+    // critic r4 S-4: the builder's own first shrink scenario passed because
+    // the second dump's new tables compensated the classes it lost
+    expect(islandShrinkCheck({clas: 1, intf: 1, tabl: 1, total: 3}, {clas: 1, intf: 1, tabl: 2, total: 4}, 3),
+      "every kind non-decreasing stands").to.equal(undefined);
+    let thrown;
+    try {
+      islandShrinkCheck({clas: 1, intf: 1, tabl: 1, total: 3}, {clas: 0, intf: 1, tabl: 3, total: 4}, 3);
+      expect.fail("the compensated shrink was accepted");
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown.message, "both totals are on the abort").to.include("the island shrank: 3 -> 4");
+    expect(thrown.message, "the kind that shrank is named").to.include("clas 1 -> 0");
+    expect(thrown.message).to.include("classes+interfaces+tables");
+  });
+
+  it("counts the DDIC XML the layers carry -- the converter is then the writer of record", () => {
+    const root = mkdtempSync(join(tmpdir(), "hana-closure-layerddic-"));
+    try {
+      mkdirSync(join(root, "layers-001", "layers", "h5c-main", "src"), {recursive: true});
+      mkdirSync(join(root, "layers-002", "layers", "h5c-main", "src"), {recursive: true});
+      writeFileSync(join(root, "layers-001", "layers", "h5c-main", "src", "zosd_h5c_a.tabl.xml"), "x");
+      writeFileSync(join(root, "layers-001", "layers", "h5c-main", "src", "zosd_h5c_b.dtel.xml"), "x");
+      writeFileSync(join(root, "layers-001", "plan.json"), "{}\n");
+      writeFileSync(join(root, "layers-002", "layers", "h5c-main", "src", "zcl_h5c_x.clas.abap"), "x");
+      expect(layersDdicCount([join(root, "layers-001"), join(root, "layers-002")])).to.equal(2);
+      expect(layersDdicCount([join(root, "layers-002")]), "no DDIC XML, no count").to.equal(0);
+      expect(layersDdicCount([])).to.equal(0);
     } finally {
       rmSync(root, {recursive: true, force: true});
     }
@@ -562,7 +638,7 @@ describe("hana-closure: the dependency closure, by iteration", () => {
   // record of what it saw. H5C_MISSING_KINDS names the dictionary kinds the
   // "dictionary" lacks; by default every requested name resolves.
   const fakeDumperSource = () => `#!/usr/bin/env node
-import {appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync} from "node:fs";
+import {appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync} from "node:fs";
 import {dirname, join, resolve} from "node:path";
 const args = process.argv.slice(2);
 const at = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : undefined; };
@@ -587,6 +663,11 @@ for (let dir = out; ; dir = dirname(dir)) {
   const parent = dirname(dir);
   if (parent === dir) break;
 }
+// the real prepareOut refuses a non-empty --out (dump.go: "is not empty")
+if (existsSync(out) && readdirSync(out).length > 0) {
+  console.error("dump out already exists and is not empty: " + out);
+  process.exit(3);
+}
 // the request is read the way the real reader reads it: schema 1
 const request = JSON.parse(readFileSync(at("--ddic-closure"), "utf8"));
 if (request.schema !== 1) {
@@ -606,17 +687,21 @@ if (record) appendFileSync(record, JSON.stringify({
 // what the dictionary answered: the request's dictionary names, resolved
 // unless H5C_MISSING_KINDS says the dictionary lacks the kind
 const missingKinds = (process.env.H5C_MISSING_KINDS ?? "").split(",").filter(Boolean);
+const unhandledKinds = (process.env.H5C_UNHANDLED_KINDS ?? "").split(",").filter(Boolean);
 const resolved = {};
 const missing = {};
-for (const kind of ["TABL", "DTEL", "DOMA", "TTYP", "SHLP"]) {
+const unhandled = {};
+for (const kind of Object.keys(request.requested)) {
   const list = request.requested[kind] ?? [];
   if (list.length === 0) continue;
-  (missingKinds.includes(kind) ? missing : resolved)[kind] = [...list].sort();
+  (missingKinds.includes(kind) ? missing : unhandledKinds.includes(kind) ? unhandled : resolved)[kind] = [...list].sort();
 }
-const found = missingKinds.includes("TABL") ? [] : (request.requested.TABL ?? []);
+const found = missingKinds.includes("TABL") || unhandledKinds.includes("TABL") ? [] : (request.requested.TABL ?? []);
 mkdirSync(join(out, "tables"), {recursive: true});
 writeFileSync(join(out, "tables", "DD02L.jsonl"), found.map((t) => JSON.stringify({TABNAME: t.toUpperCase()})).join("\\n") + (found.length === 0 ? "" : "\\n"));
-writeFileSync(join(out, "manifest.json"), JSON.stringify({closure: {rounds: 1, resolved, missing}}) + "\\n");
+const closure = {rounds: 1, resolved, missing};
+if (Object.keys(unhandled).length > 0) closure.unhandled = unhandled;
+writeFileSync(join(out, "manifest.json"), JSON.stringify({closure}) + "\\n");
 process.exit(0);
 `;
 
@@ -788,6 +873,9 @@ process.exit(0);
     const island = opts.island ?? "zcl_h5c_loop.clas.abap";
     const filesA = [[island, join(root, "island", island)]];
     if (opts.island2Name !== undefined) filesA.push([opts.island2Name, join(root, "island", opts.island2Name)]);
+    // extra staged files of the seed dump's layer -- the converter-DDIC
+    // scenario stages the .tabl.xml the converter master writes
+    for (const name of opts.convAFiles ?? []) filesA.push([name, join(root, "island", name)]);
     const filesB = (opts.convBFiles ?? []).map((name) => [name, join(root, "island", name)]);
     const convMap = JSON.stringify({
       [join(root, "dump-001")]: converterOut(join(root, "conv-a"), filesA),
@@ -805,6 +893,7 @@ process.exit(0);
       ...(opts.grow ? {H5C_GROW: "1"} : {}),
       ...(opts.noFromDump ? {H5C_NO_FROM_DUMP: "1"} : {}),
       ...(opts.missingKinds !== undefined ? {H5C_MISSING_KINDS: opts.missingKinds} : {}),
+      ...(opts.unhandledKinds !== undefined ? {H5C_UNHANDLED_KINDS: opts.unhandledKinds} : {}),
       ...(opts.refuse !== undefined ? {H5C_REFUSE: opts.refuse} : {}),
       ...(opts.dumper === false ? {OSD_HANA_DUMP_ENV: join(root, "dump.env")} : {
         OSD_HANA_DUMPER: join(root, "fake-dumper.mjs"),
@@ -1092,6 +1181,8 @@ process.exit(0);
       expect(gaps[0].name).to.equal("ZOSD_H5C_HEAD");
       expect(gaps[0].kind).to.equal("TABL");
       expect(gaps[0].iterations_requested).to.equal(2);
+      const stateAfter = JSON.parse(readFileSync(outFile(root, "state.json"), "utf8"));
+      expect(stateAfter.pending, "the hand-run dump superseded the pending round").to.equal(undefined);
       expect(existsSync(join(root, "dumper-log.jsonl")), "the dumper was never spawned").to.equal(false);
     } finally {
       rmSync(root, {recursive: true, force: true});
@@ -1296,6 +1387,87 @@ process.exit(0);
     }
   });
 
+  it("the converter is the writer of record: DDIC XML in the layers skips hana-ddic-gen", async function () {
+    this.timeout(300000);
+    // round 5 (a4h-i7): the converter master writes .tabl/.dtel/.doma/.ttyp
+    // XML from the dump's DD* rows, and the layers carry it into the build
+    // through hana-src-gen alone. The loop must not write gen/hana-ddic
+    // from the dump on top of it: the step is skipped (one log line says
+    // so), the table resolves from the layer, and the walk converges with
+    // NO dumper round and NO hana-ddic-gen call. The cross-check
+    // (--from-dump --against <layers>) is a follow-up, not built.
+    const root = scratch(CLAS_SOURCE);
+    writeFileSync(join(root, "island", "zosd_h5c_head.tabl.xml"),
+      tablXml({name: "ZOSD_H5C_HEAD", text: "h5c fixture", clidep: false,
+        fields: ddicFields([{position: "1", fieldname: "ZOSD_H5C_KEY", keyflag: "X", rollname: "",
+          datatype: "CHAR", leng: "10", decimals: "0", inttype: "C", intlen: "000020", notnull: "X"}])}));
+    fixtureDump(join(root, "dump-001"));
+    const env = writeFakes(root, envFor(root, {island: "zcl_h5c_loop.clas.abap", convAFiles: ["zosd_h5c_head.tabl.xml"]}));
+    const said = [];
+    try {
+      const result = await run(["--dump", join(root, "dump-001"), "--system", "h5c"], {root, env, say: (m) => said.push(m)});
+      expect(result.stopped).to.equal("fixed-point");
+      expect(result.iteration, "the layer closed the name: no dumper round").to.equal(1);
+      expect(existsSync(join(root, "dumper-log.jsonl")), "no dumper round ran").to.equal(false);
+      const merges = hostCalls(root);
+      expect(merges.map((m) => m.tool), "no hana-ddic-gen: the converter wrote the table").to.deep.equal(
+        ["hana-src-gen.mjs", "osd-build.mjs"]);
+      expect(merges[0].rest).to.deep.equal(
+        ["--layers", layersDirOf(root, 1), "--out", join(root, "gen", "hana-src")]);
+      expect(said.some((l) => l.includes("the layers carry the DDIC XML (1 file(s)) -- hana-ddic-gen --from-dump is skipped, the converter is the writer of record")),
+        "the skip says itself").to.equal(true);
+      expect(existsSync(join(root, "gen", "hana-ddic")), "gen/hana-ddic is not written").to.equal(false);
+      expect(existsSync(join(root, "gen", "hana-src", "000-h5c-main", "src", "zosd_h5c_head.tabl.xml")), "the layer carries the table").to.equal(true);
+      const state = JSON.parse(readFileSync(outFile(root, "state.json"), "utf8"));
+      expect(state.islandObjects, "the layer's table counts (the shrink control is not blind)").to.deep.equal({clas: 1, intf: 0, tabl: 1, total: 2});
+      expect(JSON.parse(readFileSync(outFile(root, "closure-gaps.json"), "utf8")).gaps).to.deep.equal([]);
+    } finally {
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
+
+  it("an unhandled kind is unanswered, not missing: a kind's missing wins over it", async function () {
+    this.timeout(300000);
+    // closure.unhandled = the request kinds the
+    // dumper's closure does not follow (FIX-1's dumper update). TABL and
+    // DTEL answered missing (does not exist), TTYP is unanswered: the gap
+    // stands under the missing kind, and the unhandled entry adds neither
+    // a kind nor a reason
+    const root = scratch(CLAS_TYPE_SOURCE, "zcl_h5c_type");
+    fixtureDump(join(root, "dump-001"));
+    const env = writeFakes(root, envFor(root, {island: "zcl_h5c_type.clas.abap", missingKinds: "TABL,DTEL", unhandledKinds: "TTYP"}));
+    try {
+      const result = await run(["--dump", join(root, "dump-001"), "--system", "h5c"], {root, env});
+      expect(result.stopped).to.equal("fixed-point");
+      const gaps = JSON.parse(readFileSync(outFile(root, "closure-gaps.json"), "utf8")).gaps;
+      expect(gaps).to.have.lengthOf(1);
+      expect(gaps[0].name).to.equal("ZOSD_H5C_W");
+      expect(gaps[0].kind, "the missing kind, not the unhandled one").to.be.oneOf(["TABL", "DTEL"]);
+      expect(gaps[0].reason, "does-not-exist is the stronger word: no unhandled reason").to.equal(undefined);
+    } finally {
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
+
+  it("a name unanswered only under unhandled kinds gaps with the unhandled reason", async function () {
+    this.timeout(300000);
+    const root = scratch(CLAS_TYPE_SOURCE, "zcl_h5c_type");
+    fixtureDump(join(root, "dump-001"));
+    const env = writeFakes(root, envFor(root, {island: "zcl_h5c_type.clas.abap", unhandledKinds: "TABL,DTEL,TTYP"}));
+    try {
+      const result = await run(["--dump", join(root, "dump-001"), "--system", "h5c"], {root, env});
+      expect(result.stopped).to.equal("fixed-point");
+      const gaps = JSON.parse(readFileSync(outFile(root, "closure-gaps.json"), "utf8")).gaps;
+      expect(gaps).to.have.lengthOf(1);
+      expect(gaps[0].name).to.equal("ZOSD_H5C_W");
+      expect(gaps[0].kind).to.equal("TABL");
+      expect(gaps[0].reason).to.equal("unhandled by the dumper's closure");
+      expect(gaps[0].iterations_requested).to.equal(2);
+    } finally {
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
+
   it("a shrinking island aborts the run with both counts", async function () {
     this.timeout(300000);
     // the assert behind the accumulation: if the merge ever loses objects
@@ -1310,6 +1482,7 @@ process.exit(0);
         expect.fail("the shrinking island was not caught");
       } catch (error) {
         expect(error.message).to.include("the island shrank: 2 -> 0");
+        expect(error.message).to.include("clas 2 -> 0");
         expect(error.message).to.include("classes+interfaces+tables");
       }
     } finally {
