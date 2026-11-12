@@ -204,7 +204,7 @@ export const xmlText = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&l
  *  order: KEYFLAG, ROLLNAME, COMPTYPE, ADMINFIELD, INTTYPE, INTLEN,
  *  REFTABLE, PRECFIELD, REFFIELD, NOTNULL, DATATYPE, LENG, DECIMALS, MASK);
  *  without it, spelled as before. */
-export function structureXml(e, {transport = false, ddlanguage = ""} = {}) {
+export function structureXml(e, {transport = false, ddlanguage = "", tabclass = "", sqltab = ""} = {}) {
   const builtin = (f) => {
     const m = /^c LENGTH (\d+)$/.exec(f.abapType ?? "");
     if (m) return {INTTYPE: "C", INTLEN: pad(Number(m[1]) * 2), DATATYPE: "CHAR", LENG: pad(m[1])};
@@ -232,8 +232,8 @@ ${Object.entries(props).map(([k, v]) => `     <${k}>${xmlText(v)}</${k}>`).join(
    <DD02V>
     <TABNAME>${e.name.toUpperCase()}</TABNAME>
     <DDLANGUAGE>${String(ddlanguage).trim().toUpperCase() || "E"}</DDLANGUAGE>
-    <TABCLASS>${transport ? "TRANSP" : "INTTAB"}</TABCLASS>
-${transport && e.clidep !== false ? "    <CLIDEP>X</CLIDEP>\n" : ""}${ddtext !== "" ? `    <DDTEXT>${ddtext}</DDTEXT>\n` : ""}${transport ? "    <MAINFLAG>X</MAINFLAG>\n    <CONTFLAG>A</CONTFLAG>\n" : ""}    <EXCLASS>1</EXCLASS>
+    <TABCLASS>${String(tabclass).trim() !== "" ? String(tabclass).trim().toUpperCase() : transport ? "TRANSP" : "INTTAB"}</TABCLASS>
+${String(e.sqltab ?? "").trim() !== "" ? `    <SQLTAB>${xmlText(String(e.sqltab).trim().toUpperCase())}</SQLTAB>\n` : ""}${transport && e.clidep !== false ? "    <CLIDEP>X</CLIDEP>\n" : ""}${ddtext !== "" ? `    <DDTEXT>${ddtext}</DDTEXT>\n` : ""}${transport ? "    <MAINFLAG>X</MAINFLAG>\n    <CONTFLAG>A</CONTFLAG>\n" : ""}    <EXCLASS>1</EXCLASS>
    </DD02V>
 ${transport ? `   <DD09L>
     <TABNAME>${e.name.toUpperCase()}</TABNAME>

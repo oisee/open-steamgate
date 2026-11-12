@@ -406,14 +406,15 @@ describe("hana-ddic-gen: DDIC from the dump's DD* tables", () => {
     }
   });
 
-  // CRITIC-926 SHOULD 3: an APPEND row in the dump's DD02L is not a table
-  // this path writes; the run refuses and names it instead of writing an
-  // INTTAB structure that holds no rows of its own.
+  // CRITIC-926 SHOULD 3, after H5d: a POOL row in the dump's DD02L is not
+  // a table this path writes; the run refuses and names it instead of
+  // writing a type that holds no rows. APPEND and VIEW are written since
+  // H5d (test/hana-ddic-append-view.mjs has the shapes).
   it("refuses a DD02L TABCLASS the dump path does not write, by name", async () => {
     const dump = dumpFixture();
     writeFileSync(join(dump, "tables", "DD02L.jsonl"),
       readFileSync(join(dump, "tables", "DD02L.jsonl"), "utf8") +
-      JSON.stringify({TABNAME: "ZOSD_H5_APDX", TABCLASS: "APPEND", CLIDEP: "X", MASTERLANG: "", AS4LOCAL: "A", AS4VERS: "0000"}) + "\n");
+      JSON.stringify({TABNAME: "ZOSD_H5_POOLX", TABCLASS: "POOL", CLIDEP: "", MASTERLANG: "", AS4LOCAL: "A", AS4VERS: "0000"}) + "\n");
     let error;
     try {
       await run(["--from-dump", dump, "--out", join(dump, "out")]);
@@ -421,8 +422,8 @@ describe("hana-ddic-gen: DDIC from the dump's DD* tables", () => {
       error = thrown;
     }
     try {
-      expect(error?.message ?? "(no refusal)").to.include("ZOSD_H5_APDX");
-      expect(error?.message ?? "(no refusal)").to.include("APPEND");
+      expect(error?.message ?? "(no refusal)").to.include("ZOSD_H5_POOLX");
+      expect(error?.message ?? "(no refusal)").to.include("POOL");
     } finally {
       rmSync(dump, {recursive: true, force: true});
     }

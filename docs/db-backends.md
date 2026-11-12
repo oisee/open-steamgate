@@ -521,6 +521,21 @@ the tenant schema, which the grant forbids today (OSG is SELECT-only there).
 The mode stays read-only; the shadow DDL is our schema's own and is the one
 explicit exception the guard admits.
 
+A DDIC view of the tenant (H5d) takes the synonym, client dependence or
+not: the tenant object is itself a read-only database view, and the
+shadow names it — it does not wrap it. A wrapped view would be a second
+definition of a read-only object to police for drift, bought for a client
+filter that only a client-dependent view could use; the view the dumps
+carry is client-independent, a client-dependent one would read across
+clients through the synonym, and if one ever arrives the filtered shape
+is one branch away (`TABCLASS` rides with `CLIDEP` in the eager read).
+The view reaches the eager set the way a table does — its structure type
+is a TABL object of `gen/hana-ddic`, so `ddicTables()` collects it — and
+a read that outruns the eager set is the lazy fallback's 259, answered
+with the same synonym. Outside this mode there is no shadow and no
+database view at all: the structure type is the whole of what a non-HANA
+backend gets, and a read of the view fails at SQL time.
+
 ## Sources out of the tenant: gen/hana-src
 
 The other half of the tenant's content is its sources. They do not arrive
@@ -663,13 +678,17 @@ DDTEXT and REPTEXT and the three SCRTEXTs (DD04L carries only the lengths
 they are shown in). A domain's fixed values come from DD07L, whose rows
 carry no words (DD07T is not in --ddic), so a domain with values goes out
 without them. An `.INCLUDE` row is not a refusal here: the dump carries
-every DD02L table's DD03L, so the include's fields splice in from it, in
-the include's place, in their own POSITION order — and neither is any
-other dot row: every `.INCLU-<suffix>` and `.APPEND` names its structure
-in PRECFIELD and splices the same way, a suffixed include with the suffix
-appended to each name it brings in, the rename abaplint reads out of the
-same DD03P (`ddicFieldsWithIncludes` beside `ddicFields`, which the live
-read keeps). A structured component
+every DD02L table's DD03L, so the marker goes out the way a system's own
+abapGit export spells it — `.INCLUDE`, `.INCLU-<suffix>` and `.INCLU--AP`
+(the dictionary's append spelling), the structure named in PRECFIELD, the
+transpiler expanding it off that — and the included fields' expanded
+copies the DD03L read also carries under the base table's own name are
+dropped, the name being the include's (the real closure dump measures it:
+a header table's rows hold the marker and the included fields again, two
+positions later; the splice H5a first wrote here put every such field
+into the XML twice). `ddicFieldsWithIncludes` keeps the markers and drops
+the copies; `ddicFields`, which the live
+read keeps, refuses an include row. A structured component
 (DD03L COMPTYPE S, DATATYPE STRU) carries its own COMPTYPE and resolves
 through the structure's own tabl.xml, which the same run writes. File names
 are the abapGit ones (lower case, a /namespace/ spelled #namespace#), the
@@ -686,3 +705,22 @@ refuses it. Not covered, and said so in the run's last line: search helps
 fixtures (`test/hana-ddic-gen.mjs`, synthetic `ZOSD_H5_*` JSONL in a temp
 dir, carrying the real files' measured column sets); no tenant content is
 reachable from CI, and the acceptance runs against a real dump, by hand.
+
+The two TABCLASS kinds the first real closure run refused by name are
+written since H5d (2026-11-12). An APPEND structure goes out as its own
+TABL: TABCLASS APPEND, the SQLTAB target its DD02L row names beside it,
+the include shape otherwise — no DD09L, no client — which is the shape
+the fetched pack's own append export carries, with the fields in DD03L
+order. The append reaches the target table through the chain the export
+spells: the base table's marker names its include, the include's
+`.INCLU--AP` names the append, and the transpiler expands both off
+PRECFIELD — so the target's type carries the appended fields with the
+generator merging nothing, the same route the pack's consumers take over
+its exports (they parse the type, appended component names included; they
+merge nothing). A DDIC view (TABCLASS VIEW) goes out as a read-only
+structure type — its DD03L fields, TABCLASS VIEW, no DD09L: the join
+tables a `.view.xml` needs (DD26S/DD27S) are not in `--ddic`, so the CDS
+route's DDIC-view shape is out of reach here. What the view is for
+depends on the backend, and that is the shadow schema's paragraph below.
+POOL and CLUSTER stay refused by name, and the refusal says what a view
+became and where its reads stand.
