@@ -20,6 +20,21 @@ describe("HANA_EXISTING_SCHEMA mode", () => {
 
   // connect() reaches the driver through createRequire("hdb"); the same CJS
   // cache a real require would use is pointed at a stand-in first.
+  // the fake stands in through the CJS cache a real require uses; the
+  // suites runner runs a shard's files in ONE process, so the stand-in is
+  // given back after every test -- the next hdb consumer in the shard
+  // otherwise gets a driver without prepare (FIX-4, the sqlscript suites).
+  // the give-back is a DELETE, not a restore: at the first fakeHdb call the
+  // real driver has never been required (hana-client loads hdb inside
+  // connect()), so a saved original would be undefined and every restore
+  // would return early -- the stand-in then survived the suite (the second
+  // hold's GREEN 3: sqlscript-eager connected through it, prepare missing).
+  // The next require after the delete loads the real driver fresh.
+  afterEach(() => {
+    const req = createRequire(import.meta.url);
+    delete req.cache[req.resolve("hdb")];
+  });
+
   const fakeHdb = () => {
     const sent = [];
     const require = createRequire(import.meta.url);
@@ -42,7 +57,7 @@ describe("HANA_EXISTING_SCHEMA mode", () => {
 
   it("refuses STG_DB_FRESH=1, naming both flags, before anything is sent", async () => {
     const sent = fakeHdb();
-    const db = new HanaDatabaseClient({existingSchema: true, schema: "ZOSD_H1_FRESH"});
+    const db = new HanaDatabaseClient({existingSchema: true, schema: "ZOSD_H1_FRESH", client: "001"});
     process.env.STG_DB_FRESH = "1";
     let error;
     try {
@@ -58,7 +73,7 @@ describe("HANA_EXISTING_SCHEMA mode", () => {
 
   it("sends no DDL: connect() issues only SET SCHEMA", async () => {
     const sent = fakeHdb();
-    const db = new HanaDatabaseClient({existingSchema: true, schema: "ZOSD_H1_EXISTING"});
+    const db = new HanaDatabaseClient({existingSchema: true, schema: "ZOSD_H1_EXISTING", client: "001"});
     await db.connect();
     expect(sent).to.deep.equal([`SET SCHEMA "ZOSD_H1_EXISTING"`]);
     await db.disconnect();
@@ -70,7 +85,7 @@ describe("HANA_EXISTING_SCHEMA mode", () => {
     // This holds the client to its half: after a connect in the mode, the
     // session carries no schema of ours and nothing is prepared for seeding.
     const sent = fakeHdb();
-    const db = new HanaDatabaseClient({existingSchema: true, schema: "ZOSD_H1_NOSEED"});
+    const db = new HanaDatabaseClient({existingSchema: true, schema: "ZOSD_H1_NOSEED", client: "001"});
     await db.connect();
     const ddl = sent.filter((s) => !s.startsWith("SET SCHEMA"));
     expect(ddl, "no DROP, no CREATE, no INSERT").to.deep.equal([]);

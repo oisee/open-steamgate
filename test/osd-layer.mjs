@@ -834,7 +834,9 @@ describe("public entry points refuse a tree that is not the public live generati
   const live = () => {
     const named = new Map(), source = join(fixture, "src/zpublic.prog.abap");
     const hash = hashOf(fixture, inputsOf(fixture), {digests: named});
-    put(`build/by-input/${hash}/manifest.json`, JSON.stringify({hash, systemDigest: null, systemPrivate: false, provenance: []}));
+    // the input folders as a build records them: a publisher reads them to
+    // show the generation carries no gen/hana-src or gen/hana-ddic (#923)
+    put(`build/by-input/${hash}/manifest.json`, JSON.stringify({hash, inputs: {folders: ["src"]}, systemDigest: null, systemPrivate: false, provenance: []}));
     // a valid read record: what the build read, inside what the hash named
     put(`build/by-input/${hash}/reads.json`, JSON.stringify(makeReadRecord(fixture, named, [readEntry(fixture, source, readFileSync(source))])));
     put(`build/by-input/${hash}/output/init.mjs`, "public\n");

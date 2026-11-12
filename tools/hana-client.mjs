@@ -36,6 +36,7 @@ import {join} from "node:path";
 const require = createRequire(import.meta.url);
 import {trimLiterals} from "./sql-literals.mjs";
 import {osqlSemanticsError} from "./osql-error.mjs";
+import {ensureShadow, ensureShadowFor, shadowDdlSchema, tableFrom259} from "./hana-shadow-schema.mjs";
 
 
 /** Every identifier this client sends goes to HANA quoted in UPPER case.
@@ -205,7 +206,7 @@ export function hanaConnection(input = {}) {
     candidates.push(fileURLToPath(new URL("../.local/hxe-password", import.meta.url)));
   } catch { /* bundled: the two above are the answer */ }
   const passwordFile = candidates.find((f) => existsSync(f)) ?? "";
-  return {
+  const connection = {
     host: input.host ?? process.env.HANA_HOST ?? process.env.HXE_HOST ?? "localhost",
     port: Number(input.port ?? process.env.HANA_PORT ?? process.env.HXE_PORT ?? HANA_TENANT_PORT),
     user: input.user ?? process.env.HANA_USER ?? process.env.HXE_USER ?? "SYSTEM",
@@ -218,6 +219,16 @@ export function hanaConnection(input = {}) {
     packetSize: Number(input.packetSize ?? process.env.HANA_PACKET_SIZE ?? 1024 * 1024 * 64),
     packetSizeLimit: Number(input.packetSize ?? process.env.HANA_PACKET_SIZE ?? 1024 * 1024 * 64),
   };
+  // H3: the logon client rides the CONNECT, not a SET -- HANA refuses
+  // `SET 'CLIENT'` (455, predefined, measured on the bed), and node-hdb moves
+  // a SESSIONVARIABLE: key into the client info at connect. The same client
+  // is the sy-mandt the ABAP reads, set at boot by tools/osd-identity.mjs
+  // (bootIdentity).
+  const client = input.client ?? process.env.OSD_CLIENT;
+  if (client !== undefined && client !== "") {
+    connection["SESSIONVARIABLE:CLIENT"] = client;
+  }
+  return connection;
 }
 
 /** HANA has no multi-row `VALUES`, so `INSERT INTO t (a,b) VALUES (1,2),(3,4)`
@@ -326,7 +337,11 @@ export class HanaDatabaseClient {
     // what sy-dbsys reports; a real system running on HANA says HDB
     this.name = "HDB";
     this.trace = input.trace === true;
-    this.schema = input.schema ?? process.env.HANA_SCHEMA ?? "OSD";
+    // upper once, here: execute() folds quoted identifiers to upper and the
+    // catalog literals and SET SCHEMA go out exactly as built, so one
+    // normalisation at construction keeps DDL, catalog and session in one
+    // schema instead of three spellings of it (critic SHOULD 5 at f0a248af1)
+    this.schema = String(input.schema ?? process.env.HANA_SCHEMA ?? "OSD").toUpperCase();
     this.droppedSchema = false;
     /** did *this* connection make the schema fresh? see `freshened` */
     this.droppedSchema = false;
@@ -341,6 +356,13 @@ export class HanaDatabaseClient {
     // (docs/db-backends.md, "Existing schema, read-only").
     this.existingSchema = input.existingSchema ?? process.env.HANA_EXISTING_SCHEMA === "1";
     this.readOnly = input.readOnly ?? (this.existingSchema && process.env.OSD_HANA_WRITE !== "1");
+    // H3: the logon client (OSD_CLIENT) and our own schema (HANA_OWN_SCHEMA).
+    // In existing-schema mode connect() refuses to start without a client:
+    // the shadow views filter MANDT = SESSION_CONTEXT('CLIENT'), and a NULL
+    // client reads every client-dependent table as empty.
+    this.logonClient = input.client ?? process.env.OSD_CLIENT ?? "";
+    this.ownSchema = String(input.ownSchema ?? process.env.HANA_OWN_SCHEMA ?? "").toUpperCase();
+    this.shadowTables = input.shadowTables ?? [];
     // Seeded from generated DDIC on every process start, then augmented from
     // DDL. Open SQL writes RAW values as quoted hex; HANA needs X'...'. A
     // persisted schema executes no CREATE TABLE after restart, so DDL alone
@@ -352,6 +374,12 @@ export class HanaDatabaseClient {
       }
     }
   }
+
+  /** inside ensureShadowFor right now. Its DD02L / SYS.VIEWS / SYS.SYNONYMS
+   *  reads go through query() -- the same 259-retrying path -- so a 259 on
+   *  one of them must not re-enter the fallback (critic MUST 1 at f0a248af1;
+   *  the probe counted 199 DD02L reads before the flag). */
+  #inShadowFor = false;
 
   /** One statement, and **the statement is in the failure**.
    *
@@ -417,6 +445,14 @@ export class HanaDatabaseClient {
     if (this.readOnly !== true) return;
     const kind = isMultiStatement(sql) ? "multi" : statementKind(sql);
     if (kind === "SELECT" || kind === "SET" || kind === "COMMIT" || kind === "ROLLBACK") return;
+    // H3: shadow-schema DDL is our own schema's business and is allowed
+    // there -- and only there. tools/hana-shadow-schema.mjs owns the four
+    // shapes; the check is the owning schema read off the statement, never a
+    // parse of it, and the tenant schema never matches.
+    if ((kind === "CREATE" || kind === "DROP") && this.ownSchema !== "") {
+      const target = shadowDdlSchema(sql);
+      if (target !== undefined && target === this.ownSchema) return; // upper by construction
+    }
     const error = new Error(`HANA_READONLY: ${kind === "" ? "statement" : kind} refused in read-only mode (HANA_EXISTING_SCHEMA=1 without OSD_HANA_WRITE=1); the statement was not sent to the database`);
     error.code = "HANA_READONLY";
     throw error;
@@ -429,6 +465,21 @@ export class HanaDatabaseClient {
     if (this.existingSchema === true && process.env.STG_DB_FRESH === "1") {
       throw new Error(`HANA_EXISTING_SCHEMA=1 and STG_DB_FRESH=1 refuse each other: the mode runs over a schema an SAP system already holds, and fresh means DROP SCHEMA over it. Drop the STG_DB_FRESH, or point HANA_SCHEMA at a schema of your own.`);
     }
+    // Refused before a socket is even opened, the way fresh-and-existing is:
+    // without a logon client the shadow views filter on a NULL
+    // SESSION_CONTEXT('CLIENT') and every client-dependent table reads empty
+    // -- a silently wrong run is worse than no run.
+    if (this.existingSchema === true && this.logonClient === "") {
+      throw new Error(`HANA_EXISTING_SCHEMA=1 refuses to start without OSD_CLIENT: the mode isolates the logon client in HANA (docs/db-backends.md, "Shadow schema: the client lives in HANA"), and a session without a client sees every client-dependent table empty. Set OSD_CLIENT to the logon client.`);
+    }
+    // Refused before a socket is even opened, like the two above: our own
+    // schema spelled as the tenant's would create the shadow views over the
+    // tenant's own tables -- and the guard, reading the owning schema off the
+    // statement, would admit them (critic MUST 2 at f0a248af1). Both names
+    // are upper at construction, so this is the case-folded compare.
+    if (this.existingSchema === true && this.ownSchema !== "" && this.ownSchema === this.schema) {
+      throw new Error(`HANA_OWN_SCHEMA refuses to equal HANA_SCHEMA ("${this.schema}"): the shadow views would sit on the tenant's own tables, and the read-only guard would admit DDL on them. Point HANA_OWN_SCHEMA at a schema of our own.`);
+    }
     const hdb = require("hdb");
     this.client = hdb.createClient(hanaConnection(this.options));
     await new Promise((resolve, reject) => this.client.connect((err) => (err ? reject(err) : resolve())));
@@ -437,12 +488,27 @@ export class HanaDatabaseClient {
     this.client.setAutoCommit(false);
     // The mode only skips: the schema and its tables are already there, so
     // neither the drop of STG_DB_FRESH nor the CREATE SCHEMA happens, and
-    // the seed that test/setup.mjs would run is skipped with it. SET SCHEMA
-    // stays: the session still has to sit in the configured schema.
+    // the seed that test/setup.mjs would run is skipped with it. H1: without
+    // HANA_OWN_SCHEMA the session sits in the tenant's schema, as it always
+    // did. H3: with it, the session sits in our own schema behind the shadow
+    // objects, created idempotently first -- a second connect finds them in
+    // the catalog and sends nothing.
     if (this.existingSchema === true) {
-      this.#guard(`SET SCHEMA "${this.schema}"`);
-      await this.#run(`SET SCHEMA "${this.schema}"`);
+      if (this.ownSchema !== "") {
+        await ensureShadow(this, {own: this.ownSchema, tenant: this.schema, tables: this.shadowTables});
+        this.#guard(`SET SCHEMA "${this.ownSchema}"`);
+        await this.#run(`SET SCHEMA "${this.ownSchema}"`);
+      } else {
+        this.#guard(`SET SCHEMA "${this.schema}"`);
+        await this.#run(`SET SCHEMA "${this.schema}"`);
+      }
       globalThis.abap?.builtin?.sy?.get()?.dbsys?.set(this.name);
+      // sy-mandt is set at boot from OSD_CLIENT by tools/osd-identity.mjs
+      // (bootIdentity); saying it again here keeps a directly-constructed
+      // client as honest as the dbsys line above.
+      if (this.logonClient !== "") {
+        globalThis.abap?.builtin?.sy?.get()?.mandt?.set(this.logonClient);
+      }
       this.connected = true;
       return;
     }
@@ -606,6 +672,34 @@ export class HanaDatabaseClient {
   }
 
   async query(sql) {
+    return this.#queryWithShadow(sql, false);
+  }
+
+  /** the lazy half of the shadow schema: a statement that fails with HANA's
+   *  error 259 (invalid table name) carries the table in the error; when the
+   *  tenant's DD02L holds that name, the shadow object is made and the
+   *  caller retries. False means the error is somebody else's problem. */
+  async #shadowFor(error) {
+    if (this.existingSchema !== true || this.ownSchema === "" || this.connected !== true) return false;
+    if (this.#inShadowFor === true) return false; // never re-enter the fallback
+    const name = tableFrom259(error);
+    if (name === undefined) return false;
+    this.#inShadowFor = true;
+    try {
+      return await ensureShadowFor(this, {own: this.ownSchema, tenant: this.schema, name});
+    } catch (fallbackError) {
+      // the fallback's own DD02L / SYS.VIEWS / SYS.SYNONYMS read failed: the
+      // caller's statement keeps its own error -- a 259 stays that 259. The
+      // flag above is what stopped the recursion (probe at f0a248af1: 199
+      // DD02L reads); this is logged, not swallowed silent.
+      if (this.trace) console.error(`shadow fallback for ${name} failed: ${fallbackError?.message ?? fallbackError}`);
+      return false;
+    } finally {
+      this.#inShadowFor = false;
+    }
+  }
+
+  async #queryWithShadow(sql, retried) {
     this.#guard(sql);
     const folded = foldIdentifiers(sql);
     if (this.trace) console.log(folded);
@@ -640,6 +734,9 @@ export class HanaDatabaseClient {
         return row;
       });
     } catch (error) {
+      if (retried === false && await this.#shadowFor(error) === true) {
+        return this.#queryWithShadow(sql, true); // once, and only once
+      }
       throw await osqlSemanticsError(error);
     } finally {
       // A prepared SELECT owns a server-side statement even after its rows

@@ -417,3 +417,210 @@ DD03L) — and exits 1 on any difference; `--mandt` says which tables have
 MANDT as the first key
 field. No HANA is reachable from CI: the probe is exercised with fixtures
 and fake drivers, and run against a system by hand.
+
+## Shadow schema: the client lives in HANA
+
+`HANA_EXISTING_SCHEMA=1` with `HANA_OWN_SCHEMA` set (built 2026-11-11, H3):
+the session does not sit in the tenant's schema — it sits in a schema of our
+own, behind one view or synonym per table the build knows, and the logon
+client is the filter.
+
+The why: the runtime has no implicit client
+(ANOMALY-2026-09-11-no-implicit-mandt in ANORMALIES.md) — `sy-mandt` is a
+constant and generated SQL carries no `MANDT` predicate, so over a real
+system's schema every read crosses every client; on the bed, 19,634 of the
+tenant's 41,568 tables have MANDT as the first key field. Fixing it in the
+generators is refused upstream ([abaplint/transpiler#606](https://github.com/abaplint/transpiler/issues/606));
+fixing it in the database seam would need a second SQL parser. So the client
+lives in HANA, the way SAP's own client handling does there: for every table
+the generation knows (`ddicTables()` in `tools/hana-shadow-schema.mjs` walks
+the same layers the build does), `connect()` makes sure our own schema holds
+
+```
+CREATE VIEW "<own>"."T" AS SELECT * FROM "<tenant>"."T" WHERE MANDT = SESSION_CONTEXT('CLIENT')   -- DD02L.CLIDEP = 'X'
+CREATE SYNONYM "<own>"."T" FOR "<tenant>"."T"                                                    -- otherwise
+```
+
+and then `SET SCHEMA "<own>"`. Joins, FOR ALL ENTRIES and aggregates inherit
+the predicate; no generated SQL changes anywhere. Creation is idempotent:
+the catalog (`SYS.VIEWS` with its `DEFINITION`, `SYS.SYNONYMS`) is read
+first, existing objects are left alone, and a view whose definition drifted
+is recreated with `CREATE OR REPLACE`. HANA holds the view's query string —
+the text after `AS`, with `*` expanded into the quoted column list — in
+`DEFINITION`, and "current" is decided structurally: whitespace-normalised,
+the query must select anything (`*` or any quoted column list) from
+`"<tenant>"."<T>"` with `WHERE MANDT = SESSION_CONTEXT('CLIENT')`. The FROM
+target and the predicate decide, the projection is HANA's to spell, and a
+view pointing at another schema or table, or filtering by a hard-coded
+client, is recreated. A connect that finds the view current sends nothing
+(fix round 2: comparing the whole `CREATE` text recreated every view on
+every connect; fix round 3, bed-measured 2026-11-12: comparing even the
+query text did the same, because HANA stores the expanded columns — and two
+hosts connecting at once raced on the replace).
+
+The flags:
+
+- `OSD_CLIENT` — the logon client. Existing-schema mode refuses to start
+  without it: the session filters on `SESSION_CONTEXT('CLIENT')`, and a NULL
+  client reads every client-dependent table empty. It is passed to node-hdb
+  as the connect option `'SESSIONVARIABLE:CLIENT'` — `SET 'CLIENT'` is
+  refused by HANA (455, predefined, measured on the bed). The same value is
+  `sy-mandt` at boot (`bootIdentity` in tools/osd-identity.mjs), so ABAP
+  branching on `sy-mandt` sees the logon client; `connect()` sets it too, for
+  directly-constructed clients.
+- `HANA_OWN_SCHEMA` — our schema, the session's home. Unset keeps the H1
+  behavior exactly: `SET SCHEMA` to `HANA_SCHEMA` (the tenant), no shadow
+  objects.
+- `HANA_SCHEMA` stays the tenant. `STG_DB_FRESH=1` with the mode is refused
+  as before; `OSD_HANA_WRITE=1` lifts the read-only guard as before.
+
+Two guards keep the DDL ours. The read-only guard is extended by exactly one
+allow: the four shadow shapes — `CREATE [OR REPLACE] VIEW`, `CREATE
+SYNONYM`, `DROP VIEW`, `DROP SYNONYM` — and only when the owning schema read
+off the statement is `HANA_OWN_SCHEMA`; a `CREATE` on the tenant schema is
+still refused with `HANA_READONLY`, and `CREATE TABLE` on our own schema is
+not a shadow shape and stays refused. And the eager set is only what the
+tenant's `DD02L` holds: a table of our own (`ZSTG_*`) has no shadow, because
+it is not in `DD02L` at all. Table names with a SAP namespace
+(`/DMO/TRAVEL`) shadow like any other: quoted identifiers carry the
+slashes, the 259 parser keeps the namespace, and the eager set admits the
+name. `HANA_OWN_SCHEMA` equal to `HANA_SCHEMA` is refused before a socket
+opens — the shadow views would sit on the tenant's own tables, and the
+read-only guard, reading the owning schema off the statement, would admit
+DDL on them. Both schema names are normalised to upper once at
+construction, so the DDL, the catalog literals and `SET SCHEMA` spell one
+schema.
+
+The lazy half: a statement that fails with HANA error 259 (invalid table
+name) carries the table name in the error; when the tenant's `DD02L` holds
+that name, the shadow object is created and the statement retried — once,
+and only once. The name is read from the error, never from the statement.
+
+The DDIC the build knows comes from the real system:
+`tools/hana-ddic-gen.mjs` reads the tenant's DD03L and writes
+`gen/hana-ddic/<table>.tabl.xml` — `--tables A,B` reads those,
+`--from-build` discovers them (a missing DDIC name surfaces in the
+transpile's own validation output, `check_syntax, Database table or view "x"
+not found` / `unknown_types, ... contains unknown: X not found`; the tool
+reads the transpiler's words, never parses ABAP). `npm run transpile` creates the folder
+empty from the first build on (only a database-backed `--from-build` fills it), and the readers
+tolerate its absence regardless, because a fresh clone runs the osgo host before any transpile.
+`gen/hana-ddic` is listed
+in `abap_transpile.json` **before** `src/`: the later folder wins, so a
+hand-written `src/<table>.tabl.xml` of the same name shadows the generated
+copy — the real system's DDIC loses to an override only on purpose, and a
+folder that is an input of its own is walked as its own layer by the build,
+the transpiler and the store alike. Everything is exercised with fakes and
+fixtures (`test/hana-ddic-gen.mjs`, `test/hana-shadow-schema.mjs`); no HANA
+is reachable from CI, and the acceptance runs on the bed.
+
+Not covered, as decided when the mechanism was chosen (2026-11-11): `CLIENT
+SPECIFIED` — reading across all clients would want a synonym-read variant
+per table, countable in the corpus before anyone needs it; and writes into
+the tenant schema, which the grant forbids today (OSG is SELECT-only there).
+The mode stays read-only; the shadow DDL is our schema's own and is the one
+explicit exception the guard admits.
+
+## Sources out of the tenant: gen/hana-src
+
+The other half of the tenant's content is its sources. They do not arrive
+through a loader (the H4 decision, 2026-11-12: vsp already holds the decoder
+and a second one would be a new wheel) — they arrive as **input layers**,
+made by two tools that live outside this repository and read nothing but a
+dump:
+
+1. `vsp hana dump` (the a4h sibling's private binary) writes a dump
+   directory: `manifest.json`, `reposrc.jsonl`, `src/*.abap` and the raw
+   cross-reference tables under `tables/*.jsonl`. The dumper holds the
+   credentials; this repository never runs it.
+2. the dump→layers converter (`dump-to-layers.mjs`, Node builtins only)
+   reads a dump and writes `plan.json` plus `layers/<name>/{.abapgit.xml,
+   src/}` — one abapGit repository per package, `order` topological with
+   dependencies first, `cycles` the package SCCs it cannot order.
+
+`tools/hana-src-gen.mjs` copies the selected layers into
+`gen/hana-src/<NNN>-<name>/` — NNN is the plan's order, zero-padded, so the
+names sort in dependency order — and writes `gen/hana-src/manifest.json`
+with the layers' provenance: the source directory — for `--from-dump`, the
+dump directory and the `--system` prefix, not the converter's temp
+directory (a fresh mkdtemp every run would make `--from-dump --check` drift
+on the path alone, and point at a directory that no longer exists) —, the
+dump manifest's provenance and hash when plan.json carries them, the
+converter's commit when plan.json carries one. A cycle group is one folder, the members' src
+merged and the members named in the manifest, because no order between
+them is valid. `--packages <LIKE>` scopes it (the converter's own glob:
+`%` or `*` is any run of characters, `_` is one character), `--check`
+exits 1 when the existing gen/hana-src has drifted, and `--from-dump` runs
+the converter itself (`OSD_HANA_CONVERTER` names its path) on a dump
+directory, started through `tools/osd-host.mjs` like every tool a tool
+starts (`scriptCommandIn` with this process's environment: a compiled
+binary is its own `process.execPath`, so there the interpreter is
+`OSD_NODE`, else the `node` on the `PATH` — the SEA build's variable
+already, `scripts/build-sea.mjs` naming the Node that goes inside):
+
+    node <converter> <dump> --out <layers> --system <prefix>
+    node tools/hana-src-gen.mjs --layers <layers>
+    # or: node tools/hana-src-gen.mjs --from-dump --dump <dump> --system <prefix>
+
+Dumps and layer directories live outside git — they hold a real tenant's
+sources, and the tool refuses a `--layers` inside this tree unless it sits
+under `gen/` or `.local/`, both untracked, so neither the layers nor the
+manifest is ever committed; `--out` is held to the same rule. The tool
+never reads the dump's `tables/*.jsonl` at all; the provenance it records
+is what plan.json copied from the dump manifest.
+
+A generation built with a private gen/ layer in its inputs is private like
+the layers themselves — the tenant's sources (`gen/hana-src`) and their
+dictionary (`gen/hana-ddic`, the DD03L shapes the H3 generation writes)
+reached the transpile — and every publisher that bundles a build refuses
+it: the preview (scripts/build-preview.mjs:59, beside its $TMP refusals),
+the docker image (docker/image/assemble.mjs:17 guards `build/live` before
+anything is copied), the download bundle
+(scripts/make-download-bundle.mjs:40, before anything is staged) and the
+release directory (scripts/make-release.mjs:47, before the tree and the
+generation are copied — the directory docs/docker.md documents as "the
+release the image copies"). The refusal reads the generation's own record
+of what it was built from (`manifest.inputs.folders`, the expanded folder
+list tools/osd-build.mjs writes), so it is decided by what the build read,
+not by what the tree holds now; the helper is `generationHanaSrcProblem`
+in tools/osd-tmp.mjs, beside the `$TMP` one, and its one list of the two
+private prefixes is also what every publisher's gen/ copy filter drops
+(docker/image/assemble.mjs:57, scripts/make-download-bundle.mjs:79,
+scripts/make-release.mjs:57), so a stale `gen/hana-src` or `gen/hana-ddic`
+on disk never rides along with a generation whose record is clean. The
+build context is covered separately by
+docker/image/Dockerfile.dockerignore, which names both folders.
+Publishers that stage `gen/` never are safe by construction: the VSIX seed
+(scripts/build-vsix.mjs:353-354 stages src, webapp, tools, data and four
+files; the binary's seed tars the same staging), the OCI system publish
+(scripts/system-stage.mjs:12 stages src, data, webapp) and the preview
+itself (it writes bundles under web/generated and build/preview only).
+The CI artifact tar (tools/osd-ci-artifact.mjs:17, `gen output build`)
+packs a fresh CI checkout, which holds no tenant folders, and feeds the
+CI suite jobs — it publishes nothing.
+
+The layering rule is the one `gen/hana-ddic` already established, one step
+further: one entry `gen/hana-src/*` in `abap_transpile.json`, after
+`gen/hana-ddic` and before `src/`, expanded to its children wherever the
+folder list is read (`expandedFolders` in tools/osd-packs.mjs; the inputs
+report, the transpiler, the store and the capture all read the same
+expansion). The children are expanded and not listed because their names
+are the converter's `<system>-<package>` of private packages, and a
+tracked config should carry neither the churn nor the names. The later
+folder wins, so the real system's sources lose only to a hand-written
+`src/` override, on purpose — a generated copy of an object `src/` now
+holds is reported by `node tools/osd-inputs.mjs` like any override. A
+layer's `.abapgit.xml` is a repository marker, not an object, and the
+store keeps every child non-writable under `$STG_HANA_SRC`, the way gen/
+is kept.
+
+What the converter cannot source is counted, not lost: plan.json's
+`no_source` — IWSV/IWMO/IWOM/IWSG/IWPR, TABL, SHLP, SICF, WAPA, W3MI,
+DTEL, FUGR and friends — is copied into gen/hana-src/manifest.json and
+reported. Those kinds have other routes: TABL come from `gen/hana-ddic`
+(H3), the SEGW kinds from the SEGW tables (H5); gen/hana-src reports them
+and carries the sources only.
+
+Exercised with fixtures (`test/hana-src-gen.mjs`, synthetic `ZOSD_H4_*`
+converter output built in a temp dir); no tenant content is reachable
+from CI.

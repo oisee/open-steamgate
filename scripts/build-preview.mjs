@@ -22,14 +22,13 @@ import {packsInfo, servicesOf} from "../tools/osd-status.mjs";
 import {identity} from "../tools/osd-identity.mjs";
 import {SANDBOX_CONFIG_PATH, SANDBOX_CONFIG_BODY} from "../tools/osd-sandbox-config.mjs";
 import {ObjectStore} from "../tools/osd-store.mjs";
-import {forPublishing, generationTmpProblem, tmpModulesIn} from "../tools/osd-tmp.mjs";
+import {forPublishing, generationHanaSrcProblem, generationTmpProblem, tmpModulesIn} from "../tools/osd-tmp.mjs";
 import {realpathSync} from "node:fs";
 import {localObjectKeys} from "../tools/osd-deploy-manifest.mjs";
 import {tableFieldsOf} from "../tools/adt-documents.mjs";
 import {cdsEntityOf} from "../tools/adt-cds.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
-assertPublicSystem(root);
 const generated = resolve(root, "web/generated");
 // build/preview, not build/: build/ is the generation store of tools/osd-build.mjs
 // (build/live is what output/ points at), and webpack cleans its output
@@ -60,6 +59,13 @@ if (process.env.OSD_PREVIEW_GENERATE_ONLY !== "1") assertPublicTree(root);
   }
   const problem = generationTmpProblem(generation);
   if (problem !== undefined) throw new Error(problem);
+  // and the twin for gen/hana-src (H4): the tenant's sources are private
+  // exactly like $TMP, and a generation built with them is never bundled
+  const hanaProblem = generationHanaSrcProblem(generation);
+  if (hanaProblem !== undefined) throw new Error(hanaProblem);
+  // a private or unrecorded live generation never reaches a public preview;
+  // after the two checks above, so their refusals name their own cause
+  assertPublicSystem(root);
   // and by content, for a generation whose record is right and output is not
   const localModules = tmpModulesIn(resolve(root, "output"), localObjectKeys(root));
   if (localModules.length > 0) {

@@ -67,6 +67,9 @@ const ROOT_PACKAGES = {
   local: "$OSD",
   test: "$STG_TEST",
   gen: "$STG_GEN",
+  // the DDIC the real system generated for the build (H3): generated like
+  // gen/, but its own layer and package, and not hand-writable either
+  "gen/hana-ddic": "$STG_HANA_DDIC",
 };
 
 // A folder that is a package of its own rather than a child of the root
@@ -158,9 +161,14 @@ export function rootsOf(root, env = process.env) {
   const config = loadConfig(root), system = activeSystem(root, env);
   const packs = new Map([...packRootsOf(root, env), ...userLayersOf(root, env)].map((pack) => [pack.path, pack]));
   return inputFoldersOf(root, config, env).map((path) => packs.get(path) ?? (path === TMP_FOLDER ? tmpRoot() : {
-    path, writable: path !== "gen", library: false,
+    // gen/hana-src/<layer> (H4) is generated like gen/ and is no repository
+    // of this tree: never hand-writable, one package for the subtree -- the
+    // converter's layer names carry the tenant's packages, and the fallback
+    // derivation would name them after the zero-padded folder
+    path, writable: path !== "gen" && path !== "gen/hana-ddic" && !path.startsWith("gen/hana-src/"), library: false,
     ...(path === "local" || path.startsWith("local/") ? {imported: true} : {}),
-    ...(existsSync(join(root, path, ".abapgit.xml")) ? {
+    ...(path.startsWith("gen/hana-src/") ? {package: "$STG_HANA_SRC"}
+      : existsSync(join(root, path, ".abapgit.xml")) ? {
       abapgit: repositoryConfig(join(root, path)),
       package: rootPackage(join(root, path), "$OSD_" + packageWord(basename(path))),
     } : {}),
@@ -294,9 +302,14 @@ export class ObjectStore {
   // every object of every root, by type and name
   build(invalidate = true) {
     const index = new Map();
+    const rootPaths = new Set(this.roots.map((root) => root.path));
     for (const root of [...this.roots, ...this.libs]) {
-      // a library brings the file list the BUILD reads; a root is walked
-      for (const file of root.files ?? walkStoreFiles(this, root.path, [])) {
+      // a library brings the file list the BUILD reads; a root is walked.
+      // A folder that is a root of its own is walked as its own layer; the
+      // parent's walk skips it (the same rule as the build's filesIn, H3
+      // gen/hana-ddic), or the later parent root would own its objects
+      const skipDirs = new Set([...rootPaths].filter((path) => path !== root.path));
+      for (const file of root.files ?? walkStoreFiles(this, root.path, [], undefined, skipDirs)) {
         const name = basename(file);
         for (const [type, meta] of Object.entries(TYPES)) {
           if (!name.endsWith(meta.ext) || meta.sameFileAs !== undefined) {

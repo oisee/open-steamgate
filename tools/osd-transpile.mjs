@@ -26,7 +26,7 @@ import {createRequire} from "node:module";
 import {tmpdir} from "node:os";
 import {basename, dirname, join, relative, resolve, sep} from "node:path";
 import {hostModules} from "./osd-host.mjs";
-import {isSourceIdentity, inputFoldersOf} from "./osd-packs.mjs";
+import {expandedFolders, isSourceIdentity, inputFoldersOf} from "./osd-packs.mjs";
 import {mapStatementStarts} from "./osd-source-map-starts.mjs";
 import {lowerDerived, readRapBindings} from "./rap/lower-derived.mjs";
 import {urlLibraryPath} from "./osd-url-lib.mjs";
@@ -120,8 +120,11 @@ export function isBinaryFilename(filename) {
 }
 
 // every file under a folder, absolute, forward slashes, sorted: the order
-// the registry sees is then a property of the tree and not of the disk
-export function walk(dir, out = []) {
+// the registry sees is then a property of the tree and not of the disk.
+// `skipDirs`: a folder that is an input of its own is walked as its own layer
+// (H3: gen/hana-ddic inside gen); the parent's walk must not pick it up again
+// -- the same rule as tools/osd-inputs.mjs filesIn, which decides hiding.
+export function walk(dir, out = [], skipDirs) {
   let entries;
   try {
     entries = readdirSync(dir).sort();
@@ -131,8 +134,9 @@ export function walk(dir, out = []) {
   for (const entry of entries) {
     if (entry === ".git") continue;
     const p = join(dir, entry);
+    if (skipDirs?.has(p)) continue;
     if (statSync(p).isDirectory()) {
-      walk(p, out);
+      walk(p, out, skipDirs);
     } else {
       out.push(p.split(sep).join("/"));
     }
@@ -190,14 +194,18 @@ export function listFiles(root, config) {
   const include = regexps(config.input_filter);
   const exclude = regexps(config.exclude_filter);
   const system = activeSystem(root) ?? null;
-  const folders = system ? inputFoldersOf(root, config) : Array.isArray(config.input_folder) ? config.input_folder : [config.input_folder];
+  const folders = system ? inputFoldersOf(root, config)
+    : expandedFolders(Array.isArray(config.input_folder) ? config.input_folder : [config.input_folder], root);
   const wanted = [];
   let skipped = 0;
   for (const folder of folders.filter((f) => typeof f === "string")) {
-    for (const filename of walk(resolve(root, folder))) {
+    const skipDirs = new Set(folders.filter((f) => f !== folder).map((f) => resolve(root, f)));
+    for (const filename of walk(resolve(root, folder), [], skipDirs)) {
+      // a repository marker is not source in either mode (H4: the converter's
+      // layers are abapGit repositories; a system's layers carry .osd-layer.json)
       // DSL navigation metadata (*.trace.meta.json) is volatile and no object:
       // never read here, so it never names a generation (osd-build hashOf)
-      if (isSourceIdentity(filename) || /\.trace\.meta\.json$/i.test(filename) || system && [".osd-layer.json", ".abapgit.xml"].includes(basename(filename))) {
+      if (isSourceIdentity(filename) || /\.trace\.meta\.json$/i.test(filename) || [".osd-layer.json", ".abapgit.xml"].includes(basename(filename))) {
         skipped++;
       } else if (include.length > 0 && matchesSourcePath(root, filename, include, system) === false) {
         skipped++;

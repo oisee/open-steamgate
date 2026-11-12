@@ -379,8 +379,8 @@
    "reason": "lowered 2026-10-02: the YAML line index went to tools/dsl-yaml-lines.mjs; holds the range: of L3 slice 3a"
   },
   "tools/hana-client.mjs": {
-   "lines": 1026,
-   "reason": "H1 fix round 2, 2026-11-11: grew past the default mjs ceiling of 1000 by the multi-statement guard: isMultiStatement, the quote- and comment-aware walker beside statementKind, so #guard refuses a text carrying a top-level `;` as kind \"multi\" before the first word is read (the critic round's smuggle finding, measured reaching the driver over exec and prepare). The file is the one HANA DatabaseClient -- the dialect rewrites, the literal trim and the read-only guard with their measured history live together on purpose; carving it into a package of its own is not this fix round's work."
+   "lines": 1123,
+   "reason": "H3 fix round 2, 2026-11-12: the lazy fallback's reentrancy flag (its own DD02L / SYS.VIEWS / SYS.SYNONYMS reads must not re-enter it; critic MUST 1), the HANA_OWN_SCHEMA == HANA_SCHEMA refusal before a socket opens (MUST 2) and the one upper normalisation of both schema names at construction (SHOULD 5) live here, where the retry and the guard already live. NICE 9 -- moving the retry and the allow behind one call into tools/hana-shadow-schema.mjs -- stays the next slice's cut."
   },
   "tools/gogen/emit-constructors.ts": {
    "lines": 32,
@@ -699,8 +699,8 @@
    "reason": "baseline 2026-10-01"
   },
   "tools/osd-build.mjs": {
-   "lines": 1056,
-   "reason": "#641 zip layers: user source layers (zip cache + overlay) enter the build inputs and the generation hash; 2026-11-09 +7, the build makes packs/rap-flight's seed rows after the transpile through tools/rap-flight/seed-capture.mjs (generator output, not tracked), the call itself three lines beside the comment that says why it is imported by URL; +3 more, the import guarded by the pack's presence so a root without it (a store, a served system) never reaches the import; round 2 +29, the call moved out of main() into build() itself so every path that ends in a generation (a first start, a store's activation) makes the rows, cache hits included -- gated on the pack being one of the build's selected inputs (not its directory) and started as a child through osd-host, which boots the generation the build just made rather than the live pointer and keeps a second runtime out of a process that is already serving one; round 3 +6, a comment bullet saying the capture child works on a database of its own (it clears the inherited STG_DB/STG_DB_PATH, so a build inside a process serving a persistent DuckDB file still captures); round 5 +2, inputsOf leaves a data folder the build captured (the seed marker) out of the generation hash, since rows made by running a generation are its output and hashing them renamed the tree right after every build; round 7 +3, the capture script falls back to this checkout's copy when the root is a sources-only scratch tree without tools/ (test/adt-xref-warm.mjs builds one, and the import of the root's copy failed in its before-all hook)"
+   "lines": 1065,
+   "reason": "#641 zip layers: user source layers (zip cache + overlay) enter the build inputs and the generation hash; 2026-11-09 +7, the build makes packs/rap-flight's seed rows after the transpile through tools/rap-flight/seed-capture.mjs (generator output, not tracked), the call itself three lines beside the comment that says why it is imported by URL; +3 more, the import guarded by the pack's presence so a root without it (a store, a served system) never reaches the import; round 2 +29, the call moved out of main() into build() itself so every path that ends in a generation (a first start, a store's activation) makes the rows, cache hits included -- gated on the pack being one of the build's selected inputs (not its directory) and started as a child through osd-host, which boots the generation the build just made rather than the live pointer and keeps a second runtime out of a process that is already serving one; round 3 +6, a comment bullet saying the capture child works on a database of its own (it clears the inherited STG_DB/STG_DB_PATH, so a build inside a process serving a persistent DuckDB file still captures); round 5 +2, inputsOf leaves a data folder the build captured (the seed marker) out of the generation hash, since rows made by running a generation are its output and hashing them renamed the tree right after every build; round 7 +3, the capture script falls back to this checkout's copy when the root is a sources-only scratch tree without tools/ (test/adt-xref-warm.mjs builds one, and the import of the root's copy failed in its before-all hook); fix round 4 (H3) +6, runGenerators creates the generated-input folder the config lists (gen/hana-ddic) empty from the first build on -- readers tolerate its absence anyway, a fresh clone runs the osgo host before any transpile; fix round 4 (H4) +3, inputsOf records a listed folder only while it holds a file the hash would count (the NOT_AN_INPUT rule folder() applies): the base's runGenerators leaves gen/hana-ddic existing but empty on every build, this record is the only witness the private-layer guard reads, and an empty folder was never read -- an existing empty listed folder had named every generation after the first private"
   },
   "tools/osd-prove-inplace.mjs": {
    "lines": 1058,
@@ -711,8 +711,8 @@
    "reason": "conditional delete moved to vsp (#320)"
   },
   "tools/osd-store.mjs": {
-   "lines": 1661,
-   "reason": "baseline 2026-10-01"
+   "lines": 1674,
+   "reason": "H3, 2026-11-11: eight lines. gen/hana-ddic is generated, not hand-written: ROOT_PACKAGES names its package and rootsOf keeps it non-writable like gen/, and build() hands walkStoreFiles the set of root paths to skip so a folder that is an input of its own (gen/hana-ddic inside gen) is indexed once, as its own layer -- the same nested-input rule the build's filesIn and the transpiler's listFiles got. H4, 2026-11-12: five lines. gen/hana-src/<layer> is generated like gen/ too: rootsOf keeps every child non-writable and pins one package ($STG_HANA_SRC) for the subtree -- the converter's layer names carry the tenant's packages, and the fallback derivation would name them after the zero-padded folder."
   },
   "tools/segw-gen.mjs": {
    "lines": 1845,

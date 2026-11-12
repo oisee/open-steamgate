@@ -159,9 +159,15 @@ function walk(dir, out = [], seen = new Set()) {
   return out;
 }
 
-// what a generation is made of, and the hash that names it
+// what a generation is made of, and the hash that names it. A listed folder
+// is an input only while it holds a file the hash would count (the
+// NOT_AN_INPUT rule folder() applies): the base leaves gen/hana-ddic empty
+// on every build, and an empty folder was never read
 export function inputsOf(root, config = loadConfig(root)) {
-  const folders = inputFoldersOf(root, config).map((f) => join(root, f)).filter(existsSync);
+  // a listed folder is an input while it holds any file: an empty one
+  // (gen/hana-ddic before hana-ddic-gen writes it) was never read, and a
+  // folder of media alone is still read by the transpiler
+  const folders = inputFoldersOf(root, config).map((f) => join(root, f)).filter((f) => existsSync(f) && walk(f).length > 0);
   const libs = (config.libs ?? []).map((l) => {
     const cached = urlLibraryPath(root, l);
     if (cached) {
@@ -207,8 +213,12 @@ const TRACE_METADATA = /\.trace\.meta\.json$/i;
 const NOT_AN_INPUT = /\.(mjs|cjs|js|ts|py|md|txt|log|lock|snap|trace\.meta\.json)$/i;
 
 export const generatorClosure = (toolsDir = TOOLS, generators = GENERATORS) => generatorClosureOf(toolsDir, generators);
-export const runGenerators = (root, log = () => {}, overlay, readsLog, external) =>
-  runGeneratorsOf(TOOLS, GENERATORS, activeOverlay, root, log, overlay, readsLog, external);
+export const runGenerators = (root, log = () => {}, overlay, readsLog, external) => {
+  // the generated-input folder the config lists (H3: gen/hana-ddic) exists
+  // from the first build on, empty until hana-ddic-gen --from-build writes it
+  mkdirSync(join(root, "gen", "hana-ddic"), {recursive: true});
+  return runGeneratorsOf(TOOLS, GENERATORS, activeOverlay, root, log, overlay, readsLog, external);
+};
 export const generatorIdentity = () => generatorIdentityOf(TOOLS, GENERATORS);
 
 /** what `gen/` holds right now, by content: 196 files, milliseconds */
