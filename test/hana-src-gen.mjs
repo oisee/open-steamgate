@@ -1,7 +1,7 @@
 import {expect} from "chai";
 import {cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
-import {join} from "node:path";
+import {join, resolve} from "node:path";
 import {run} from "../tools/hana-src-gen.mjs";
 import {expandedFolders} from "../tools/osd-packs.mjs";
 import {layers} from "../tools/osd-inputs.mjs";
@@ -13,7 +13,9 @@ import {layers} from "../tools/osd-inputs.mjs";
 // way dump-to-layers.mjs writes it. Objects and packages are ZOSD_H4_*;
 // layer names are the converter's <system>-<package> of those. The layering
 // case is held the way H3 holds its: the folders become inputs before src/
-// and a hand-written src/ file of the same name wins.
+// and a hand-written src/ file of the same name wins. One case runs
+// --from-dump through a fake converter (OSD_HANA_CONVERTER) written into the
+// test's own temp dir; no real converter, dump or HANA is involved.
 
 // the .abapgit.xml the converter writes, verbatim from the fixture sample
 const ABAPGIT_XML = `<?xml version="1.0" encoding="utf-8"?>
@@ -295,5 +297,161 @@ describe("hana-src-gen: the tenant's sources as input layers", () => {
     } finally {
       rmSync(root, {recursive: true, force: true});
     }
+  });
+
+  it("the tracked abap_transpile.json pins the order: gen/hana-ddic, gen/hana-src/*, then src", () => {
+    // the decision lives in the tracked file; layers()'s mechanics are
+    // pinned by the temp-config case above, the file itself by this one
+    const config = JSON.parse(readFileSync(new URL("../abap_transpile.json", import.meta.url), "utf8"));
+    const folders = config.input_folder;
+    const at = (entry) => folders.indexOf(entry);
+    expect(at("gen/hana-ddic"), "gen/hana-ddic is listed").to.be.at.least(0);
+    expect(at("gen/hana-src/*"), "the generated layers are one entry").to.be.at.least(0);
+    expect(at("src"), "src is listed").to.be.at.least(0);
+    expect(at("gen/hana-ddic"), "the layers sit after gen/hana-ddic").to.be.lessThan(at("gen/hana-src/*"));
+    expect(at("gen/hana-src/*"), "the layers sit before src/: the later folder wins").to.be.lessThan(at("src"));
+    expect(config.exclude_filter, "the manifest is provenance, not transpile input")
+      .to.include("/gen/hana-src/manifest\\.json$");
+  });
+
+  it("--from-dump runs the converter on the dump, records the dump as the source, and --check agrees", async () => {
+    const f = converterOutput();
+    const bin = mkdtempSync(join(tmpdir(), "hana-src-conv-"));
+    const dumpDir = join(bin, "dump"); // a dump path; the fake converter never opens it
+    mkdirSync(dumpDir, {recursive: true});
+    const recorded = join(bin, "argv.json");
+    writeFileSync(join(bin, "fake-converter.mjs"), [
+      "import {cpSync, writeFileSync} from \"node:fs\";",
+      "const args = process.argv.slice(2);",
+      "writeFileSync(process.env.FAKE_CONVERTER_RECORD, JSON.stringify(args));",
+      "cpSync(process.env.FAKE_CONVERTER_SOURCE, args[args.indexOf(\"--out\") + 1], {recursive: true});",
+      ""].join("\n"));
+    const saved = {
+      OSD_HANA_CONVERTER: process.env.OSD_HANA_CONVERTER,
+      FAKE_CONVERTER_RECORD: process.env.FAKE_CONVERTER_RECORD,
+      FAKE_CONVERTER_SOURCE: process.env.FAKE_CONVERTER_SOURCE,
+    };
+    try {
+      f.layer("osd-tmp-zosd-h4-a", "$ZOSD_H4_A", 0, [["zosd_h4_a.prog.abap", "REPORT zosd_h4_a.\n"]]);
+      f.plan();
+      process.env.OSD_HANA_CONVERTER = join(bin, "fake-converter.mjs");
+      process.env.FAKE_CONVERTER_RECORD = recorded;
+      process.env.FAKE_CONVERTER_SOURCE = f.root;
+      const at = out(f.root);
+      expect(await run(["--from-dump", "--dump", dumpDir, "--system", "osd", "--out", at])).to.equal(0);
+      // the converter's argv, pinned: <dump> --out <temp> --system <prefix>
+      const args = JSON.parse(readFileSync(recorded, "utf8"));
+      expect(args.slice(0, 1), "the dump is the converter's input").to.deep.equal([dumpDir]);
+      expect(args.slice(1), "--out, the temp dir this tool made, --system, the prefix")
+        .to.deep.equal(["--out", args[2], "--system", "osd"]);
+      expect(args[2], "the temp dir is this tool's own mkdtemp").to.match(/hana-src-layers-/);
+      // the manifest names the dump and the prefix, not the temp dir (which
+      // is gone by now), so a later --check over the same dump agrees: a new
+      // temp dir cannot drift on its path alone
+      const manifest = JSON.parse(readFileSync(join(at, "manifest.json"), "utf8"));
+      expect(manifest.source).to.equal(resolve(dumpDir));
+      expect(manifest.system).to.equal("osd");
+      expect(await run(["--from-dump", "--dump", dumpDir, "--system", "osd", "--check", "--out", at])).to.equal(0);
+    } finally {
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key]; else process.env[key] = value;
+      }
+      rmSync(bin, {recursive: true, force: true});
+      rmSync(f.root, {recursive: true, force: true});
+    }
+  });
+
+  it("--out inside the tree is refused unless it is under gen/ or .local/", async () => {
+    const tree = mkdtempSync(join(tmpdir(), "hana-src-out-"));
+    const f = converterOutput();
+    try {
+      f.layer("osd-tmp-zosd-h4-a", "$ZOSD_H4_A", 0, [["zosd_h4_a.prog.abap", "REPORT zosd_h4_a.\n"]]);
+      f.plan();
+      let refused;
+      try {
+        await run(["--layers", f.root, "--out", join(tree, "src", "tenant")], {root: tree});
+        expect.fail("an --out inside the tree must refuse");
+      } catch (error) {
+        refused = error;
+      }
+      expect(refused.message).to.match(/--out .*inside this tree/);
+      expect(refused.message).to.match(/gen\/ or \.local\//);
+      // under .local/ the same out is allowed, like under gen/
+      expect(await run(["--layers", f.root, "--out", join(tree, ".local", "hana-src")], {root: tree})).to.equal(0);
+      expect(readdirSync(join(tree, ".local", "hana-src"))).to.include("000-osd-tmp-zosd-h4-a");
+    } finally {
+      rmSync(tree, {recursive: true, force: true});
+      rmSync(f.root, {recursive: true, force: true});
+    }
+  });
+
+  it("a folder beside a layer's src/ is refused, like a nested one; a file stays ignored", async () => {
+    const f = converterOutput();
+    try {
+      f.layer("osd-tmp-zosd-h4-a", "$ZOSD_H4_A", 0, [["zosd_h4_a.prog.abap", "REPORT zosd_h4_a.\n"]]);
+      f.plan();
+      mkdirSync(join(f.root, "layers", "osd-tmp-zosd-h4-a", "other"), {recursive: true});
+      writeFileSync(join(f.root, "layers", "osd-tmp-zosd-h4-a", "other", "stray.txt"), "stray\n");
+      let refused;
+      try {
+        await run(["--layers", f.root, "--out", out(f.root)]);
+        expect.fail("a folder beside src/ must refuse");
+      } catch (error) {
+        refused = error;
+      }
+      expect(refused.message).to.match(/other\/ beside src\//);
+      // a file beside src/ is ignored, not copied (a package.devc.xml, when
+      // the converter grows one)
+      rmSync(join(f.root, "layers", "osd-tmp-zosd-h4-a", "other"), {recursive: true, force: true});
+      writeFileSync(join(f.root, "layers", "osd-tmp-zosd-h4-a", "package.devc.xml"), "<devc/>");
+      expect(await run(["--layers", f.root, "--out", out(f.root)])).to.equal(0);
+      expect(readdirSync(join(out(f.root), "000-osd-tmp-zosd-h4-a"))).to.deep.equal([".abapgit.xml", "src"]);
+    } finally {
+      rmSync(f.root, {recursive: true, force: true});
+    }
+  });
+
+  it("the preview publisher refuses a generation built with gen/hana-src layers", async () => {
+    // the helper, unit-first: an inputs.folders entry under gen/hana-src/ is
+    // a private generation, a clean one publishes, an unreadable record is a
+    // refusal (fail closed). No second witness, unlike the $TMP check: this
+    // tree's own config names "gen/hana-src/*" whether or not a build saw
+    // any, so only the generation's expanded folder list decides.
+    const {generationHanaSrcProblem} = await import("../tools/osd-tmp.mjs");
+    const generation = mkdtempSync(join(tmpdir(), "hana-src-pub-"));
+    try {
+      writeFileSync(join(generation, "manifest.json"), JSON.stringify({
+        inputs: {folders: ["src", "gen/hana-src/000-osd-tmp-zosd-h4-a"]}}));
+      expect(generationHanaSrcProblem(generation)).to.match(/gen\/hana-src\/000-osd-tmp-zosd-h4-a/);
+      expect(generationHanaSrcProblem(generation), "the tenant's sources are private").to.match(/private/);
+      writeFileSync(join(generation, "manifest.json"), JSON.stringify({
+        inputs: {folders: ["src", "gen", "gen/hana-ddic"]}}));
+      expect(generationHanaSrcProblem(generation), "a generation without the layers publishes").to.equal(undefined);
+      writeFileSync(join(generation, "manifest.json"), "{broken");
+      expect(generationHanaSrcProblem(generation), "no record, no publishing").to.match(/no readable record/);
+      // the preview calls it beside its $TMP refusals
+      const source = readFileSync(new URL("../scripts/build-preview.mjs", import.meta.url), "utf8");
+      expect(source, "the preview imports the twin of generationTmpProblem").to.include("generationHanaSrcProblem");
+      expect(source).to.match(/generationHanaSrcProblem\(generation\)/);
+    } finally {
+      rmSync(generation, {recursive: true, force: true});
+    }
+  });
+
+  it("the docker image publisher refuses it, and the build context names the private folders", () => {
+    const assemble = readFileSync(new URL("../docker/image/assemble.mjs", import.meta.url), "utf8");
+    expect(assemble, "the live generation is guarded before anything is copied")
+      .to.match(/generationHanaSrcProblem\(join\("build", live\)\)/);
+    expect(assemble, "the gen/ copy does not carry the raw layers either").to.include("gen/hana-src");
+    const ignore = readFileSync(new URL("../docker/image/Dockerfile.dockerignore", import.meta.url), "utf8");
+    expect(ignore, "the context excludes the tenant's sources").to.match(/^gen\/hana-src$/m);
+    expect(ignore, "and the generated DDIC beside them").to.match(/^gen\/hana-ddic$/m);
+  });
+
+  it("the download bundle refuses a generation built with gen/hana-src layers", () => {
+    const source = readFileSync(new URL("../scripts/make-download-bundle.mjs", import.meta.url), "utf8");
+    expect(source, "the bundle guards build/live before staging")
+      .to.match(/generationHanaSrcProblem\(join\(root, "build", generation\)\)/);
+    expect(source, "and the staged gen/ does not carry the raw layers").to.include("gen/hana-src");
   });
 });

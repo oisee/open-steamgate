@@ -20,23 +20,27 @@
 //   --dump <dir>        the dump directory
 //   --system <prefix>   the converter names layers <system>-<package> and
 //                       requires the prefix, so --from-dump does too
-//   --packages <LIKE>   repeatable; the converter's %/_ glob over plan.json's
-//                       package. A cycle group rides in when any member
-//                       matches: its members cannot be ordered against each
-//                       other, so it is one folder or none
+//   --packages <LIKE>   repeatable; the converter's own glob over plan.json's
+//                       package (% or * is any run of characters, _ is one).
+//                       A cycle group rides in when any member matches: its
+//                       members cannot be ordered against each other, so it
+//                       is one folder or none
 //   --check             compare an existing --out with what would be
 //                       written; exit 1 on drift (generated_at is not
 //                       compared: every run would drift on the clock)
 //   --out <dir>         default gen/hana-src
 //
-// Refusals, named: a layer folder without .abapgit.xml; a nested folder in a
-// layer or its src/ (a converter layer is flat); a plan.json folder path
-// that leaves the layers directory; a plan.json schema this tool does not
-// read; --layers inside this tree unless under gen/ or .local/ (dumps hold a
-// real tenant's sources, and both of those are untracked); an --out that
-// exists without this tool's manifest.json in it. An --out WITH the manifest
-// is replaced wholesale: stale children of a previous dump must not linger
-// beside the new ones.
+// Refusals, named: a layer folder without .abapgit.xml; a folder beside a
+// layer's src/ or a nested one inside it (a converter layer is .abapgit.xml
+// and a flat src/, nothing else -- a file beside src/ is ignored, not
+// copied); a plan.json folder path that leaves the layers directory; a
+// plan.json schema this tool does not read; --layers inside this tree unless
+// under gen/ or .local/ (dumps hold a real tenant's sources, and both of
+// those are untracked); an --out held to the same rule (an --out inside the
+// tree lands the manifest on a tracked path); an --out that exists without
+// this tool's manifest.json in it. An --out WITH the manifest is replaced
+// wholesale: stale children of a previous dump must not linger beside the
+// new ones.
 //
 // The NNN is the plan's order, zero-padded to the widest order the plan
 // names, three at least, so the folder names sort in dependency order -- the
@@ -110,10 +114,11 @@ function groupFolder(group, width) {
 
 /** one layer folder of the layers directory: the files to copy, relative to
  *  the folder, in name order. Refuses what the converter never writes: a
- *  missing .abapgit.xml, a nested folder (a converter layer's src/ is flat),
- *  a src/ that is not there, a folder path that leaves the layers
- *  directory. Other files beside a layer folder (a package.devc.xml, when
- *  the converter grows one) are ignored, not copied. */
+ *  missing .abapgit.xml, a folder beside src/ (a converter layer is
+ *  .abapgit.xml and a flat src/, nothing else), a nested folder inside src/,
+ *  a src/ that is not there, a folder path that leaves the layers directory.
+ *  A file beside a layer folder (a package.devc.xml, when the converter
+ *  grows one) is ignored, not copied. */
 function layerFiles(layersDir, layer) {
   const base = resolve(layersDir);
   const folder = resolve(base, layer.folder ?? `layers/${layer.name}`);
@@ -123,6 +128,11 @@ function layerFiles(layersDir, layer) {
   const marker = join(folder, ".abapgit.xml");
   if (existsSync(marker) === false || statSync(marker).isFile() === false) {
     throw new Error(`hana-src-gen: layer ${layer.name} (${layer.folder}) has no .abapgit.xml -- not a converter layer`);
+  }
+  for (const entry of readdirSync(folder, {withFileTypes: true})) {
+    if (entry.isDirectory() && entry.name !== "src") {
+      throw new Error(`hana-src-gen: layer ${layer.name} (${layer.folder}) holds ${entry.name}/ beside src/ -- a converter layer is .abapgit.xml and a flat src/ only`);
+    }
   }
   let entries;
   try {
@@ -166,10 +176,11 @@ function intended(layersDir, plan, patterns) {
   return {tree, groups};
 }
 
-function manifestFor(source, plan, groups) {
+function manifestFor(source, plan, groups, system) {
   const width = padWidth(plan);
   return {
     source,
+    ...(system !== undefined ? {system} : {}),
     ...(plan.dump !== undefined ? {dump: plan.dump} : {}),
     ...(plan.converter_commit !== undefined ? {converter_commit: plan.converter_commit} : {}),
     layers: groups.map((group) => {
@@ -199,16 +210,20 @@ let TREE;
 const treeRoot = () => TREE ??= decodeURIComponent(new URL("../", import.meta.url).pathname);
 
 /** a layers directory inside this tree holds a real tenant's sources where a
- *  commit could reach them: refused, unless it sits under gen/ or .local/
+ *  commit could reach them, and an --out inside the tree lands the manifest
+ *  on a tracked path: both refused, unless they sit under gen/ or .local/
  *  (both untracked). options.root stands in for the tree in tests. */
-export function withinTree(layersDir, root = treeRoot()) {
+export function withinTree(dir, root = treeRoot(), flag = "--layers") {
   const base = resolve(root);
-  const dir = resolve(layersDir);
-  if (dir === base || dir.startsWith(base + sep) === false) return;
-  const rel = relative(base, dir);
+  const at = resolve(dir);
+  if (at === base || at.startsWith(base + sep) === false) return;
+  const rel = relative(base, at);
   const allowed = rel === "gen" || rel.startsWith(`gen${sep}`) || rel === ".local" || rel.startsWith(`.local${sep}`);
   if (allowed) return;
-  throw new Error(`hana-src-gen: --layers ${layersDir} is inside this tree, and dumps hold a real tenant's sources -- keep it under gen/ or .local/ (both untracked), or outside the repository`);
+  if (flag === "--layers") {
+    throw new Error(`hana-src-gen: --layers ${dir} is inside this tree, and dumps hold a real tenant's sources -- keep it under gen/ or .local/ (both untracked), or outside the repository`);
+  }
+  throw new Error(`hana-src-gen: --out ${dir} is inside this tree -- keep it under gen/ or .local/ (both untracked) so neither the layers nor the manifest is ever committed, or outside the repository`);
 }
 
 const sameFile = (a, b) => readFileSync(a).equals(readFileSync(b));
@@ -331,10 +346,14 @@ export async function run(args = process.argv.slice(2), options = {}) {
     }
     const temp = mkdtempSync(join(tmpdir(), "hana-src-layers-"));
     try {
+      // the converter's argv is pinned by test: <dump> --out <temp> --system <prefix>
       const child = spawnSync(process.execPath, [converter, dump, "--out", temp, "--system", system], {stdio: "inherit"});
       if (child.status !== 0) throw new Error(`hana-src-gen: the converter exited ${child.status ?? "on a signal"}`);
       layers = temp;
-      return await generate(layers, out, packages, check, options);
+      // the manifest's provenance is the dump, not this temp dir: a fresh
+      // mkdtemp every run would make --from-dump --check drift on the path
+      // alone, and point at a directory that no longer exists
+      return await generate(layers, out, packages, check, options, {source: resolve(dump), system});
     } finally {
       rmSync(temp, {recursive: true, force: true});
     }
@@ -342,16 +361,17 @@ export async function run(args = process.argv.slice(2), options = {}) {
   return generate(layers, out, packages, check, options);
 }
 
-async function generate(layers, out, packages, check, options) {
+async function generate(layers, out, packages, check, options, provenance = {}) {
   withinTree(layers, options.root);
+  withinTree(out, options.root, "--out");
   const plan = JSON.parse(readFileSync(join(layers, "plan.json"), "utf8"));
   const {tree, groups} = intended(layers, plan, packages);
-  const manifest = manifestFor(layers, plan, groups);
+  const manifest = manifestFor(provenance.source ?? layers, plan, groups, provenance.system);
   if (check === true) {
     const drift = driftOf(out, tree, manifest);
     if (drift.length === 0) {
       const files = [...tree.values()].reduce((n, f) => n + f.size, 0);
-      console.log(`hana-src-gen: ${out} matches ${layers} (${tree.size} folder(s), ${files} file(s))`);
+      console.log(`hana-src-gen: ${out} matches ${provenance.source ?? layers} (${tree.size} folder(s), ${files} file(s))`);
       return 0;
     }
     for (const line of drift) console.log(`hana-src-gen: ${line}`);
