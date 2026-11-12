@@ -4,7 +4,7 @@ import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {HanaDatabaseClient} from "../tools/hana-client.mjs";
-import {ddicTables, synonymSql, viewSql} from "../tools/hana-shadow-schema.mjs";
+import {ddicTables, synonymSql, tableFrom259, viewSql} from "../tools/hana-shadow-schema.mjs";
 
 // The shadow schema (tools/hana-shadow-schema.mjs, H3 B+C): the client lives
 // in a schema of our own, over the tenant's tables, with SESSION_CONTEXT
@@ -164,6 +164,25 @@ describe("the HANA shadow schema", () => {
     } finally {
       await db.disconnect();
     }
+  });
+
+  it("the 259 wire text measured on the bed names the table, not the first word", () => {
+    // bed acceptance 2026-11-12 (REPORT open question 1, answered): the
+    // runtime's `SELECT * FROM sflight` failed with this, and the first-word
+    // read after "invalid table name:" took "Could" -- DD02L was asked for
+    // COULD, found nothing, and the lazy fallback never fired.
+    const error = new Error("invalid table name:  Could not find table/view SFLIGHT in schema OSD: line 1 col 15 (at pos 14)");
+    error.code = 259;
+    expect(tableFrom259(error), "the table, not the first word of the sentence").to.equal("SFLIGHT");
+  });
+
+  it("a /-namespaced 259 name keeps its namespace, quoted or not", () => {
+    const bare = new Error("invalid table name:  Could not find table/view /DMO/TRAVEL in schema OSD: line 1 col 15 (at pos 14)");
+    bare.code = 259;
+    expect(tableFrom259(bare)).to.equal("/DMO/TRAVEL");
+    const quoted = new Error(`invalid table name:  Could not find table/view "/DMO/TRAVEL" in schema OSD: line 1 col 15 (at pos 14)`);
+    quoted.code = 259;
+    expect(tableFrom259(quoted), "the quotes come off, the namespace stays").to.equal("/DMO/TRAVEL");
   });
 
   it("the client is a node-hdb session variable, set at connect, not by SET", async () => {

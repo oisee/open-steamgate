@@ -59,12 +59,21 @@ export function shadowDdlSchema(sql) {
 }
 
 /** HANA error 259 is "invalid table name" and the message carries the name;
- *  the lazy fallback reads it from here and never from the statement. Tolerates
- *  a schema prefix and quotes; the exact wire text is what the bed run
- *  confirms (fakes here pin the contract). */
+ *  the lazy fallback reads it from here and never from the statement. The
+ *  shape the bed measured (acceptance 2026-11-12) reads first:
+ *
+ *    invalid table name:  Could not find table/view SFLIGHT in schema OSD: line 1 col 15 (at pos 14)
+ *
+ *  The plain `invalid table name: <name>` the fakes sent before the bed run
+ *  stays as the fallback. The name may be namespaced (/DMO/TRAVEL) and
+ *  quoted; quotes come off, the namespace stays. The schema in the message
+ *  is our own -- the session sits there after SET SCHEMA -- so the name
+ *  alone decides what the lazy fallback shadows. */
 export function tableFrom259(error) {
   if (Number(error?.code) !== 259) return undefined;
-  const match = /invalid table name:?[\s"']*([A-Za-z0-9_.$#]+)/i.exec(String(error?.message ?? ""));
+  const message = String(error?.message ?? "");
+  const measured = /Could not find table\/view (\S+) in schema (\S+)/i.exec(message);
+  const match = measured ?? /invalid table name:?[\s"']*([A-Za-z0-9_.$#]+)/i.exec(message);
   if (match === null) return undefined;
   const name = match[1].split(".").pop().replace(/[^A-Za-z0-9_/#$]/g, "");
   return name === "" ? undefined : name.toUpperCase();
