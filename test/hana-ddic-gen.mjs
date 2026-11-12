@@ -1,6 +1,6 @@
 import {expect} from "chai";
 import {createRequire} from "node:module";
-import {existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
+import {existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {run, tablesFromValidation} from "../tools/hana-ddic-gen.mjs";
@@ -171,6 +171,209 @@ describe("hana-ddic-gen: DDIC from the real DD03L for the build", () => {
       expect(stack.owner.get("TABL ZOSD_H3_KEEP")).to.equal("gen");
     } finally {
       rmSync(root, {recursive: true, force: true});
+    }
+  });
+});
+
+// ---------------------------------------------------------------- dump ----
+// DDIC from the dump's DD* JSONL (tools/hana-ddic-gen.mjs --from-dump, H5a).
+// The fixture is a dump directory the way `vsp hana dump --ddic` writes it:
+// manifest.json, src/ and tables/*.jsonl -- one JSON object per line, the
+// DD* table's full measured column set, the keys as HANA stores them. The
+// key sets here are the real files' (measured on the H5 probe dump,
+// 2026-11-12), reduced to the columns this tool reads; the objects are
+// synthetic ZOSD_H5_*. No database and no HANA involved: the dump path is
+// files in, XML out, the same mapper as the live read.
+describe("hana-ddic-gen: DDIC from the dump's DD* tables", () => {
+  const dumpFixture = ({omit = []} = {}) => {
+    const root = mkdtempSync(join(tmpdir(), "hana-ddic-dump-"));
+    mkdirSync(join(root, "tables"), {recursive: true});
+    const table = (name, rows) => {
+      if (omit.includes(name)) return;
+      writeFileSync(join(root, "tables", `${name}.jsonl`),
+        rows.map((row) => JSON.stringify(row)).join("\n") + (rows.length > 0 ? "\n" : ""));
+    };
+    table("DD02L", [
+      {TABNAME: "ZOSD_H5_HEAD", TABCLASS: "TRANSP", CLIDEP: "X", MASTERLANG: "", AS4LOCAL: "A", AS4VERS: "0000", AS4DATE: "20260101", AS4USER: "SAP"},
+      {TABNAME: "ZOSD_H5_STRUCT", TABCLASS: "INTTAB", CLIDEP: "", MASTERLANG: "", AS4LOCAL: "A", AS4VERS: "0000", AS4DATE: "20260101", AS4USER: "SAP"},
+      // an inactive version of the same table: the live read pins
+      // AS4LOCAL 'A' and AS4VERS '0000', so the dump path drops it the same way
+      {TABNAME: "ZOSD_H5_HEAD", TABCLASS: "TRANSP", CLIDEP: "X", AS4LOCAL: "I", AS4VERS: "0000"},
+    ]);
+    table("DD03L", [
+      {TABNAME: "ZOSD_H5_HEAD", POSITION: "1", FIELDNAME: "MANDT", KEYFLAG: "X", ROLLNAME: "MANDT", COMPTYPE: "E", DATATYPE: "CLNT", LENG: "3", DECIMALS: "0", INTTYPE: "C", INTLEN: "000006", NOTNULL: "X", AS4LOCAL: "A", AS4VERS: "0000", SRS_ID: 0},
+      {TABNAME: "ZOSD_H5_HEAD", POSITION: "2", FIELDNAME: "ZOSD_H5_KEY", KEYFLAG: "X", ROLLNAME: "", COMPTYPE: "E", DATATYPE: "CHAR", LENG: "10", DECIMALS: "0", INTTYPE: "C", INTLEN: "", NOTNULL: "X", AS4LOCAL: "A", AS4VERS: "0000", SRS_ID: 0},
+      // typed only through its data element, and through that element's domain
+      {TABNAME: "ZOSD_H5_HEAD", POSITION: "3", FIELDNAME: "ZOSD_H5_ELEM", KEYFLAG: "", ROLLNAME: "ZOSD_H5_DTEL_CHAR", COMPTYPE: "E", DATATYPE: "", LENG: "", DECIMALS: "", INTTYPE: "", INTLEN: "", NOTNULL: "", AS4LOCAL: "A", AS4VERS: "0000", SRS_ID: 0},
+      {TABNAME: "ZOSD_H5_HEAD", POSITION: "4", FIELDNAME: "ZOSD_H5_VIA_DOMA", KEYFLAG: "", ROLLNAME: "ZOSD_H5_DTEL_DOMA", COMPTYPE: "E", DATATYPE: "", LENG: "", DECIMALS: "", INTTYPE: "", INTLEN: "", NOTNULL: "", AS4LOCAL: "A", AS4VERS: "0000", SRS_ID: 0},
+      // a structured component: DD03L carries DATATYPE STRU and no INTTYPE
+      {TABNAME: "ZOSD_H5_HEAD", POSITION: "5", FIELDNAME: "ZOSD_H5_ADDR", KEYFLAG: "", ROLLNAME: "ZOSD_H5_STRUCT", COMPTYPE: "S", DATATYPE: "STRU", LENG: "000000", DECIMALS: "000000", INTTYPE: "", INTLEN: "000000", NOTNULL: "", AS4LOCAL: "A", AS4VERS: "0000", SRS_ID: 0},
+      {TABNAME: "ZOSD_H5_STRUCT", POSITION: "1", FIELDNAME: "ZOSD_H5_NAME", KEYFLAG: "", ROLLNAME: "", COMPTYPE: "E", DATATYPE: "CHAR", LENG: "30", DECIMALS: "0", INTTYPE: "C", INTLEN: "000060", NOTNULL: "", AS4LOCAL: "A", AS4VERS: "0000"},
+      // an inactive field version: dropped like its table's
+      {TABNAME: "ZOSD_H5_STRUCT", POSITION: "2", FIELDNAME: "ZOSD_H5_EXTRA", KEYFLAG: "", ROLLNAME: "", COMPTYPE: "E", DATATYPE: "CHAR", LENG: "5", DECIMALS: "0", INTTYPE: "C", INTLEN: "000010", NOTNULL: "", AS4LOCAL: "I", AS4VERS: "0000"},
+    ]);
+    table("DD04L", [
+      {ROLLNAME: "ZOSD_H5_DTEL_CHAR", DATATYPE: "CHAR", LENG: "000010", DECIMALS: "000000", OUTPUTLEN: "000030", HEADLEN: "30", SCRLEN1: "10", SCRLEN2: "15", SCRLEN3: "20", DTELMASTER: "E", AS4LOCAL: "A", AS4VERS: "0000"},
+      {ROLLNAME: "ZOSD_H5_DTEL_DOMA", DOMNAME: "ZOSD_H5_DOMA", DATATYPE: "", LENG: "", DECIMALS: "", DTELMASTER: "E", AS4LOCAL: "A", AS4VERS: "0000"},
+      {ROLLNAME: "ZOSD_H5_DTEL_OLD", DATATYPE: "CHAR", LENG: "000001", AS4LOCAL: "I", AS4VERS: "0000"},
+    ]);
+    table("DD01L", [
+      {DOMNAME: "ZOSD_H5_DOMA", DATATYPE: "CHAR", LENG: "000001", DECIMALS: "000000", OUTPUTLEN: "000001", LOWERCASE: "X", VALEXI: "X", DOMMASTER: "E", AS4LOCAL: "A", AS4VERS: "0000"},
+    ]);
+    table("DD07L", [
+      {DOMNAME: "ZOSD_H5_DOMA", VALPOS: "0001", DOMVALUE_L: "N", DOMVALUE_H: "", AS4LOCAL: "A", AS4VERS: "0000"},
+      {DOMNAME: "ZOSD_H5_DOMA", VALPOS: "0002", DOMVALUE_L: "O", DOMVALUE_H: "", AS4LOCAL: "A", AS4VERS: "0000"},
+      {DOMNAME: "ZOSD_H5_DOMA", VALPOS: "0003", DOMVALUE_L: "C", DOMVALUE_H: "Z", AS4LOCAL: "A", AS4VERS: "0000"},
+    ]);
+    // the texts, in two languages: the master language wins, not the first row
+    table("DD02T", [
+      {TABNAME: "ZOSD_H5_HEAD", DDTEXT: "h5 fixture head (de)", DDLANGUAGE: "D", AS4LOCAL: "A", AS4VERS: "0000"},
+      {TABNAME: "ZOSD_H5_HEAD", DDTEXT: "h5 fixture head", DDLANGUAGE: "E", AS4LOCAL: "A", AS4VERS: "0000"},
+    ]);
+    table("DD04T", [
+      {ROLLNAME: "ZOSD_H5_DTEL_CHAR", DDTEXT: "h5 fixture element (de)", DDLANGUAGE: "D", AS4LOCAL: "A", AS4VERS: "0000"},
+      {ROLLNAME: "ZOSD_H5_DTEL_CHAR", DDTEXT: "h5 fixture element", REPTEXT: "Elem", SCRTEXT_S: "El", SCRTEXT_M: "Elem", SCRTEXT_L: "Element", DDLANGUAGE: "E", AS4LOCAL: "A", AS4VERS: "0000"},
+    ]);
+    table("DD01T", [
+      {DOMNAME: "ZOSD_H5_DOMA", DDTEXT: "h5 fixture domain", DDLANGUAGE: "E", AS4LOCAL: "A", AS4VERS: "0000"},
+    ]);
+    table("DD40L", [
+      {TYPENAME: "ZOSD_H5_TTYPE", AS4LOCAL: "A", AS4VERS: "0000"},
+    ]);
+    return root;
+  };
+
+  it("writes the tables, structures, elements and domains of the dump", async () => {
+    const dump = dumpFixture();
+    const out = join(dump, "out");
+    try {
+      expect(await run(["--from-dump", dump, "--out", out])).to.equal(0);
+      expect(readdirSync(out).sort()).to.deep.equal([
+        "zosd_h5_doma.doma.xml", "zosd_h5_dtel_char.dtel.xml", "zosd_h5_dtel_doma.dtel.xml",
+        "zosd_h5_head.tabl.xml", "zosd_h5_struct.tabl.xml"]);
+      const head = readFileSync(join(out, "zosd_h5_head.tabl.xml"), "utf8");
+      expect(head).to.include(`<TABNAME>ZOSD_H5_HEAD</TABNAME>`);
+      expect(head).to.include(`<TABCLASS>TRANSP</TABCLASS>`);
+      expect(head).to.include(`<CLIDEP>X</CLIDEP>`);
+      expect(head).to.include(`<DD09L>`);
+      expect(head).to.include(`<DDTEXT>h5 fixture head</DDTEXT>`);
+      // the client field, in the shape every table of this tree writes it
+      expect(head).to.match(/<FIELDNAME>MANDT<\/FIELDNAME>\s*<KEYFLAG>X<\/KEYFLAG>\s*<ROLLNAME>MANDT<\/ROLLNAME>/);
+      // the field typed only by its data element resolves CHAR 000010
+      expect(head).to.match(/<FIELDNAME>ZOSD_H5_ELEM<\/FIELDNAME>[\s\S]*?<DATATYPE>CHAR<\/DATATYPE>[\s\S]*?<LENG>000010<\/LENG>/);
+      // the element -> domain hop resolves CHAR 000001
+      expect(head).to.match(/<FIELDNAME>ZOSD_H5_VIA_DOMA<\/FIELDNAME>[\s\S]*?<DATATYPE>CHAR<\/DATATYPE>[\s\S]*?<LENG>000001<\/LENG>/);
+      // the structured component carries its own COMPTYPE
+      expect(head).to.match(/<FIELDNAME>ZOSD_H5_ADDR<\/FIELDNAME>\s*<ROLLNAME>ZOSD_H5_STRUCT<\/ROLLNAME>\s*<COMPTYPE>S<\/COMPTYPE>/);
+      const struct = readFileSync(join(out, "zosd_h5_struct.tabl.xml"), "utf8");
+      expect(struct).to.include(`<TABCLASS>INTTAB</TABCLASS>`);
+      expect(struct).to.not.include(`<DD09L>`);
+      expect(struct).to.not.include(`<CLIDEP>X</CLIDEP>`);
+      expect(struct).to.include(`<FIELDNAME>ZOSD_H5_NAME</FIELDNAME>`);
+      expect(struct).to.not.include(`ZOSD_H5_EXTRA`);
+      const dtel = readFileSync(join(out, "zosd_h5_dtel_char.dtel.xml"), "utf8");
+      expect(dtel).to.include(`serializer="LCL_OBJECT_DTEL"`);
+      expect(dtel).to.include(`<ROLLNAME>ZOSD_H5_DTEL_CHAR</ROLLNAME>`);
+      expect(dtel).to.include(`<DATATYPE>CHAR</DATATYPE>`);
+      expect(dtel).to.include(`<LENG>000010</LENG>`);
+      expect(dtel).to.include(`<DDTEXT>h5 fixture element</DDTEXT>`);
+      expect(dtel).to.include(`<SCRTEXT_S>El</SCRTEXT_S>`);
+      expect(dtel).to.include(`<DTELMASTER>E</DTELMASTER>`);
+      expect(dtel).to.not.include(`h5 fixture element (de)`);
+      const viaDoma = readFileSync(join(out, "zosd_h5_dtel_doma.dtel.xml"), "utf8");
+      expect(viaDoma).to.include(`<DOMNAME>ZOSD_H5_DOMA</DOMNAME>`);
+      expect(viaDoma).to.not.include(`<DATATYPE>`);
+      const doma = readFileSync(join(out, "zosd_h5_doma.doma.xml"), "utf8");
+      expect(doma).to.include(`serializer="LCL_OBJECT_DOMA"`);
+      expect(doma).to.include(`<DOMNAME>ZOSD_H5_DOMA</DOMNAME>`);
+      expect(doma).to.include(`<LOWERCASE>X</LOWERCASE>`);
+      expect(doma).to.include(`<VALEXI>X</VALEXI>`);
+      expect(doma).to.include(`<DDTEXT>h5 fixture domain</DDTEXT>`);
+      expect(doma).to.match(/<VALPOS>0001<\/VALPOS>[\s\S]*?<DOMVALUE_L>N<\/DOMVALUE_L>/);
+      expect(doma).to.match(/<VALPOS>0003<\/VALPOS>[\s\S]*?<DOMVALUE_L>C<\/DOMVALUE_L>[\s\S]*?<DOMVALUE_H>Z<\/DOMVALUE_H>/);
+      expect(existsSync(join(out, "zosd_h5_ttype.ttyp.xml")), "DD40L is not covered").to.equal(false);
+    } finally {
+      rmSync(dump, {recursive: true, force: true});
+    }
+  });
+
+  it("reports what it wrote and the kinds the dump does not cover", async () => {
+    const dump = dumpFixture();
+    const out = join(dump, "out");
+    const lines = [];
+    const log = console.log;
+    console.log = (line) => lines.push(String(line));
+    let code;
+    try {
+      code = await run(["--from-dump", dump, "--out", out]);
+    } finally {
+      console.log = log;
+      rmSync(dump, {recursive: true, force: true});
+    }
+    expect(code).to.equal(0);
+    const said = lines.join("\n");
+    expect(said).to.match(/2 table\(s\), 2 data element\(s\), 1 domain\(s\)/);
+    expect(said).to.match(/not covered/);
+    expect(said).to.match(/SHLP/);
+    expect(said).to.match(/MSAG/);
+    expect(said).to.match(/1 table type\(s\)/);
+  });
+
+  it("--check matches its own output and refuses drift", async () => {
+    const dump = dumpFixture();
+    const out = join(dump, "out");
+    try {
+      expect(await run(["--from-dump", dump, "--out", out])).to.equal(0);
+      expect(await run(["--from-dump", dump, "--out", out, "--check"])).to.equal(0);
+      // a file edited in place drifts
+      writeFileSync(join(out, "zosd_h5_head.tabl.xml"),
+        readFileSync(join(out, "zosd_h5_head.tabl.xml"), "utf8").replace("h5 fixture head", "hand-edited"));
+      expect(await run(["--from-dump", dump, "--out", out, "--check"])).to.equal(1);
+      // a missing file drifts
+      rmSync(join(out, "zosd_h5_dtel_char.dtel.xml"));
+      expect(await run(["--from-dump", dump, "--out", out, "--check"])).to.equal(1);
+      // a file the plan does not write drifts
+      writeFileSync(join(out, "zosd_h5_stray.tabl.xml"), "<abapGit/>");
+      expect(await run(["--from-dump", dump, "--out", out, "--check"])).to.equal(1);
+      // no out at all says so instead of comparing nothing
+      expect(await run(["--from-dump", dump, "--out", join(dump, "never"), "--check"])).to.equal(1);
+    } finally {
+      rmSync(dump, {recursive: true, force: true});
+    }
+  });
+
+  it("a DD* file the dump does not carry is no rows, not an error", async () => {
+    const dump = dumpFixture({omit: ["DD07L", "DD40L", "DD01T"]});
+    const out = join(dump, "out");
+    try {
+      expect(await run(["--from-dump", dump, "--out", out])).to.equal(0);
+      const doma = readFileSync(join(out, "zosd_h5_doma.doma.xml"), "utf8");
+      expect(doma).to.include(`<DD01V>`);
+      expect(doma).to.not.include(`<DD07V`);
+      expect(doma).to.not.include(`<DDTEXT>`);
+    } finally {
+      rmSync(dump, {recursive: true, force: true});
+    }
+  });
+
+  it("refuses a mixed invocation, and a folder that is not a dump", async () => {
+    const refuse = async (promise, pattern) => {
+      let error;
+      try {
+        await promise;
+      } catch (thrown) {
+        error = thrown;
+      }
+      expect(error?.message ?? "(no refusal)", `expected a refusal matching ${pattern}`).to.match(pattern);
+    };
+    const dump = dumpFixture({omit: ["DD02L"]});
+    try {
+      await refuse(run(["--from-dump", dump, "--tables", "ZOSD_H5_HEAD"]), /choose --from-dump/);
+      await refuse(run(["--from-build", "--check"]), /--check/);
+      await refuse(run(["--from-dump", dump, "--out", join(dump, "out")]), /tables\/DD02L\.jsonl/);
+      await refuse(run(["--from-dump", dump, "--nonsense"]), /unknown option/);
+    } finally {
+      rmSync(dump, {recursive: true, force: true});
     }
   });
 });

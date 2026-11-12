@@ -51,7 +51,7 @@
 //
 // The XML itself is emitted by structureXml (tools/cds-computed.mjs) in its
 // transport shape: one writer, two consumers.
-import {structureXml} from "./cds-computed.mjs";
+import {structureXml, xmlText} from "./cds-computed.mjs";
 
 const pad = (n) => String(n).padStart(6, "0");
 
@@ -121,12 +121,18 @@ export function ddicField(row, refs = {}) {
   const reftable = String(row.reftable ?? "").toUpperCase();
   const precfield = String(row.precfield ?? "").toUpperCase();
   const reffield = String(row.reffield ?? "").toUpperCase();
+  // the component type DD03L names, when it is not the plain data-element
+  // one (H5a): a structured component arrives as COMPTYPE S with DATATYPE
+  // STRU and no INTTYPE, and the XML carries ROLLNAME beside COMPTYPE S --
+  // the type is the structure the rollname names, not a data element
+  const comptype = String(row.comptype ?? "").toUpperCase();
   return {
     fieldname, key, notnull, ...(rollname === "" ? {} : {rollname}),
     datatype, inttype, inttypeFrom, leng: pad(digits), intlen, intlenFrom,
     ...(reftable === "" ? {} : {reftable}),
     ...(precfield === "" ? {} : {precfield}),
     ...(reffield === "" ? {} : {reffield}),
+    ...(comptype === "" || comptype === "E" ? {} : {comptype}),
     ...(decimals > 0 ? {decimals: pad(decimals)} : {}),
   };
 }
@@ -198,11 +204,20 @@ export function mandtFirstKey(fields) {
  *  writer. `table` is {name, text, clidep, fields}, the fields as
  *  ddicFields returned them. */
 export function tablXml(table) {
+  // the TABCLASS the DD02L row carries, through to the writer (H5a): the
+  // dump's structures arrive as INTTAB and go out in the include shape --
+  // no DD09L, no client, TABCLASS INTTAB. A row without one stays TRANSP,
+  // which is what the live read has always produced.
+  const tabclass = String(table.tabclass ?? "TRANSP").toUpperCase();
   const fields = (table.fields ?? []).map((f) => ({
+    // tabl marks a DDIC field so the writer's include shape keeps it: that
+    // filter exists for the CDS structure's computed-only fields (H5a), and
+    // a marked field is never one of those
+    tabl: true,
     name: f.fieldname,
     dd03p: f.mandt === true ? f.tags : {
       ...(f.key ? {KEYFLAG: "X"} : {}),
-      ...(f.rollname !== undefined ? {ROLLNAME: f.rollname, COMPTYPE: "E"} : {}),
+      ...(f.rollname !== undefined ? {ROLLNAME: f.rollname, COMPTYPE: f.comptype ?? "E"} : {}),
       ADMINFIELD: "0",
       INTTYPE: f.inttype,
       INTLEN: f.intlen,
@@ -216,5 +231,141 @@ export function tablXml(table) {
       MASK: `  ${f.datatype}`,
     },
   }));
-  return structureXml({name: table.name, label: table.text, clidep: table.clidep !== false, fields}, {transport: true});
+  return structureXml({name: table.name, label: table.text, clidep: table.clidep !== false, fields}, {transport: tabclass === "TRANSP"});
+}
+
+// ------------------------------------------------------------- the dump ----
+// The pieces the dump path (H5a) needs and the live read never did. The
+// *.dtel.xml / *.doma.xml of this tree were only ever written by hand, so
+// there was no writer to reuse: these are the one pair, beside tablXml, in
+// the envelope the tree's own files carry (read off src/zosd_test/ddic,
+// packs/rap-flight and the lib's dtel/doma files).
+
+/** the abapGit file name of an object: lower case, a /namespace/ spelled
+ *  #namespace#, the way abapGit names namespace objects on disk and the way
+ *  this tree's own dumps and layers spell them. One rule for the gen tool's
+ *  live read and its dump read. */
+export function abapGitFileName(name, kind) {
+  return `${String(name).toLowerCase().replaceAll("/", "#")}.${kind}.xml`;
+}
+
+const abapGitEnvelope = (serializer, values) => `<?xml version="1.0" encoding="utf-8"?>
+<abapGit version="v1.0.0" serializer="LCL_OBJECT_${serializer}" serializer_version="v1.0.0">
+ <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
+  <asx:values>
+${values}  </asx:values>
+ </asx:abap>
+</abapGit>
+`;
+
+// the tags of a DD04V/DD01V/DD07V: what the row leaves blank stays absent,
+// the way a system's own abapGit export writes it
+const tagLines = (indent, tags) => tags
+  .filter(([, value]) => String(value ?? "").trim() !== "")
+  .map(([name, value]) => `${indent}<${name}>${xmlText(String(value).trim())}</${name}>`)
+  .join("\n") + "\n";
+
+/** one DD04L row and its DD04T text row as the tree's abapGit *.dtel.xml.
+ *  `element` is {name, row, trow, masterLanguage}: the type comes from the
+ *  DD04L row (DATATYPE/LENG/DECIMALS of its own, otherwise DOMNAME names the
+ *  domain -- the hop ddicField resolves for a table's field), the words from
+ *  the DD04T row, which is where the dictionary keeps DDTEXT and the four
+ *  labels (DD04L carries only the lengths they are shown in). */
+export function dtelXml(element) {
+  const row = element.row ?? {};
+  const trow = element.trow ?? {};
+  const v = (tag) => String(row[tag] ?? "");
+  const t = (tag) => String(trow[tag] ?? "");
+  const lang = (String(element.masterLanguage ?? "").trim() || "E").toUpperCase();
+  const typed = v("datatype").trim() !== "";
+  const tags = [
+    ["ROLLNAME", String(element.name ?? "").toUpperCase()],
+    ["DDLANGUAGE", lang],
+    ["HEADLEN", v("headlen")],
+    ["SCRLEN1", v("scrlen1")],
+    ["SCRLEN2", v("scrlen2")],
+    ["SCRLEN3", v("scrlen3")],
+    ["DDTEXT", t("ddtext")],
+    ["REPTEXT", t("reptext")],
+    ["SCRTEXT_S", t("scrtext_s")],
+    ["SCRTEXT_M", t("scrtext_m")],
+    ["SCRTEXT_L", t("scrtext_l")],
+    ["DTELMASTER", v("dtelmaster").trim() !== "" ? v("dtelmaster") : lang],
+    ...(typed ? [["DATATYPE", v("datatype").toUpperCase()],
+      ["LENG", pad(Number(v("leng").trim()) || 0)],
+      ["DECIMALS", pad(Number(v("decimals").trim()) || 0)]] : []),
+    ["OUTPUTLEN", v("outputlen")],
+    ["DOMNAME", v("domname").toUpperCase()],
+    ["REFKIND", v("refkind").toUpperCase()],
+    ["REFTYPE", v("reftype").toUpperCase()],
+  ];
+  return abapGitEnvelope("DTEL", `   <DD04V>\n${tagLines("    ", tags)}   </DD04V>\n`);
+}
+
+/** one DD01L row, its DD01T text and its DD07L values as the tree's abapGit
+ *  *.doma.xml. `domain` is {name, row, text, masterLanguage, values}. A
+ *  domain with no dumped values goes out without the DD07V_TAB -- the shape
+ *  of a domain without fixed values in this tree's own files. */
+export function domaXml(domain) {
+  const row = domain.row ?? {};
+  const v = (tag) => String(row[tag] ?? "");
+  const lang = (String(domain.masterLanguage ?? "").trim() || "E").toUpperCase();
+  const tags = [
+    ["DOMNAME", String(domain.name ?? "").toUpperCase()],
+    ["DDLANGUAGE", lang],
+    ["DATATYPE", v("datatype").toUpperCase()],
+    ["LENG", pad(Number(v("leng").trim()) || 0)],
+    ["DECIMALS", pad(Number(v("decimals").trim()) || 0)],
+    ["OUTPUTLEN", v("outputlen")],
+    ...(v("lowercase").trim().toUpperCase() === "X" ? [["LOWERCASE", "X"]] : []),
+    ...(v("valexi").trim().toUpperCase() === "X" ? [["VALEXI", "X"]] : []),
+    ["DDTEXT", domain.text ?? ""],
+  ];
+  const values = [...(domain.values ?? [])]
+    .sort((a, b) => (Number(a.valpos) || 0) - (Number(b.valpos) || 0))
+    .map((value) => {
+      const w = (tag) => String(value[tag] ?? "");
+      return `    <DD07V>\n${tagLines("     ", [
+        ["DOMNAME", String(domain.name ?? "").toUpperCase()],
+        ["VALPOS", String(Number(w("valpos").trim()) || 0).padStart(4, "0")],
+        ["DDLANGUAGE", lang],
+        ["DOMVALUE_L", w("domvalue_l")],
+        ["DOMVALUE_H", w("domvalue_h")],
+        ["DDTEXT", w("ddtext")],
+      ])}    </DD07V>`;
+    })
+    .join("\n");
+  const valuesBlock = values === "" ? "" : `   <DD07V_TAB>\n${values}\n   </DD07V_TAB>\n`;
+  return abapGitEnvelope("DOMA", `   <DD01V>\n${tagLines("    ", tags)}   </DD01V>\n${valuesBlock}`);
+}
+
+/** the fields of one DD03L read, with the .INCLUDE rows spliced from the
+ *  other reads of the same dump (H5a): the dump carries every DD02L table's
+ *  DD03L, so the include's rows arrive in the include's place, in their own
+ *  POSITION order. The spliced rows are deliberately NOT re-sorted against
+ *  the outer ones -- their positions are their own table's, and sorting
+ *  them together would interleave them by number. `includes` carries the
+ *  dump's DD03L rows by table name; the live read keeps plain ddicFields,
+ *  which refuses an include row it cannot splice. */
+export function ddicFieldsWithIncludes(rows, refs = {}, includes = new Map(), seen = new Set()) {
+  const sorted = [...(rows ?? [])].sort((a, b) => (Number(a.position) || 0) - (Number(b.position) || 0));
+  const out = [];
+  for (const row of sorted) {
+    const name = String(row.fieldname ?? "").toUpperCase();
+    if (name.startsWith(".") === false) {
+      const field = ddicField(row, refs);
+      if (field !== undefined) out.push(field);
+      continue;
+    }
+    const include = (name === ".INCLUDE" ? String(row.precfield ?? "") : name).toUpperCase();
+    if (seen.has(include)) {
+      throw new Error(`hana-ddic-map: the include chain closes a cycle at ${include}`);
+    }
+    const inner = includes.get(include);
+    if (inner === undefined) {
+      throw new Error(`hana-ddic-map: the table carries an include row (${include}) whose DD03L is not in the dump`);
+    }
+    out.push(...ddicFieldsWithIncludes(inner, refs, includes, new Set([...seen, include])));
+  }
+  return out;
 }

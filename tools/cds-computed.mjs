@@ -185,7 +185,7 @@ export function constantLines(constants) {
 }
 
 const pad = (n, w = 6) => String(n).padStart(w, "0");
-const xmlText = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+export const xmlText = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 /** R11: the DDIC structure (TABL INTTAB) under the CDS name of a computed
  *  view: `TYPES x TYPE /dmo/i_carrierslocksingleton_s` resolves as on a
@@ -210,7 +210,7 @@ export function structureXml(e, {transport = false} = {}) {
       default: return {INTTYPE: "I", INTLEN: pad(4), DATATYPE: "INT4", LENG: pad(10)};
     }
   };
-  const fields = e.fields.filter((f) => transport || f.constant !== undefined || f.aggregate).map((f) => {
+  const fields = e.fields.filter((f) => transport || f.tabl === true || f.constant !== undefined || f.aggregate).map((f) => {
     const d = f.aggregate?.dd03p;
     const props = f.dd03p ?? (d?.ROLLNAME ? {ROLLNAME: d.ROLLNAME, COMPTYPE: "E"}
       : d ? Object.fromEntries(["INTTYPE", "INTLEN", "DATATYPE", "LENG", "DECIMALS"].filter((k) => d[k] !== undefined).map((k) => [k, d[k]]))

@@ -1,5 +1,5 @@
 import {expect} from "chai";
-import {ddicFields, mandtFirstKey, tablXml} from "../tools/hana-ddic-map.mjs";
+import {ddicFields, ddicFieldsWithIncludes, mandtFirstKey, tablXml} from "../tools/hana-ddic-map.mjs";
 
 // The DD03L -> our *.tabl.xml shape mapping (tools/hana-ddic-map.mjs), as a
 // pure function: fixture rows with made-up names, no database.
@@ -183,5 +183,57 @@ describe("the DD03L to abapGit TABL mapping", () => {
     // a non-key field carries neither KEYFLAG nor NOTNULL
     expect(xml).to.not.match(/<FIELDNAME>ZOSD_H1_CODE<\/FIELDNAME>\s*<KEYFLAG/);
     expect(xml).to.include(`<MASK>  DEC</MASK>`);
+  });
+
+  // the dump path (H5a): a dump carries every DD02L table's DD03L, so an
+  // .INCLUDE row is not a refusal there -- the include's fields arrive in
+  // the include's place, in their own POSITION order. The outer rows keep
+  // the order their positions give them, and the spliced rows are not
+  // re-sorted against them (their positions are their own table's and would
+  // collide with the outer ones).
+  it("splices an .INCLUDE row from the other DD03L reads of the same dump (H5a)", () => {
+    const rows = [
+      {position: "1", fieldname: "MANDT", keyflag: "X", rollname: "MANDT", datatype: "CLNT", leng: "3", decimals: "0", inttype: "C", intlen: "000006", notnull: "X"},
+      {position: "3", fieldname: ".INCLUDE", precfield: "ZOSD_H1_STAMP"},
+      {position: "5", fieldname: "ZOSD_H1_TAIL", keyflag: "", rollname: "", datatype: "CHAR", leng: "2", decimals: "0", inttype: "C", intlen: "000004", notnull: ""},
+    ];
+    const includes = new Map([["ZOSD_H1_STAMP", [
+      // the include's own positions decide inside it, here 2 then 1
+      {position: "2", fieldname: "ZOSD_H1_STAMP_A", keyflag: "", rollname: "", datatype: "TIMS", leng: "6", decimals: "0", inttype: "T", intlen: "000012", notnull: ""},
+      {position: "1", fieldname: "ZOSD_H1_STAMP_D", keyflag: "", rollname: "", datatype: "DATS", leng: "8", decimals: "0", inttype: "D", intlen: "000016", notnull: ""},
+    ]]]);
+    const fields = ddicFieldsWithIncludes(rows, {}, includes);
+    expect(fields.map((f) => f.fieldname)).to.deep.equal(
+      ["MANDT", "ZOSD_H1_STAMP_D", "ZOSD_H1_STAMP_A", "ZOSD_H1_TAIL"]);
+  });
+
+  it("an include whose DD03L is not in the dump is refused by name, and a cycle too", () => {
+    const row = {position: "1", fieldname: ".INCLUDE", precfield: "ZOSD_H1_ABSENT"};
+    let error;
+    try { ddicFieldsWithIncludes([row], {}, new Map()); } catch (e) { error = e; }
+    expect(error?.message).to.include("ZOSD_H1_ABSENT");
+    const cycle = new Map([["ZOSD_H1_A", [{position: "1", fieldname: ".INCLUDE", precfield: "ZOSD_H1_B"}]],
+      ["ZOSD_H1_B", [{position: "1", fieldname: ".INCLUDE", precfield: "ZOSD_H1_A"}]]]);
+    error = undefined;
+    try {
+      ddicFieldsWithIncludes(cycle.get("ZOSD_H1_A"), {}, cycle, new Set(["ZOSD_H1_B"]));
+    } catch (e) { error = e; }
+    expect(error?.message).to.match(/cycle/);
+  });
+
+  it("a structured component carries its own COMPTYPE (H5a: DD03L COMPTYPE S)", () => {
+    const fields = ddicFields([
+      {position: "1", fieldname: "ZOSD_H1_ADDR", keyflag: "", rollname: "ZOSD_H1_STRUCT", comptype: "S", datatype: "STRU", leng: "000000", decimals: "000000", inttype: "", intlen: "000000", notnull: ""},
+    ], {});
+    expect(fields[0]).to.include({rollname: "ZOSD_H1_STRUCT", comptype: "S", datatype: "STRU"});
+    // a structure is not a TRANSP table: the dump's INTTAB rows go out in the
+    // include shape, no DD09L and no client
+    const xml = tablXml({name: "ZOSD_H1_WITH_STRUCT", text: "h1 fixture structure", clidep: false, tabclass: "INTTAB", fields});
+    expect(xml).to.include(`<TABCLASS>INTTAB</TABCLASS>`);
+    expect(xml).to.not.include(`<DD09L>`);
+    expect(xml).to.include(`<ROLLNAME>ZOSD_H1_STRUCT</ROLLNAME>
+     <COMPTYPE>S</COMPTYPE>`);
+    // the live path's tables, with no TABCLASS named, stay TRANSP
+    expect(tablXml({name: "ZOSD_H1_HEAD", text: "", clidep: true, fields: []})).to.include(`<TABCLASS>TRANSP</TABCLASS>`);
   });
 });
