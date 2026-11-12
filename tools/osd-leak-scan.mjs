@@ -49,6 +49,28 @@ const UUID =
   /\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b/g;
 export const CAPTURE = /\.(pcap|pcapng|jsonl)$/i;
 
+// A home directory names its owner. `/home/<name>/`, `/Users/<name>/` and
+// `C:\Users\<name>\` carry a real user name into a tracked file, and nobody
+// has to list that name for it to be one: a stack trace pasted into a doc, an
+// absolute require into a sibling checkout. The identifier list never caught
+// it, because a user name is too short and too common to list (2026-11-10).
+// The generic names below are container users, CI users and doc placeholders;
+// anything else is somebody's account. A backslash may be written escaped, as
+// it is inside a JS or JSON string.
+export const HOME_PATH = /(?:\/home\/|\/Users\/|\b[A-Za-z]:\\{1,2}Users\\{1,2})([A-Za-z0-9._-]+)(?=[\/\\])/g;
+export const GENERIC_HOME_NAMES = new Set([
+  "coder", "runner", "user", "username", "x", "y", "z", "example", "someone", "somebody",
+  "node", "root", "me", "you", "name", "ubuntu", "vscode", "codespace", "codespaces",
+  "dev", "developer", "shared", "public", "default", "test", "linuxbrew",
+]);
+export function homePaths(text) {
+  const found = [];
+  for (const m of text.matchAll(HOME_PATH)) {
+    if (!GENERIC_HOME_NAMES.has(m[1].toLowerCase())) found.push(m[0]);
+  }
+  return found;
+}
+
 // Lock files are megabytes of base64 integrity hashes, nobody writes them by
 // hand, and no identifier reaches one except by chance. Scanning them produces
 // a page of four-byte coincidences per run, which is how a check teaches its
@@ -355,6 +377,11 @@ function scan(root, sources, names, publication = false, privateLayer = false) {
         note(view.how, "частный адрес", m);
       }
       for (const m of view.text.match(UUID) ?? []) note(view.how, "uuid", m);
+      // only views that are text: a decoded payload is bytes, and a path there
+      // would be a coincidence
+      if (view.how === "текст" || view.how === "utf-16le") {
+        for (const m of homePaths(view.text)) note(view.how, "домашний каталог", m, "home-path");
+      }
       if (view.digest && view.run64) knownDigests.add(view.run64);
       for (const { text: addr } of packedAddresses(view.packed)) {
         if (view.run64 && !view.digest) {

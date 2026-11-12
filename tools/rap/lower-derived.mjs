@@ -21,8 +21,11 @@ export function readRapBindings(root, onRead) {
 // Each becomes an explicit signature over the BDEF's derived types (the
 // pool-scoped bindings bdef-gen writes), with the implicit response
 // parameters the form has: FAILED / REPORTED / MAPPED (EARLY), CHANGING.
+//   METHODS m FOR INSTANCE FEATURES IMPORTING keys REQUEST req FOR ent RESULT result.   (R4)
+//   METHODS m FOR NUMBERING IMPORTING entities FOR CREATE ent.                           (R4)
 const RESPONSES = {DETERMINE: ["reported"], VALIDATE: ["failed", "reported"], MODIFY: ["mapped", "failed", "reported"],
-  READ: ["failed", "reported"], LOCK: ["failed", "reported"]};
+  READ: ["failed", "reported"], LOCK: ["failed", "reported"], FEATURES: ["failed", "reported"],
+  NUMBERING: ["mapped", "failed", "reported"]};
 // forms a system knows that are not lowered: named in the refusal
 const REFUSED = ["NUMBERING", "INSTANCE", "GLOBAL", "PRECHECK", "FEATURES", "AUTHORIZATION", "DETERMINE", "VALIDATE", "MODIFY", "READ", "LOCK", "BEHAVIOR"];
 const ident = "[A-Za-z_/%][A-Za-z0-9_/%]*";
@@ -48,6 +51,17 @@ function parseForm(text, where) {
   }
   if ((m = re(`LOCK IMPORTING (${ident}) FOR LOCK (${ident})`))) {
     return {form: "LOCK", clauses: [{param: m[1], kind: "LOCK", entity: m[2]}]};
+  }
+  if ((m = re(`INSTANCE FEATURES IMPORTING (${ident}) REQUEST (${ident}) FOR (${ident}) RESULT (${ident})`))) {
+    return {form: "FEATURES", clauses: [{param: m[1], kind: "FEATURES", entity: m[3], request: m[2], result: m[4]}]};
+  }
+  if ((m = re(`NUMBERING IMPORTING (${ident}) FOR CREATE (${ident})`))) {
+    return {form: "NUMBERING", clauses: [{param: m[1], kind: "CREATE", entity: m[2]}]};
+  }
+  // R5: the early numbering of a create by association (cba), in the
+  // parent's handler: the rows are a TABLE FOR CREATE parent\_child
+  if ((m = re(`NUMBERING IMPORTING (${ident}) FOR CREATE (${ident})\\\\(${ident})`))) {
+    return {form: "NUMBERING", clauses: [{param: m[1], kind: "CREATE", entity: `${m[2]}\\${m[3]}`, source: m[2], assoc: m[3]}]};
   }
   if ((m = re("MODIFY IMPORTING (.+)"))) {
     const clauses = [];
@@ -97,6 +111,7 @@ export function implicitHandlers(source, filename) {
     const params = [];
     for (const c of parsed.clauses) {
       params.push({name: c.param.toLowerCase(), direction: "importing", role: ["CREATE", "UPDATE"].includes(c.kind) ? "entities" : "keys", clause: c, of: "import"});
+      if (c.request) params.push({name: c.request.toLowerCase(), direction: "importing", role: "request", clause: c, of: "request"});
       if (c.result) params.push({name: c.result.toLowerCase(), direction: "changing", role: "result", clause: c, of: "result"});
     }
     for (const r of RESPONSES[parsed.form]) params.push({name: r, direction: "changing", role: r});
@@ -129,6 +144,7 @@ function lowerImplicit(source, filename, bindings) {
       const c = p.clause;
       if (c.kind === "ACTION") return type(`ACTION ${p.of === "result" ? "RESULT" : "IMPORT"} ${c.entity}~${c.name}`);
       if (c.kind === "READ") return type(`READ ${p.of === "result" ? "RESULT" : "IMPORT"} ${c.entity}`);
+      if (c.kind === "FEATURES") return type(`INSTANCE FEATURES ${{import: "KEY", request: "REQUEST", result: "RESULT"}[p.of]} ${c.entity}`);
       return type(`${c.kind} ${c.entity}`);
     };
     const group = d => h.params.filter(p => p.direction === d).map(p => `${p.name} TYPE ${typeOf(p)}`).join(" ");
@@ -150,8 +166,118 @@ function lowerImplicit(source, filename, bindings) {
   return source;
 }
 
+// R7: a pool's saver declares `METHODS save_modified REDEFINITION.`; on a
+// system its parameters are implicit and typed by the BDEF, here they are
+// written out over the pool's bindings (abaplint voids every parameter of a
+// CL_ABAP_BEHAVIOR_SAVER method, ANORMALIES "RAP saver phases"):
+//   IMPORTING create TYPE REQUEST FOR CHANGE b  update TYPE REQUEST FOR CHANGE b
+//             delete TYPE REQUEST FOR DELETE b  CHANGING reported TYPE RESPONSE FOR REPORTED LATE b
+export const SAVE_MODIFIED = [["create", "importing", "REQUEST CHANGE"], ["update", "importing", "REQUEST CHANGE"],
+  ["delete", "importing", "REQUEST DELETE"], ["reported", "changing", "RESPONSE REPORTED"]];
+// R10: `METHODS adjust_numbers REDEFINITION.` the same way:
+//   CHANGING mapped TYPE RESPONSE FOR MAPPED LATE b  reported TYPE RESPONSE FOR REPORTED LATE b
+export const ADJUST_NUMBERS = [["mapped", "changing", "RESPONSE MAPPED LATE"], ["reported", "changing", "RESPONSE REPORTED"]];
+
+/** the saver classes of a source and their `save_modified REDEFINITION` (R10:
+ *  and `adjust_numbers REDEFINITION`) token */
+export function saverRedefinitions(source, filename) {
+  if (!/\.abap$/i.test(filename) || !/cl_abap_behavior_saver/i.test(source)) return [];
+  const tokens = new Lexer().run(new MemoryFile(filename, source)).tokens.filter(t => t.constructor.name !== "Comment");
+  const w = i => tokens[i]?.getStr().toUpperCase();
+  const out = [];
+  let saver = false, statement = true, inMethods = false;
+  for (let i = 0; i < tokens.length; i++) {
+    const first = statement;
+    statement = w(i) === ".";
+    if (first && w(i) === "CLASS" && w(i + 2) === "DEFINITION") {
+      let j = i + 3;
+      while (j < tokens.length && w(j) !== ".") j++;
+      const words = tokens.slice(i + 3, j).map(t => t.getStr().toUpperCase());
+      const from = words.indexOf("FROM");
+      saver = from > 0 && words[from - 1] === "INHERITING" && words[from + 1] === "CL_ABAP_BEHAVIOR_SAVER";
+    }
+    if (first) inMethods = w(i) === "METHODS";
+    if (saver && inMethods && ["SAVE_MODIFIED", "ADJUST_NUMBERS"].includes(w(i)) && w(i + 1) === "REDEFINITION") {
+      out.push({token: tokens[i + 1], method: w(i), where: `${filename}:${tokens[i].getStart().getRow()}`});
+    }
+    if (w(i) === "ENDCLASS") saver = false;
+  }
+  return out;
+}
+
+function lowerSaver(source, filename, bindings) {
+  const found = saverRedefinitions(source, filename);
+  if (!found.length) return source;
+  const pool = poolOf(filename);
+  const lines = [0];
+  for (let i = 0; i < source.length; i++) if (source[i] === "\n") lines.push(i + 1);
+  const offset = t => lines[t.getStart().getRow() - 1] + t.getStart().getCol() - 1;
+  for (const {token, method, where} of found.reverse()) {
+    const type = key => {
+      const t = bindings[`POOL ${pool} FOR ${key}`.toUpperCase()];
+      if (!t) throw new Error(`${where}: ${method.toLowerCase()} in pool ${pool}, which no behavior definition ${method === "ADJUST_NUMBERS" ? "with late numbering" : "with a saver request"} names (${key})`);
+      return t;
+    };
+    const params = method === "ADJUST_NUMBERS" ? ADJUST_NUMBERS : SAVE_MODIFIED;
+    const group = d => params.filter(p => p[1] === d).map(([n, , k]) => `${n} TYPE ${type(k)}`).join(" ");
+    const start = offset(token);
+    const text = [["importing", "IMPORTING"], ["changing", "CHANGING"]].filter(([d]) => group(d)).map(([d, w]) => `${w} ${group(d)}`).join(" ");
+    source = source.slice(0, start) + text + source.slice(start + token.getStr().length);
+  }
+  return source;
+}
+
+// R7: CORRESPONDING #( x-alias MAPPING FROM ENTITY ) -- the entity's
+// `mapping for` read backwards -- becomes the explicit MAPPING of its pairs
+// (nothing when it names none); MAPPING TO ENTITY the other way round. A
+// source `delete-<alias>` (save_modified's REQUEST FOR DELETE) maps its keys only
+function lowerMappingEntity(source, filename, bindings) {
+  if (!/\bMAPPING\s+(FROM|TO)\s+ENTITY\b/i.test(source)) return source;
+  const pool = poolOf(filename);
+  const tokens = new Lexer().run(new MemoryFile(filename, source)).tokens.filter(t => t.constructor.name !== "Comment");
+  const w = i => tokens[i]?.getStr().toUpperCase();
+  const lines = [0];
+  for (let i = 0; i < source.length; i++) if (source[i] === "\n") lines.push(i + 1);
+  const offset = t => lines[t.getStart().getRow() - 1] + t.getStart().getCol() - 1;
+  const changes = [];
+  for (let i = 1; i < tokens.length; i++) {
+    if (w(i) !== "MAPPING" || !["FROM", "TO"].includes(w(i + 1)) || w(i + 2) !== "ENTITY") continue;
+    const where = `${filename}:${tokens[i].getStart().getRow()}`;
+    // `delete-<alias>`, the save_modified parameter, is a REQUEST FOR DELETE: keys only
+    const keys = w(i - 2) === "-" && w(i - 3) === "DELETE" ? " KEYS" : "";
+    const clause = pool && bindings[`POOL ${pool} FOR MAPPING ${w(i + 1)} ENTITY${keys} ${w(i - 1)}`];
+    if (!clause) throw new Error(`${where}: MAPPING ${w(i + 1)} ENTITY after ${tokens[i - 1].getStr()}, which names no entity of a behavior definition of pool ${pool}`);
+    const start = offset(tokens[i]), end = offset(tokens[i + 2]) + tokens[i + 2].getStr().length;
+    changes.push({start, end, text: clause === "%NONE" ? "" : clause});
+  }
+  for (const c of changes.reverse()) source = source.slice(0, c.start) + c.text + source.slice(c.end);
+  return source;
+}
+
+// R7: the clean-room saver declares save_modified for abaplint's static
+// check only; in the build each pool declares its own, typed by its BDEF, so
+// the base's declaration and implementation are blanked (rows kept)
+function lowerLintOnly(source, filename) {
+  if (!/^cl_abap_behavior_saver\.clas\.abap$/i.test(filename.split(/[\\/]/).pop())) return source;
+  // the declaration between the markers (definition part), and the method's
+  // implementation from METHOD save_modified to its ENDMETHOD (a comment
+  // outside a method of the implementation part is not storable on a system)
+  let blank = false, method = false;
+  return source.split("\n").map(line => {
+    if (/^\* LINT-ONLY begin/.test(line)) { blank = true; return ""; }
+    if (/^\* LINT-ONLY end/.test(line)) { blank = false; return ""; }
+    if (/^\s*METHOD (save_modified|adjust_numbers)\./i.test(line)) method = true;
+    if (method) { if (/^\s*ENDMETHOD\./i.test(line)) method = false; return ""; }
+    return blank ? "" : line;
+  }).join("\n");
+}
+
 export function lowerDerived(source, filename, bindings) {
-  if (!filename.endsWith(".abap") || !/\bFOR\b/i.test(source)) return source;
+  if (!filename.endsWith(".abap")) return source;
+  source = lowerLintOnly(source, filename);
+  source = lowerSaver(source, filename, bindings);
+  source = lowerMappingEntity(source, filename, bindings);
+  if (!/\bFOR\b/i.test(source)) return source;
   source = lowerImplicit(source, filename, bindings);
   const allTokens = new Lexer().run(new MemoryFile(filename, source)).tokens;
   const tokens = allTokens.filter(t => t.constructor.name !== "Comment");
@@ -166,7 +292,8 @@ export function lowerDerived(source, filename, bindings) {
     // Longest binding first: qualified entity/action names consist of several tokens.
     for (let end = i + 3; end < tokens.length && end < i + 18; end++) {
       const slice = tokens.slice(i + 1, end + 1);
-      const key = slice.map(t => t.getStr()).join(" ").replace(/\s*([\\~])\s*/g, "$1").toUpperCase();
+      // `bdef\\entity` (the entity of a BDEF, written with two backslashes) is bound as bdef\entity
+      const key = slice.map(t => t.getStr()).join(" ").replace(/\s*([\\~])\s*/g, "$1").replace(/\\\\/g, "\\").toUpperCase();
       if (bindings[key]) found = {end, type: bindings[key]};
       if ([".", ","].includes(word(end))) break;
     }

@@ -65,6 +65,32 @@ CLASS kernel_rap_eml DEFINITION PUBLIC FINAL CREATE PRIVATE.
       RAISING
         zcx_osd_rap.
 
+* R5: MODIFY ENTITIES ... ENTITY entity CREATE BY \assoc FROM rows, and
+* READ ENTITIES ... ENTITY entity BY \assoc FROM keys RESULT result LINK
+* link: what a lowering of BY is to call (the pinned transpiler has none
+* yet, docs/rap-runtime.md, "R5")
+    CLASS-METHODS create_by
+      IMPORTING
+        bdef          TYPE csequence
+        entity        TYPE csequence
+        assoc         TYPE csequence
+        rows          TYPE STANDARD TABLE
+        fields        TYPE csequence OPTIONAL
+        set_fields    TYPE abap_bool OPTIONAL
+        auto_fill_cid TYPE abap_bool OPTIONAL
+      RAISING
+        zcx_osd_rap.
+    CLASS-METHODS read_by
+      IMPORTING
+        bdef   TYPE csequence
+        entity TYPE csequence
+        assoc  TYPE csequence
+        keys   TYPE ANY TABLE
+      CHANGING
+        result TYPE STANDARD TABLE OPTIONAL
+        link   TYPE STANDARD TABLE OPTIONAL
+      RAISING
+        zcx_osd_rap.
 * COMMIT ENTITIES [RESPONSE OF bdef FAILED failed REPORTED reported]; the
 * targets are the statement's: cleared first
     CLASS-METHODS commit
@@ -195,9 +221,11 @@ CLASS kernel_rap_eml IMPLEMENTATION.
 
   METHOD execute.
     DATA lr_result   TYPE REF TO data.
+    DATA lr_mapped   TYPE REF TO data.
     DATA lr_failed   TYPE REF TO data.
     DATA lr_reported TYPE REF TO data.
     FIELD-SYMBOLS <lt_result>   TYPE STANDARD TABLE.
+    FIELD-SYMBOLS <ls_mapped>   TYPE any.
     FIELD-SYMBOLS <ls_failed>   TYPE any.
     FIELD-SYMBOLS <ls_reported> TYPE any.
 
@@ -211,13 +239,17 @@ CLASS kernel_rap_eml IMPLEMENTATION.
       ENDIF.
       ASSIGN lr_result->* TO <lt_result>.
     ENDIF.
+* R6: a factory action answers its new instances in the statement's MAPPED
+    lr_mapped = target( iv_bdef = bdef iv_kind = 'MAPPED' ).
     lr_failed = target( iv_bdef = bdef iv_kind = 'FAILED' ).
     lr_reported = target( iv_bdef = bdef iv_kind = 'REPORTED' ).
+    ASSIGN lr_mapped->* TO <ls_mapped>.
     ASSIGN lr_failed->* TO <ls_failed>.
     ASSIGN lr_reported->* TO <ls_reported>.
 
     zcl_osd_rap_eml=>execute( EXPORTING iv_bdef = bdef iv_entity = entity iv_action = action it_rows = rows
-                              CHANGING ct_result = <lt_result> cs_failed = <ls_failed> cs_reported = <ls_reported> ).
+                              CHANGING ct_result = <lt_result> cs_failed = <ls_failed> cs_reported = <ls_reported>
+                                       cs_mapped = <ls_mapped> ).
     subrc( lr_failed ).
   ENDMETHOD.
 
@@ -238,6 +270,68 @@ CLASS kernel_rap_eml IMPLEMENTATION.
 
     zcl_osd_rap_eml=>read( EXPORTING iv_bdef = bdef iv_entity = entity it_keys = keys iv_fields = fields
                            CHANGING ct_result = <lt_result> cs_failed = <ls_failed> ).
+    subrc( lr_failed ).
+  ENDMETHOD.
+
+  METHOD create_by.
+    DATA lr_mapped   TYPE REF TO data.
+    DATA lr_failed   TYPE REF TO data.
+    DATA lr_reported TYPE REF TO data.
+    FIELD-SYMBOLS <ls_mapped>   TYPE any.
+    FIELD-SYMBOLS <ls_failed>   TYPE any.
+    FIELD-SYMBOLS <ls_reported> TYPE any.
+
+    lr_mapped = target( iv_bdef = bdef iv_kind = 'MAPPED' ).
+    lr_failed = target( iv_bdef = bdef iv_kind = 'FAILED' ).
+    lr_reported = target( iv_bdef = bdef iv_kind = 'REPORTED' ).
+    ASSIGN lr_mapped->* TO <ls_mapped>.
+    ASSIGN lr_failed->* TO <ls_failed>.
+    ASSIGN lr_reported->* TO <ls_reported>.
+
+    zcl_osd_rap_eml=>create_by( EXPORTING iv_bdef = bdef iv_entity = entity iv_assoc = assoc
+                                          it_rows = rows iv_fields = fields iv_set_fields = set_fields
+                                          iv_auto_fill_cid = auto_fill_cid
+                                CHANGING cs_mapped = <ls_mapped> cs_failed = <ls_failed> cs_reported = <ls_reported> ).
+    subrc( lr_failed ).
+  ENDMETHOD.
+
+  METHOD read_by.
+    DATA lr_result TYPE REF TO data.
+    DATA lr_link   TYPE REF TO data.
+    DATA lr_failed TYPE REF TO data.
+    DATA lo_bo     TYPE REF TO zif_osd_rap_bo.
+    DATA ls_model  TYPE zif_osd_rap_bo=>ty_model.
+    DATA ls_entity TYPE zif_osd_rap_bo=>ty_entity.
+    DATA lv_entity TYPE string.
+    FIELD-SYMBOLS <lt_result> TYPE STANDARD TABLE.
+    FIELD-SYMBOLS <lt_link>   TYPE STANDARD TABLE.
+    FIELD-SYMBOLS <ls_failed> TYPE any.
+
+    lo_bo = zcl_osd_rap_eml=>runtime( bdef )->bo( ).
+    ls_model = lo_bo->model( ).
+    lv_entity = to_upper( entity ).
+    LOOP AT ls_model-entities INTO ls_entity.
+      IF ls_entity-name = lv_entity OR to_upper( ls_entity-alias ) = lv_entity.
+        EXIT.
+      ENDIF.
+    ENDLOOP.
+    IF result IS SUPPLIED.
+      ASSIGN result TO <lt_result>.
+    ELSE.
+      lr_result = lo_bo->new_table( iv_entity = ls_entity-name iv_kind = 'READ BY RESULT' iv_action = assoc ).
+      ASSIGN lr_result->* TO <lt_result>.
+    ENDIF.
+    IF link IS SUPPLIED.
+      ASSIGN link TO <lt_link>.
+    ELSE.
+      lr_link = lo_bo->new_table( iv_entity = ls_entity-name iv_kind = 'LINK' iv_action = assoc ).
+      ASSIGN lr_link->* TO <lt_link>.
+    ENDIF.
+    lr_failed = target( iv_bdef = bdef iv_kind = 'FAILED' ).
+    ASSIGN lr_failed->* TO <ls_failed>.
+
+    zcl_osd_rap_eml=>read_by( EXPORTING iv_bdef = bdef iv_entity = entity iv_assoc = assoc it_keys = keys
+                              CHANGING ct_result = <lt_result> ct_link = <lt_link> cs_failed = <ls_failed> ).
     subrc( lr_failed ).
   ENDMETHOD.
 

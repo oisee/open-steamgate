@@ -384,7 +384,7 @@ export function annotationsClass(m) {
   const cls = m.classes.mpcAnn;
   const w = new AnnotationWriter();
   for (const a of m.annotations) {
-    w.target(`${m.namespace}.${a.target}`);
+    if (!w.targetOf(m.namespace, a)) continue;
     if (a.property) {
       w.property(a);
     } else {

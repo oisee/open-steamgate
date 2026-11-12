@@ -190,12 +190,20 @@ describe('RAP BDEF parser (R0)', () => {
     const e = entity(`determine action (authorization:update) Check { validation Positive; determination Fill; }
       draft determine action Prepare extensible { validation Items~Positive; }
       draft determine action Empty;`);
-    assert.deepEqual(e.determineActions[0].triggers, [{kind: 'validation', name: 'Positive'}, {kind: 'determination', name: 'Fill'}]);
+    assert.deepEqual(e.determineActions[0].triggers, [{kind: 'validation', name: 'Positive', options: []}, {kind: 'determination', name: 'Fill', options: []}]);
     assert.equal(e.determineActions[0].options[0].value, 'update');
     assert.equal(e.determineActions[1].extensible, true);
     assert.deepEqual(e.determineActions[1].modifiers, ['draft']);
     assert.equal(e.determineActions[1].triggers[0].name, 'Items~Positive');
     assert.deepEqual(e.determineActions[2].triggers, []);
+  });
+
+  it('reads the ( always ) option of a determine action member (R6)', () => {
+    const e = entity(`determine action Check { determination ( always ) Fill; validation Positive; }`);
+    assert.deepEqual(e.determineActions[0].triggers, [
+      {kind: 'determination', name: 'Fill', options: [{name: 'always', value: null}]},
+      {kind: 'validation', name: 'Positive', options: []},
+    ]);
   });
 
   it('retains side effects as a located raw block with nested delimiters', () => {

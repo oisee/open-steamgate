@@ -67,7 +67,7 @@ describe("RAP managed runtime generator (R2)", () => {
     const reg = new core.Registry(new core.Config(JSON.stringify({global: {files: "/**/*.*"}, syntax: {version: "open-abap", errorNamespace: "."}, rules: {check_syntax: true, unknown_types: true}})));
     for (const f of files) reg.addFile(new core.MemoryFile(f.filename, lowerDerived(f.contents, f.filename, bindings)));
     for (const [name, source] of Object.entries(outputs)) reg.addFile(new core.MemoryFile(name, source));
-    for (const f of [...walk("src/rap"), ...walk("src/luw"), "src/sadl/zif_stg_cds_source.intf.abap", "src/sadl/zif_stg_sadl_behavior.intf.abap"].filter(x => /\.(abap|xml)$/.test(x))) {
+    for (const f of [...walk("src/rap"), ...walk("src/luw"), ...walk("src/logon"), "src/sadl/zif_stg_cds_source.intf.abap", "src/sadl/zif_stg_sadl_behavior.intf.abap"].filter(x => /\.(abap|xml)$/.test(x))) {
       reg.addFile(new core.MemoryFile(basename(f), readFileSync(f, "utf8")));
     }
     // open-abap-odata: the /IWBEP/ exceptions ZCL_OSD_RAP_SADL raises (R2c)
@@ -84,7 +84,12 @@ describe("RAP managed runtime generator (R2)", () => {
   it("refuses what the runtime does not run", () => {
     for (const [suffix, from, to, error] of [
       [".asbdef", "managed implementation", "unmanaged implementation", /only managed/],
-      [".asbdef", "lock master", "early numbering\nlock master", /early numbering through the pool is outside R2/],
+      [".asbdef", "lock master", "early numbering\nlock master", /early numbering without a FOR NUMBERING/],
+      // R10: late numbering runs, given a saver that redefines adjust_numbers
+      [".asbdef", "lock master", "late numbering\nlock master", /late numbering needs a saver redefining adjust_numbers/],
+      [".asbdef", "update;", "update ( features : instance );", /features : instance without a FOR INSTANCE FEATURES method/],
+      [".asbdef", "create;", "create ( features : instance );", /global features are outside R4/],
+      [".asbdef", "lock master", "etag master Missing\nlock master", /etag master Missing is no element/],
       [".asbdef", "field ( numbering : managed, readonly ) NoteId;", "field ( numbering : managed ) NoteText;", /needs a key of type x LENGTH 16/],
       [".asbdef", "determination Normalize on save { field NoteText; }", "determination Normalize on save { delete; }", /delete trigger/],
       [".asbdef", "action Approve result [1] $self;", "action Approve parameter ZI_RAP_NOTE result [1] $self;", /only instance actions/],
@@ -110,7 +115,9 @@ describe("RAP managed runtime generator (R2)", () => {
     assert.ok(!adapter.includes("ls_callable-entities"), "no instances table: the handler works through EML");
     assert.equal(explicit.match(/ls_callable-entities = abap_true/g).length, 4, "the explicit pool still takes its table back");
     assert.match(adapter, /io_handler->\('TEXT_LENGTH'\)\s+EXPORTING\s+keys = lt_keys\s+CHANGING\s+failed = <ls_failed>\s+reported = <ls_reported>\./);
-    assert.match(adapter, /io_handler->\('APPROVE_NOTE'\)\s+EXPORTING\s+keys = lt_keys\s+CHANGING\s+result = <lt_result>\s+mapped = ls_mapped\s+failed = <ls_failed>\s+reported = <ls_reported>\./);
+    assert.match(adapter, /io_handler->\('APPROVE_NOTE'\)\s+EXPORTING\s+keys = lt_keys\s+CHANGING\s+result = <lt_result>\s+mapped = <ls_mapped>\s+failed = <ls_failed>\s+reported = <ls_reported>\./);
+    // R6: the caller's MAPPED reaches an action handler (a factory action fills it)
+    assert.match(adapter, /IF ir_mapped IS BOUND\.\n\s+ASSIGN ir_mapped->\* TO <ls_mapped>\.\n\s+ELSE\.\n\s+ASSIGN ls_mapped TO <ls_mapped>\./);
     const classes = poolClasses("zbp_rap_note_sf", pool(files));
     assert.deepEqual(classes[0].methods.find(m => m.name === "default_status").parameters.map(p => `${p.direction} ${p.name}`), ["importing keys", "changing reported"]);
     // a parameter named otherwise keeps its role; a wrong ON and a missing FOR clause are refused

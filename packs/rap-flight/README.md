@@ -21,8 +21,9 @@ these are to send upstream and then drop):
 
 - `ABP_LOCINST_LASTCHANGE_USER` (CHAR 12), used by eight tables
 - `SDRAFT_UUID` (RAW 16), the draft tables' key; they compile, no draft runs
-- `I_CURRENCY` and `I_COUNTRYTEXT` as plain tables with the columns the
-  scenario reads (`SELECT DISTINCT currency`, `country, countryname`)
+- `I_CURRENCY`, `I_COUNTRYTEXT` and (R10) `I_COUNTRY` as plain tables with
+  the columns the scenario reads (`SELECT DISTINCT currency`, `country,
+  countryname`, `country`)
 
 Copies of the two data generators, changed where this runtime differs from a
 system and nowhere else (every change is marked `OSD overlay` in the source):
@@ -57,8 +58,33 @@ no derived upstream content.
 
 `zosd_rapflight.stg.yaml` serves the CDS interface views the generator takes
 as read-only entity sets (`/sap/opu/odata/sap/ZOSD_RAPFLIGHT_SRV`), so the
-seeded data can be read over the wire. No behavior runs: the business
-objects are what the RAP runtime cannot take yet (see the document).
+seeded data can be read over the wire.
+
+Since RAP R7 the managed travel business object runs (docs/rap-flight-pack.md,
+"R7"): its BDEFs are fetched, and the overlay carries
+
+- the three behavior pools `/dmo/bp_travel_m`, `/dmo/bp_booking_m` and
+  `/dmo/bp_bookingsupplement_m`, whole, their `locals_imp` changed where this
+  runtime differs (every change marked `OSD overlay`, listed in the document);
+- the two service definitions `/DMO/UI_TRAVEL_PROCESSOR_M` and
+  `/DMO/UI_TRAVEL_APPROVER_M` without their value helps;
+- in the seed class, the currencies the generated data uses, written into
+  the `I_CURRENCY` stand-in the travel's validations read;
+- `zcl_osd_rapflight_r7_test`, ABAP Unit over the travel's saver.
+
+Since RAP R10 the draft supplement and agency BOs run too (docs/rap-flight-pack.md,
+"R10"): their BDEFs, service definitions and consumption views are fetched,
+and the overlay carries the three pools `/dmo/bp_i_supplement`,
+`/dmo/bp_c_supplement` (the projection's augment) and `/dmo/bp_r_agencytp`
+(late numbering), each change marked `OSD overlay`; an `I_COUNTRY` stand-in
+filled by the seed class; and `zcl_osd_rapflight_r10_test`.
+
+Since RAP R11 the agency's interface BDEF `/DMO/I_AGENCYTP` and the carrier
+singleton run as well (docs/rap-flight-pack.md, "R11"): their BDEFs, views
+and `/DMO/UI_CARRIERS_S` are fetched, the overlay carries the singleton's
+pool `/dmo/bp_i_carrierslocksingle_s` (changes marked `OSD overlay`), the
+`I_CURRENCY` stand-in gets the carriers' currencies, and
+`zcl_osd_rapflight_r11_test` covers both. All ten BDEFs of the scenario run.
 
 Licence: upstream's files are Apache-2.0 (the repository's `LICENSES/` and
 `REUSE.toml`), and so are the copies in `src/` -- [LICENSE](LICENSE) says

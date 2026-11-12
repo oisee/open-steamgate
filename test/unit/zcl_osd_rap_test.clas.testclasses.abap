@@ -40,10 +40,23 @@ CLASS lcl_narrow IMPLEMENTATION.
     rr_result = mi_bo->new_result( iv_entity = iv_entity iv_action = iv_action ).
   ENDMETHOD.
 
+  METHOD zif_osd_rap_bo~new_request.
+    rr_request = mi_bo->new_request( iv_kind ).
+  ENDMETHOD.
+
+  METHOD zif_osd_rap_bo~save_modified.
+    mi_bo->save_modified( io_saver = io_saver ir_create = ir_create ir_update = ir_update
+                          ir_delete = ir_delete ir_reported = ir_reported ).
+  ENDMETHOD.
+
+  METHOD zif_osd_rap_bo~adjust_numbers.
+    RETURN.
+  ENDMETHOD.
+
   METHOD zif_osd_rap_bo~call.
     mi_bo->call( io_handler = io_handler iv_entity = iv_entity iv_name = iv_name
                  ir_rows = ir_rows ir_keys = ir_keys ir_result = ir_result
-                 ir_failed = ir_failed ir_reported = ir_reported ).
+                 ir_failed = ir_failed ir_reported = ir_reported ir_mapped = ir_mapped ).
   ENDMETHOD.
 
 ENDCLASS.
@@ -305,6 +318,7 @@ CLASS ltcl_scenario IMPLEMENTATION.
     APPEND 'DETERMINATION NORMALIZE' TO lt_exp.
     APPEND 'CHECK_BEFORE_SAVE' TO lt_exp.
     APPEND 'VALIDATION CHECKTEXT' TO lt_exp.
+    APPEND 'ADJUST_NUMBERS' TO lt_exp.
     APPEND 'SAVE' TO lt_exp.
     APPEND 'CLEANUP' TO lt_exp.
     cl_abap_unit_assert=>assert_equals( act = mo_rap->trace( ) exp = lt_exp ).

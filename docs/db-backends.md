@@ -338,3 +338,82 @@ distinguishes literals from the rest cannot be done in two passes. Items 7 and
 expression over the whole joined string, which no longer knows. Both were
 silent data corruption rather than an error, and both were caught by a test
 comparing a stored value, not by reading the code.
+
+## Existing schema, read-only
+
+`HANA_EXISTING_SCHEMA=1` runs the runtime over a HANA that already holds an
+SAP system's schema — the tables are there, the data is there, and nothing of
+ours may touch either. Built 2026-11-11 (H1): the mode in
+`tools/hana-client.mjs`, the read-only guard beside it, and the first
+measuring tool, `tools/hana-ddic-probe.mjs`.
+
+The flags:
+
+- `HANA_EXISTING_SCHEMA=1` — the mode. `connect()` skips `DROP SCHEMA` and
+  `CREATE SCHEMA` and points the session at the configured `HANA_SCHEMA`
+  with `SET SCHEMA`; `test/setup.mjs` returns straight after `connect()`, so
+  the transpiler's DDL, the seed, the drift checks and the pack reseed are
+  all skipped. The mode only skips; there is no second code path.
+- `STG_DB_FRESH=1` together with it is refused before a socket is even
+  opened: "start from nothing" is exactly what the mode must never mean
+  against a schema somebody else owns.
+- `OSD_HANA_WRITE=1` lifts the read-only guard below. Nothing in this tree
+  sets it; it is the seam a later slice will need when the mode stops being
+  read-only.
+
+What is refused: unless `OSD_HANA_WRITE=1`, every statement that is not a
+SELECT is refused at one chokepoint (`#guard` in `tools/hana-client.mjs`)
+before it reaches the driver, with code `HANA_READONLY` and the statement
+kind in the message — never the statement text, which may carry data.
+Allowed beside SELECT: `SET` (connect()'s own session statement) and
+`COMMIT`/`ROLLBACK` — the LUW bracket the runtime calls unconditionally
+(`COMMIT WORK`, every `disconnect()`); the guard runs before a refused
+statement could open a transaction, so both degenerate to the no-op their
+early return already is. Refused by kind: INSERT, UPDATE, DELETE, MERGE,
+UPSERT, CREATE, DROP, ALTER, TRUNCATE, CALL — and anything else, WITH
+included. A text carrying more than one statement — a top-level `;` outside
+the literals and comments — is refused as kind `multi` before the kind of
+its first word is even read: `SELECT 1; DROP TABLE …` is two statements,
+and the first word says nothing about the second.
+`insert()`/`update()`/`delete()` re-throw the refusal instead of
+answering subrc 4: "refused" is not "no such row". The native channel
+(`defineRelation`, `native`, `dropRelation`) is refused the same way — a
+lowered SQLScript write is a write.
+
+One door this does not close: `tools/amdp-destination.mjs` builds its own
+raw `hdb` client — its deploy issues `CREATE SCHEMA`, `DROP PROCEDURE`/
+`FUNCTION` and `CREATE PROCEDURE`/`FUNCTION` through it, not through the
+`HanaDatabaseClient` — so an AMDP deployed while the mode is on writes
+without ever meeting the guard. Nothing in the mode's flow deploys AMDP
+today, and the destination is not routed through the chokepoint yet;
+gating that is part of the slice that first runs AMDP against an existing
+schema. Until then the read-only promise covers what reaches
+`HanaDatabaseClient`, and nothing beyond it.
+
+The probe:
+
+```
+node tools/hana-ddic-probe.mjs --tables <A,B,C> [--out <dir>] [--diff] [--mandt]
+```
+
+reads DD02L, DD03L, DD04L, DD01L and DD02T from the configured schema
+through the hana-client — the same `HANA_*` env, the same identifier
+folding and literal trim — and emits the tree's own abapGit `*.tabl.xml`
+per table. The DD03L → shape mapping is `tools/hana-ddic-map.mjs`, a pure
+function tested without a database (`test/hana-ddic-map.mjs`, fixtures
+`ZOSD_H1_*`). The DD* column lists are measured, not guessed —
+`SYS.TABLE_COLUMNS` of a real schema, pinned as the fixture of
+`test/hana-ddic-probe.mjs`, whose fake driver refuses any statement naming
+a column the list does not carry (the first run against a real system died
+on DD04L's INTTYPE, which lives on DD03L only) — and every read is pinned
+to the active version (`AS4LOCAL = 'A'`, `AS4VERS = '0000'`), so a table
+carrying an inactive version does not yield its fields twice. INTTYPE and
+INTLEN come from DD03L directly, for every field, resolved or not; only a
+blank is derived from the type rules, and the probe prints, per field,
+when that was. `--diff` compares against `src/**/<table>.tabl.xml` when
+present — field order, type, length, decimals, key flag, and the reference
+a CURR/QUAN field carries (REFTABLE/REFFIELD, PRECFIELD, straight from
+DD03L) — and exits 1 on any difference; `--mandt` says which tables have
+MANDT as the first key
+field. No HANA is reachable from CI: the probe is exercised with fixtures
+and fake drivers, and run against a system by hand.

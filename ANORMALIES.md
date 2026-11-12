@@ -360,6 +360,7 @@ Format adapted from `larshp/hithub` (MIT).
 - Actual open-abap behaviour: DEC beyond 15 significant digits is stored as REAL by the SQLite seam; equality and ranges at the 16th digit collapse. The transpiled JS class through `@abaplint/database-sqlite` stores both rows as REAL `20261008100000.125` and returns `2, 0, 2, 2`; the same ABAP/table fixture on Go returns identical counts. Local measurement: `.local/hostcls/dec-measure.txt`, scripts `measure-dec.mjs` and `measure-dec-go.mjs` beside it.
 - Impact: DEC 15 timestamps remain exact; full DEC 21,7 timestamp precision is unavailable in SQLite comparisons on both hosts.
 - Smallest safe workaround: compare values within 15 significant digits when exactness is required; storage is unchanged.
+- Second impact, found 2026-11-10 (RAP R4 ETag): the runtime already loses the digits before SQLite sees them -- `UPDATE`/`INSERT` render a packed value through `Packed.get()`, a double, into the SQL text, so DuckDB's exact `DECIMAL(21,7)` gets the same rounded value. A RAP `etag master` over a TIMESTAMPL `last_changed_at` therefore resolves about 4 ms (2^-8 s at that size): two writes of one entity inside that window stored the same stamp, the ETag did not move, and a PATCH with the first write's tag was accepted after the second (lost update; reproduced on V2 and V4 with the clock held still, `test/rap-r4.mjs`). Workaround: `ZCL_OSD_RAP_RUNTIME=>APART` steps a new stamp (100 ns, 200 ns, 400 ns ...) until its double is above the old stamp's, so every write moves the ETag; under a burst a stamp may run a few milliseconds ahead of the clock. It is removed when the seam stores DEC beyond 15 digits exactly (the runtime's write path and the SQLite column type both).
 - Upstream issue: not reported; this round is local only.
 - Regression: the fixture asserts DEC 15 exactly, adjacent DEC 21,7 values `20261008.1234567` / `20261008.1234568` exactly, and measured high-precision host parity.
 - Upstream version containing a fix: unknown.
@@ -4362,6 +4363,15 @@ Not an anomaly, recorded for porting: on 7.58, `FIND ... REGEX` (POSIX) raises a
 - Upstream: none filed. It belongs with implicit RAP handler signatures in
   abaplint; explicit signatures are this project's interim form.
 
+- R7 (2026-11-10): `save_modified` is lowered the same way. Its
+  `METHODS save_modified REDEFINITION.` is rewritten by
+  `tools/rap/lower-derived.mjs` into a declaration of the saver's own
+  (`create` / `update` `TYPE REQUEST FOR CHANGE`, `delete` `TYPE REQUEST FOR
+  DELETE`, `reported` `TYPE RESPONSE FOR REPORTED LATE`, all over the BDEF's
+  generated types), because the voided parameters of the base class cannot
+  be typed by a BDEF; the generated adapter calls it by name.
+  `adjust_numbers` and `save` join the parameterless phases.
+
 ## The RAP flight reference scenario as a pack (packs/rap-flight)
 
 - Status: measured; worked around in the pack's overlay only, nothing
@@ -4507,6 +4517,62 @@ Not an anomaly, recorded for porting: on 7.58, `FIND ... REGEX` (POSIX) raises a
   before any DDL reaches a database, so no error names the cycle's views --
   an upstream type-resolution limitation, measured 2026-11-09.
 - Upstream: abaplint/transpiler, needs an issue.
+
+## RAP R7: the flight travel pools against this transpiler (packs/rap-flight overlay)
+
+- Status: worked around in the pack overlay (`packs/rap-flight/src/#dmo#bp_*_m.clas.locals_imp.abap`, each change marked `OSD overlay`); no upstream issue filed yet.
+- Discovery: RAP R7, building the managed travel BO's three pools, 2026-11-10.
+- Expected (public ABAP documentation): the pools compile and run unchanged.
+- Measured here, in the order the build met them:
+  - abaplint does not parse `CORRESPONDING ... DISCARDING DUPLICATES`, `CORRESPONDING #( k MAPPING %fail = DEFAULT VALUE #( ... ) )`, or `CLASS ... DEFINITION DEFERRED FOR TESTING` (known, R4 pack audit);
+  - the pinned transpiler stops at `CORRESPONDING #( DEEP x )` and `CORRESPONDING #( x EXCEPT f )` (`CorrespondingBodyTranspiler, todo`);
+  - an EML target declared inline (`RESULT DATA(x)`) is void (known, docs/rap-eml.md), and `BY \_assoc` / `LINK` are not lowered (known, R5);
+  - `VALUE #( FOR r IN rows ( %param = r ) )`, a move of a READ RESULT row into an action result's `%param` (a structure of the same fields without the `%data` / `%tky` groups), fails at run time with `value.get is not a function`; `%param = CORRESPONDING #( r )` works.
+- Workaround: the overlay copies of the three pools; every edit is listed in docs/rap-flight-pack.md ("R7: the travel pools").
+- Upstream: candidates for abaplint/transpiler (CORRESPONDING DEEP / EXCEPT; the structure move) -- needs an issue each, with a reproducer, after a critic pass.
+
+## RAP R10: the flight draft pools against this transpiler (packs/rap-flight overlay)
+
+### ANOMALY-2026-11-11-rap-augmenting-eml -- MODIFY AUGMENTING ENTITIES is not lowered
+
+- Status: `workaround`
+- Discovery date: `2026-11-11`
+- Affected versions: the pinned `@abaplint/transpiler` (libs.lock.json), its RAP EML lowering
+- Affected ABAP statement, runtime API or adapter: `MODIFY AUGMENTING ENTITIES OF b ENTITY e CREATE BY \_a FROM t RELATING TO r BY rel`, `READ ENTITIES ... BY \_a FROM k LINK DATA(l)`; derived-table secondary keys `draft`, `cid` (`t[ KEY draft %tky = ... ]`)
+- Minimal ABAP reproducer: upstream `reuse/supplement/#dmo#bp_c_supplement.clas.locals_imp.abap` (abap-platform-refscen-flight at 5353cbeb)
+- Exact command used to run it: `npm run transpile` with the upstream pool in place of the overlay
+- Expected SAP behaviour: the augment's requests join the original request (public BDEF documentation, "augment")
+- Actual open-abap behaviour: the augmenting form and `BY \_assoc` are not lowered onto `KERNEL_RAP_EML`; the derived tables carry no `draft` / `cid` keys
+- Impact on open-steamgate: the supplement projection's augment (the text child behind `SupplementDescription`) needs an overlay
+- Smallest safe workaround: the overlay writes the `ZCL_OSD_RAP_EML` calls the statements stand for (`create_by`, `read_by`, `modify`) and reads by the key fields; `RELATING TO` (message mapping) is not run: a failed augment fails the whole request (docs/rap-runtime.md "R10")
+- Upstream issue: needs an issue (abaplint/transpiler, beside the `BY \_assoc` lowering of R5) after a critic pass
+- Regression-test location: `test/rap-r10.mjs` ("creates a supplement draft with its description (augment)")
+- Upstream version containing a fix: unknown
+
+### ANOMALY-2026-11-11-update-include-group -- UPDATE dbtab FROM TABLE of a table with a named include answers 4
+
+- Status: `workaround`
+- Discovery date: `2026-11-11`
+- Affected versions: the pinned `@abaplint/runtime` (libs.lock.json), `statements/update_database.js`
+- Affected ABAP statement, runtime API or adapter: `UPDATE dbtab FROM TABLE @rows` (and `FROM wa`) where the table's row has a named include group (`.INCLUDE ... AS %admin` of a draft table) or a namespaced append component
+- Minimal ABAP reproducer: the generated `ZCL_STG_TAB_DMO_SUPPL_D=>UPDATE` before R10 over `/DMO/SUPPL_D`
+- Exact command used to run it: `node tools/osd-unit.mjs CLAS ZCL_OSD_RAPFLIGHT_R10_TEST` (EDITS_AND_DISCARDS: "save of the draft of Supplement ... (U) failed")
+- Expected SAP behaviour: the row with the work area's key is updated, sy-subrc 0
+- Actual open-abap behaviour: `updateDatabase` makes a SET of every top-level component of the structure (`Object.keys`), the include group among them; the row is not updated and sy-subrc is 4 (not narrowed further: the generated `FROM wa` form does not even parse as JavaScript, see the R7 pack entry)
+- Impact on open-steamgate: every update of a flight draft (the draft tables include the admin structure) and of an active agency (its append) failed
+- Smallest safe workaround: `tools/cds2ddic.mjs` writes the update of such a table as `UPDATE dbtab SET col = wa-col ... WHERE key = wa-key` over its flattened columns (still one UPDATE for the database, its triggers and foreign keys); a first version replaced the row by DELETE + INSERT, which the #917 critic showed fires DELETE/INSERT triggers instead of UPDATE
+- Upstream issue: needs an issue (abaplint/transpiler runtime) with a reproducer, after a critic pass
+- Regression-test location: `ZCL_OSD_RAPFLIGHT_R10_TEST` (EDITS_AND_DISCARDS), `test/rap-r10.mjs`
+- Upstream version containing a fix: unknown
+
+## RAP R7: a namespaced service's V2 $metadata (open-abap-odata handler)
+
+- Status: open; the data requests work, `$metadata` over V2 does not.
+- Discovery: RAP R7, serving `/DMO/UI_TRAVEL_PROCESSOR_M`, 2026-11-10.
+- Expected: `GET /sap/opu/odata/sap/%2FDMO%2FUI_TRAVEL_PROCESSOR_M/$metadata` answers the model (this gateway takes the escaped name, `ZCL_STG_URL` unescapes it).
+- Measured: 500 `I:/IWBEP/CM_MGW_RT:032`. The dispatcher hands `$metadata` to `ZCL_OAO_HTTP_HANDLER=>HANDLE( path )` of open-abap-odata, which reads the service with `/sap/opu/odata/sap/([^/]+)` and does not unescape it, so `ZCL_OAO_REGISTRY=>GET` misses `%2FDMO%2F...` and raises `/IWBEP/CX_MGW_TECH_EXCEPTION` without a text. V4 `$metadata` of the same service works (this tree's own writer). The answer's `__metadata` URIs carry the name unescaped (`/sap//DMO/UI_...`), which is not a URL a client can follow back.
+- Workaround: none; `test/rap-flight-travel.mjs` does not read V2 `$metadata`.
+- Upstream: the unescape is a one-line change in open-abap-odata's handler (a PR in the fork staging area, then upstream); the URIs are this gateway's (a system serves a namespaced service at `/sap/opu/odata/<ns>/<name>/`).
 
 ## Class statics outlive the HTTP request (LUW_HELD, PR #901)
 

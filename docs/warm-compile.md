@@ -48,8 +48,10 @@ RUN_TESTS pins that same published generation even before comparison.
    and VSIX host. Both the full prime and subsequent warm builds run there;
    the launcher can answer HTTP and proxy requests throughout. The warm
    path becomes available only when the prime completes. An activation
-   during priming waits up to 30 seconds while other requests keep using
-   the serving generation. A silent compiler, exit, or IPC loss kills and
+   during priming waits for it at most 60 s times the host's measured
+   slowdown, then builds cold while the prime goes on; the prime's own
+   deadline is sized by the tree (`tools/warm-deadline/README.md`). Other
+   requests keep using the serving generation throughout. A silent compiler, exit, or IPC loss kills and
    awaits the compiler before building cold; later publications stay cold
    until restart. The inactive-source metadata is sent with each operation. The
    prime checks its premise rather than assuming it: a full run of the kept

@@ -102,7 +102,12 @@ class Parser {
     } else {
       const kind = this.take('additional') ?? this.take('unmanaged');
       if (!kind) throw new Error('Unknown with clause');
-      this.need('save'); target.options.push({kind: `${kind.toLowerCase()} save`});
+      this.need('save');
+      // R7: with additional|unmanaged save [with full data] [and cleanup]
+      const option = {kind: `${kind.toLowerCase()} save`};
+      if (this.at('with') && this.tokens[this.i + 1]?.lower === 'full') { this.i += 2; this.need('data'); option.fullData = true; }
+      if (this.at('and') && this.tokens[this.i + 1]?.lower === 'cleanup') { this.i += 2; option.cleanup = true; }
+      target.options.push(option);
     }
   }
   parse() {
@@ -173,6 +178,14 @@ class Parser {
     if (this.take('use')) { this.need('etag'); e.useEtag = true; return; }
     if (this.take('using')) { e.using = this.name(); return; }
     if (this.take('extensible')) { e.options.push({kind: 'extensible'}); return; }
+    // R11: a pragma (`##DRAFT_OP_NOT_REQUIRED` on the carrier singleton)
+    // silences a message of the system's syntax check; it is kept, it
+    // changes nothing at runtime
+    // (the tokenizer gives `#`, `#` and the name, adjacent on one line)
+    const [h1, h2, word] = this.tokens.slice(this.i, this.i + 3);
+    if (h1?.value === '#' && h2?.value === '#' && word && h2.end === h1.end + 1 && word.start === h2.end && /^\w+$/.test(word.value)) {
+      (e.pragmas ??= []).push(`##${word.value.toUpperCase()}`); this.i += 3; return;
+    }
     throw new Error('Unknown entity header clause');
   }
   cardinality() {
@@ -270,7 +283,9 @@ class Parser {
         const kind = this.name().toLowerCase();
         if (determine) {
           if (!['validation', 'determination'].includes(kind)) throw new Error('Unknown determine trigger');
-          const name = this.qualifiedName(); this.need(';'); triggers.push({kind, name});
+          // R6: determination ( always ) d; runs whatever its triggers say
+          const options = this.options();
+          const name = this.qualifiedName(); this.need(';'); triggers.push({kind, name, options});
         } else if (kind === 'field') { const fields = this.list(); this.need(';'); triggers.push({kind, fields}); }
         else if (['create', 'update', 'delete'].includes(kind)) { this.need(';'); triggers.push({kind}); }
         else throw new Error('Unknown trigger');

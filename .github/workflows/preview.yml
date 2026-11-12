@@ -110,6 +110,25 @@ jobs:
       # Keep the existing sql.js regression suite: the public Pages build
       # changes database, but it must not silently lose coverage of the
       # original browser runtime.
+      # The preview leaves rap-flight out (its seed is ~12 MB; with it the
+      # sql.js asm build's fixed 21 MB heap aborts with OOM, PR #917); a
+      # growable heap for the service worker is the real fix (planned). Set
+      # for the rest of the job, so every preview build (the sql.js one here
+      # and the DuckDB one on main) sees the same packs as the generation.
+      # A failing node or an empty list must stop the job here: an empty
+      # OSD_WEB_PACKS would build a preview with no packs and look complete
+      # (#917 follow-up). `$( )` inside echo hides node's exit status, so
+      # the list is taken first, under set -e, and checked.
+      - name: Choose the preview's packs
+        run: |
+          set -euo pipefail
+          packs="$(node --input-type=module -e "import {packsOf} from './tools/osd-packs.mjs'; console.log(packsOf(process.cwd()).map(p => p.name).filter(n => n !== 'rap-flight').join(','))")"
+          if [ -z "$packs" ]; then
+            echo "::error::no packs chosen for the preview"
+            exit 1
+          fi
+          echo "preview packs: $packs"
+          echo "OSD_WEB_PACKS=$packs" >> "$GITHUB_ENV"
       - run: npm run web:preview
       - name: Read the installed Playwright version
         id: playwright_version
@@ -120,13 +139,10 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: chromium-v1-${{ runner.os }}-${{ steps.playwright_version.outputs.version }}
+      # apt only if Chromium does not launch; a smoke launch decides
+      # (scripts/ci-chromium.sh, docs/ci-tests.md).
       - name: Install Chromium and system dependencies
-        run: |
-          if [[ "${{ steps.chromium_cache.outputs.cache-hit }}" == true ]]; then
-            npx playwright install-deps chromium
-          else
-            npx playwright install --with-deps chromium
-          fi
+        run: bash scripts/ci-chromium.sh "${{ steps.chromium_cache.outputs.cache-hit }}"
       - name: Check the sql.js build in a browser
         run: npx playwright test --config playwright.preview.config.mjs
       # On main the build directory is replaced here: only the DuckDB-Wasm
@@ -149,7 +165,7 @@ jobs:
       # From Location"; docs/vscode-web.md). It is built after every check and
       # screenshot of the preview above: web:vscode transpiles its own pack
       # selection and rewrites web/generated/, never build/preview itself.
-      # Every pack the preview itself carries (OSD_WEB_PACKS=all), so the
+      # Every pack (OSD_WEB_PACKS=all, over the preview's own selection), so the
       # extension's launchpad shows the same tiles as this page's.
       - name: VS Code web extension
         run: |

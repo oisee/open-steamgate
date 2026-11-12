@@ -58,7 +58,8 @@ CLASS zcl_osd_rap_eml DEFINITION PUBLIC FINAL CREATE PRIVATE.
       RAISING
         zcx_osd_rap.
 
-* EXECUTE action FROM rows [RESULT result]
+* EXECUTE action FROM rows [RESULT result]; CS_MAPPED gets the instances a
+* factory action creates (R6)
     CLASS-METHODS execute
       IMPORTING
         iv_bdef     TYPE csequence
@@ -69,6 +70,7 @@ CLASS zcl_osd_rap_eml DEFINITION PUBLIC FINAL CREATE PRIVATE.
         ct_result   TYPE STANDARD TABLE
         cs_failed   TYPE any
         cs_reported TYPE any
+        cs_mapped   TYPE any OPTIONAL
       RAISING
         zcx_osd_rap.
 
@@ -82,6 +84,39 @@ CLASS zcl_osd_rap_eml DEFINITION PUBLIC FINAL CREATE PRIVATE.
         iv_fields TYPE csequence OPTIONAL
       CHANGING
         ct_result TYPE STANDARD TABLE
+        cs_failed TYPE any
+      RAISING
+        zcx_osd_rap.
+
+* R5: MODIFY ENTITIES ... ENTITY e CREATE BY \_assoc FROM rows (a TABLE FOR
+* CREATE e\_assoc); IV_FIELDS / IV_SET_FIELDS / IV_AUTO_FILL_CID act on the
+* %target rows, as on a system
+    CLASS-METHODS create_by
+      IMPORTING
+        iv_bdef          TYPE csequence
+        iv_entity        TYPE csequence
+        iv_assoc         TYPE csequence
+        it_rows          TYPE STANDARD TABLE
+        iv_fields        TYPE csequence OPTIONAL
+        iv_set_fields    TYPE abap_bool DEFAULT abap_false
+        iv_auto_fill_cid TYPE abap_bool DEFAULT abap_false
+      CHANGING
+        cs_mapped        TYPE any
+        cs_failed        TYPE any
+        cs_reported      TYPE any
+      RAISING
+        zcx_osd_rap.
+
+* R5: READ ENTITIES ... ENTITY e BY \_assoc FROM keys RESULT result LINK link
+    CLASS-METHODS read_by
+      IMPORTING
+        iv_bdef   TYPE csequence
+        iv_entity TYPE csequence
+        iv_assoc  TYPE csequence
+        it_keys   TYPE ANY TABLE
+      CHANGING
+        ct_result TYPE STANDARD TABLE
+        ct_link   TYPE STANDARD TABLE
         cs_failed TYPE any
       RAISING
         zcx_osd_rap.
@@ -194,6 +229,23 @@ CLASS zcl_osd_rap_eml DEFINITION PUBLIC FINAL CREATE PRIVATE.
         it_fields  TYPE string_table
       RAISING
         zcx_osd_rap.
+
+* R11: a statement over an interface (or projection) BDEF runs on its base
+* (docs/rap-runtime.md, "Interface BDEFs"): EV_BDEF and EV_ENTITY are the
+* base's, IV_USE (C U D: the operation, A: the action IV_NAME, B: create by
+* the association IV_NAME, L: read by it, R: read) must be one the BDEF
+* uses. A BDEF with an adapter of its own is returned as it is
+    CLASS-METHODS route
+      IMPORTING
+        iv_bdef   TYPE csequence
+        iv_entity TYPE csequence OPTIONAL
+        iv_use    TYPE c OPTIONAL
+        iv_name   TYPE csequence OPTIONAL
+      EXPORTING
+        ev_bdef   TYPE string
+        ev_entity TYPE string
+      RAISING
+        zcx_osd_rap.
 ENDCLASS.
 
 
@@ -252,13 +304,17 @@ CLASS zcl_osd_rap_eml IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD modify.
+    DATA lv_bdef    TYPE string.
+    DATA lv_entity  TYPE string.
     DATA lo_runtime   TYPE REF TO zcl_osd_rap_runtime.
     DATA lv_operation TYPE zcl_osd_rap_runtime=>ty_operation.
     DATA lr_rows      TYPE REF TO data.
     DATA lv_before    TYPE i.
     FIELD-SYMBOLS <lt_rows> TYPE ANY TABLE.
 
-    lo_runtime = runtime( iv_bdef ).
+    route( EXPORTING iv_bdef = iv_bdef iv_entity = iv_entity iv_use = operation_of( iv_operation )
+           IMPORTING ev_bdef = lv_bdef ev_entity = lv_entity ).
+    lo_runtime = runtime( lv_bdef ).
     lv_operation = operation_of( iv_operation ).
     lv_before = count_rows( cs_failed ).
 
@@ -270,8 +326,54 @@ CLASS zcl_osd_rap_eml IMPLEMENTATION.
                             iv_auto_fill_cid = iv_auto_fill_cid
                   CHANGING ct_rows = <lt_rows> ).
 
-    lo_runtime->modify( EXPORTING iv_entity = iv_entity iv_operation = lv_operation it_rows = <lt_rows>
+    lo_runtime->modify( EXPORTING iv_entity = lv_entity iv_operation = lv_operation it_rows = <lt_rows>
                         CHANGING cs_mapped = cs_mapped cs_failed = cs_failed cs_reported = cs_reported ).
+    subrc( is_failed = cs_failed iv_before = lv_before ).
+  ENDMETHOD.
+
+  METHOD create_by.
+    DATA lv_bdef    TYPE string.
+    DATA lv_entity  TYPE string.
+    DATA lo_runtime TYPE REF TO zcl_osd_rap_runtime.
+    DATA lr_rows    TYPE REF TO data.
+    DATA lv_before  TYPE i.
+    FIELD-SYMBOLS <lt_rows>   TYPE STANDARD TABLE.
+    FIELD-SYMBOLS <ls_row>    TYPE any.
+    FIELD-SYMBOLS <lt_target> TYPE STANDARD TABLE.
+
+    route( EXPORTING iv_bdef = iv_bdef iv_entity = iv_entity iv_use = 'B' iv_name = iv_assoc
+           IMPORTING ev_bdef = lv_bdef ev_entity = lv_entity ).
+    lo_runtime = runtime( lv_bdef ).
+    lv_before = count_rows( cs_failed ).
+    CREATE DATA lr_rows LIKE it_rows.
+    ASSIGN lr_rows->* TO <lt_rows>.
+    <lt_rows> = it_rows.
+    LOOP AT <lt_rows> ASSIGNING <ls_row>.
+      ASSIGN COMPONENT '%TARGET' OF STRUCTURE <ls_row> TO <lt_target>.
+      IF sy-subrc = 0.
+        prepare_rows( EXPORTING iv_fields = iv_fields iv_set_fields = iv_set_fields
+                                iv_auto_fill_cid = iv_auto_fill_cid
+                      CHANGING ct_rows = <lt_target> ).
+      ENDIF.
+    ENDLOOP.
+    lo_runtime->create_by( EXPORTING iv_entity = lv_entity iv_assoc = iv_assoc it_rows = <lt_rows>
+                           CHANGING cs_mapped = cs_mapped cs_failed = cs_failed cs_reported = cs_reported ).
+    subrc( is_failed = cs_failed iv_before = lv_before ).
+  ENDMETHOD.
+
+  METHOD read_by.
+    DATA lv_bdef    TYPE string.
+    DATA lv_entity  TYPE string.
+    DATA lo_runtime TYPE REF TO zcl_osd_rap_runtime.
+    DATA lv_before  TYPE i.
+
+    route( EXPORTING iv_bdef = iv_bdef iv_entity = iv_entity iv_use = 'L' iv_name = iv_assoc
+           IMPORTING ev_bdef = lv_bdef ev_entity = lv_entity ).
+    lo_runtime = runtime( lv_bdef ).
+    lv_before = count_rows( cs_failed ).
+    CLEAR: ct_result, ct_link.
+    lo_runtime->read_by( EXPORTING iv_entity = lv_entity iv_assoc = iv_assoc it_keys = it_keys
+                         CHANGING ct_result = ct_result ct_link = ct_link cs_failed = cs_failed ).
     subrc( is_failed = cs_failed iv_before = lv_before ).
   ENDMETHOD.
 
@@ -370,31 +472,45 @@ CLASS zcl_osd_rap_eml IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD execute.
+    DATA lv_bdef    TYPE string.
+    DATA lv_entity  TYPE string.
     DATA lo_runtime TYPE REF TO zcl_osd_rap_runtime.
     DATA lv_before  TYPE i.
 
-    lo_runtime = runtime( iv_bdef ).
+    route( EXPORTING iv_bdef = iv_bdef iv_entity = iv_entity iv_use = 'A' iv_name = iv_action
+           IMPORTING ev_bdef = lv_bdef ev_entity = lv_entity ).
+    lo_runtime = runtime( lv_bdef ).
     lv_before = count_rows( cs_failed ).
     CLEAR ct_result.
-    lo_runtime->execute( EXPORTING iv_entity = iv_entity iv_action = iv_action it_keys = it_rows
-                         CHANGING ct_result = ct_result cs_failed = cs_failed cs_reported = cs_reported ).
+    IF cs_mapped IS SUPPLIED.
+      lo_runtime->execute( EXPORTING iv_entity = lv_entity iv_action = iv_action it_keys = it_rows
+                           CHANGING ct_result = ct_result cs_failed = cs_failed cs_reported = cs_reported
+                                    cs_mapped = cs_mapped ).
+    ELSE.
+      lo_runtime->execute( EXPORTING iv_entity = lv_entity iv_action = iv_action it_keys = it_rows
+                           CHANGING ct_result = ct_result cs_failed = cs_failed cs_reported = cs_reported ).
+    ENDIF.
     subrc( is_failed = cs_failed iv_before = lv_before ).
   ENDMETHOD.
 
   METHOD read.
+    DATA lv_bdef    TYPE string.
+    DATA lv_entity  TYPE string.
     DATA lo_runtime TYPE REF TO zcl_osd_rap_runtime.
     DATA lv_before  TYPE i.
 
-    lo_runtime = runtime( iv_bdef ).
+    route( EXPORTING iv_bdef = iv_bdef iv_entity = iv_entity iv_use = 'R'
+           IMPORTING ev_bdef = lv_bdef ev_entity = lv_entity ).
+    lo_runtime = runtime( lv_bdef ).
     lv_before = count_rows( cs_failed ).
     IF iv_fields IS NOT INITIAL AND iv_fields <> co_all_fields.
-      check_fields( io_runtime = lo_runtime iv_entity = iv_entity it_fields = field_list( iv_fields ) ).
+      check_fields( io_runtime = lo_runtime iv_entity = lv_entity it_fields = field_list( iv_fields ) ).
     ENDIF.
     CLEAR ct_result.
-    lo_runtime->read( EXPORTING iv_entity = iv_entity it_keys = it_keys
+    lo_runtime->read( EXPORTING iv_entity = lv_entity it_keys = it_keys
                       CHANGING ct_result = ct_result cs_failed = cs_failed ).
     IF iv_fields IS NOT INITIAL AND iv_fields <> co_all_fields.
-      project( EXPORTING io_runtime = lo_runtime iv_entity = iv_entity iv_fields = iv_fields
+      project( EXPORTING io_runtime = lo_runtime iv_entity = lv_entity iv_fields = iv_fields
                CHANGING ct_result = ct_result ).
     ENDIF.
     subrc( is_failed = cs_failed iv_before = lv_before ).
@@ -447,7 +563,8 @@ CLASS zcl_osd_rap_eml IMPLEMENTATION.
     FIELD-SYMBOLS <ls_failed>   TYPE any.
     FIELD-SYMBOLS <ls_reported> TYPE any.
 
-    lv_bdef = to_upper( iv_bdef ).
+* R11: RESPONSE OF an interface BDEF is its base's session
+    route( EXPORTING iv_bdef = iv_bdef IMPORTING ev_bdef = lv_bdef ).
     lv_before = count_rows( cs_failed ).
     ev_saved = abap_true.
     LOOP AT gt_sessions INTO ls_session.
@@ -511,6 +628,94 @@ CLASS zcl_osd_rap_eml IMPLEMENTATION.
       sy-subrc = 4.
     ELSE.
       sy-subrc = 0.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD route.
+    DATA li_registry TYPE REF TO zif_osd_rap_registry.
+    DATA lt_proj     TYPE zif_osd_rap_registry=>tt_projection.
+    DATA ls_proj     TYPE zif_osd_rap_registry=>ty_projection.
+    DATA ls_map      TYPE zif_osd_rap_registry=>ty_map.
+    DATA ls_model    TYPE zif_osd_rap_bo=>ty_model.
+    DATA ls_entity   TYPE zif_osd_rap_bo=>ty_entity.
+    DATA lv_class    TYPE string.
+    DATA lv_name     TYPE string.
+    DATA lv_found    TYPE abap_bool.
+    DATA lv_used     TYPE abap_bool.
+
+    ev_bdef = to_upper( iv_bdef ).
+    ev_entity = iv_entity.
+    lv_class = 'ZCL_OSD_RAP_REGISTRY'.
+    TRY.
+        CREATE OBJECT li_registry TYPE (lv_class).
+      CATCH cx_sy_create_object_error.
+        RETURN.
+    ENDTRY.
+    IF li_registry->get( ev_bdef ) IS BOUND.
+      RETURN.
+    ENDIF.
+    lt_proj = li_registry->projections( ev_bdef ).
+    IF lt_proj IS INITIAL.
+* no such definition: RUNTIME( ) says so
+      RETURN.
+    ENDIF.
+    READ TABLE lt_proj INDEX 1 INTO ls_proj.
+    ev_bdef = ls_proj-base_bdef.
+    IF iv_entity IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    lv_name = to_upper( iv_entity ).
+    LOOP AT lt_proj INTO ls_proj.
+      IF ls_proj-entity = lv_name OR to_upper( ls_proj-alias ) = lv_name.
+        lv_found = abap_true.
+        EXIT.
+      ENDIF.
+    ENDLOOP.
+    IF lv_found = abap_false.
+      RAISE EXCEPTION TYPE zcx_osd_rap EXPORTING iv_reason = |EML: { iv_entity } is no entity of { iv_bdef }|.
+    ENDIF.
+* the rows and the responses go to the base by component name: an element
+* the BDEF renames, a response alias that differs from the base's, or an
+* augment (its pool's, which EML here does not call) is refused rather than
+* mapped wrongly
+    LOOP AT ls_proj-fields INTO ls_map.
+      IF ls_map-name <> ls_map-base.
+        RAISE EXCEPTION TYPE zcx_osd_rap EXPORTING iv_reason = |EML on { iv_bdef }: { ls_proj-alias } renames { ls_map-base } to { ls_map-name } (outside R11)|.
+      ENDIF.
+    ENDLOOP.
+    IF ls_proj-augment IS NOT INITIAL.
+      RAISE EXCEPTION TYPE zcx_osd_rap EXPORTING iv_reason = |EML on { iv_bdef }: { ls_proj-alias } has an augment (outside R11)|.
+    ENDIF.
+    ls_model = runtime( ev_bdef )->bo( )->model( ).
+    READ TABLE ls_model-entities INTO ls_entity WITH KEY name = ls_proj-base_entity.
+    IF sy-subrc <> 0 OR to_upper( ls_entity-alias ) <> to_upper( ls_proj-alias ).
+      RAISE EXCEPTION TYPE zcx_osd_rap EXPORTING iv_reason = |EML on { iv_bdef }: { ls_proj-alias } is { ls_entity-alias } in { ev_bdef } (outside R11)|.
+    ENDIF.
+    ev_entity = ls_proj-base_entity.
+
+    lv_name = to_upper( iv_name ).
+    CASE iv_use.
+      WHEN 'C'.
+        lv_used = ls_proj-create.
+      WHEN 'U'.
+        lv_used = ls_proj-update.
+      WHEN 'D'.
+        lv_used = ls_proj-delete.
+      WHEN 'A'.
+        READ TABLE ls_proj-actions TRANSPORTING NO FIELDS WITH KEY table_line = lv_name.
+        lv_used = boolc( sy-subrc = 0 ).
+      WHEN 'B'.
+        READ TABLE ls_proj-creates TRANSPORTING NO FIELDS WITH KEY table_line = lv_name.
+        lv_used = boolc( sy-subrc = 0 ).
+      WHEN 'L'.
+        READ TABLE ls_proj-assocs TRANSPORTING NO FIELDS WITH KEY table_line = lv_name.
+        lv_used = boolc( sy-subrc = 0 ).
+      WHEN OTHERS.
+        lv_used = abap_true.
+    ENDCASE.
+    IF lv_used = abap_false.
+      RAISE EXCEPTION TYPE zcx_osd_rap EXPORTING iv_reason = |{ iv_bdef } does not use { iv_use } { iv_name } of { ls_proj-alias }|.
     ENDIF.
   ENDMETHOD.
 

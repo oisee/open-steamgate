@@ -16,16 +16,14 @@
         "^(draft|colldraft|hierarchy|unmanaged)/",
         "^reuse/agency/(cntry|datgn|rev)/",
         "^reuse/agency/slogn/.*\\.(clas|ddls|devc)\\.",
-        "\\.bdef\\.",
-        "\\.srvd\\.",
+        "^(?!managed/#dmo#(i_travel_m|c_travel_processor_m|c_travel_approver_m)\\.bdef\\.|reuse/supplement/#dmo#(i|c)_supplement\\.bdef\\.|reuse/agency/#dmo#(r|c|i)_agencytp\\.bdef\\.|reuse/carrier/#dmo#(i|c)_carrierslocksingleton_s\\.bdef\\.).*\\.bdef\\.",
+        "^(?!reuse/supplement/#dmo#ui_supplement\\.srvd\\.|reuse/agency/#dmo#ui_agency\\.srvd\\.|reuse/carrier/#dmo#ui_carriers_s\\.srvd\\.).*\\.srvd\\.",
         "\\.clas\\.testclasses\\.abap$",
         "/#dmo#bp_",
         "/#dmo#tc_",
         "/#dmo#cl_flight_amdp\\.",
         "/#dmo#cl_flight_legacy\\.",
         "/#dmo#flight_travel_api\\.fugr\\.",
-        "^managed/#dmo#c_(travel|booking|booksuppl)_(processor|approver)_m\\.ddls\\.",
-        "^reuse/(agency/#dmo#(c|i)_agencytp|carrier/#dmo#c_carrier_s|carrier/#dmo#(c|i)_carrierslocksingleton_s|supplement/#dmo#c_supplement)\\.ddls\\.",
         "^legacy/#dmo#currency_helper\\.ddls\\."
       ]
     }
@@ -34,16 +32,14 @@
     "^(draft|colldraft|hierarchy|unmanaged)/": "the other scenarios of the repository; this pack is the managed one with what it reads",
     "^reuse/agency/(cntry|datgn|rev)/": "the extensibility chapter: BDEF extensions, RAISE ENTITY EVENT, WITH INDICATORS -- out of scope",
     "^reuse/agency/slogn/.*\\.(clas|ddls|devc)\\.": "the slogan extension: its append structure and data element stay because /dmo/agency includes them; its views, test class and package go with the chapter",
-    "\\.bdef\\.": "tools/rap/bdef-gen.mjs refuses every BDEF here (projection, associations, draft) and a refusal is a failed build; measured per file in docs/rap-flight-pack.md",
-    "\\.srvd\\.": "main's R3 (#892) serves every service definition it finds, and a refusal is a failed build; measured per file in docs/rap-flight-pack.md: six of the seven expose views the pack does not fetch on purpose (the consumption projections, the carrier singleton) or a view the type generator skips (the readonly root's association), and the seventh, the legacy base view, resolves but is not this pack's service to publish -- the service here is the overlay's own YAML",
+    "^(?!managed/#dmo#(i_travel_m|c_travel_processor_m|c_travel_approver_m)\\.bdef\\.|reuse/supplement/#dmo#(i|c)_supplement\\.bdef\\.|reuse/agency/#dmo#(r|c|i)_agencytp\\.bdef\\.|reuse/carrier/#dmo#(i|c)_carrierslocksingleton_s\\.bdef\\.).*\\.bdef\\.": "tools/rap/bdef-gen.mjs refuses every BDEF of the other scenarios and a refusal is a failed build; measured per file by tools/rap-flight/constructs.mjs. The managed travel BO and its two projections run since R7, the draft supplement and agency BOs and their projections since R10, the agency's interface BDEF and the carrier singleton with its projection since R11 (docs/rap-runtime.md): all ten BDEFs of this pack's scenario run",
+    "^(?!reuse/supplement/#dmo#ui_supplement\\.srvd\\.|reuse/agency/#dmo#ui_agency\\.srvd\\.|reuse/carrier/#dmo#ui_carriers_s\\.srvd\\.).*\\.srvd\\.": "main's R3 (#892) serves every service definition it finds, and a refusal is a failed build; measured per file in docs/rap-flight-pack.md: the managed scenario's two come from the overlay without their value helps, the readonly root's does not resolve, and the legacy base view is not this pack's service to publish. /DMO/UI_SUPPLEMENT and /DMO/UI_AGENCY are fetched as they are since R10, /DMO/UI_CARRIERS_S since R11",
     "\\.clas\\.testclasses\\.abap$": "ABAP Unit over cl_abap_behv_test_environment, cl_cds_test_environment, cl_osql_test_environment: none of the three exists here",
-    "/#dmo#bp_": "behavior pools: EML and implicit handler signatures, refused by the transpiler (READ/MODIFY ENTITIES throw) and partly by abaplint",
+    "/#dmo#bp_": "behavior pools: the ones of the BOs that do not run (the carrier singleton, the other scenarios) are refused; the managed travel's three pools (R7) and the supplement's two and the agency's (R10) come whole from the overlay (src/), their locals_imp changed where this runtime differs (marked OSD overlay), because an object the overlay names hides every file of it upstream",
     "/#dmo#tc_": "test consumer classes: EML against the business objects above",
     "/#dmo#cl_flight_amdp\\.": "the AMDP currency conversion: tools/amdp-gen.mjs has no HANA type for its /dmo/ data-element parameters and a refusal fails the build",
     "/#dmo#cl_flight_legacy\\.": "the legacy business object: calls the AMDP class above and selects from I_Currency; the data generator needed only its price formula, inlined in the overlay",
     "/#dmo#flight_travel_api\\.fugr\\.": "the legacy API function group: every module calls /dmo/cl_flight_legacy, excluded above",
-    "^managed/#dmo#c_(travel|booking|booksuppl)_(processor|approver)_m\\.ddls\\.": "the five consumption views of the managed scenario: `as projection on` is not generated by tools/cds2ddic.mjs (measured: skipped, no select) and test/cds-check.mjs wants every view of the tree generated",
-    "^reuse/(agency/#dmo#(c|i)_agencytp|carrier/#dmo#c_carrier_s|carrier/#dmo#(c|i)_carrierslocksingleton_s|supplement/#dmo#c_supplement)\\.ddls\\.": "the reuse layer's projection views and the singleton root (a join): not generated by tools/cds2ddic.mjs, same reason",
     "^legacy/#dmo#currency_helper\\.ddls\\.": "the legacy currency helper: a view with parameters whose one element is currency_conversion( ), which the generator has no reading of (it resolved no field)"
   }
 }

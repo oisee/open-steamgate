@@ -26,6 +26,8 @@ CLASS zcl_stg_http_handler IMPLEMENTATION.
 * its own); a batch that dumped never reached its reset, and the next RAP save
 * would leave its COMMIT to a group that is gone (ZCL_OSD_LUW_HOLD=>HELD).
     zcl_osd_luw_hold=>hold( abap_false ).
+* R9: who sends it (the draft owner); a static, so set on every request
+    zcl_osd_logon=>enter( server->request->get_header_field( 'authorization' ) ).
     lv_method = server->request->get_header_field( '~request_method' ).
     lv_path   = server->request->get_header_field( '~path' ).
     lv_host   = server->request->get_header_field( 'host' ).
@@ -101,6 +103,8 @@ CLASS zcl_stg_http_handler IMPLEMENTATION.
     ENDIF.
     server->response->set_status( code   = ls_response-status
                                   reason = ls_response-reason ).
+* R9: the request's user ends with the request
+    zcl_osd_logon=>leave( ).
   ENDMETHOD.
 
 ENDCLASS.

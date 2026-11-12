@@ -288,7 +288,7 @@ the columns do not add up):
 | 8 | **abaplint parser gaps** on 7.5x syntax: `CLASS ... DEFINITION DEFERRED FOR TESTING` (8 objects), `CORRESPONDING ... DISCARDING DUPLICATES` (7), `CORRESPONDING #( a FROM b USING k = k ... )` (1), `MAPPING %fail = DEFAULT VALUE #( )` (2), `TYPES ... WITH INDICATORS` / `UPDATE ... INDICATORS` (1), a `SWITCH` over `REDUCE ... LET` (1) | 12 | pools and the data generators; the generators are overlaid around them |
 | 9 | **Released DDIC missing from open-abap-core**: `ABP_LOCINST_LASTCHANGE_USER` (7 tables), `SDRAFT_UUID` (2), the views `I_Currency` (24 files name it), `I_Country` / `I_CountryText` (25) | 9 tables + 2 classes | stand-ins in the overlay |
 | 10 | **Number ranges**: `cl_numberrange_intervals` has only a no-op `create`, `cl_numberrange_runtime=>number_get` has no `quantity`; `CL_ABAP_RANDOM_INT8`, `CL_ABAP_RANDOM_FLOAT` absent | 2 | the data generators, overlaid |
-| 11 | **Features / authorization / locks** (`features : instance`, `authorization master`, `lock master`, `etag master`): parsed and ignored by R2 | 4 BDEFs | not a wall yet, because nothing reaches them |
+| 11 | **Features / authorization / locks** (`features : instance`, `authorization master`, `lock master`, `etag master`): parsed and ignored by R2; since R4 `etag master`, instance features and early numbering run ([rap-runtime.md](rap-runtime.md), "R4"), authorization and locks are still ignored | 4 BDEFs | not a wall yet, because nothing reaches them |
 | 12 | **`GET BADI` / `CALL BADI`**, BAdI definitions (ENHS) | 1 | the data generator, overlaid |
 | 13 | **Late numbering** | 1 BDEF | `/DMO/R_AGENCYTP` |
 
@@ -299,17 +299,158 @@ before draft (6). The test doubles (7) are a separate track and gate
 nothing but the tests. The parser gaps (8) are abaplint issues, each with
 a one-line reproducer in the table.
 
+## Per construct (R4)
+
+`node tools/rap-flight/constructs.mjs` is the finer measurement R4 started
+from: per BDEF of `managed/` and the reuse layer (`--all` adds the
+extension chapter), every behavior construct and every handler form of its
+pools, each with what the tree does with it (runs, ignored, refused; the
+`SUPPORT` table in the script names the test behind each "runs"), and the
+first refusal of `bdef-gen` + `rap-runtime-gen` over the BDEF, the
+scenario's DDIC and the pool. R4 moved `etag master` (4 BDEFs), early
+numbering and `FOR NUMBERING` (2), `features : instance` and `FOR INSTANCE
+FEATURES` (2) from ignored or refused to running; the first wall of every
+BDEF is unchanged, which is the measurement's point: compositions,
+projections and draft are what stands between this tree and the scenario
+([rap-runtime.md](rap-runtime.md), "R4").
+
+## R7: the managed travel BO runs
+
+Since RAP R7 ([rap-runtime.md](rap-runtime.md), "R7") the managed travel
+business object is built and served without draft (V2 data requests and V4; V2 `$metadata` of the namespaced services fails on open-abap-odata's unescape, ANORMALIES):
+
+- **Fetched as they are**: `/DMO/I_TRAVEL_M`, `/DMO/C_TRAVEL_PROCESSOR_M`
+  and `/DMO/C_TRAVEL_APPROVER_M` (BDEFs) and the five consumption views of
+  the managed scenario (`as projection on`, generated since R5). The
+  manifest's BDEF pattern excludes every other BDEF (draft, the singleton
+  grammar, the interface BDEF).
+- **From the overlay**: the three behavior pools, whole (an object the
+  overlay names hides every file of it upstream, so the main class and its
+  XML are copies too), and the two service definitions without their value
+  helps (`/DMO/I_*_StdVH`, `I_CurrencyStdVH`, `I_CountryVH` are not fetched
+  or not released here). Served at `/sap/opu/odata/sap/%2FDMO%2FUI_TRAVEL_PROCESSOR_M`
+  and `.../%2FDMO%2FUI_TRAVEL_APPROVER_M`, and the same under `odata4`.
+- **The seed**: the seed class also fills the `I_CURRENCY` stand-in with the
+  currencies the generated data uses (the validations look a currency up
+  there), and `test/seed.mjs` now resolves a field typed by a data element
+  through the element and its domain. Before, every `/dmo/` DATS column went
+  in as ISO text cut to eight characters (`2027-06-`): no seeded date of the
+  pack compared equal to anything, and the booking's `validateConnection`
+  found no flight.
+
+### R7: the travel pools
+
+What the overlay changes in the three `locals_imp` includes, each marked
+`OSD overlay` in the source. None changes what a handler decides:
+
+| change | where | why |
+| --- | --- | --- |
+| `DEFINITION DEFERRED FOR TESTING` lines and the `FRIENDS` naming test classes dropped | all three | the test classes are not fetched; abaplint does not parse the statement |
+| an EML target declared with its derived type, `WITH CORRESPONDING #( keys )` as a declared import table | every READ / MODIFY ENTITIES | abaplint types an inline EML target void (docs/rap-eml.md) |
+| `READ ENTITIES ... BY \_assoc`, the deep `MODIFY ... CREATE BY` of `copyTravel` written as the `ZCL_OSD_RAP_EML` calls they lower to, the statement in a comment | travel, booking | `BY` is not lowered by the pinned transpiler (R5) |
+| the `LINK` reads by `\_Travel` / `\_Booking` that only fill a message's `%path` not made; `%path` from the instance's own key | booking, supplement | the key of a child carries its ancestors' keys, so the result is the same |
+| `CORRESPONDING ... DISCARDING DUPLICATES` as a loop into the sorted table | all three | not parsed |
+| `CORRESPONDING #( ... EXCEPT ... )`, `CORRESPONDING #( DEEP ... )`, `MAPPING %fail = DEFAULT VALUE` spelled out | travel, supplement | not transpiled / not parsed |
+| `USING KEY entity`, `KEY id` read by the key fields; `LOOP ... GROUP BY` and the two `REDUCE ... USING KEY` of the cba numbering as loops | travel, booking | the derived tables have no secondary keys `id` / `entity` here (the saver's `REQUEST FOR CHANGE` does have `entity`) |
+| `%param = CORRESPONDING #( travel )` in the two status actions | travel | the structure move fails at run time (ANORMALIES "RAP R7: the flight travel pools") |
+| `cl_numberrange_runtime=>number_get` replaced by the highest saved travel ID + 1 | travel | this runtime's class has no QUANTITY / return codes and `/DMO/TRV_M` no interval (unmeasured against a system's interval) |
+| `/dmo/cl_flight_amdp=>convert_currency` replaced by 0 for an amount in another currency | travel | the AMDP class is not fetched; HANA's `CONVERT_CURRENCY` with `error_handling 'set to null'` and no rates answers null (unmeasured) |
+
+The saver `lcl_save` is upstream's, but for its `FRIENDS` line: the
+additional save of the travel and the unmanaged save of the supplements
+through `/DMO/FLIGHT_BOOKSUPPL_C/U/D` run as written.
+
+Tests: `test/rap-flight-travel.mjs` (V2 and V4: create, cba, validation
+messages, update through the unmanaged save, `copyTravel`, delete with the
+cascade, `acceptTravel` / `rejectTravel` through the approver projection)
+and `ZCL_OSD_RAPFLIGHT_R7_TEST` (the change log in `/dmo/log_travel`, the
+supplements in `/dmo/booksuppl_m`).
+
+## R10: the supplement and agency BOs run with draft
+
+Since RAP R10 ([rap-runtime.md](rap-runtime.md), "R10") the draft BOs of
+the reuse layer are built and served with their projections: the
+supplement (`/DMO/I_SUPPLEMENT`, `/DMO/C_SUPPLEMENT`, served as
+`/DMO/UI_SUPPLEMENT`) and the agency (`/DMO/R_AGENCYTP`, `/DMO/C_AGENCYTP`,
+served as `/DMO/UI_AGENCY`), over V4 at `/sap/opu/odata4/sap/%2FDMO%2FUI_...`
+and over V2 data requests.
+
+- **Fetched as they are**: the four BDEFs, the two service definitions and
+  the two consumption views (their path elements are served since R10, the
+  ones that reach `I_Country` / `I_Currency` -- table stand-ins here -- are
+  not, and the build says so). `/DMO/I_AGENCYTP` (an interface BDEF) and the
+  carrier singleton stay out.
+- **From the overlay**: the three pools, whole. What changes in the
+  `locals_imp` includes, each marked `OSD overlay`:
+
+| change | where | why |
+| --- | --- | --- |
+| `DEFINITION DEFERRED FOR TESTING` and the `FRIENDS` naming test classes dropped | all three | the test classes are not fetched |
+| an EML target declared with its derived type, `WITH CORRESPONDING #( keys )` as a declared import table | every READ ENTITIES | abaplint types an inline EML target void |
+| `CORRESPONDING ... DISCARDING DUPLICATES` as a loop | supplement, agency validations | not parsed |
+| `cl_numberrange_runtime=>number_get` replaced by the highest saved ID + 1 (the supplement's per category, over the active and the draft table) | supplement early numbering, agency `adjust_numbers` | this runtime's class has no QUANTITY / SUBOBJECT / return codes and the objects no interval (unmeasured against a system's interval) |
+| `LOOP ... GROUP BY` as a loop over the categories | supplement early numbering | the numbering per category, spelled out |
+| `MODIFY AUGMENTING ENTITIES ... RELATING TO` and `READ ENTITIES ... BY \_assoc ... LINK` written as the `ZCL_OSD_RAP_EML` calls they stand for; `RELATING TO` not run | supplement projection's augment | not lowered by the pinned transpiler (ANORMALIES "RAP R10") |
+| `KEY draft` / `KEY cid` reads by the key fields | supplement projection's augment | the derived tables have no such secondary keys here |
+| `ASSERT agency_id_max = number_range_key` dropped | agency `adjust_numbers` | no number range |
+
+- **The seed**: the seed class also fills an `I_COUNTRY` stand-in (the
+  released view `I_Country`, read by the agency's country validation) with
+  the countries of the generated agencies and customers.
+
+Tests: `test/rap-r10.mjs` (generators; V4: create a supplement draft with
+its description through the augment, change it, Prepare, Activate; a
+validation refusing Activate; Edit and Discard; V2 reads; an agency draft
+under a preliminary key, activated to its final key; a refused agency) and
+`ZCL_OSD_RAPFLIGHT_R10_TEST` (the same through the runtime with
+`%is_draft`, and an active agency created and numbered late).
+
+## R11: the agency's interface BDEF and the carrier singleton run
+
+Since RAP R11 ([rap-runtime.md](rap-runtime.md), "R11") all ten behavior
+definitions of the scenario run. `/DMO/I_AGENCYTP` (`interface; use
+draft;`) is typed as a projection of `/DMO/R_AGENCYTP` and used through EML
+in the base's transaction; the carrier singleton
+(`/DMO/I_CARRIERSLOCKSINGLETON_S`, `/DMO/C_CARRIERSLOCKSINGLETON_S`) is
+served as `/DMO/UI_CARRIERS_S` over V4: its root is a computed view (one
+row: the literal key 1 and `max( last_changed_at )` over `/dmo/carrier`),
+its carriers carry the constant `CarrierSingletonID`, and Edit drafts the
+root with every carrier.
+
+- **Fetched as they are**: the interface BDEF and its view, the singleton's
+  two BDEFs, its four views and `/DMO/UI_CARRIERS_S`.
+- **From the overlay**: the singleton's pool `/dmo/bp_i_carrierslocksingle_s`,
+  whole. In its `locals_imp`, each marked `OSD overlay`:
+
+| change | where | why |
+| --- | --- | --- |
+| `DEFINITION DEFERRED FOR TESTING` and the `FRIENDS` naming test classes dropped | the handler and the saver | the test classes are not fetched |
+| an EML target declared with its derived type, `WITH CORRESPONDING #( keys )` as a declared import table | every READ ENTITIES | abaplint types an inline EML target void |
+| `CORRESPONDING ... DISCARDING DUPLICATES MAPPING ... EXCEPT *` as a loop | the features, validateCurrencyCode | not parsed |
+
+- **The seed**: the `I_CURRENCY` stand-in also gets the carriers'
+  currencies, which the singleton's `validateCurrencyCode` looks up when
+  the carriers are activated.
+
+Tests: `test/rap-r11.mjs` (generators; V4: the root and its carriers,
+navigation and `$expand`, Edit + change + create below the draft + Prepare
++ Activate and back, a refused Activate and Discard) and
+`ZCL_OSD_RAPFLIGHT_R11_TEST` (the interface through EML; the singleton
+through the runtime with `%is_draft`).
+
 ## Not done
 
-- No business object of the scenario runs: not one BDEF is accepted, so
-  there is no managed runtime behind the views. The service is read-only
-  over SADL and has no navigation properties.
-- The service definitions (`srvd`) are not fetched and the bindings
-  (`srvb`) are not read: main's R3 (#892) serves every service definition
-  it finds, six of the seven here refuse (the table above), and the one
-  that resolves, the legacy base view, is not this pack's service to
-  publish. The OData service here is the overlay's YAML, under a name of
-  ours.
+- All of the scenario's business objects run: the managed travel (R7),
+  the supplement and agency (R10), the agency's interface BDEF and the
+  carrier singleton (R11) (`node tools/rap-flight/constructs.mjs`). V2 `$metadata`
+  of the two travel services fails (ANORMALIES "RAP R7: a namespaced
+  service's V2 $metadata"); V4's answers.
+- Of the service definitions (`srvd`) `/DMO/UI_SUPPLEMENT` and
+  `/DMO/UI_AGENCY` are fetched (R10), `/DMO/UI_CARRIERS_S` (R11); the managed travel's two come from the
+  overlay without their value helps (R7), the readonly root's does not resolve, and the legacy base view is not this
+  pack's service to publish. The bindings (`srvb`) are not read. The
+  read-only views are served by the overlay's own YAML
+  (`ZOSD_RAPFLIGHT_SRV`).
 - The `draft/`, `colldraft/`, `hierarchy/` and `unmanaged/` scenarios are
   not fetched; their counts above come from the clone, not from a build.
 - The ABAP Unit includes are not run.

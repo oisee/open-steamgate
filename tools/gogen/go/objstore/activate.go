@@ -143,8 +143,8 @@ func ActivateAll(objects []Object) error {
 // a file the build did not have does not exist. A library object is always
 // live (it cannot change here). An object this store does not know is not.
 func Live(typ, name string) bool {
-	storeState.mu.Lock()
-	defer storeState.mu.Unlock()
+	storeState.mu.RLock()
+	defer storeState.mu.RUnlock()
 	if storeState.cfg == nil {
 		return false
 	}

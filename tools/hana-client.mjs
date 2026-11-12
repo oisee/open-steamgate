@@ -94,6 +94,79 @@ function foldIdentifiers(sql) {
   return out;
 }
 
+/** The first word of the statement, read outside the single-quoted literals.
+ *
+ *  The read-only guard refuses by kind, never by text: the text may carry
+ *  data, and a message quoting it would put that data into a log. A word
+ *  read from inside a literal is not a kind -- `statementKind("'INSERT …'")`
+ *  is empty, and empty is refused like any kind that is not allowed. */
+export function statementKind(sql) {
+  let i = 0;
+  let quoted = false;
+  while (i < sql.length) {
+    const c = sql[i];
+    if (quoted) {
+      if (c === "'") {
+        if (sql[i + 1] === "'") i++;
+        else quoted = false;
+      }
+      i += 1;
+      continue;
+    }
+    if (c === "'") { quoted = true; i += 1; continue; }
+    if (/[A-Za-z]/.test(c)) break;
+    i += 1;
+  }
+  return (/^[A-Za-z]+/.exec(sql.slice(i))?.[0] ?? "").toUpperCase();
+}
+
+/** A top-level `;`: the text carries more than the one statement.
+ *
+ *  A kind is the first word of the first statement, so
+ *  `SELECT 1; DROP TABLE "T"` reads as a SELECT and walks past the guard --
+ *  measured, the critic round's smuggle probe, over exec and prepare. HANA
+ *  itself answers a multi-statement string with a syntax error, so nothing
+ *  executed; but this client's promise is to refuse before the driver sees
+ *  anything at all, and the separator is what breaks it. Quote- and
+ *  comment-aware, like foldIdentifiers above: a `;` counts only outside the
+ *  single-quoted literals ('' an escaped quote), outside the double-quoted
+ *  identifiers, and outside SQL's line and block comments. The guard
+ *  refuses such a text as kind "multi" before the kind of its first word
+ *  is read. */
+export function isMultiStatement(sql) {
+  let i = 0;
+  while (i < sql.length) {
+    const c = sql[i];
+    if (c === "'") {                       // a literal: skip it whole
+      i += 1;
+      while (i < sql.length) {
+        if (sql[i] === "'" && sql[i + 1] === "'") { i += 2; continue; }
+        if (sql[i] === "'") { i += 1; break; }
+        i += 1;
+      }
+      continue;
+    }
+    if (c === '"') {                       // a quoted identifier
+      const close = sql.indexOf('"', i + 1);
+      i = close === -1 ? sql.length : close + 1;
+      continue;
+    }
+    if (c === "-" && sql[i + 1] === "-") { // a line comment, to its end
+      const nl = sql.indexOf("\n", i);
+      i = nl === -1 ? sql.length : nl + 1;
+      continue;
+    }
+    if (c === "/" && sql[i + 1] === "*") { // a block comment
+      const end = sql.indexOf("*/", i + 2);
+      i = end === -1 ? sql.length : end + 2;
+      continue;
+    }
+    if (c === ";") return true;
+    i += 1;
+  }
+  return false;
+}
+
 /** a row of the seam is flat: number | string | Uint8Array | null */
 function plain(value, dataType) {
   if (typeof value === "bigint") return Number(value);
@@ -261,6 +334,13 @@ export class HanaDatabaseClient {
     this.client = undefined;
     this.connected = false;
     this.inTransaction = false;
+    // HANA_EXISTING_SCHEMA=1: the schema is an SAP system's, already there,
+    // with its data. The mode only skips -- no DROP SCHEMA, no CREATE, no
+    // seed (test/setup.mjs returns straight after connect) -- and it is
+    // read-only unless OSD_HANA_WRITE=1 says otherwise
+    // (docs/db-backends.md, "Existing schema, read-only").
+    this.existingSchema = input.existingSchema ?? process.env.HANA_EXISTING_SCHEMA === "1";
+    this.readOnly = input.readOnly ?? (this.existingSchema && process.env.OSD_HANA_WRITE !== "1");
     // Seeded from generated DDIC on every process start, then augmented from
     // DDL. Open SQL writes RAW values as quoted hex; HANA needs X'...'. A
     // persisted schema executes no CREATE TABLE after restart, so DDL alone
@@ -307,13 +387,65 @@ export class HanaDatabaseClient {
     return err;
   }
 
+  /** The one door every statement the eleven DatabaseClient methods send
+   *  passes through (and the native channel beside them, which is refused
+   *  the same way: a lowered SQLScript write is a write). In the
+   *  existing-schema mode, read-only unless `OSD_HANA_WRITE=1`, everything
+   *  that is not a SELECT is refused here, before it reaches the driver:
+   *
+   *  - `SET` is allowed: it is connect()'s own session statement, and
+   *    pointing the session at the configured schema is not a write.
+   *  - `COMMIT` and `ROLLBACK` are allowed -- decided and written down in
+   *    docs/db-backends.md. They are the LUW bracket the runtime calls
+   *    unconditionally (disconnect() commits), and under this guard no
+   *    refused statement can open a transaction -- the guard runs before
+   *    beginTransaction() -- so they degenerate to the no-op the early
+   *    return in commit()/rollback() already is.
+   *  - everything else -- INSERT, UPDATE, DELETE, MERGE, UPSERT, CREATE,
+   *    DROP, ALTER, TRUNCATE, CALL, and any word not on the allowed list --
+   *    is refused with code `HANA_READONLY` and the kind in the message.
+   *    The statement text never travels with it: it may carry data.
+   *  - and a text carrying a top-level `;` is refused as kind "multi"
+   *    before the kind of its first word is even read: a kind is the first
+   *    word of the FIRST statement, and that word says nothing about the
+   *    second one (`SELECT 1; DROP TABLE "T"` measured walking past as a
+   *    SELECT -- the critic round's smuggle probe, exec and prepare).
+   *
+   *  Without the mode this is a pass-through: STG_DB=hana's own path has to
+   *  keep issuing CREATE TABLE and the seed. */
+  #guard(sql) {
+    if (this.readOnly !== true) return;
+    const kind = isMultiStatement(sql) ? "multi" : statementKind(sql);
+    if (kind === "SELECT" || kind === "SET" || kind === "COMMIT" || kind === "ROLLBACK") return;
+    const error = new Error(`HANA_READONLY: ${kind === "" ? "statement" : kind} refused in read-only mode (HANA_EXISTING_SCHEMA=1 without OSD_HANA_WRITE=1); the statement was not sent to the database`);
+    error.code = "HANA_READONLY";
+    throw error;
+  }
+
   async connect() {
+    // Refused before a socket is even opened: STG_DB_FRESH=1 means "start
+    // from nothing", which is exactly what this mode must never mean against
+    // a schema somebody else owns.
+    if (this.existingSchema === true && process.env.STG_DB_FRESH === "1") {
+      throw new Error(`HANA_EXISTING_SCHEMA=1 and STG_DB_FRESH=1 refuse each other: the mode runs over a schema an SAP system already holds, and fresh means DROP SCHEMA over it. Drop the STG_DB_FRESH, or point HANA_SCHEMA at a schema of your own.`);
+    }
     const hdb = require("hdb");
     this.client = hdb.createClient(hanaConnection(this.options));
     await new Promise((resolve, reject) => this.client.connect((err) => (err ? reject(err) : resolve())));
     // COMMIT and ROLLBACK are meaningless while the session autocommits, and
     // the LUW of docs/db-backends.md depends on them meaning something
     this.client.setAutoCommit(false);
+    // The mode only skips: the schema and its tables are already there, so
+    // neither the drop of STG_DB_FRESH nor the CREATE SCHEMA happens, and
+    // the seed that test/setup.mjs would run is skipped with it. SET SCHEMA
+    // stays: the session still has to sit in the configured schema.
+    if (this.existingSchema === true) {
+      this.#guard(`SET SCHEMA "${this.schema}"`);
+      await this.#run(`SET SCHEMA "${this.schema}"`);
+      globalThis.abap?.builtin?.sy?.get()?.dbsys?.set(this.name);
+      this.connected = true;
+      return;
+    }
     // STG_DB_FRESH=1 means start from nothing; without it a second run meets
     // the tables the first one left and dies on "duplicate table name"
     if (process.env.STG_DB_FRESH === "1" && freshened.has(this.schema) === false) {
@@ -328,6 +460,7 @@ export class HanaDatabaseClient {
       await new Promise((resolve, reject) => this.client.commit((e) => (e ? reject(e) : resolve())));
     }
     await this.#run(`CREATE SCHEMA "${this.schema}"`).catch(() => undefined);
+    this.#guard(`SET SCHEMA "${this.schema}"`);
     await this.#run(`SET SCHEMA "${this.schema}"`);
     globalThis.abap?.builtin?.sy?.get()?.dbsys?.set(this.name);
     this.connected = true;
@@ -366,6 +499,9 @@ export class HanaDatabaseClient {
       return;
     }
     if (sql === "") return;
+    // the guard runs before beginTransaction(): a refused statement must
+    // leave no transaction open behind it
+    this.#guard(sql);
     // A statement opens the LUW here exactly as a modifying one does. Without
     // this the flag stayed false, `commit()` returned early -- it begins with
     // `if (this.inTransaction === false) return` -- and with autocommit off
@@ -401,6 +537,7 @@ export class HanaDatabaseClient {
 
   /** one modifying statement; the count of rows it touched */
   async #modifying(sql) {
+    this.#guard(sql);
     await this.beginTransaction();
     const folded = binaryLiterals(foldIdentifiers(sql), this.binaryColumns);
     if (this.trace) console.log(folded);
@@ -415,6 +552,10 @@ export class HanaDatabaseClient {
       const dbcnt = await this.#modifying(sql);
       return {subrc: 0, dbcnt};
     } catch (e) {
+      // a refusal is not a row-count answer: subrc 4 says "no such row" to
+      // an ABAP caller, and hiding the guard behind it would make a
+      // read-only run look like one whose rows never matched
+      if (e?.code === "HANA_READONLY") throw e;
       if (this.trace) console.error(e);
       return {subrc: 4, dbcnt: 0};
     }
@@ -434,6 +575,7 @@ export class HanaDatabaseClient {
       const dbcnt = await this.#modifying(sql);
       return {subrc: dbcnt === 0 ? 4 : 0, dbcnt};
     } catch (e) {
+      if (e?.code === "HANA_READONLY") throw e;
       if (this.trace) console.error(e);
       return {subrc: 4, dbcnt: 0};
     }
@@ -446,6 +588,7 @@ export class HanaDatabaseClient {
       const dbcnt = await this.#modifying(trimLiterals(sql));
       return {subrc: dbcnt === 0 ? 4 : 0, dbcnt};
     } catch (e) {
+      if (e?.code === "HANA_READONLY") throw e;
       if (this.trace) console.error(e);
       return {subrc: 4, dbcnt: 0};
     }
@@ -463,6 +606,7 @@ export class HanaDatabaseClient {
   }
 
   async query(sql) {
+    this.#guard(sql);
     const folded = foldIdentifiers(sql);
     if (this.trace) console.log(folded);
     let stmt;
@@ -505,6 +649,7 @@ export class HanaDatabaseClient {
   }
 
   async checkSelect(sql) {
+    this.#guard(sql);
     const prepared = await new Promise((resolve, reject) =>
       this.client.prepare(foldIdentifiers(this.rewrite(sql)), (err, stmt) => err ? reject(err) : resolve(stmt)));
     await new Promise((resolve, reject) =>
@@ -542,6 +687,7 @@ export class HanaDatabaseClient {
 
   /** One lowered statement, sent as written, with its values bound. */
   async native({sql, params = [], expect = "rows"}) {
+    this.#guard(sql);
     if (this.trace) console.log("native:", sql, params.length ? JSON.stringify(params) : "");
     const stmt = await new Promise((resolve, reject) =>
       this.client.prepare(sql, (err, s) => (err ? reject(err) : resolve(s))));
@@ -619,6 +765,7 @@ export class HanaDatabaseClient {
     if (materialise === undefined) {
       // a view is HANA's cheapest definition, and it keeps the relation
       // inside the engine rather than becoming rows on the way through us
+      this.#guard(`CREATE VIEW ${handle.ref} AS ${sql}`);
       await this.#run(`CREATE VIEW ${handle.ref} AS ${sql}`);
     } else {
       // A materialised relation is a **column table**, not a local temporary
@@ -627,6 +774,7 @@ export class HanaDatabaseClient {
       // needs a reference it can splice anywhere. The client drops it.
       handle.ref = `"${this.schema}"."${ident}"`;
       if (params.length === 0) {
+        this.#guard(`CREATE COLUMN TABLE ${handle.ref}`);
         await this.#run(`CREATE COLUMN TABLE ${handle.ref} AS (${sql}) WITH DATA`);
       } else {
         // HANA takes no parameter in a DDL statement -- measured, it answers
@@ -647,6 +795,7 @@ export class HanaDatabaseClient {
         // instrument invented. Asking the engine to type the real statement
         // removes the guess rather than improving it.
         const metadata = await this.#resultMetadata(sql);
+        this.#guard(`CREATE COLUMN TABLE ${handle.ref}`);
         await this.#run(`CREATE COLUMN TABLE ${handle.ref} (${columnsFromMetadata(metadata).join(", ")})`);
         await this.native({sql: `INSERT INTO ${handle.ref} (${sql})`, params, expect: "none"});
       }
@@ -668,6 +817,7 @@ export class HanaDatabaseClient {
 
   async dropRelation(handle) {
     const what = handle.kind === "definition" ? "VIEW" : "TABLE";
+    this.#guard(`DROP ${what} ${handle.ref}`);
     await this.#run(`DROP ${what} ${handle.ref}`).catch(() => undefined);
   }
 

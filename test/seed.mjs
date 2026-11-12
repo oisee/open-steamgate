@@ -7,16 +7,42 @@ import {readdirSync, readFileSync} from "node:fs";
 import {dataDirsOf, ddicDirsOf, packsOf} from "../tools/osd-packs.mjs";
 import {join} from "node:path";
 
-function fieldLengths(tablXml) {
+// A field typed by a data element (ROLLNAME) carries no DATATYPE of its
+// own in the table's XML: the element's, or its domain's, says what it is.
+// Without this the flight pack's /dmo/ dates (ROLLNAME /DMO/FLIGHT_DATE ->
+// domain /DMO/DATE, DATS) went in as ISO text cut to eight characters
+// ('2027-06-'), so no date of the pack compared equal to anything (R7).
+function elementType(rollname, ddicDirs) {
+  const read = (name, kind) => {
+    const file = `${name.toLowerCase().replace(/\//g, "#")}.${kind}.xml`;
+    for (const dir of ddicDirs ?? []) {
+      try { return readFileSync(join(dir, file), "utf8"); } catch { /* elsewhere */ }
+    }
+    return undefined;
+  };
+  const dtel = read(rollname, "dtel");
+  if (dtel === undefined) return {};
+  const own = {datatype: /<DATATYPE>([^<]+)</.exec(dtel)?.[1], leng: /<LENG>0*(\d+)</.exec(dtel)?.[1]};
+  const domname = /<DOMNAME>([^<]+)</.exec(dtel)?.[1];
+  if (own.datatype || domname === undefined) return own;
+  const doma = read(domname, "doma");
+  if (doma === undefined) return {};
+  return {datatype: /<DATATYPE>([^<]+)</.exec(doma)?.[1], leng: /<LENG>0*(\d+)</.exec(doma)?.[1]};
+}
+
+function fieldLengths(tablXml, ddicDirs) {
   const lengths = new Map();
   const re = /<DD03P>([\s\S]*?)<\/DD03P>/g;
   let m;
   while ((m = re.exec(tablXml)) !== null) {
     const block = m[1];
     const name = /<FIELDNAME>([^<]+)</.exec(block)?.[1]?.toLowerCase();
-    const datatype = /<DATATYPE>([^<]+)</.exec(block)?.[1];
-    const leng = /<LENG>0*(\d+)</.exec(block)?.[1];
+    let datatype = /<DATATYPE>([^<]+)</.exec(block)?.[1];
+    let leng = /<LENG>0*(\d+)</.exec(block)?.[1];
     const rollname = /<ROLLNAME>([^<]+)</.exec(block)?.[1];
+    if (datatype === undefined && rollname !== undefined && rollname !== "MANDT") {
+      ({datatype, leng} = elementType(rollname, ddicDirs));
+    }
     if (name === undefined) {
       continue;
     }
@@ -138,7 +164,7 @@ function seedFrom(dataDir, ddicDirs, owners, absent = new Set()) {
     let lengths = new Map();
     for (const dir of ddicDirs) {
       try {
-        lengths = fieldLengths(readFileSync(join(dir, table + ".tabl.xml"), "utf8"));
+        lengths = fieldLengths(readFileSync(join(dir, table + ".tabl.xml"), "utf8"), ddicDirs);
         break;
       } catch {
         // table defined elsewhere or in a lib: insert unpadded, the runtime pads on read

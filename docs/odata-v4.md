@@ -488,7 +488,17 @@ what the facade had to learn for it:
 | Edit, field changes, Save, Cancel, Create (with a key dialog) | sticky session; `PATCH` with `If-Match` and `SAP-ContextId` |
 | `Accept: ...;IEEE754Compatible=true` | not negotiated: the demo has no Int64/Decimal |
 
-Not covered for Fiori Elements: draft (`Common.DraftRoot`), creating or
+Draft (`Common.DraftRoot`) is served for a draft-enabled RAP business
+object since RAP R8 ([rap-runtime.md](rap-runtime.md), "R8"): the key
+`IsActiveEntity=true|false`, the draft actions as bound actions, and the
+list filter `IsActiveEntity eq false or SiblingEntity/IsActiveEntity eq null`
+recognised as one condition. Since R9 ([rap-runtime.md](rap-runtime.md),
+"R9") `SiblingEntity` and `DraftAdministrativeData` are navigations of every
+entity of a draft BO, the "Editing Status" conditions through them are
+understood, a field the client may neither create nor change of a draft
+entity type is `Core.Computed`, and a Fiori Elements V4 app runs the whole
+draft flow over it (`webapp/trip4`, `test/e2e/trip4.spec.mjs`).
+Not covered for Fiori Elements: draft over SEGW services, creating or
 editing bookings below a travel (writes through a navigation property are
 501), side effects, and value helps beyond what the V2 annotations already
 describe. The list report's basic search field sends `$search="..."`,
@@ -500,7 +510,7 @@ resolves, from the standalone `/app/travel4/index.html` it does not.
 ## Not served in this slice
 
 - `@odata.bind`, writes through navigation properties, deep update.
-- `If-None-Match`, conditional GET, SADL ETags, draft.
+- `If-None-Match`, conditional GET, SADL ETags, draft beyond RAP R9's slice.
 - Binary property values in request bodies (501).
 - `$expand=*`, `nav/nav` expand paths, `$levels`; parameter aliases,
   non-primitive operation parameters, collections of primitive or complex

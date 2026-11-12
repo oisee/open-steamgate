@@ -46,6 +46,8 @@ CLASS zcl_osd_v4_http IMPLEMENTATION.
 * its own); a batch that dumped never reached its reset, and the next RAP save
 * would leave its COMMIT to a group that is gone (ZCL_OSD_LUW_HOLD=>HELD).
     zcl_osd_luw_hold=>hold( abap_false ).
+* R9: who sends it (the draft owner); a static, so set on every request
+    zcl_osd_logon=>enter( server->request->get_header_field( 'authorization' ) ).
 * ANORMALIES: posted-form-has-no-fields, V4 GET addendum. Decode once
 * from the raw query: names, form spaces and literal encoded plus signs.
     lv_query = server->request->get_header_field( '~query_string' ).
@@ -100,6 +102,8 @@ CLASS zcl_osd_v4_http IMPLEMENTATION.
     ENDLOOP.
     server->response->set_cdata( ls_response-body ).
     server->response->set_status( code = ls_response-status reason = ls_response-reason ).
+* R9: the request's user ends with the request
+    zcl_osd_logon=>leave( ).
   ENDMETHOD.
 
   METHOD dispatch.
@@ -319,12 +323,17 @@ CLASS zcl_osd_v4_http IMPLEMENTATION.
 * Set(key)/<navigation>: the source entity's key, then the target set read
 * the way $expand reads it -- the DPC sees the navigation path and the
 * source key, as on the V2 path
-      IF iv_method <> 'GET'.
+      ls_nav = zcl_stg_model_info=>find_nav( is_set = ls_set iv_name = lo_query->mv_navigation ).
+* a POST to a collection-valued navigation creates the target below its
+* source (OData 4.01 Part 1, 11.4.2.1; a RAP create by association, R5); the
+* DPC sees the navigation path and the source key, as on the V2 path
+      IF iv_method <> 'GET' AND NOT ( iv_method = 'POST' AND ls_nav-to_many = abap_true ).
         zcl_osd_v4_query=>fail( iv_text = 'Writes through a navigation property are not implemented' iv_status = 501 ).
       ENDIF.
-      ls_nav = zcl_stg_model_info=>find_nav( is_set = ls_set iv_name = lo_query->mv_navigation ).
+* R11: a namespaced service (/DMO/UI_CARRIERS_S) goes into the path escaped,
+* as it came: unescaped its slashes end the service name at /DMO
       CREATE OBJECT lo_source EXPORTING
-        iv_path = |/sap/opu/odata4/sap/{ lo_model->ms_service-name }/{ ls_set-name }({ lo_query->ms_request-key_string })|
+        iv_path = |/sap/opu/odata4/sap/{ replace( val = lo_model->ms_service-name sub = '/' with = '%2F' occ = 0 ) }/{ ls_set-name }({ lo_query->ms_request-key_string })|
         it_options = lt_none.
       lo_source->prepare( is_set = ls_set io_model = lo_model ).
       ls_source = ls_set.
@@ -355,6 +364,21 @@ CLASS zcl_osd_v4_http IMPLEMENTATION.
       APPEND ls_path TO lo_context->mt_navigation_path.
     ENDIF.
     lo_dpc = zcl_oao_registry=>create_dpc( lo_model->ms_service-name ).
+* R9: Set(key)/SiblingEntity and Set(key)/DraftAdministrativeData of a
+* draft BO: a source that is not there (or is another user's draft) is a
+* 404, a source without the related entity a 204 (OData 4.01 Part 1,
+* 9.1.4 and 11.2.7; critic MUST 2 on #915)
+    IF lo_source IS BOUND AND iv_method = 'GET'
+        AND ( ls_nav-name = 'SiblingEntity' OR ls_nav-name = 'DraftAdministrativeData' ).
+      lo_dpc->get_entity( EXPORTING iv_entity_name = ls_source-entity_type iv_entity_set_name = ls_source-name
+        iv_source_name = ls_source-entity_type it_key_tab = lo_source->mo_context->mt_key_tab
+        it_navigation_path = lo_source->mo_context->mt_navigation_path
+        io_tech_request_context = lo_source->mo_context IMPORTING er_entity = lr_data ).
+      IF lr_data IS NOT BOUND.
+        zcl_osd_v4_query=>fail( iv_text = 'Entity not found' iv_status = 404 ).
+      ENDIF.
+      CLEAR lr_data.
+    ENDIF.
 * an entity a sticky session holds is read and changed in the session
     IF lo_query->ms_request-key_string IS NOT INITIAL AND lo_source IS NOT BOUND.
       lr_buffer = zcl_osd_v4_sticky=>buffered( it_headers = it_headers iv_service = lo_model->ms_service-name
@@ -539,7 +563,7 @@ CLASS zcl_osd_v4_http IMPLEMENTATION.
 * the options inside the parentheses are a query of the target set: the
 * same validation and the same select-options as a request to it
       CREATE OBJECT lo_sub EXPORTING
-        iv_path = |/sap/opu/odata4/sap/{ io_model->ms_service-name }/{ ls_target-name }| it_options = ls_item-options.
+        iv_path = |/sap/opu/odata4/sap/{ replace( val = io_model->ms_service-name sub = '/' with = '%2F' occ = 0 ) }/{ ls_target-name }| it_options = ls_item-options.
       lo_sub->prepare( is_set = ls_target io_model = io_model ).
       lo_context = lo_sub->mo_context.
       lo_context->mt_key_tab = lt_keys.
