@@ -4,6 +4,8 @@ import {tmpdir} from "node:os";
 import {execFileSync, spawnSync} from "node:child_process";
 import {dirname, join, resolve} from "node:path";
 import {run} from "../tools/hana-src-gen.mjs";
+import {build} from "../tools/osd-build.mjs";
+import {generationHanaSrcProblem} from "../tools/osd-tmp.mjs";
 import {expandedFolders} from "../tools/osd-packs.mjs";
 import {layers} from "../tools/osd-inputs.mjs";
 
@@ -442,6 +444,93 @@ describe("hana-src-gen: the tenant's sources as input layers", () => {
       expect(generationHanaSrcProblem(generation), "no record, no publishing").to.match(/no readable record/);
     } finally {
       rmSync(generation, {recursive: true, force: true});
+    }
+  });
+
+  // ---- the REAL pair: the build's own inputsOf record, and the guard every
+  // publisher reads it with -- not a hand-written manifest. The base leaves
+  // gen/hana-ddic existing but empty on every build (runGenerators, H3 fix
+  // round 4), so a tree that has built once must still publish: the record
+  // names what the build read, and an empty folder was never read.
+  const CHECKOUT = resolve(import.meta.dirname, "..");
+  const realTree = () => {
+    const root = mkdtempSync(join(tmpdir(), "hana-src-real-"));
+    symlinkSync(join(CHECKOUT, "node_modules"), join(root, "node_modules"), "dir");
+    // the generators resolve library pins (cds2ddic's types, the gui
+    // converter of osd-gui-convert): a lock this tree can read and the
+    // checkout's clones. The tree is not a checkout, so the pin gate is the
+    // shipped-tree rule and the refs are never verified -- they only have to
+    // be well-formed.
+    writeFileSync(join(root, "libs.lock.json"), JSON.stringify({
+      transpiler: {repo: "example/transpiler", ref: "a".repeat(40)},
+      libraries: ["abapgit", "ajson", "express-icf-shim", "open-abap-apc", "open-abap-core", "open-abap-odata", "open-abap-gui"]
+        .map((folder) => ({folder, repo: `example/${folder}`, ref: "0".repeat(40)})),
+    }));
+    mkdirSync(join(root, ".local"), {recursive: true});
+    symlinkSync(join(CHECKOUT, ".local", "lars"), join(root, ".local", "lars"), "dir");
+    mkdirSync(join(root, "src"), {recursive: true});
+    writeFileSync(join(root, "src", "zosd_h4_real.clas.abap"),
+      "CLASS zosd_h4_real DEFINITION PUBLIC.\nENDCLASS.\nCLASS zosd_h4_real IMPLEMENTATION.\nENDCLASS.\n");
+    writeFileSync(join(root, "abap_transpile.json"), JSON.stringify({
+      input_folder: ["gen/hana-ddic", "src"], output_folder: "output", libs: [],
+      options: {ignoreSyntaxCheck: false, addFilenames: true, addCommonJS: true, unknownTypes: "compileError"},
+    }));
+    return root;
+  };
+  const editSource = (root) => writeFileSync(join(root, "src", "zosd_h4_real.clas.abap"),
+    `CLASS zosd_h4_real DEFINITION PUBLIC.\nENDCLASS.\nCLASS zosd_h4_real IMPLEMENTATION.\nENDCLASS.\n* touched ${Math.random()}\n`);
+  const manifestFolders = (root, hash) =>
+    JSON.parse(readFileSync(join(root, "build", "by-input", hash, "manifest.json"), "utf8")).inputs.folders;
+  // a build of a tree of its own: the publishers' env scrub, for the same
+  // reason their fake trees pass OSD_PACKS= and friends empty
+  const withTreeEnv = async (fn) => {
+    const names = ["OSD_PACKS", "OSD_WEB_PACKS", "OSD_TMP", "OSD_LAYERS", "OSD_LAYER_PACKAGE", "OSD_IMAGE_PACKS"];
+    const saved = Object.fromEntries(names.map((n) => [n, process.env[n]]));
+    try {
+      for (const n of names) delete process.env[n];
+      return await fn();
+    } finally {
+      for (const [n, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[n]; else process.env[n] = v;
+      }
+    }
+  };
+
+  it("the real pair: an empty gen/hana-ddic is no input, the next build is not refused", async function () {
+    this.timeout(240000);
+    const root = realTree();
+    try {
+      const first = await withTreeEnv(() => build({root}));
+      expect(generationHanaSrcProblem(join(root, "build", "by-input", first.hash)), "the first build publishes").to.equal(undefined);
+      // runGenerators has made gen/hana-ddic, empty, by now; a source edit
+      // makes the next build a generation of its own, the way any tree that
+      // changed since its last build is
+      editSource(root);
+      const second = await withTreeEnv(() => build({root}));
+      expect(second.hash, "the edit built a new generation").to.not.equal(first.hash);
+      expect(manifestFolders(root, second.hash), "the empty folder is not in the record").to.not.include("gen/hana-ddic");
+      expect(generationHanaSrcProblem(join(root, "build", "by-input", second.hash)), "the second build publishes too").to.equal(undefined);
+    } finally {
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
+
+  it("the real pair: one file in gen/hana-ddic makes the generation after it private", async function () {
+    this.timeout(240000);
+    const root = realTree();
+    try {
+      const first = await withTreeEnv(() => build({root}));
+      writeFileSync(join(root, "gen", "hana-ddic", "zosd_h4_real_tab.tabl.xml"),
+        "<abapGit><TABNAME>ZOSD_H4_REAL_TAB</TABNAME></abapGit>");
+      editSource(root);
+      const second = await withTreeEnv(() => build({root}));
+      expect(second.hash, "the edit built a new generation").to.not.equal(first.hash);
+      expect(manifestFolders(root, second.hash), "a folder that contributed is the record").to.include("gen/hana-ddic");
+      const problem = generationHanaSrcProblem(join(root, "build", "by-input", second.hash));
+      expect(problem, "the tenant's DDIC in the inputs is private").to.match(/gen\/hana-ddic/);
+      expect(problem).to.match(/private/);
+    } finally {
+      rmSync(root, {recursive: true, force: true});
     }
   });
 
