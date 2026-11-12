@@ -25,6 +25,9 @@ describe("the HANA shadow schema", () => {
     // SCARR stands in for the bed-measured view of fix round 3: HANA stored
     // the flight table's view with * expanded into the column list.
     {TABNAME: "SCARR", CLIDEP: "X"},
+    // H5d: a DDIC view takes a synonym whatever its client dependence says
+    {TABNAME: "ZOSD_H3_VIEWC", CLIDEP: "X", TABCLASS: "VIEW"},
+    {TABNAME: "ZOSD_H3_VIEWF", CLIDEP: "", TABCLASS: "VIEW"},
   ];
   // the fake stands in through the CJS cache a real require uses; the
   // suites runner runs a shard's files in ONE process, so the stand-in is
@@ -105,6 +108,35 @@ describe("the HANA shadow schema", () => {
         `CREATE VIEW "ZOSD_H3_OWN"."ZOSD_H3_CLI" AS SELECT * FROM "ZOSD_H3_TENANT"."ZOSD_H3_CLI" WHERE MANDT = SESSION_CONTEXT('CLIENT')`);
       expect(sent).to.include(
         `CREATE SYNONYM "ZOSD_H3_OWN"."ZOSD_H3_FREE" FOR "ZOSD_H3_TENANT"."ZOSD_H3_FREE"`);
+    } finally {
+      await db.disconnect();
+    }
+  });
+
+  it("a DDIC view is shadowed as a synonym, client-dependent or not (H5d)", async () => {
+    // the tenant's view is itself a read-only database view: the shadow
+    // names it, it does not wrap it -- no MANDT view over a view, no
+    // definition of our own to police for drift.
+    const {db, sent} = await connect({shadowTables: ["ZOSD_H3_VIEWC", "ZOSD_H3_VIEWF", "ZOSD_H3_CLI"]});
+    try {
+      expect(sent).to.include(`CREATE SYNONYM "ZOSD_H3_OWN"."ZOSD_H3_VIEWC" FOR "ZOSD_H3_TENANT"."ZOSD_H3_VIEWC"`);
+      expect(sent).to.include(`CREATE SYNONYM "ZOSD_H3_OWN"."ZOSD_H3_VIEWF" FOR "ZOSD_H3_TENANT"."ZOSD_H3_VIEWF"`);
+      // a client-dependent TABLE beside them still gets the MANDT view
+      expect(sent).to.include(
+        `CREATE VIEW "ZOSD_H3_OWN"."ZOSD_H3_CLI" AS SELECT * FROM "ZOSD_H3_TENANT"."ZOSD_H3_CLI" WHERE MANDT = SESSION_CONTEXT('CLIENT')`);
+    } finally {
+      await db.disconnect();
+    }
+  });
+
+  it("the lazy fallback shadows a view as a synonym and retries (H5d)", async () => {
+    const {db, sent} = await connect({shadowTables: []}, {failName: "ZOSD_H3_VIEWC", failTimes: 1});
+    try {
+      const rows = await db.query(`SELECT * FROM zosd_h3_viewc`);
+      expect(rows).to.deep.equal([]);
+      expect(sent).to.include(`CREATE SYNONYM "ZOSD_H3_OWN"."ZOSD_H3_VIEWC" FOR "ZOSD_H3_TENANT"."ZOSD_H3_VIEWC"`);
+      const attempts = sent.filter((s) => /FROM\s+zosd_h3_viewc/i.test(s) && /^\s*SELECT/i.test(s));
+      expect(attempts.length, "the failed statement and exactly one retry").to.equal(2);
     } finally {
       await db.disconnect();
     }

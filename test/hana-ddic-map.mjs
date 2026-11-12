@@ -185,17 +185,24 @@ describe("the DD03L to abapGit TABL mapping", () => {
     expect(xml).to.include(`<MASK>  DEC</MASK>`);
   });
 
-  // the dump path (H5a): a dump carries every DD02L table's DD03L, so an
-  // .INCLUDE row is not a refusal there -- the include's fields arrive in
-  // the include's place, in their own POSITION order. The outer rows keep
-  // the order their positions give them, and the spliced rows are not
-  // re-sorted against them (their positions are their own table's and would
-  // collide with the outer ones).
-  it("splices an .INCLUDE row from the other DD03L reads of the same dump (H5a)", () => {
+  // the dump path (H5d): a dump carries every DD02L table's DD03L, so an
+  // .INCLUDE row goes out as the marker a system's own export spells --
+  // the transpiler expands it off PRECFIELD -- and the included fields'
+  // expanded copies the dump also carries under the base table's own name
+  // are dropped by the dictionary's own mark: every expanded copy carries
+  // ADMINFIELD '1', every plain row '0' (measured on the real closure
+  // dump: 16 copies against 265 plain rows, the 7 markers '0' as well,
+  // the first copy one position after its marker). The rule is the mark's
+  // value space, abapGit's `adminfield <> '0'` -- the '1' is what the
+  // dumps measure, not the rule.
+  it("keeps an .INCLUDE row as the marker and drops the ADMINFIELD-'1' copies (H5d)", () => {
     const rows = [
-      {position: "1", fieldname: "MANDT", keyflag: "X", rollname: "MANDT", datatype: "CLNT", leng: "3", decimals: "0", inttype: "C", intlen: "000006", notnull: "X"},
-      {position: "3", fieldname: ".INCLUDE", precfield: "ZOSD_H1_STAMP"},
-      {position: "5", fieldname: "ZOSD_H1_TAIL", keyflag: "", rollname: "", datatype: "CHAR", leng: "2", decimals: "0", inttype: "C", intlen: "000004", notnull: ""},
+      {position: "1", fieldname: "MANDT", keyflag: "X", rollname: "MANDT", datatype: "CLNT", leng: "3", decimals: "0", inttype: "C", intlen: "000006", notnull: "X", adminfield: "0"},
+      {position: "3", fieldname: ".INCLUDE", precfield: "ZOSD_H1_STAMP", adminfield: "0"},
+      // the dump's expanded copy of the include's field, one position on,
+      // carrying the dictionary's mark
+      {position: "4", fieldname: "ZOSD_H1_STAMP_A", keyflag: "", rollname: "", datatype: "TIMS", leng: "6", decimals: "0", inttype: "T", intlen: "000012", notnull: "", adminfield: "1"},
+      {position: "5", fieldname: "ZOSD_H1_TAIL", keyflag: "", rollname: "", datatype: "CHAR", leng: "2", decimals: "0", inttype: "C", intlen: "000004", notnull: "", adminfield: "0"},
     ];
     const includes = new Map([["ZOSD_H1_STAMP", [
       // the include's own positions decide inside it, here 2 then 1
@@ -203,57 +210,63 @@ describe("the DD03L to abapGit TABL mapping", () => {
       {position: "1", fieldname: "ZOSD_H1_STAMP_D", keyflag: "", rollname: "", datatype: "DATS", leng: "8", decimals: "0", inttype: "D", intlen: "000016", notnull: ""},
     ]]]);
     const fields = ddicFieldsWithIncludes(rows, {}, includes);
-    expect(fields.map((f) => f.fieldname)).to.deep.equal(
-      ["MANDT", "ZOSD_H1_STAMP_D", "ZOSD_H1_STAMP_A", "ZOSD_H1_TAIL"]);
+    expect(fields.map((f) => f.fieldname)).to.deep.equal(["MANDT", ".INCLUDE", "ZOSD_H1_TAIL"]);
+    expect(fields[1]).to.deep.equal({fieldname: ".INCLUDE", key: false, marker: true, precfield: "ZOSD_H1_STAMP"});
   });
 
   it("an include whose DD03L is not in the dump is refused by name, and a cycle too", () => {
     const row = {position: "1", fieldname: ".INCLUDE", precfield: "ZOSD_H1_ABSENT"};
     let error;
     try { ddicFieldsWithIncludes([row], {}, new Map()); } catch (e) { error = e; }
+    expect(error?.message).to.include(".INCLUDE");
     expect(error?.message).to.include("ZOSD_H1_ABSENT");
     const cycle = new Map([["ZOSD_H1_A", [{position: "1", fieldname: ".INCLUDE", precfield: "ZOSD_H1_B"}]],
       ["ZOSD_H1_B", [{position: "1", fieldname: ".INCLUDE", precfield: "ZOSD_H1_A"}]]]);
     error = undefined;
     try {
-      ddicFieldsWithIncludes(cycle.get("ZOSD_H1_A"), {}, cycle, new Set(["ZOSD_H1_B"]));
+      ddicFieldsWithIncludes(cycle.get("ZOSD_H1_A"), {}, cycle);
     } catch (e) { error = e; }
     expect(error?.message).to.match(/cycle/);
   });
 
   // CRITIC-926 SHOULD 5: every .INCLU- form names its structure in
-  // PRECFIELD -- abaplint reads it there for every form (table.js). The
-  // suffix rides on the marker: a .INCLU-01 row splices the structure with
-  // "01" appended to every name it brings in, the rename abaplint applies
-  // reading the same DD03P; an append (.APPEND, and .INCLU--AP, which is
-  // how the dictionary spells an append) splices without a rename.
-  it("splices .INCLU-01 and .APPEND rows like .INCLUDE, the suffix kept on the names", () => {
+  // PRECFIELD -- abaplint reads it there for every form (table.js) and
+  // applies the suffix rename itself, so the marker passes through as the
+  // dictionary spells it; an append goes out as .INCLU--AP (the
+  // dictionary's spelling, the transpiler's no-rename form) whatever the
+  // row called itself.
+  it("keeps .INCLU-01 and .INCLU--AP markers as spelled, .APPEND spelled as the dictionary spells an append", () => {
     const rows = [
       {position: "1", fieldname: "MANDT", keyflag: "X", rollname: "MANDT", datatype: "CLNT", leng: "3", decimals: "0", inttype: "C", intlen: "000006", notnull: "X"},
       {position: "2", fieldname: ".INCLU-01", precfield: "ZOSD_H1_STAMP"},
-      {position: "3", fieldname: ".APPEND", precfield: "ZOSD_H1_APPEND"},
-      {position: "4", fieldname: "ZOSD_H1_TAIL", keyflag: "", rollname: "", datatype: "CHAR", leng: "2", decimals: "0", inttype: "C", intlen: "000004", notnull: ""},
+      // the suffix rename the transpiler applies: a copy of a suffixed
+      // marker sits under the suffixed name, so the fallback's name set
+      // has to know it (these rows carry no ADMINFIELD column -- the name
+      // rule is what keeps the copies out when the mark is absent)
+      {position: "3", fieldname: "ZOSD_H1_STAMP_A01", keyflag: "", rollname: "", datatype: "TIMS", leng: "6", decimals: "0", inttype: "T", intlen: "000012", notnull: ""},
+      {position: "4", fieldname: ".APPEND", precfield: "ZOSD_H1_APPEND"},
+      {position: "5", fieldname: ".INCLU--AP", precfield: "ZOSD_H1_DEEP"},
+      // the append form renames nothing: the copy keeps the plain name
+      {position: "6", fieldname: "ZOSD_H1_DEEP_D", keyflag: "", rollname: "", datatype: "DATS", leng: "8", decimals: "0", inttype: "D", intlen: "000016", notnull: ""},
+      {position: "7", fieldname: "ZOSD_H1_TAIL", keyflag: "", rollname: "", datatype: "CHAR", leng: "2", decimals: "0", inttype: "C", intlen: "000004", notnull: ""},
     ];
     const includes = new Map([
       ["ZOSD_H1_STAMP", [
-        // the include itself carries an .INCLUDE: the outer suffix renames
-        // the whole subtree it splices in
-        {position: "1", fieldname: ".INCLUDE", precfield: "ZOSD_H1_DEEP"},
-        {position: "2", fieldname: "ZOSD_H1_STAMP_A", keyflag: "", rollname: "", datatype: "TIMS", leng: "6", decimals: "0", inttype: "T", intlen: "000012", notnull: ""},
-      ]],
-      ["ZOSD_H1_DEEP", [
-        {position: "1", fieldname: "ZOSD_H1_DEEP_D", keyflag: "", rollname: "", datatype: "DATS", leng: "8", decimals: "0", inttype: "D", intlen: "000016", notnull: ""},
+        {position: "1", fieldname: "ZOSD_H1_STAMP_A", keyflag: "", rollname: "", datatype: "TIMS", leng: "6", decimals: "0", inttype: "T", intlen: "000012", notnull: ""},
       ]],
       ["ZOSD_H1_APPEND", [
         {position: "1", fieldname: "ZOSD_H1_AP_F1", keyflag: "", rollname: "", datatype: "CHAR", leng: "4", decimals: "0", inttype: "C", intlen: "000008", notnull: ""},
       ]],
+      ["ZOSD_H1_DEEP", [
+        {position: "1", fieldname: "ZOSD_H1_DEEP_D", keyflag: "", rollname: "", datatype: "DATS", leng: "8", decimals: "0", inttype: "D", intlen: "000016", notnull: ""},
+      ]],
     ]);
     const fields = ddicFieldsWithIncludes(rows, {}, includes);
-    expect(fields.map((f) => f.fieldname)).to.deep.equal(
-      ["MANDT", "ZOSD_H1_DEEP_D01", "ZOSD_H1_STAMP_A01", "ZOSD_H1_AP_F1", "ZOSD_H1_TAIL"]);
-    // .INCLU--AP is the dictionary's append spelling: no rename
-    const ap = ddicFieldsWithIncludes([{position: "1", fieldname: ".INCLU--AP", precfield: "ZOSD_H1_APPEND"}], {}, includes);
-    expect(ap.map((f) => f.fieldname)).to.deep.equal(["ZOSD_H1_AP_F1"]);
+    expect(fields.map((f) => f.fieldname)).to.deep.equal(["MANDT", ".INCLU-01", ".INCLU--AP", ".INCLU--AP", "ZOSD_H1_TAIL"]);
+    // the suffix rename is the transpiler's, off the marker it reads; each
+    // marker keeps the structure it names
+    expect(fields.filter((f) => f.marker === true).map((f) => f.precfield))
+      .to.deep.equal(["ZOSD_H1_STAMP", "ZOSD_H1_APPEND", "ZOSD_H1_DEEP"]);
   });
 
   it("refuses a dot row by its marker when PRECFIELD is blank, and names both otherwise", () => {
@@ -264,6 +277,118 @@ describe("the DD03L to abapGit TABL mapping", () => {
     try { ddicFieldsWithIncludes([{position: "1", fieldname: ".INCLU-05", precfield: "ZOSD_H1_ABSENT"}], {}, new Map()); } catch (e) { error = e; }
     expect(error?.message).to.include(".INCLU-05");
     expect(error?.message).to.include("ZOSD_H1_ABSENT");
+  });
+
+  // CRITIC-929 MUST 1, the shape the bare name rule missed: a .INCLU-01
+  // marker and the dump's expansion rows under the suffixed names, carrying
+  // ADMINFIELD '1' as the real dump's 16 copies all do. The mark decides,
+  // not the name -- and the kept marker makes the transpiler's own suffix
+  // rename produce the A01/B01 names by itself.
+  it("drops a .INCLU-01 marker's ADMINFIELD-'1' copies whatever they are named (H5d)", () => {
+    const rows = [
+      {position: "1", fieldname: "MANDT", keyflag: "X", rollname: "MANDT", datatype: "CLNT", leng: "3", decimals: "0", inttype: "C", intlen: "000006", notnull: "X", adminfield: "0"},
+      {position: "2", fieldname: "ZOSD_H1_SFX_KEY", keyflag: "X", rollname: "", datatype: "CHAR", leng: "10", decimals: "0", inttype: "C", intlen: "000020", notnull: "X", adminfield: "0"},
+      {position: "3", fieldname: ".INCLU-01", precfield: "ZOSD_H1_SFX_INC", adminfield: "0"},
+      // the dump's expansion rows: suffixed names, the dictionary's mark
+      {position: "4", fieldname: "ZOSD_H1_SFX_A01", keyflag: "", rollname: "", datatype: "CHAR", leng: "1", decimals: "0", inttype: "C", intlen: "000002", notnull: "", adminfield: "1"},
+      {position: "5", fieldname: "ZOSD_H1_SFX_B01", keyflag: "", rollname: "", datatype: "DATS", leng: "8", decimals: "0", inttype: "D", intlen: "000016", notnull: "", adminfield: "1"},
+      {position: "6", fieldname: "ZOSD_H1_SFX_TAIL", keyflag: "", rollname: "", datatype: "CHAR", leng: "2", decimals: "0", inttype: "C", intlen: "000004", notnull: "", adminfield: "0"},
+    ];
+    const includes = new Map([["ZOSD_H1_SFX_INC", [
+      {position: "1", fieldname: "ZOSD_H1_SFX_A", keyflag: "", rollname: "", datatype: "CHAR", leng: "1", decimals: "0", inttype: "C", intlen: "000002", notnull: ""},
+      {position: "2", fieldname: "ZOSD_H1_SFX_B", keyflag: "", rollname: "", datatype: "DATS", leng: "8", decimals: "0", inttype: "D", intlen: "000016", notnull: ""},
+    ]]]);
+    const fields = ddicFieldsWithIncludes(rows, {}, includes);
+    expect(fields.map((f) => f.fieldname)).to.deep.equal(["MANDT", "ZOSD_H1_SFX_KEY", ".INCLU-01", "ZOSD_H1_SFX_TAIL"]);
+    // what the XML makes of it: the marker in, no copy name anywhere
+    const xml = tablXml({name: "ZOSD_H1_SFX_BASE", text: "", clidep: false, fields});
+    expect(xml).to.include(`<FIELDNAME>.INCLU-01</FIELDNAME>`);
+    expect(xml).to.not.include("ZOSD_H1_SFX_A01");
+    expect(xml).to.not.include("ZOSD_H1_SFX_B01");
+    expect(xml.split("ZOSD_H1_SFX_A").length - 1).to.equal(0);
+  });
+
+  // CRITIC-929-r2 SHOULD 1: the mark decides, and here a test can see it.
+  // Every copy fixture above carries the name the name rule computes, so
+  // there mark and name agree; this row carries the mark and a name NO
+  // include brings -- the only shape where the mark alone decides. The
+  // name-only mutant keeps it and goes red here.
+  it("drops an ADMINFIELD-'1' row whose name no include brings -- the mark, not the name (H5d r2)", () => {
+    const rows = [
+      {position: "1", fieldname: "MANDT", keyflag: "X", rollname: "MANDT", datatype: "CLNT", leng: "3", decimals: "0", inttype: "C", intlen: "000006", notnull: "X", adminfield: "0"},
+      {position: "2", fieldname: ".INCLUDE", precfield: "ZOSD_H1_MARK_INC", adminfield: "0"},
+      // the dictionary's mark is what drops this row: its name is in no
+      // include's rows, so the name rule alone would keep it
+      {position: "3", fieldname: "ZOSD_H1_MARK_GHOST", keyflag: "", rollname: "", datatype: "CHAR", leng: "1", decimals: "0", inttype: "C", intlen: "000002", notnull: "", adminfield: "1"},
+      {position: "4", fieldname: "ZOSD_H1_TAIL", keyflag: "", rollname: "", datatype: "CHAR", leng: "2", decimals: "0", inttype: "C", intlen: "000004", notnull: "", adminfield: "0"},
+    ];
+    const includes = new Map([["ZOSD_H1_MARK_INC", [
+      {position: "1", fieldname: "ZOSD_H1_MARK_REAL", keyflag: "", rollname: "", datatype: "CHAR", leng: "4", decimals: "0", inttype: "C", intlen: "000008", notnull: ""},
+    ]]]);
+    const fields = ddicFieldsWithIncludes(rows, {}, includes);
+    expect(fields.map((f) => f.fieldname)).to.deep.equal(["MANDT", ".INCLUDE", "ZOSD_H1_TAIL"]);
+  });
+
+  // CRITIC-929-r2 SHOULD 2: the mark's value space is abapGit's own rule,
+  // `adminfield <> '0'`, not `= '1'` -- both dumps measure only '0' and
+  // '1', but the rule decides by the mark, not by the value the dumps
+  // happen to carry. Under the old `=== "1"` skip this row is written
+  // beside the marker and dies in the transpiler; the rule drops it.
+  it("drops a row carrying a mark other than '0' or '1' -- abapGit's rule is <> '0' (H5d r2)", () => {
+    const rows = [
+      {position: "1", fieldname: "MANDT", keyflag: "X", rollname: "MANDT", datatype: "CLNT", leng: "3", decimals: "0", inttype: "C", intlen: "000006", notnull: "X", adminfield: "0"},
+      {position: "2", fieldname: ".INCLUDE", precfield: "ZOSD_H1_MARK_INC", adminfield: "0"},
+      {position: "3", fieldname: "ZOSD_H1_MARK_ODD", keyflag: "", rollname: "", datatype: "CHAR", leng: "1", decimals: "0", inttype: "C", intlen: "000002", notnull: "", adminfield: "2"},
+      {position: "4", fieldname: "ZOSD_H1_TAIL", keyflag: "", rollname: "", datatype: "CHAR", leng: "2", decimals: "0", inttype: "C", intlen: "000004", notnull: "", adminfield: "0"},
+    ];
+    const includes = new Map([["ZOSD_H1_MARK_INC", [
+      {position: "1", fieldname: "ZOSD_H1_MARK_REAL", keyflag: "", rollname: "", datatype: "CHAR", leng: "4", decimals: "0", inttype: "C", intlen: "000008", notnull: ""},
+    ]]]);
+    const fields = ddicFieldsWithIncludes(rows, {}, includes);
+    expect(fields.map((f) => f.fieldname)).to.deep.equal(["MANDT", ".INCLUDE", "ZOSD_H1_TAIL"]);
+  });
+
+  // CRITIC-929-r2 SHOULD 2: a plain row ('0') named like an include's
+  // flattened field. Plain by its mark, round 1 kept it -- tablXml's
+  // refusal cannot see the collision, because the include's fields are
+  // not in the final list: the kept marker makes the transpiler expand
+  // them in, and the duplicate died in cds2ddic later. It is refused
+  // here, at generation, naming the table (the row's own TABNAME) and
+  // the field, like the raw duplicate's refusal beside it.
+  it("refuses a plain row that repeats an include's field, naming table and field (H5d r2)", () => {
+    const rows = [
+      {position: "1", fieldname: "MANDT", keyflag: "X", rollname: "MANDT", datatype: "CLNT", leng: "3", decimals: "0", inttype: "C", intlen: "000006", notnull: "X", tabname: "ZOSD_H1_DUPREF", adminfield: "0"},
+      {position: "2", fieldname: ".INCLUDE", precfield: "ZOSD_H1_DUPREF_INC", tabname: "ZOSD_H1_DUPREF", adminfield: "0"},
+      {position: "3", fieldname: "ZOSD_H1_DUPREF_F", keyflag: "", rollname: "", datatype: "CHAR", leng: "1", decimals: "0", inttype: "C", intlen: "000002", notnull: "", tabname: "ZOSD_H1_DUPREF", adminfield: "0"},
+    ];
+    const includes = new Map([["ZOSD_H1_DUPREF_INC", [
+      {position: "1", fieldname: "ZOSD_H1_DUPREF_F", keyflag: "", rollname: "", datatype: "CHAR", leng: "1", decimals: "0", inttype: "C", intlen: "000002", notnull: ""},
+    ]]]);
+    let error;
+    try { ddicFieldsWithIncludes(rows, {}, includes); } catch (e) { error = e; }
+    expect(error?.message, "the table").to.include("ZOSD_H1_DUPREF");
+    expect(error?.message, "the field").to.include("ZOSD_H1_DUPREF_F");
+  });
+
+  // CRITIC-929 MUST 1 (b): a raw duplicate -- two plain rows of one table
+  // carrying the same FIELDNAME, no include in sight -- is refused before
+  // anything is written, naming table and field, where it used to be
+  // written twice and die in cds2ddic later. Two markers naming two
+  // appends are the dictionary's own spelling and stay legal.
+  it("refuses a field list that repeats a FIELDNAME, naming table and field (H5d)", () => {
+    let error;
+    try {
+      tablXml({name: "ZOSD_H1_DUP", text: "", clidep: false, fields: [
+        {fieldname: "ZOSD_H1_DUP_F", key: false, datatype: "CHAR", leng: "000002", intlen: "000004", inttype: "C"},
+        {fieldname: "ZOSD_H1_DUP_F", key: false, datatype: "CHAR", leng: "000002", intlen: "000004", inttype: "C"},
+      ]});
+    } catch (e) { error = e; }
+    expect(error?.message, "the table").to.include("ZOSD_H1_DUP");
+    expect(error?.message, "the field").to.include("ZOSD_H1_DUP_F");
+    expect(() => tablXml({name: "ZOSD_H1_TWO_AP", text: "", clidep: false, fields: [
+      {fieldname: ".INCLU--AP", key: false, marker: true, precfield: "ZOSD_H1_AP_ONE"},
+      {fieldname: ".INCLU--AP", key: false, marker: true, precfield: "ZOSD_H1_AP_TWO"},
+    ]}), "two appends stay legal").to.not.throw();
   });
 
   it("a structured component carries its own COMPTYPE (H5a: DD03L COMPTYPE S)", () => {
@@ -289,13 +414,14 @@ describe("the DD03L to abapGit TABL mapping", () => {
     expect(tablXml({name: "ZOSD_H1_HEAD", text: "", clidep: true, fields: []})).to.include(`<TABCLASS>TRANSP</TABCLASS>`);
   });
 
-  // CRITIC-926 SHOULD 3: TABCLASS was reduced to a boolean, and an APPEND/
-  // VIEW/POOL row went out silently as an INTTAB structure -- a pool as a
-  // type that holds no rows, an append as a free-standing structure. The
-  // two kinds this path writes are TRANSP and INTTAB; anything else is
-  // refused by name.
+  // CRITIC-926 SHOULD 3: TABCLASS was reduced to a boolean, and a POOL
+  // row went out silently as an INTTAB structure -- a type that holds no
+  // rows. H5d lifted the two refusals the real closure run hit (APPEND and
+  // VIEW); POOL and CLUSTER stay refused by name, and the refusal is about
+  // the TABCLASS alone (CRITIC-929 SHOULD 4): the view sentence lives in
+  // the dump run's summary line and the docs, not in this error.
   it("refuses a TABCLASS this path does not write, by name", () => {
-    for (const tabclass of ["APPEND", "VIEW", "POOL", "CLUSTER"]) {
+    for (const tabclass of ["POOL", "CLUSTER"]) {
       let error;
       try { tablXml({name: `ZOSD_H1_${tabclass}`, text: "", clidep: true, tabclass, fields: []}); } catch (e) { error = e; }
       expect(error?.message, tabclass).to.include(`ZOSD_H1_${tabclass}`);
@@ -303,6 +429,57 @@ describe("the DD03L to abapGit TABL mapping", () => {
     }
     expect(tablXml({name: "ZOSD_H1_TRANSP", text: "", clidep: true, tabclass: "TRANSP", fields: []})).to.include(`<TABCLASS>TRANSP</TABCLASS>`);
     expect(tablXml({name: "ZOSD_H1_INTTAB", text: "", clidep: false, tabclass: "INTTAB", fields: []})).to.include(`<TABCLASS>INTTAB</TABCLASS>`);
+  });
+
+  // H5d, the two refusals the real closure run hit, now written: an APPEND
+  // as its own TABL -- TABCLASS APPEND, the SQLTAB target, no DD09L, no
+  // client -- and a VIEW as a read-only structure type, the shape the
+  // transpiler resolves the name through.
+  it("writes an APPEND with its SQLTAB target and a VIEW as a read-only structure (H5d)", () => {
+    const append = tablXml({name: "ZOSD_H1_APPEND", text: "h1 fixture append", clidep: false, tabclass: "APPEND",
+      sqltab: "ZOSD_H1_BASE", fields: []});
+    expect(append).to.include(`<TABCLASS>APPEND</TABCLASS>`);
+    expect(append).to.include(`<SQLTAB>ZOSD_H1_BASE</SQLTAB>`);
+    expect(append).to.not.include(`<DD09L>`);
+    expect(append).to.not.include(`<CLIDEP>`);
+    // no target named, no tag: an empty SQLTAB is drift, as everywhere
+    expect(tablXml({name: "ZOSD_H1_APPEND_NT", text: "", clidep: false, tabclass: "APPEND", fields: []}))
+      .to.not.include(`<SQLTAB>`);
+    const view = tablXml({name: "ZOSD_H1_VIEW", text: "h1 fixture view", clidep: false, tabclass: "VIEW",
+      fields: [
+        {fieldname: "ZOSD_H1_VKEY", key: true, datatype: "CHAR", leng: "000004", intlen: "000008", inttype: "C"},
+        {fieldname: "ZOSD_H1_VTEXT", key: false, datatype: "CHAR", leng: "000030", intlen: "000060", inttype: "C"},
+      ]});
+    expect(view).to.include(`<TABCLASS>VIEW</TABCLASS>`);
+    expect(view).to.not.include(`<DD09L>`);
+    expect(view).to.not.include(`<CLIDEP>`);
+    expect(view).to.include(`<FIELDNAME>ZOSD_H1_VTEXT</FIELDNAME>`);
+    // the POOL refusal is about the TABCLASS alone (CRITIC-929 SHOULD 4):
+    // the view sentence is the summary line's and the docs', not this
+    // error's tail
+    let error;
+    try { tablXml({name: "ZOSD_H1_POOL", text: "", clidep: true, tabclass: "POOL", fields: []}); } catch (e) { error = e; }
+    expect(error?.message).to.include("ZOSD_H1_POOL");
+    expect(error?.message).to.not.include("synonym");
+    expect(error?.message).to.not.include("SQL time");
+  });
+
+  // the marker's DD03P, as the fetched pack's own exports spell it: KEYFLAG
+  // when the marker is a key include, COMPTYPE S, the structure in
+  // PRECFIELD, the component kind in MASK -- and none of the type tags a
+  // plain field carries
+  it("an include marker goes out as the export spells it (H5d)", () => {
+    const xml = tablXml({name: "ZOSD_H1_WITH_MARKER", text: "h1 fixture", clidep: false,
+      fields: [
+        {fieldname: "MANDT", key: true, notnull: true, mandt: true, datatype: "CLNT", leng: "000003",
+          tags: {KEYFLAG: "X", ROLLNAME: "MANDT", ADMINFIELD: "0", NOTNULL: "X", COMPTYPE: "E"}},
+        {fieldname: ".INCLU--AP", key: false, marker: true, precfield: "ZOSD_H1_APPEND"},
+      ]});
+    expect(xml).to.match(/<FIELDNAME>\.INCLU--AP<\/FIELDNAME>\s*<COMPTYPE>S<\/COMPTYPE>\s*<PRECFIELD>ZOSD_H1_APPEND<\/PRECFIELD>\s*<MASK>      S<\/MASK>/);
+    // a key include carries its KEYFLAG on the marker
+    const keyed = tablXml({name: "ZOSD_H1_KEYED", text: "", clidep: false,
+      fields: [{fieldname: ".INCLUDE", key: true, marker: true, precfield: "ZOSD_H1_KEYS"}]});
+    expect(keyed).to.match(/<FIELDNAME>\.INCLUDE<\/FIELDNAME>\s*<KEYFLAG>X<\/KEYFLAG>\s*<COMPTYPE>S<\/COMPTYPE>/);
   });
 
   // CRITIC-926 SHOULD 4: the TABL header's DDLANGUAGE was a hard-coded E

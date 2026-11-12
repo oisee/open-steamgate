@@ -104,7 +104,7 @@ not been tested on it), git, and for HTTPS `openssl`.
 ```sh
 git clone https://github.com/oisee/open-steamgate && cd open-steamgate
 npm ci                 # measured: 387 packages in 18 s
-npm run bootstrap      # clones the 7 pinned libraries into .local/lars/, fetches the packs, builds; measured 55 s
+npm run bootstrap      # verifies/builds and links the pinned transpiler (libs.lock.json), clones the 7 pinned libraries into .local/lars/, fetches the packs, builds; measured 115 s with the pin already in ~/.cache/osd, 60 s of that the transpile
 npm run osd:tls        # a self-signed certificate in .local/tls/ -- Eclipse refuses plain HTTP
 npm start              # http://localhost:3030/  and  https://localhost:44330/
 ```

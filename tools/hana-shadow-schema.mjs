@@ -2,7 +2,9 @@
 // docs/db-backends.md, "Shadow schema: the client lives in HANA"). For every
 // table the build knows, connect() makes sure our own schema holds a view
 // `SELECT * FROM <tenant>.T WHERE MANDT = SESSION_CONTEXT('CLIENT')` when the
-// tenant's DD02L calls the table client-dependent, a synonym otherwise; the
+// tenant's DD02L calls the table client-dependent, a synonym otherwise -- and
+// a DDIC view (H5d) takes the synonym whatever its client dependence says,
+// the tenant's object being a read-only database view of its own; the
 // session then does SET SCHEMA <own> and every unqualified name the runtime
 // emits resolves to the filtered object. What SESSION_CONTEXT('CLIENT') reads
 // is the node-hdb connect option 'SESSIONVARIABLE:CLIENT', set from OSD_CLIENT
@@ -90,18 +92,23 @@ function assertSchema(what, value) {
   }
 }
 
-/** CLIDEP (=> view or synonym) for the names the tenant actually holds, in as
- *  many reads as there are chunks: an IN list is not unbounded, and the
- *  answer is also the filter -- the build knows tables of its own (ZSTG_*)
- *  that must not get a shadow over a tenant table that does not exist. */
+/** CLIDEP and TABCLASS for the names the tenant actually holds, in as many
+ *  reads as there are chunks: an IN list is not unbounded, and the answer
+ *  is also the filter -- the build knows tables of its own (ZSTG_*) that
+ *  must not get a shadow over a tenant table that does not exist. TABCLASS
+ *  (H5d) tells a DDIC view from a table: the view is shadowed as a synonym
+ *  whatever its client dependence says. */
 async function clidepOf(db, tenant, names) {
   const found = new Map();
   for (let at = 0; at < names.length; at += CHUNK) {
     const list = names.slice(at, at + CHUNK).map((name) => `'${name}'`).join(",");
     const rows = await db.query(
-      `SELECT TABNAME, CLIDEP FROM "${tenant}"."DD02L" WHERE TABNAME IN (${list}) AND AS4LOCAL = 'A' AND AS4VERS = '0000'`);
+      `SELECT TABNAME, CLIDEP, TABCLASS FROM "${tenant}"."DD02L" WHERE TABNAME IN (${list}) AND AS4LOCAL = 'A' AND AS4VERS = '0000'`);
     for (const row of rows) {
-      found.set(String(row.tabname).toUpperCase(), String(row.clidep).toUpperCase() === "X");
+      found.set(String(row.tabname).toUpperCase(), {
+        clidep: String(row.clidep).toUpperCase() === "X",
+        view: String(row.tabclass ?? "").toUpperCase() === "VIEW",
+      });
     }
   }
   return found;
@@ -172,7 +179,20 @@ export async function ensureShadow(db, {own, tenant, tables}) {
       report.skipped.push(name); // one of ours, not in the tenant: no shadow
       continue;
     }
-    if (clidep.get(name) === true) {
+    const kind = clidep.get(name);
+    if (kind.view === true || kind.clidep === false) {
+      // a DDIC view (H5d) or a client-independent table: a synonym. The
+      // tenant's view is itself a read-only database view; the shadow names
+      // it, it does not wrap it -- a synonym has no definition of its own
+      // to drift, and the view the dumps carry is client-independent. A
+      // client-dependent view would read across clients through the
+      // synonym; none is in the dumps, and if one arrives the filtered
+      // shape is one branch away (docs/db-backends.md).
+      if (there.synonyms.has(name) === false) {
+        await db.execute(synonymSql(name, own, tenant));
+        report.created.push(name);
+      }
+    } else {
       const wanted = viewSql(name, own, tenant);
       const current = there.views.get(name);
       if (current === undefined) {
@@ -182,9 +202,6 @@ export async function ensureShadow(db, {own, tenant, tables}) {
         await db.execute(replaceViewSql(name, own, tenant));
         report.replaced.push(name);
       }
-    } else if (there.synonyms.has(name) === false) {
-      await db.execute(synonymSql(name, own, tenant));
-      report.created.push(name);
     }
   }
   return report;
@@ -200,8 +217,14 @@ export async function ensureShadowFor(db, {own, tenant, name}) {
   if (NAME.test(table) === false) return false;
   const clidep = await clidepOf(db, tenant, [table]);
   if (clidep.has(table) === false) return false;
+  const kind = clidep.get(table);
   const there = await existingObjects(db, own);
-  if (clidep.get(table) === true) {
+  if (kind.view === true || kind.clidep === false) {
+    // the eager half's rule (H5d): a DDIC view is named, not wrapped
+    if (there.synonyms.has(table) === false) {
+      await db.execute(synonymSql(table, own, tenant));
+    }
+  } else {
     const wanted = viewSql(table, own, tenant);
     const current = there.views.get(table);
     if (current === undefined) {
@@ -209,8 +232,6 @@ export async function ensureShadowFor(db, {own, tenant, name}) {
     } else if (isCurrentView(current, tenant, table) === false) {
       await db.execute(replaceViewSql(table, own, tenant));
     }
-  } else if (there.synonyms.has(table) === false) {
-    await db.execute(synonymSql(table, own, tenant));
   }
   return true;
 }
