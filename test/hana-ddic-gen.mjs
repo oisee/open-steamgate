@@ -195,7 +195,7 @@ describe("hana-ddic-gen: DDIC from the dump's DD* tables", () => {
     };
     table("DD02L", [
       {TABNAME: "ZOSD_H5_HEAD", TABCLASS: "TRANSP", CLIDEP: "X", MASTERLANG: "", AS4LOCAL: "A", AS4VERS: "0000", AS4DATE: "20260101", AS4USER: "SAP"},
-      {TABNAME: "ZOSD_H5_STRUCT", TABCLASS: "INTTAB", CLIDEP: "", MASTERLANG: "", AS4LOCAL: "A", AS4VERS: "0000", AS4DATE: "20260101", AS4USER: "SAP"},
+      {TABNAME: "ZOSD_H5_STRUCT", TABCLASS: "INTTAB", CLIDEP: "", MASTERLANG: "D", AS4LOCAL: "A", AS4VERS: "0000", AS4DATE: "20260101", AS4USER: "SAP"},
       // an inactive version of the same table: the live read pins
       // AS4LOCAL 'A' and AS4VERS '0000', so the dump path drops it the same way
       {TABNAME: "ZOSD_H5_HEAD", TABCLASS: "TRANSP", CLIDEP: "X", AS4LOCAL: "I", AS4VERS: "0000"},
@@ -213,8 +213,15 @@ describe("hana-ddic-gen: DDIC from the dump's DD* tables", () => {
       {TABNAME: "ZOSD_H5_STRUCT", POSITION: "2", FIELDNAME: "ZOSD_H5_EXTRA", KEYFLAG: "", ROLLNAME: "", COMPTYPE: "E", DATATYPE: "CHAR", LENG: "5", DECIMALS: "0", INTTYPE: "C", INTLEN: "000010", NOTNULL: "", AS4LOCAL: "I", AS4VERS: "0000"},
     ]);
     table("DD04L", [
-      {ROLLNAME: "ZOSD_H5_DTEL_CHAR", DATATYPE: "CHAR", LENG: "000010", DECIMALS: "000000", OUTPUTLEN: "000030", HEADLEN: "30", SCRLEN1: "10", SCRLEN2: "15", SCRLEN3: "20", DTELMASTER: "E", AS4LOCAL: "A", AS4VERS: "0000"},
-      {ROLLNAME: "ZOSD_H5_DTEL_DOMA", DOMNAME: "ZOSD_H5_DOMA", DATATYPE: "", LENG: "", DECIMALS: "", DTELMASTER: "E", AS4LOCAL: "A", AS4VERS: "0000"},
+      // the real dump's shape (measured 2026-11-12, 8 of 10 rows): a
+      // domain-typed element is REFKIND D with DOMNAME and the domain's own
+      // type copied onto the element row -- the copy must not reach the XML
+      // (CRITIC-926 SHOULD 1)
+      {ROLLNAME: "ZOSD_H5_DTEL_DOMA", DOMNAME: "ZOSD_H5_DOMA", DATATYPE: "CHAR", LENG: "000001", DECIMALS: "000000", OUTPUTLEN: "000001", HEADLEN: "12", SCRLEN1: "10", SCRLEN2: "12", SCRLEN3: "12", DTELMASTER: "E", REFKIND: "D", AS4LOCAL: "A", AS4VERS: "0000"},
+      // the real other 2: REFKIND blank, the element's own DATATYPE
+      {ROLLNAME: "ZOSD_H5_DTEL_CHAR", DATATYPE: "CHAR", LENG: "000010", DECIMALS: "000000", OUTPUTLEN: "000020", HEADLEN: "30", SCRLEN1: "10", SCRLEN2: "15", SCRLEN3: "20", DTELMASTER: "E", REFKIND: "", AS4LOCAL: "A", AS4VERS: "0000"},
+      // like the real string element: zeros the writer must drop
+      {ROLLNAME: "ZOSD_H5_DTEL_STRG", DATATYPE: "STRG", LENG: "000000", DECIMALS: "000000", OUTPUTLEN: "000000", HEADLEN: "11", SCRLEN1: "10", DTELMASTER: "E", REFKIND: "", AS4LOCAL: "A", AS4VERS: "0000"},
       {ROLLNAME: "ZOSD_H5_DTEL_OLD", DATATYPE: "CHAR", LENG: "000001", AS4LOCAL: "I", AS4VERS: "0000"},
     ]);
     table("DD01L", [
@@ -229,6 +236,9 @@ describe("hana-ddic-gen: DDIC from the dump's DD* tables", () => {
     table("DD02T", [
       {TABNAME: "ZOSD_H5_HEAD", DDTEXT: "h5 fixture head (de)", DDLANGUAGE: "D", AS4LOCAL: "A", AS4VERS: "0000"},
       {TABNAME: "ZOSD_H5_HEAD", DDTEXT: "h5 fixture head", DDLANGUAGE: "E", AS4LOCAL: "A", AS4VERS: "0000"},
+      // the struct's text exists only in its master language (CRITIC-926
+      // SHOULD 4: the TABL header's DDLANGUAGE follows it)
+      {TABNAME: "ZOSD_H5_STRUCT", DDTEXT: "h5 fixture struct (de)", DDLANGUAGE: "D", AS4LOCAL: "A", AS4VERS: "0000"},
     ]);
     table("DD04T", [
       {ROLLNAME: "ZOSD_H5_DTEL_CHAR", DDTEXT: "h5 fixture element (de)", DDLANGUAGE: "D", AS4LOCAL: "A", AS4VERS: "0000"},
@@ -250,7 +260,7 @@ describe("hana-ddic-gen: DDIC from the dump's DD* tables", () => {
       expect(await run(["--from-dump", dump, "--out", out])).to.equal(0);
       expect(readdirSync(out).sort()).to.deep.equal([
         "zosd_h5_doma.doma.xml", "zosd_h5_dtel_char.dtel.xml", "zosd_h5_dtel_doma.dtel.xml",
-        "zosd_h5_head.tabl.xml", "zosd_h5_struct.tabl.xml"]);
+        "zosd_h5_dtel_strg.dtel.xml", "zosd_h5_head.tabl.xml", "zosd_h5_struct.tabl.xml"]);
       const head = readFileSync(join(out, "zosd_h5_head.tabl.xml"), "utf8");
       expect(head).to.include(`<TABNAME>ZOSD_H5_HEAD</TABNAME>`);
       expect(head).to.include(`<TABCLASS>TRANSP</TABCLASS>`);
@@ -269,20 +279,39 @@ describe("hana-ddic-gen: DDIC from the dump's DD* tables", () => {
       expect(struct).to.include(`<TABCLASS>INTTAB</TABCLASS>`);
       expect(struct).to.not.include(`<DD09L>`);
       expect(struct).to.not.include(`<CLIDEP>X</CLIDEP>`);
+      // the header's DDLANGUAGE is the master language the text was picked
+      // in, not a hard-coded E (CRITIC-926 SHOULD 4)
+      expect(struct).to.include(`<DDLANGUAGE>D</DDLANGUAGE>`);
+      expect(struct).to.include(`<DDTEXT>h5 fixture struct (de)</DDTEXT>`);
       expect(struct).to.include(`<FIELDNAME>ZOSD_H5_NAME</FIELDNAME>`);
       expect(struct).to.not.include(`ZOSD_H5_EXTRA`);
       const dtel = readFileSync(join(out, "zosd_h5_dtel_char.dtel.xml"), "utf8");
       expect(dtel).to.include(`serializer="LCL_OBJECT_DTEL"`);
       expect(dtel).to.include(`<ROLLNAME>ZOSD_H5_DTEL_CHAR</ROLLNAME>`);
-      expect(dtel).to.include(`<DATATYPE>CHAR</DATATYPE>`);
-      expect(dtel).to.include(`<LENG>000010</LENG>`);
+      // a predefined-typed element: the type block stands after DTELMASTER
+      // (abapGit's DD04V order), DECIMALS 0 dropped (CRITIC-926 SHOULD 1)
+      expect(dtel).to.match(/<DTELMASTER>E<\/DTELMASTER>\s*<DATATYPE>CHAR<\/DATATYPE>\s*<LENG>000010<\/LENG>\s*<OUTPUTLEN>000020<\/OUTPUTLEN>/);
+      expect(dtel).to.not.include(`<DECIMALS>`);
       expect(dtel).to.include(`<DDTEXT>h5 fixture element</DDTEXT>`);
       expect(dtel).to.include(`<SCRTEXT_S>El</SCRTEXT_S>`);
       expect(dtel).to.include(`<DTELMASTER>E</DTELMASTER>`);
       expect(dtel).to.not.include(`h5 fixture element (de)`);
+      // like the real dump's string element: LENG/DECIMALS/OUTPUTLEN all
+      // zero, none of them written
+      const strg = readFileSync(join(out, "zosd_h5_dtel_strg.dtel.xml"), "utf8");
+      expect(strg).to.include(`<DATATYPE>STRG</DATATYPE>`);
+      expect(strg).to.not.include(`<LENG>`);
+      expect(strg).to.not.include(`<DECIMALS>`);
+      expect(strg).to.not.include(`<OUTPUTLEN>`);
+      // a domain-typed element (REFKIND D): DOMNAME right after the
+      // language, none of the copied type tags (CRITIC-926 SHOULD 1)
       const viaDoma = readFileSync(join(out, "zosd_h5_dtel_doma.dtel.xml"), "utf8");
-      expect(viaDoma).to.include(`<DOMNAME>ZOSD_H5_DOMA</DOMNAME>`);
+      expect(viaDoma).to.match(/<DDLANGUAGE>E<\/DDLANGUAGE>\s*<DOMNAME>ZOSD_H5_DOMA<\/DOMNAME>/);
       expect(viaDoma).to.not.include(`<DATATYPE>`);
+      expect(viaDoma).to.not.include(`<LENG>`);
+      expect(viaDoma).to.not.include(`<DECIMALS>`);
+      expect(viaDoma).to.not.include(`<OUTPUTLEN>`);
+      expect(viaDoma).to.include(`<REFKIND>D</REFKIND>`);
       const doma = readFileSync(join(out, "zosd_h5_doma.doma.xml"), "utf8");
       expect(doma).to.include(`serializer="LCL_OBJECT_DOMA"`);
       expect(doma).to.include(`<DOMNAME>ZOSD_H5_DOMA</DOMNAME>`);
@@ -312,7 +341,7 @@ describe("hana-ddic-gen: DDIC from the dump's DD* tables", () => {
     }
     expect(code).to.equal(0);
     const said = lines.join("\n");
-    expect(said).to.match(/2 table\(s\), 2 data element\(s\), 1 domain\(s\)/);
+    expect(said).to.match(/2 table\(s\), 3 data element\(s\), 1 domain\(s\)/);
     expect(said).to.match(/not covered/);
     expect(said).to.match(/SHLP/);
     expect(said).to.match(/MSAG/);
@@ -372,6 +401,28 @@ describe("hana-ddic-gen: DDIC from the dump's DD* tables", () => {
       await refuse(run(["--from-build", "--check"]), /--check/);
       await refuse(run(["--from-dump", dump, "--out", join(dump, "out")]), /tables\/DD02L\.jsonl/);
       await refuse(run(["--from-dump", dump, "--nonsense"]), /unknown option/);
+    } finally {
+      rmSync(dump, {recursive: true, force: true});
+    }
+  });
+
+  // CRITIC-926 SHOULD 3: an APPEND row in the dump's DD02L is not a table
+  // this path writes; the run refuses and names it instead of writing an
+  // INTTAB structure that holds no rows of its own.
+  it("refuses a DD02L TABCLASS the dump path does not write, by name", async () => {
+    const dump = dumpFixture();
+    writeFileSync(join(dump, "tables", "DD02L.jsonl"),
+      readFileSync(join(dump, "tables", "DD02L.jsonl"), "utf8") +
+      JSON.stringify({TABNAME: "ZOSD_H5_APDX", TABCLASS: "APPEND", CLIDEP: "X", MASTERLANG: "", AS4LOCAL: "A", AS4VERS: "0000"}) + "\n");
+    let error;
+    try {
+      await run(["--from-dump", dump, "--out", join(dump, "out")]);
+    } catch (thrown) {
+      error = thrown;
+    }
+    try {
+      expect(error?.message ?? "(no refusal)").to.include("ZOSD_H5_APDX");
+      expect(error?.message ?? "(no refusal)").to.include("APPEND");
     } finally {
       rmSync(dump, {recursive: true, force: true});
     }

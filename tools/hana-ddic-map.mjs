@@ -181,7 +181,11 @@ export function ddicFields(rows, refs = {}) {
   for (const row of [...(rows ?? [])].sort((a, b) => (Number(a.position) || 0) - (Number(b.position) || 0))) {
     const name = String(row.fieldname ?? "").toUpperCase();
     if (name.startsWith(".")) {
-      includes.push(name === ".INCLUDE" ? String(row.precfield ?? "(no name)") : name);
+      // every dot form names its structure in PRECFIELD (.INCLUDE,
+      // .INCLU-<suffix>, .APPEND alike), and the refusal below says which
+      // structure to read -- a blank PRECFIELD falls back to the marker
+      const structure = String(row.precfield ?? "").trim().toUpperCase();
+      includes.push(structure !== "" ? structure : name);
       continue;
     }
     const field = ddicField(row, refs);
@@ -201,14 +205,22 @@ export function mandtFirstKey(fields) {
 }
 
 /** one mapped table as the tree's abapGit TABL XML, through the shared
- *  writer. `table` is {name, text, clidep, fields}, the fields as
- *  ddicFields returned them. */
+ *  writer. `table` is {name, text, clidep, tabclass, fields, language}:
+ *  the fields as ddicFields/ddicFieldsWithIncludes returned them, the
+ *  language the master language the text was picked in. */
 export function tablXml(table) {
   // the TABCLASS the DD02L row carries, through to the writer (H5a): the
   // dump's structures arrive as INTTAB and go out in the include shape --
   // no DD09L, no client, TABCLASS INTTAB. A row without one stays TRANSP,
-  // which is what the live read has always produced.
+  // which is what the live read has always produced. Anything else --
+  // APPEND, VIEW, POOL, CLUSTER -- is refused by name (CRITIC-926
+  // SHOULD 3): TABCLASS reduced to a boolean wrote an APPEND as a
+  // free-standing INTTAB structure and a POOL as a type that holds no
+  // rows, silently.
   const tabclass = String(table.tabclass ?? "TRANSP").toUpperCase();
+  if (tabclass !== "TRANSP" && tabclass !== "INTTAB") {
+    throw new Error(`hana-ddic-map: ${table.name}: TABCLASS ${tabclass} is not written here -- only TRANSP and INTTAB are`);
+  }
   const fields = (table.fields ?? []).map((f) => ({
     // tabl marks a DDIC field so the writer's include shape keeps it: that
     // filter exists for the CDS structure's computed-only fields (H5a), and
@@ -219,7 +231,11 @@ export function tablXml(table) {
       ...(f.key ? {KEYFLAG: "X"} : {}),
       ...(f.rollname !== undefined ? {ROLLNAME: f.rollname, COMPTYPE: f.comptype ?? "E"} : {}),
       ADMINFIELD: "0",
-      INTTYPE: f.inttype,
+      // a structured component (COMPTYPE S) has INTTYPE blank in DD03L and
+      // INTTYPE_OF has no STRU: an empty tag is the drift the module
+      // refuses everywhere else, so the tag only goes out when there is a
+      // letter (CRITIC-926 SHOULD 2)
+      ...(f.inttype ? {INTTYPE: f.inttype} : {}),
       INTLEN: f.intlen,
       ...(f.reftable !== undefined ? {REFTABLE: f.reftable} : {}),
       ...(f.precfield !== undefined ? {PRECFIELD: f.precfield} : {}),
@@ -228,10 +244,17 @@ export function tablXml(table) {
       DATATYPE: f.datatype,
       LENG: f.leng,
       ...(f.decimals !== undefined ? {DECIMALS: f.decimals} : {}),
-      MASK: `  ${f.datatype}`,
+      // MASK the way a system's own export spells it ("      S" on a real
+      // export's .INCLUDE row): a structured component is an S, an ordinary
+      // field is two spaces plus its DATATYPE. Spelled here, not carried:
+      // the dump's MASK column arrives trimmed, its leading spaces gone.
+      MASK: f.comptype === "S" ? "      S" : `  ${f.datatype}`,
     },
   }));
-  return structureXml({name: table.name, label: table.text, clidep: table.clidep !== false, fields}, {transport: tabclass === "TRANSP"});
+  // the header's DDLANGUAGE is the master language the text was picked in,
+  // not a hard-coded E (CRITIC-926 SHOULD 4)
+  return structureXml({name: table.name, label: table.text, clidep: table.clidep !== false, fields},
+    {transport: tabclass === "TRANSP", ddlanguage: table.language});
 }
 
 // ------------------------------------------------------------- the dump ----
@@ -265,39 +288,51 @@ const tagLines = (indent, tags) => tags
   .map(([name, value]) => `${indent}<${name}>${xmlText(String(value).trim())}</${name}>`)
   .join("\n") + "\n";
 
-/** one DD04L row and its DD04T text row as the tree's abapGit *.dtel.xml.
- *  `element` is {name, row, trow, masterLanguage}: the type comes from the
- *  DD04L row (DATATYPE/LENG/DECIMALS of its own, otherwise DOMNAME names the
- *  domain -- the hop ddicField resolves for a table's field), the words from
- *  the DD04T row, which is where the dictionary keeps DDTEXT and the four
- *  labels (DD04L carries only the lengths they are shown in). */
+/** one DD04L row and its DD04T text row as the tree's abapGit *.dtel.xml,
+ *  in the DD04V shape a system's own export writes (CRITIC-926 SHOULD 1).
+ *  `element` is {name, row, trow, masterLanguage}: DOMNAME stands third,
+ *  right after DDLANGUAGE, and a domain-typed element (REFKIND D) goes out
+ *  with none of DATATYPE/LENG/DECIMALS/OUTPUTLEN at all -- the dictionary
+ *  copies the domain's type onto the DD04L row, abapGit clears the copy on
+ *  the way out, and abaplint resolves the type through the domain
+ *  (lookupDomain). A predefined-typed element (REFKIND blank) keeps its own
+ *  type tags, after DTELMASTER, with the initial values dropped: abapGit
+ *  writes no zero LENG/DECIMALS/OUTPUTLEN -- the real dump's one string
+ *  element carries LENG 000000, and its export spells DATATYPE alone. The
+ *  words come from the DD04T row, which is where the dictionary keeps
+ *  DDTEXT and the four labels (DD04L carries only the lengths they are
+ *  shown in, unpadded, as the row says them). */
 export function dtelXml(element) {
   const row = element.row ?? {};
   const trow = element.trow ?? {};
   const v = (tag) => String(row[tag] ?? "");
   const t = (tag) => String(trow[tag] ?? "");
   const lang = (String(element.masterLanguage ?? "").trim() || "E").toUpperCase();
-  const typed = v("datatype").trim() !== "";
+  const refkind = v("refkind").trim().toUpperCase();
+  const domainTyped = refkind === "D";
+  const positive = (tag) => Number(v(tag).trim()) > 0;
   const tags = [
     ["ROLLNAME", String(element.name ?? "").toUpperCase()],
     ["DDLANGUAGE", lang],
-    ["HEADLEN", v("headlen")],
-    ["SCRLEN1", v("scrlen1")],
-    ["SCRLEN2", v("scrlen2")],
-    ["SCRLEN3", v("scrlen3")],
+    ...(v("domname").trim() !== "" ? [["DOMNAME", v("domname").toUpperCase()]] : []),
+    ...(positive("headlen") ? [["HEADLEN", v("headlen")]] : []),
+    ...(positive("scrlen1") ? [["SCRLEN1", v("scrlen1")]] : []),
+    ...(positive("scrlen2") ? [["SCRLEN2", v("scrlen2")]] : []),
+    ...(positive("scrlen3") ? [["SCRLEN3", v("scrlen3")]] : []),
     ["DDTEXT", t("ddtext")],
     ["REPTEXT", t("reptext")],
     ["SCRTEXT_S", t("scrtext_s")],
     ["SCRTEXT_M", t("scrtext_m")],
     ["SCRTEXT_L", t("scrtext_l")],
     ["DTELMASTER", v("dtelmaster").trim() !== "" ? v("dtelmaster") : lang],
-    ...(typed ? [["DATATYPE", v("datatype").toUpperCase()],
-      ["LENG", pad(Number(v("leng").trim()) || 0)],
-      ["DECIMALS", pad(Number(v("decimals").trim()) || 0)]] : []),
-    ["OUTPUTLEN", v("outputlen")],
-    ["DOMNAME", v("domname").toUpperCase()],
-    ["REFKIND", v("refkind").toUpperCase()],
-    ["REFTYPE", v("reftype").toUpperCase()],
+    ...(domainTyped ? [] : [
+      ...(v("datatype").trim() !== "" ? [["DATATYPE", v("datatype").toUpperCase()]] : []),
+      ...(positive("leng") ? [["LENG", pad(Number(v("leng").trim()))]] : []),
+      ...(positive("decimals") ? [["DECIMALS", pad(Number(v("decimals").trim()))]] : []),
+      ...(positive("outputlen") ? [["OUTPUTLEN", v("outputlen")]] : []),
+    ]),
+    ...(refkind !== "" ? [["REFKIND", refkind]] : []),
+    ...(v("reftype").trim() !== "" ? [["REFTYPE", v("reftype").toUpperCase()]] : []),
   ];
   return abapGitEnvelope("DTEL", `   <DD04V>\n${tagLines("    ", tags)}   </DD04V>\n`);
 }
@@ -339,14 +374,19 @@ export function domaXml(domain) {
   return abapGitEnvelope("DOMA", `   <DD01V>\n${tagLines("    ", tags)}   </DD01V>\n${valuesBlock}`);
 }
 
-/** the fields of one DD03L read, with the .INCLUDE rows spliced from the
- *  other reads of the same dump (H5a): the dump carries every DD02L table's
- *  DD03L, so the include's rows arrive in the include's place, in their own
- *  POSITION order. The spliced rows are deliberately NOT re-sorted against
- *  the outer ones -- their positions are their own table's, and sorting
- *  them together would interleave them by number. `includes` carries the
- *  dump's DD03L rows by table name; the live read keeps plain ddicFields,
- *  which refuses an include row it cannot splice. */
+/** the fields of one DD03L read, with the include rows spliced from the
+ *  other reads of the same dump (H5a): the dump carries every DD02L
+ *  table's DD03L, so the include's rows arrive in the include's place, in
+ *  their own POSITION order. Every dot row names its structure in
+ *  PRECFIELD -- .INCLUDE, .INCLU-<suffix> and .APPEND alike -- and a
+ *  suffixed include keeps the suffix (CRITIC-926 SHOULD 5): its fields go
+ *  out with the suffix appended to each name, the rename abaplint applies
+ *  reading the same DD03P; .INCLU--AP, the dictionary's append spelling,
+ *  renames nothing. The spliced rows are deliberately NOT re-sorted
+ *  against the outer ones -- their positions are their own table's, and
+ *  sorting them together would interleave them by number. `includes`
+ *  carries the dump's DD03L rows by table name; the live read keeps plain
+ *  ddicFields, which refuses an include row it cannot splice. */
 export function ddicFieldsWithIncludes(rows, refs = {}, includes = new Map(), seen = new Set()) {
   const sorted = [...(rows ?? [])].sort((a, b) => (Number(a.position) || 0) - (Number(b.position) || 0));
   const out = [];
@@ -357,15 +397,21 @@ export function ddicFieldsWithIncludes(rows, refs = {}, includes = new Map(), se
       if (field !== undefined) out.push(field);
       continue;
     }
-    const include = (name === ".INCLUDE" ? String(row.precfield ?? "") : name).toUpperCase();
+    const include = String(row.precfield ?? "").trim().toUpperCase();
+    if (include === "") {
+      throw new Error(`hana-ddic-map: the table carries an include row (${name}) with no PRECFIELD naming its structure`);
+    }
+    const suffix = /^\.INCLU-(.+)$/.exec(name)?.[1];
+    const rename = suffix !== undefined && suffix !== "-AP";
     if (seen.has(include)) {
       throw new Error(`hana-ddic-map: the include chain closes a cycle at ${include}`);
     }
     const inner = includes.get(include);
     if (inner === undefined) {
-      throw new Error(`hana-ddic-map: the table carries an include row (${include}) whose DD03L is not in the dump`);
+      throw new Error(`hana-ddic-map: the table carries an include row (${name}) whose DD03L (${include}) is not in the dump`);
     }
-    out.push(...ddicFieldsWithIncludes(inner, refs, includes, new Set([...seen, include])));
+    const spliced = ddicFieldsWithIncludes(inner, refs, includes, new Set([...seen, include]));
+    out.push(...(rename ? spliced.map((f) => ({...f, fieldname: `${f.fieldname}${suffix}`})) : spliced));
   }
   return out;
 }

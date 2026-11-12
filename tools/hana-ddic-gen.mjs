@@ -153,10 +153,13 @@ export function readDumpDdic(dir) {
 
 /** what --from-dump writes, as abapGit file name -> XML. The rows go through
  *  the live read's mapper: ddicFieldsWithIncludes for the tables (the dump
- *  carries every DD02L table's DD03L, so an .INCLUDE row splices), then
- *  tablXml / dtelXml / domaXml. An object's text is its T table's row in
- *  the L row's master language, E when none is named -- the live read's
- *  DDLANGUAGE 'E', said per object instead of per query. */
+ *  carries every DD02L table's DD03L, so an include row splices, a
+ *  .INCLU-<suffix> with its suffix kept on the names), then tablXml /
+ *  dtelXml / domaXml. An object's text is its T table's row in the L row's
+ *  master language, E when none is named -- the live read's DDLANGUAGE 'E',
+ *  said per object instead of per query; the TABL header's DDLANGUAGE
+ *  carries that language too, and a TABCLASS outside TRANSP and INTTAB
+ *  refuses the run. */
 export function dumpGeneration(dd) {
   const elements = new Map(dd.dd04l.map((row) => [String(row.rollname ?? "").toUpperCase(), row]));
   const domains = new Map(dd.dd01l.map((row) => [String(row.domname ?? "").toUpperCase(), row]));
@@ -184,6 +187,7 @@ export function dumpGeneration(dd) {
       text: textOf(dd.dd02t, "tabname", name, head.masterlang),
       clidep: String(head.clidep ?? "").toUpperCase() === "X",
       tabclass: String(head.tabclass ?? "").trim() || "TRANSP",
+      language: head.masterlang,
       fields: ddicFieldsWithIncludes(includes.get(name) ?? [], {elements, domains}, includes),
     }));
     counts.tabl++;

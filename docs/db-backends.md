@@ -642,22 +642,34 @@ an error.
 
 The live read never needed the kinds the dump carries beyond tables, so
 this path writes what H3's could not: `*.tabl.xml` for every active DD02L
-row — TABCLASS through to the writer, a TRANSP in the transport shape,
-anything else (a structure) as an include, no DD09L, no client — and
-`*.dtel.xml` and `*.doma.xml` for the DD04L and DD01L rows. The writers are
-the tree's first DD04V/DD01V writers (until now those files existed only
-hand-written), beside `tablXml` in `tools/hana-ddic-map.mjs`, in the
-envelope the tree's own files carry. The texts are the T table's row in the
-L row's master language (`MASTERLANG`/`DTELMASTER`/`DOMMASTER`, E when none
-is named — the live read's `DDLANGUAGE 'E'`, said per object instead of per
-query); the labels come from DD04T, which is where the dictionary keeps
+row — TABCLASS INTTAB as an include structure (no DD09L, no client),
+TABCLASS TRANSP in the transport shape with its DD09L, and any other
+TABCLASS (an APPEND, a VIEW, a POOL or CLUSTER) refused by name rather
+than written as a structure it is not (2026-11-12, fix round 1) — and
+`*.dtel.xml` and `*.doma.xml` for the DD04L and DD01L rows, in the DD04V
+shape a system's own export writes: a domain-typed element (REFKIND D)
+goes out with DOMNAME and none of the type tags the DD04L row carries as
+the domain's copy, a predefined-typed one with its type after DTELMASTER
+and the initial values dropped. The writers are the tree's first
+DD04V/DD01V writers (until now those files existed only hand-written),
+beside `tablXml` in `tools/hana-ddic-map.mjs`, in the envelope the tree's
+own files carry. The texts are the T table's row in the L row's master
+language (`MASTERLANG`/`DTELMASTER`/`DOMMASTER`, E when none is named —
+the live read's `DDLANGUAGE 'E'`, said per object instead of per query);
+the TABL header's `DDLANGUAGE` is that language too, and a table with no
+text in it goes out without the `DDTEXT`, not with an empty tag. The
+labels come from DD04T, which is where the dictionary keeps
 DDTEXT and REPTEXT and the three SCRTEXTs (DD04L carries only the lengths
 they are shown in). A domain's fixed values come from DD07L, whose rows
 carry no words (DD07T is not in --ddic), so a domain with values goes out
 without them. An `.INCLUDE` row is not a refusal here: the dump carries
 every DD02L table's DD03L, so the include's fields splice in from it, in
-the include's place, in their own POSITION order (`ddicFieldsWithIncludes`
-beside `ddicFields`, which the live read keeps). A structured component
+the include's place, in their own POSITION order — and neither is any
+other dot row: every `.INCLU-<suffix>` and `.APPEND` names its structure
+in PRECFIELD and splices the same way, a suffixed include with the suffix
+appended to each name it brings in, the rename abaplint reads out of the
+same DD03P (`ddicFieldsWithIncludes` beside `ddicFields`, which the live
+read keeps). A structured component
 (DD03L COMPTYPE S, DATATYPE STRU) carries its own COMPTYPE and resolves
 through the structure's own tabl.xml, which the same run writes. File names
 are the abapGit ones (lower case, a /namespace/ spelled #namespace#), the
