@@ -11,6 +11,7 @@ import cp from "node:child_process";
 import {randomUUID} from "node:crypto";
 import {basename, resolve} from "node:path";
 import wt from "node:worker_threads";
+import {GIT_SAFE, isolatedGit} from "./osd-env.mjs";
 
 const CARRIED = ["OSD_GENERATOR_READS", "OSD_READ_ROOT", "OSD_READ_EXTERNAL", "OSD_READ_EXCLUDE_PREFIXES", "OSD_BUILD_VERIFIED"];
 // metadata of .git, never file content: the argv after any `-C <dir>`
@@ -59,7 +60,7 @@ export function installChildHooks({write, recorder, meta, listed}) {
       meta(repository, command);
       // ls-files names what is under its paths
       for (const path of paths) listed(resolve(repository, path), command);
-      return options;
+      return {...options, env: isolatedGit(options?.env ?? process.env), git: true};
     }
     if (kind === "other") return void incomplete(command) ?? options;
     if (options?.detached) incomplete(`${command} (detached)`);
@@ -70,7 +71,10 @@ export function installChildHooks({write, recorder, meta, listed}) {
   const normal = (name, forked = false) => (file, ...rest) => {
     const args = Array.isArray(rest[0]) ? rest.shift() : [];
     const options = rest[0] !== null && typeof rest[0] === "object" ? rest.shift() : undefined;
-    return o[name](file, args, plan(file, args, options, forked), ...rest);
+    const planned = plan(file, args, options, forked);
+    if (planned?.git !== true) return o[name](file, args, planned, ...rest);
+    const {git, ...safe} = planned;
+    return o[name](file, [...GIT_SAFE, ...args], safe, ...rest);
   };
   for (const name of ["spawn", "spawnSync", "execFile", "execFileSync"]) cp[name] = normal(name);
   cp.fork = normal("fork", true);

@@ -1,7 +1,7 @@
 import {expect} from "chai";
 import {execFileSync, spawnSync} from "node:child_process";
 import {createHash} from "node:crypto";
-import {closeSync, mkdirSync, mkdtempSync, openSync, realpathSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
+import {closeSync, existsSync, mkdirSync, mkdtempSync, openSync, realpathSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join, resolve} from "node:path";
 import {runGeneratorsOf} from "../tools/osd-build-generators.mjs";
@@ -221,6 +221,15 @@ describe("tools/osd-generator-reads: a generator's reads decide the generation's
     expect(log.incomplete).to.deep.equal([]);
     expect(log.entries.some(entry => entry.kind === "meta" && entry.path === "vault/*" && entry.privacy === true)).to.equal(true);
     expect(publish(log)).to.throw().with.property("code", "PRIVATE_LAYER");
+  });
+
+  it("S2: an allow-listed git runs with the repository's fsmonitor off", () => {
+    const ran = join(base, "zfsmonitor-ran");
+    writeFileSync(join(base, "zfsmonitor.sh"), `#!/bin/sh\ntouch '${ran}'\nexit 1\n`, {mode: 0o755});
+    execFileSync("git", ["-C", root, "config", "core.fsmonitor", join(base, "zfsmonitor.sh")]);
+    const log = generate("gitListPrivate");
+    expect(log.incomplete).to.deep.equal([]);
+    expect(existsSync(ran), "the repository's fsmonitor program ran").to.equal(false);
   });
 
   it("a file the generator wrote and reads back is derived, not a source", () => {

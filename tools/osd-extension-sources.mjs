@@ -1,9 +1,15 @@
 import {execFileSync} from "node:child_process";
+import {createHash} from "node:crypto";
 import {existsSync, lstatSync, readdirSync, readFileSync} from "node:fs";
 import {join, relative, resolve, sep} from "node:path";
 import {verifyPublicArtefact} from "./osd-provenance.mjs";
 import {readEntry} from "./osd-read-record.mjs";
+import {GIT_SAFE, isolatedGit} from "./osd-env.mjs";
 
+const git = (args, options = {}) => execFileSync("git", [...GIT_SAFE, ...args], {env: isolatedGit(), stdio: ["ignore", "pipe", "pipe"], ...options});
+// the bytes on disk as a Git blob id: skip-worktree and assume-unchanged
+// hide a change from git's own diff, never from the bytes
+const blobOf = (bytes, length) => createHash(length === 64 ? "sha256" : "sha1").update(`blob ${bytes.length}\0`).update(bytes).digest("hex");
 const fail = message => { const error = new Error(message); error.code = "BAD_PROVENANCE"; throw error; };
 
 export function assertPublicExtensionIdentity(extension, part) {
@@ -29,15 +35,16 @@ export function assertExtensionSources(extension, parts) {
   }
   let top, tracked;
   try {
-    top = execFileSync("git", ["-C", extension, "rev-parse", "--show-toplevel"], {encoding: "utf8"}).trim();
+    top = git(["-C", extension, "rev-parse", "--show-toplevel"], {encoding: "utf8"}).trim();
     const prefix = relative(top, extension) || ".";
     if (prefix === ".." || prefix.startsWith(`..${sep}`)) fail("extension leaves Git checkout");
-    tracked = new Set(execFileSync("git", ["-C", top, "ls-tree", "-r", "--name-only", "-z", "HEAD", "--", prefix])
-      .toString().split("\0").filter(Boolean));
+    tracked = new Map(git(["-C", top, "ls-tree", "-r", "-z", "HEAD", "--", prefix]).toString().split("\0").filter(Boolean)
+      .map(line => { const tab = line.indexOf("\t"); return [line.slice(tab + 1), line.slice(0, tab).split(" ")]; })
+      .filter(([, [, type]]) => type === "blob").map(([path, [mode, , id]]) => [path, {mode, id}]));
     const paths = parts.map(part => relative(top, resolve(extension, part)).split(sep).join("/"));
-    execFileSync("git", ["-C", top, "diff", "--quiet", "HEAD", "--", ...paths]);
+    git(["-C", top, "diff", "--quiet", "HEAD", "--", ...paths]);
     for (const flags of [["--others", "--exclude-standard"], ["--others", "--ignored", "--exclude-standard"]]) {
-      const extra = execFileSync("git", ["-C", top, "ls-files", ...flags, "-z", "--", ...paths]);
+      const extra = git(["-C", top, "ls-files", ...flags, "-z", "--", ...paths]);
       if (extra.length) fail("extension contains untracked or ignored files");
     }
   } catch { fail("extension static files need a verified directory or Git tracked closure"); }
@@ -47,8 +54,9 @@ export function assertExtensionSources(extension, parts) {
     if (entry.isDirectory()) {
       for (const name of readdirSync(path)) visit(join(path, name));
     } else {
-      if (!entry.isFile() || !tracked.has(relative(top, path).split(sep).join("/")))
-        fail(`extension source is untracked: ${path}`);
+      const blob = tracked.get(relative(top, path).split(sep).join("/"));
+      if (!entry.isFile() || blob === undefined || blob.mode === "120000") fail(`extension source is untracked: ${path}`);
+      if (blobOf(readFileSync(path), blob.id.length) !== blob.id) fail(`extension source differs from HEAD: ${path}`);
       if (readEntry(extension, path, readFileSync(path)).privacy !== false)
         fail(`extension source identity is private or unknown: ${path}`);
     }

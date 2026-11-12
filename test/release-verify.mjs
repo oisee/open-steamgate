@@ -204,6 +204,32 @@ describe("scripts/release-verify: an artefact by its content", () => {
     expect(() => assertExtensionSources(extension, ["package.json"])).to.throw().with.property("code", "BAD_PROVENANCE");
   });
 
+  // FIX8 S1/S2: index flags hide a worktree change from git's diff, never
+  // from the bytes; a repository's fsmonitor program never runs
+  it("refuses a change behind skip-worktree or assume-unchanged and never runs an fsmonitor", () => {
+    const extension = join(dir, "flagged-extension");
+    mkdirSync(extension);
+    writeFileSync(join(extension, "package.json"), "{}");
+    writeFileSync(join(extension, "zmedia.txt"), "synthetic public");
+    const git = (...args) => execFileSync("git", ["-C", extension, ...args], {stdio: "pipe"});
+    execFileSync("git", ["init", "-q", extension]);
+    git("add", ".");
+    git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "fixture");
+    expect(() => assertExtensionSources(extension, ["package.json", "zmedia.txt"])).not.to.throw();
+    for (const flag of ["skip-worktree", "assume-unchanged"]) {
+      git("update-index", `--${flag}`, "zmedia.txt");
+      writeFileSync(join(extension, "zmedia.txt"), "synthetic change behind the flag");
+      expect(() => assertExtensionSources(extension, ["zmedia.txt"])).to.throw(/differs from HEAD/).with.property("code", "BAD_PROVENANCE");
+      git("update-index", `--no-${flag}`, "zmedia.txt");
+      git("checkout", "--", "zmedia.txt");
+    }
+    const ran = join(dir, "zfsmonitor-ran");
+    writeFileSync(join(dir, "zfsmonitor.sh"), `#!/bin/sh\ntouch '${ran}'\nexit 1\n`, {mode: 0o755});
+    git("config", "core.fsmonitor", join(dir, "zfsmonitor.sh"));
+    expect(() => assertExtensionSources(extension, ["package.json", "zmedia.txt"])).not.to.throw();
+    expect(existsSync(ran), "the repository's fsmonitor program ran").to.equal(false);
+  });
+
   it("checks every byte of an extension with a root provenance sidecar", () => {
     const extension = join(dir, "stamped-extension");
     mkdirSync(extension);
