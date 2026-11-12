@@ -116,6 +116,11 @@ function copyTree(from, to, source) {
 
 /** The staged folder carries its identity; its rename commits the install. */
 async function publish(pack, source, stage, entry, log) {
+  // A forced fetch of the same identity keeps its bytes (the time it was
+  // first fetched): the identity is a build read, and new bytes would leave
+  // the generation's read record behind with no rebuild to renew it.
+  const previous = sourceOf(source.dir);
+  if (typeof previous?.at === "string" && JSON.stringify({...previous, at: entry.at}) === JSON.stringify(entry)) entry.at = previous.at;
   writeFileSync(join(stage, SOURCE), JSON.stringify(entry, null, 2) + "\n", {flag: "wx"});
   const old = stage.replace(".osd-fetch-stage-", ".osd-fetch-old-");
   let movedOld = false;
