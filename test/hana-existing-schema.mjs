@@ -37,7 +37,7 @@ describe("HANA_EXISTING_SCHEMA mode", () => {
 
   it("refuses STG_DB_FRESH=1, naming both flags, before anything is sent", async () => {
     const sent = fakeHdb();
-    const db = new HanaDatabaseClient({existingSchema: true, schema: "ZOSD_H1_FRESH"});
+    const db = new HanaDatabaseClient({existingSchema: true, schema: "ZOSD_H1_FRESH", client: "001"});
     process.env.STG_DB_FRESH = "1";
     let error;
     try {
@@ -53,7 +53,7 @@ describe("HANA_EXISTING_SCHEMA mode", () => {
 
   it("sends no DDL: connect() issues only SET SCHEMA", async () => {
     const sent = fakeHdb();
-    const db = new HanaDatabaseClient({existingSchema: true, schema: "ZOSD_H1_EXISTING"});
+    const db = new HanaDatabaseClient({existingSchema: true, schema: "ZOSD_H1_EXISTING", client: "001"});
     await db.connect();
     expect(sent).to.deep.equal([`SET SCHEMA "ZOSD_H1_EXISTING"`]);
     await db.disconnect();
@@ -65,7 +65,7 @@ describe("HANA_EXISTING_SCHEMA mode", () => {
     // This holds the client to its half: after a connect in the mode, the
     // session carries no schema of ours and nothing is prepared for seeding.
     const sent = fakeHdb();
-    const db = new HanaDatabaseClient({existingSchema: true, schema: "ZOSD_H1_NOSEED"});
+    const db = new HanaDatabaseClient({existingSchema: true, schema: "ZOSD_H1_NOSEED", client: "001"});
     await db.connect();
     const ddl = sent.filter((s) => !s.startsWith("SET SCHEMA"));
     expect(ddl, "no DROP, no CREATE, no INSERT").to.deep.equal([]);

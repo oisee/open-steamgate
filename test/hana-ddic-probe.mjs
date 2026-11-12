@@ -175,9 +175,11 @@ describe("the DDIC probe's reads name only measured columns", () => {
     const say = console.log;
     console.log = (line) => lines.push(String(line));
     let code;
+    process.env.OSD_CLIENT = "001"; // the mode refuses to start without a logon client (H3)
     try {
       code = await run(["--tables", "ZOSD_H1_PROBE", "--out", out, "--mandt"]);
     } finally {
+      delete process.env.OSD_CLIENT;
       console.log = say;
     }
     try {
