@@ -12,7 +12,7 @@
     "app/booking/annotations/annotations.xml": "2f5240cd9c5b33aa362e9d973640fd2c79ea0192676ca4f792cd6bccf51b4c12",
     "app/booking/i18n/i18n.properties": "6cfd486313666a3486390d776a7ff6d93d36b7f716c54dd13ddfbb662fd461da",
     "app/booking/manifest.json": "35f23537835688c66d71c8cf7289aaef624e7efa7fb78abeb7f0d7e0ff5493fb",
-    "app/flp.html": "f7e68459784b79fa164842abf714e199b16e49e2dcac4c73807a59ff0de247d4",
+    "app/flp.html": "94266f713b0285c3f624492eca00b366f49d1cc2f446f45cf7c8f7643678dc47",
     "app/i18n/i18n.properties": "effd74581383c77194781466b6dbfc75c7bc1d5f90957aad1afcf96440acf8f5",
     "app/icf/Component.js": "e74bdcf431f211c35203c4b80d2c8f9995a9211c508a04789a1ae10ff8d58ade",
     "app/icf/i18n/i18n.properties": "706ce2b22c8f2e374882ef5543a8169f1ef426c52b4f9769d942a60529c23f2a",
@@ -52,6 +52,12 @@
     "app/travels-a4h/index.html": "67a301ff12499100e4cc54961ec3d09a59e7efa570f1c9975e8b2b3445c13890",
     "app/travels-a4h/manifest.json": "3d06c2863c121ed61649078e21a9c29c704d59cf0bb687da5f7cc327551937a2",
     "app/travels-a4h/osg.svg": "8c050bda95516e3b2945369a45b58f724fcf33bbdae2327c0736f92aa1d56512",
+    "app/trip4/Component.js": "f3842d8a12857e909b19deeac26de60c40bedd1044c61025e073593ceb80fdc3",
+    "app/trip4/README.md": "ee16e746813a62f78ddc60dd67fd9e75f96225921cec1bc1d57bda5a1c380f6a",
+    "app/trip4/annotations/annotations.xml": "3b5757c036b1197584b559e4fe47c309d4f7e3d628f702d1228a3f97cfec8995",
+    "app/trip4/i18n/i18n.properties": "a72a8051f562d8e63ded06f3b897b1e416c1c82ecaa8f59ba823eb18b6155003",
+    "app/trip4/index.html": "226cbf3f8ea6694d9f21a502a17ed9e88f89d4cbf88345f66d74b5faefe1a999",
+    "app/trip4/manifest.json": "7b6e46235b1b9b1f95930d071fcd3ada597462fbc0efbc94574cb6388f274bef",
     "app/workbench/Component.js": "5e6b5e0ec782b232a7bb47866190c7df22dfb5691a57bbf9a643c22576b3a70f",
     "app/workbench/control/AbapEditor.js": "f6c18f91f36889a6d5c5ade649c647179b5d5c2558848474baab3cabe262fe89",
     "app/workbench/controller/App.controller.js": "08e6886df58c09b54090e5252cbf8d6ba569b9e42d67cd3c52e2f52de889d3cf",
@@ -130,7 +136,7 @@
     "app/zvdb/quality/manifest.json": "5b7b8d7358558eaa93f888c452173d6a8aa020fdc8e3de80e23be66d93b85331",
     "app/zvdb/quality.json": "5800f8027da653eed074e92b5e557a58aac46ec4b26e5bb8bc5dd6bc10a0167d",
     "appconfig/fioriSandboxConfig.json": "ca3d163bab055381827226140568f3bef7eaac187cebd76878e0b63e9e442356",
-    "build.json": "2e54002678b47fd27bd9e798c8bc98497d4bb72e57e3988e4a7fdd1577b71078",
+    "build.json": "aed1c1bb60c50bf81452644bb78e41bd48b26207a974756d7663b40597164020",
     "index.html": "1786fe1487f872abc26f912fceff6828de857de86e9d267b060e0c8b44009936",
     "media/zlsd-music.w3mi.data.m4a": "746357151e1329b4592c687887df8afa0506eddaeb13dc6019baea375c27632a",
     "media/zlsd-show.w3mi.data.gz": "15fc7d7481e35aa4d42adcd30a05771aaa291e0b0312ddcea65c1f1a457629b7",
@@ -248,6 +254,12 @@
     "media/zosd_travel_app_-i18n_-i18n_properties.w3mi.data.properties": "effd74581383c77194781466b6dbfc75c7bc1d5f90957aad1afcf96440acf8f5",
     "media/zosd_travel_app_-index_html.w3mi.data.html": "c0477b1c9463357e13c967ea706acb441fe6684144190f13cb26e4491ed0a33b",
     "media/zosd_travel_app_-manifest_json.w3mi.data.json": "3e409860b714ad013dda2cc3dd050739427a6473b29084f470696953b475616c",
+    "media/zosd_trip4_-annotations_-annotations_xml.w3mi.data.xml": "3b5757c036b1197584b559e4fe47c309d4f7e3d628f702d1228a3f97cfec8995",
+    "media/zosd_trip4_-component_js.w3mi.data.js": "f3842d8a12857e909b19deeac26de60c40bedd1044c61025e073593ceb80fdc3",
+    "media/zosd_trip4_-i18n_-i18n_properties.w3mi.data.properties": "a72a8051f562d8e63ded06f3b897b1e416c1c82ecaa8f59ba823eb18b6155003",
+    "media/zosd_trip4_-index_html.w3mi.data.html": "226cbf3f8ea6694d9f21a502a17ed9e88f89d4cbf88345f66d74b5faefe1a999",
+    "media/zosd_trip4_-manifest_json.w3mi.data.json": "e064c41e6c4bcddc279310b81f8dbdedcc45cc80b1c826e1fdc8553cc3e177c8",
+    "media/zosd_trip4_-readme_md.w3mi.data.md": "ee16e746813a62f78ddc60dd67fd9e75f96225921cec1bc1d57bda5a1c380f6a",
     "media/zosg_workbench_-component_js.w3mi.data.js": "5e6b5e0ec782b232a7bb47866190c7df22dfb5691a57bbf9a643c22576b3a70f",
     "media/zosg_workbench_-control_-abapeditor_js.w3mi.data.js": "f6c18f91f36889a6d5c5ade649c647179b5d5c2558848474baab3cabe262fe89",
     "media/zosg_workbench_-controller_-app_controller_js.w3mi.data.js": "08e6886df58c09b54090e5252cbf8d6ba569b9e42d67cd3c52e2f52de889d3cf",
@@ -271,11 +283,11 @@
     "screenshots/list-report.png": "78582ec7d38bcb1af8a52f783c404bc18da805750882fab1a809932aa43c9676",
     "screenshots/metadata.png": "7e5b6bd6451b7a16a440923a6f0425af8c537e20dba74bd9505017bb75a1717b",
     "screenshots/sadl-aggregate.png": "82bcba42243a48cda00134308ce8d3e4daca380e73075e348b54d6ad3ea56eb9",
-    "sw.js": "53fd9155e8705ea627cb5c7b7bbe2998b040daf8ec0f21e96a65bd333ee0782e",
-    "vscode-web/.osd-provenance.json": "57856114693d1a2069fd401cd5cbf815dfb0b33ce0dfffea31ee51e897569b6f",
+    "sw.js": "26ec9a3d0442073e354e1d50b05133b163611b8294080e1b7faf2ade7e911dd3",
+    "vscode-web/.osd-provenance.json": "b41ce033dc1ebc378822458abaf9453a42532cbf00e30431d9db16ba223cf650",
     "vscode-web/CHANGELOG.md": "0b36c58edf08209fad35690844547a3b04403922fdac2be26ac859029398874a",
     "vscode-web/README.md": "ea322a5a48f4328242e47b8a5f24f8d22eea246773c9a678f5f58f3d47fbe5ac",
-    "vscode-web/dist/web/.osd-provenance.json": "87cfa755b747c3755e7f3efa9057c144c4a630687eb1303429c357db89f649ea",
+    "vscode-web/dist/web/.osd-provenance.json": "b53801d11838a0e49cf4bcffaa336fd657eace05e87e113dbf3a6d276cb4447e",
     "vscode-web/dist/web/app/Component.js": "20be20c142b6e50933603329fcf880590b8461bc9941512090d443a6dc5ae488",
     "vscode-web/dist/web/app/analytics/Component.js": "b83568419df2310442baca5ff3340d252630cbcaa21844c1830e4013b2ea3522",
     "vscode-web/dist/web/app/analytics/annotations/annotations.xml": "503ab445c00a46828d59388a86f6ab4b39dd10a9b6837b01ba924a7529e70428",
@@ -286,7 +298,7 @@
     "vscode-web/dist/web/app/booking/annotations/annotations.xml": "2f5240cd9c5b33aa362e9d973640fd2c79ea0192676ca4f792cd6bccf51b4c12",
     "vscode-web/dist/web/app/booking/i18n/i18n.properties": "6cfd486313666a3486390d776a7ff6d93d36b7f716c54dd13ddfbb662fd461da",
     "vscode-web/dist/web/app/booking/manifest.json": "35f23537835688c66d71c8cf7289aaef624e7efa7fb78abeb7f0d7e0ff5493fb",
-    "vscode-web/dist/web/app/flp.html": "410cde0b26ab646180dd2bbe13b316052b6e7a9f34c852fac269d3b2cc20a6ec",
+    "vscode-web/dist/web/app/flp.html": "c394beadbf308a29ce93d97f678ec1b9480cca19dd2a8f77b5ec6f998c376045",
     "vscode-web/dist/web/app/i18n/i18n.properties": "effd74581383c77194781466b6dbfc75c7bc1d5f90957aad1afcf96440acf8f5",
     "vscode-web/dist/web/app/icf/Component.js": "e74bdcf431f211c35203c4b80d2c8f9995a9211c508a04789a1ae10ff8d58ade",
     "vscode-web/dist/web/app/icf/i18n/i18n.properties": "706ce2b22c8f2e374882ef5543a8169f1ef426c52b4f9769d942a60529c23f2a",
@@ -297,7 +309,7 @@
     "vscode-web/dist/web/app/manifest.json": "d0d7ca8771e9cd7320e1bce53717262f1c8710c62a21134b23563cc1d4469351",
     "vscode-web/dist/web/app/osd-airship.svg": "6231a7db003eb7f86e943ef1b1a8bafe0ae4b4b645c8d4ec056ba10f9ab7f6be",
     "vscode-web/dist/web/app/osd-logo.svg": "1e00108814f4c4d5afde7f9869beb5285161ac16ce1035b9d545f4af7e123877",
-    "vscode-web/dist/web/app/osd-web-apps.json": "c8fd28202635e3944f35c23b6b7e6f8aa547d5e06ab67b6760b815ea0294adb1",
+    "vscode-web/dist/web/app/osd-web-apps.json": "06c0918aa5040dd39d6a3763e1773e3e9ac8ca5e04720f3c4da88b33db4b527a",
     "vscode-web/dist/web/app/osg.svg": "8c050bda95516e3b2945369a45b58f724fcf33bbdae2327c0736f92aa1d56512",
     "vscode-web/dist/web/app/packs.json": "359b0d6a0d10b10461d750d4ca8f094b604aa12a395455f7107070d889618d2e",
     "vscode-web/dist/web/app/qr-github.png": "35e5e1e68c1cd5b672809d8d488d4b99cdbed2a2fb5cf6b0949fc89f74b56faa",
@@ -327,6 +339,12 @@
     "vscode-web/dist/web/app/travels-a4h/index.html": "c0477b1c9463357e13c967ea706acb441fe6684144190f13cb26e4491ed0a33b",
     "vscode-web/dist/web/app/travels-a4h/manifest.json": "3d06c2863c121ed61649078e21a9c29c704d59cf0bb687da5f7cc327551937a2",
     "vscode-web/dist/web/app/travels-a4h/osg.svg": "8c050bda95516e3b2945369a45b58f724fcf33bbdae2327c0736f92aa1d56512",
+    "vscode-web/dist/web/app/trip4/Component.js": "f3842d8a12857e909b19deeac26de60c40bedd1044c61025e073593ceb80fdc3",
+    "vscode-web/dist/web/app/trip4/README.md": "ee16e746813a62f78ddc60dd67fd9e75f96225921cec1bc1d57bda5a1c380f6a",
+    "vscode-web/dist/web/app/trip4/annotations/annotations.xml": "3b5757c036b1197584b559e4fe47c309d4f7e3d628f702d1228a3f97cfec8995",
+    "vscode-web/dist/web/app/trip4/i18n/i18n.properties": "a72a8051f562d8e63ded06f3b897b1e416c1c82ecaa8f59ba823eb18b6155003",
+    "vscode-web/dist/web/app/trip4/index.html": "226cbf3f8ea6694d9f21a502a17ed9e88f89d4cbf88345f66d74b5faefe1a999",
+    "vscode-web/dist/web/app/trip4/manifest.json": "7b6e46235b1b9b1f95930d071fcd3ada597462fbc0efbc94574cb6388f274bef",
     "vscode-web/dist/web/app/workbench/Component.js": "5e6b5e0ec782b232a7bb47866190c7df22dfb5691a57bbf9a643c22576b3a70f",
     "vscode-web/dist/web/app/workbench/control/AbapEditor.js": "f6c18f91f36889a6d5c5ade649c647179b5d5c2558848474baab3cabe262fe89",
     "vscode-web/dist/web/app/workbench/controller/App.controller.js": "08e6886df58c09b54090e5252cbf8d6ba569b9e42d67cd3c52e2f52de889d3cf",
@@ -405,7 +423,7 @@
     "vscode-web/dist/web/app/zvdb/quality/manifest.json": "5b7b8d7358558eaa93f888c452173d6a8aa020fdc8e3de80e23be66d93b85331",
     "vscode-web/dist/web/app/zvdb/quality.json": "5800f8027da653eed074e92b5e557a58aac46ec4b26e5bb8bc5dd6bc10a0167d",
     "vscode-web/dist/web/duckdb-mvp.wasm": "45d72a81fba8e57693d890da837c7041310e385e75619a8559839b15388dfe97",
-    "vscode-web/dist/web/extension.js": "902e1fed8716e73095765dc4ce06f3c1eaea33ef7172c1633c8f0563bb790f72",
+    "vscode-web/dist/web/extension.js": "50d624b9ced51b6549e3a7f014629e47b4e53e3c95b187cdf7c9bdff7ad9826c",
     "vscode-web/dist/web/media/zlsd-music.w3mi.data.m4a": "746357151e1329b4592c687887df8afa0506eddaeb13dc6019baea375c27632a",
     "vscode-web/dist/web/media/zlsd-show.w3mi.data.gz": "15fc7d7481e35aa4d42adcd30a05771aaa291e0b0312ddcea65c1f1a457629b7",
     "vscode-web/dist/web/media/zo4d_00_sales@252epng.w3mi.data.png": "afbe0fcc94b2eaf9bf3c13b35834c13cd001848ebc37de45aa156919fbf44925",
@@ -522,6 +540,12 @@
     "vscode-web/dist/web/media/zosd_travel_app_-i18n_-i18n_properties.w3mi.data.properties": "effd74581383c77194781466b6dbfc75c7bc1d5f90957aad1afcf96440acf8f5",
     "vscode-web/dist/web/media/zosd_travel_app_-index_html.w3mi.data.html": "c0477b1c9463357e13c967ea706acb441fe6684144190f13cb26e4491ed0a33b",
     "vscode-web/dist/web/media/zosd_travel_app_-manifest_json.w3mi.data.json": "3e409860b714ad013dda2cc3dd050739427a6473b29084f470696953b475616c",
+    "vscode-web/dist/web/media/zosd_trip4_-annotations_-annotations_xml.w3mi.data.xml": "3b5757c036b1197584b559e4fe47c309d4f7e3d628f702d1228a3f97cfec8995",
+    "vscode-web/dist/web/media/zosd_trip4_-component_js.w3mi.data.js": "f3842d8a12857e909b19deeac26de60c40bedd1044c61025e073593ceb80fdc3",
+    "vscode-web/dist/web/media/zosd_trip4_-i18n_-i18n_properties.w3mi.data.properties": "a72a8051f562d8e63ded06f3b897b1e416c1c82ecaa8f59ba823eb18b6155003",
+    "vscode-web/dist/web/media/zosd_trip4_-index_html.w3mi.data.html": "226cbf3f8ea6694d9f21a502a17ed9e88f89d4cbf88345f66d74b5faefe1a999",
+    "vscode-web/dist/web/media/zosd_trip4_-manifest_json.w3mi.data.json": "e064c41e6c4bcddc279310b81f8dbdedcc45cc80b1c826e1fdc8553cc3e177c8",
+    "vscode-web/dist/web/media/zosd_trip4_-readme_md.w3mi.data.md": "ee16e746813a62f78ddc60dd67fd9e75f96225921cec1bc1d57bda5a1c380f6a",
     "vscode-web/dist/web/media/zosg_workbench_-component_js.w3mi.data.js": "5e6b5e0ec782b232a7bb47866190c7df22dfb5691a57bbf9a643c22576b3a70f",
     "vscode-web/dist/web/media/zosg_workbench_-control_-abapeditor_js.w3mi.data.js": "f6c18f91f36889a6d5c5ade649c647179b5d5c2558848474baab3cabe262fe89",
     "vscode-web/dist/web/media/zosg_workbench_-controller_-app_controller_js.w3mi.data.js": "08e6886df58c09b54090e5252cbf8d6ba569b9e42d67cd3c52e2f52de889d3cf",
@@ -562,7 +586,7 @@
     "vscode-web/walkthrough/try-it.md": "aac6258ab6f14560e66bfb3e834ac8cabe493a3e42fd42252bddc3541b33f896",
     "vscode-web/walkthrough/where-things-live.md": "e862db4bbd160a36b09bd20f04aa126f794ad7fe1d00c9505bdef2f1f9c8c670"
   },
-  "generation": "4bb73f96449a24ad",
+  "generation": "617facee63a29611",
   "systemDigest": null,
   "systemPrivate": false,
   "inputs": [
@@ -599,16 +623,6 @@
     {
       "kind": "source",
       "path": "packs/gui-examples/upstream",
-      "private": false
-    },
-    {
-      "kind": "source",
-      "path": "packs/rap-flight/upstream",
-      "private": false
-    },
-    {
-      "kind": "source",
-      "path": "packs/rap-flight/src",
       "private": false
     },
     {
@@ -713,11 +727,6 @@
     },
     {
       "kind": "source",
-      "path": "packs/rap-flight/osd-pack.json",
-      "private": false
-    },
-    {
-      "kind": "source",
       "path": "packs/lsd/osd-pack.json",
       "private": false
     },
@@ -734,6 +743,11 @@
     {
       "kind": "pack-oci",
       "path": "packs/zork/games",
+      "private": false
+    },
+    {
+      "kind": "pack-oci",
+      "path": "packs/rap-flight/upstream",
       "private": false
     },
     {
