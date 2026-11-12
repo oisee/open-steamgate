@@ -59,6 +59,7 @@ const roads = {
   forkPreload: () => new Promise(ok => { writeFileSync("open/zbefore.cjs", "require('fs').readFileSync('vault/zsentinel.txt')"); writeFileSync("open/zchild.cjs", ""); fork("./open/zchild.cjs", [], {execArgv: [...process.execArgv, "--require", "./open/zbefore.cjs"]}).on("exit", ok); }),
   forkPlain: () => new Promise(ok => { writeFileSync("open/zchild.cjs", "require('fs').readFileSync('vault/zsentinel.txt')"); fork("./open/zchild.cjs").on("exit", ok); }),
   envFilePreload: () => { writeFileSync("open/zbefore.cjs", "require('fs').readFileSync('vault/zsentinel.txt')"); writeFileSync("open/zpre.env", "NODE_OPTIONS=--require ./open/zbefore.cjs"); spawnSync(process.execPath, ["--env-file=open/zpre.env", "-e", "0"]); },
+  nodeRun: () => { writeFileSync("open/package.json", JSON.stringify({scripts: {zleak: "cat ../vault/zsentinel.txt"}})); spawnSync(process.execPath, ["--run", "zleak"], {cwd: "open"}); },
   requireAfterEval: () => { writeFileSync("open/zbefore.cjs", "require('fs').readFileSync('vault/zsentinel.txt')"); spawnSync(process.execPath, ["-e", "0", "--require", "./open/zbefore.cjs"]); },
   scriptArgRequire: () => { writeFileSync("open/zscript.cjs", "require('fs').readFileSync('vault/zsentinel.txt')"); spawnSync(process.execPath, ["./open/zscript.cjs", "--require", "x"]); },
   // (D) a file written by the generator, then read back, is derived
@@ -228,6 +229,12 @@ describe("tools/osd-generator-reads: a generator's reads decide the generation's
   it("envFilePreload: an env file that sets NODE_OPTIONS makes the record incomplete", () => {
     const log = generate("envFilePreload");
     expect(log.incomplete.some(what => what.includes("(preload --env-file=open/zpre.env)")), log.incomplete.join("; ")).to.equal(true);
+    expect(publish(log)).to.throw().with.property("code", "UNKNOWN_PRIVACY");
+  });
+
+  it("nodeRun: a package script node --run starts in a shell makes the record incomplete", () => {
+    const log = generate("nodeRun");
+    expect(log.incomplete.some(what => what.includes("(preload --run)")), log.incomplete.join("; ")).to.equal(true);
     expect(publish(log)).to.throw().with.property("code", "UNKNOWN_PRIVACY");
   });
 

@@ -51,6 +51,10 @@ export function preloadsOf(args, nodeOptions, execArgv, recorder) {
       // an env file or config file can set NODE_OPTIONS (and so a preload) itself
       const file = /^(--env-file(?:-if-exists)?|--experimental-config-file|--experimental-default-config-file)(?:=|$)/.exec(word);
       if (file) { found.push(word); if (!word.includes("=") && file[1] !== "--experimental-default-config-file") i++; continue; }
+      // node itself starts these children (a package script's shell, test
+      // files, a watched restart), past the hooked child_process
+      const runner = /^(--run|--test|--watch|--watch-path|--watch-preserve-output)(?:=|$)/.exec(word);
+      if (runner) { found.push(word); if (word === "--run" || word === "--watch-path") i++; continue; }
       const m = PRELOAD.exec(word);
       if (m) {
         const value = m[2] ?? String(list[++i] ?? "");
