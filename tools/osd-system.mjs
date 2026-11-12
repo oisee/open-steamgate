@@ -171,7 +171,13 @@ export function assertPublicGenerations(root) {
 export function unrecordedGeneration(dir) {
   const file = join(dir, "manifest.json");
   if (!existsSync(file)) return false;
-  try { const record = JSON.parse(readFileSync(file, "utf8")); return !existsSync(join(dir, "reads.json")) || typeof record.systemPrivate !== "boolean" || !Array.isArray(record.provenance); } catch { return true; }
+  // null is a recorded answer (privacy unknown: refused for publishing), not
+  // a missing one -- building again would only record it again. A warm
+  // generation (tools/osd-warm.mjs, its `.warm.json` beside it) is a serving
+  // artefact with no read record of its own: it is reused for serving, and
+  // publishing refuses it (READ_RECORD) until a cold build makes the record.
+  const warm = existsSync(`${dir}.warm.json`);
+  try { const record = JSON.parse(readFileSync(file, "utf8")); return !warm && !existsSync(join(dir, "reads.json")) || ![true, false, null].includes(record.systemPrivate) || !Array.isArray(record.provenance); } catch { return true; }
 }
 
 export const layerDir = (root, layer) => join(root, ".local/system", layer.path);

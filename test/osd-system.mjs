@@ -253,6 +253,21 @@ describe("osd-system: one digest supplies the system", function () {
       json(join(dir, "manifest.json"), {hash: "0123456789abcdef", systemDigest: null, systemPrivate: false, provenance: []});
       expect(unrecordedGeneration(dir)).to.equal(false);
     });
+
+    // #908 CI: unknown privacy is recorded, and a warm generation is a serving
+    // artefact -- neither is built again on every build
+    it("reuses a generation recorded as unknown, and a warm one without a record", () => {
+      const dir = join(scratch, "build/by-input/fedcba9876543210");
+      json(join(dir, "manifest.json"), {hash: "fedcba9876543210", systemDigest: null, systemPrivate: null, provenance: []});
+      writeFileSync(join(dir, "reads.json"), "{}");
+      expect(unrecordedGeneration(dir), "null is an answer").to.equal(false);
+      rmSync(join(dir, "reads.json"));
+      expect(unrecordedGeneration(dir), "no record, not warm").to.equal(true);
+      json(`${dir}.warm.json`, {hash: "fedcba9876543210", verified: false});
+      expect(unrecordedGeneration(dir), "warm, no record").to.equal(false);
+      json(join(dir, "manifest.json"), {hash: "fedcba9876543210", systemDigest: null, systemPrivate: false});
+      expect(unrecordedGeneration(dir), "warm still needs its system fields").to.equal(true);
+    });
   });
   let root, source, r, host, ref, env, cwd;
   beforeEach(async () => {

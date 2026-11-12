@@ -282,7 +282,14 @@ export function hashOf(root, inputs = inputsOf(root), options = {}) {
   for (const name of generationSystem(root, inputs).provenance.filter(input => input.private !== false).map(input => `${input.kind}:${input.path}${input.private === null ? ":unknown" : ""}`).sort()) h.update("private-input\0").update(name).update("\0"); // unknown privacy names a generation too
   for (const layer of inputs.sourceLayers ?? []) {
     h.update("source-layer\0").update(JSON.stringify(layer)).update("\0");
+    // the ZIP is named by archiveId (its sha256) above; listing its digest
+    // lets the read record count the build's read of it as hashed
+    if (layer.archiveFile && existsSync(layer.archiveFile)) digests?.set(layer.archiveFile, digestOf(layer.archiveFile));
   }
+  // written by inputsOf from the source layers just hashed, so its bytes are a
+  // function of them: listed for the read record, not hashed again
+  const mounts = join(root, "local/overlays/.osd-mounts.txt");
+  if (existsSync(mounts)) digests?.set(mounts, digestOf(mounts));
   h.update("config\0").update(readFileSync(inputs.config)).update("\0");
   const lockFile = join(root, "libs.lock.json");
   if (existsSync(lockFile)) {
@@ -970,7 +977,7 @@ async function makePackSeeds(root, inputs, hash, log, named) {
   const [cmd, ...argv] = toolCommand(script, ["--ensure", "--output", join(layout(root).byInput, hash, "output")]);
   const generation = join(layout(root).byInput, hash);
   const readsLog = join(generation, "seed-reads.jsonl");
-  const env = {...process.env, OSD_ROOT: root, OSD_READ_EXCLUDE_PREFIXES: JSON.stringify([join(root, "packs/rap-flight/data")]), OSD_BUILD_VERIFIED: buildVerified(root)};
+  const env = {...process.env, OSD_ROOT: root, OSD_READ_EXCLUDE_PREFIXES: JSON.stringify([join(root, "packs/rap-flight/data"), join(root, ".local/activation")]), OSD_BUILD_VERIFIED: buildVerified(root)};
   if (!hosted()) argv.unshift("--import", join(TOOLS, "osd-generator-reads.mjs"));
   for (const line of recordedRun(cmd, argv, root, env, readsLog, "seed-capture.mjs").split("\n")) {
     if (line.trim() !== "") log(line);
