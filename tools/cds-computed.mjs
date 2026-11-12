@@ -185,7 +185,7 @@ export function constantLines(constants) {
 }
 
 const pad = (n, w = 6) => String(n).padStart(w, "0");
-const xmlText = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+export const xmlText = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 /** R11: the DDIC structure (TABL INTTAB) under the CDS name of a computed
  *  view: `TYPES x TYPE /dmo/i_carrierslocksingleton_s` resolves as on a
@@ -195,12 +195,16 @@ const xmlText = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").re
  *  This is the one TABL XML writer of the tree. With `transport` it spells a
  *  transparent table instead of a structure -- TABCLASS, CLIDEP, MAINFLAG,
  *  CONTFLAG and the DD09L technical settings -- which is what the DDIC probe
- *  of the existing-schema mode emits (tools/hana-ddic-probe.mjs). A field
+ *  of the existing-schema mode emits (tools/hana-ddic-probe.mjs). With
+ *  `ddlanguage` the header carries that language instead of E -- the master
+ *  language the text was picked in (CRITIC-926 SHOULD 4) -- and a DDTEXT
+ *  that comes out empty is dropped, the way an export leaves it out, not
+ *  written as an empty tag. A field
  *  may also carry its DD03P tags directly in `f.dd03p` (the mapping's own
  *  order: KEYFLAG, ROLLNAME, COMPTYPE, ADMINFIELD, INTTYPE, INTLEN,
  *  REFTABLE, PRECFIELD, REFFIELD, NOTNULL, DATATYPE, LENG, DECIMALS, MASK);
  *  without it, spelled as before. */
-export function structureXml(e, {transport = false} = {}) {
+export function structureXml(e, {transport = false, ddlanguage = ""} = {}) {
   const builtin = (f) => {
     const m = /^c LENGTH (\d+)$/.exec(f.abapType ?? "");
     if (m) return {INTTYPE: "C", INTLEN: pad(Number(m[1]) * 2), DATATYPE: "CHAR", LENG: pad(m[1])};
@@ -210,7 +214,7 @@ export function structureXml(e, {transport = false} = {}) {
       default: return {INTTYPE: "I", INTLEN: pad(4), DATATYPE: "INT4", LENG: pad(10)};
     }
   };
-  const fields = e.fields.filter((f) => transport || f.constant !== undefined || f.aggregate).map((f) => {
+  const fields = e.fields.filter((f) => transport || f.tabl === true || f.constant !== undefined || f.aggregate).map((f) => {
     const d = f.aggregate?.dd03p;
     const props = f.dd03p ?? (d?.ROLLNAME ? {ROLLNAME: d.ROLLNAME, COMPTYPE: "E"}
       : d ? Object.fromEntries(["INTTYPE", "INTLEN", "DATATYPE", "LENG", "DECIMALS"].filter((k) => d[k] !== undefined).map((k) => [k, d[k]]))
@@ -220,16 +224,16 @@ export function structureXml(e, {transport = false} = {}) {
 ${Object.entries(props).map(([k, v]) => `     <${k}>${xmlText(v)}</${k}>`).join("\n")}
     </DD03P>`;
   });
+  const ddtext = xmlText(String(e.label ?? e.name).slice(0, 60));
   return `<?xml version="1.0" encoding="utf-8"?>
 <abapGit version="v1.0.0" serializer="LCL_OBJECT_TABL" serializer_version="v1.0.0">
  <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
   <asx:values>
    <DD02V>
     <TABNAME>${e.name.toUpperCase()}</TABNAME>
-    <DDLANGUAGE>E</DDLANGUAGE>
+    <DDLANGUAGE>${String(ddlanguage).trim().toUpperCase() || "E"}</DDLANGUAGE>
     <TABCLASS>${transport ? "TRANSP" : "INTTAB"}</TABCLASS>
-${transport && e.clidep !== false ? "    <CLIDEP>X</CLIDEP>\n" : ""}    <DDTEXT>${xmlText(String(e.label ?? e.name).slice(0, 60))}</DDTEXT>
-${transport ? "    <MAINFLAG>X</MAINFLAG>\n    <CONTFLAG>A</CONTFLAG>\n" : ""}    <EXCLASS>1</EXCLASS>
+${transport && e.clidep !== false ? "    <CLIDEP>X</CLIDEP>\n" : ""}${ddtext !== "" ? `    <DDTEXT>${ddtext}</DDTEXT>\n` : ""}${transport ? "    <MAINFLAG>X</MAINFLAG>\n    <CONTFLAG>A</CONTFLAG>\n" : ""}    <EXCLASS>1</EXCLASS>
    </DD02V>
 ${transport ? `   <DD09L>
     <TABNAME>${e.name.toUpperCase()}</TABNAME>
