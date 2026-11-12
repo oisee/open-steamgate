@@ -337,7 +337,11 @@ export class HanaDatabaseClient {
     // what sy-dbsys reports; a real system running on HANA says HDB
     this.name = "HDB";
     this.trace = input.trace === true;
-    this.schema = input.schema ?? process.env.HANA_SCHEMA ?? "OSD";
+    // upper once, here: execute() folds quoted identifiers to upper and the
+    // catalog literals and SET SCHEMA go out exactly as built, so one
+    // normalisation at construction keeps DDL, catalog and session in one
+    // schema instead of three spellings of it (critic SHOULD 5 at f0a248af1)
+    this.schema = String(input.schema ?? process.env.HANA_SCHEMA ?? "OSD").toUpperCase();
     this.droppedSchema = false;
     /** did *this* connection make the schema fresh? see `freshened` */
     this.droppedSchema = false;
@@ -357,7 +361,7 @@ export class HanaDatabaseClient {
     // the shadow views filter MANDT = SESSION_CONTEXT('CLIENT'), and a NULL
     // client reads every client-dependent table as empty.
     this.logonClient = input.client ?? process.env.OSD_CLIENT ?? "";
-    this.ownSchema = input.ownSchema ?? process.env.HANA_OWN_SCHEMA ?? "";
+    this.ownSchema = String(input.ownSchema ?? process.env.HANA_OWN_SCHEMA ?? "").toUpperCase();
     this.shadowTables = input.shadowTables ?? [];
     // Seeded from generated DDIC on every process start, then augmented from
     // DDL. Open SQL writes RAW values as quoted hex; HANA needs X'...'. A
@@ -370,6 +374,12 @@ export class HanaDatabaseClient {
       }
     }
   }
+
+  /** inside ensureShadowFor right now. Its DD02L / SYS.VIEWS / SYS.SYNONYMS
+   *  reads go through query() -- the same 259-retrying path -- so a 259 on
+   *  one of them must not re-enter the fallback (critic MUST 1 at f0a248af1;
+   *  the probe counted 199 DD02L reads before the flag). */
+  #inShadowFor = false;
 
   /** One statement, and **the statement is in the failure**.
    *
@@ -441,7 +451,7 @@ export class HanaDatabaseClient {
     // parse of it, and the tenant schema never matches.
     if ((kind === "CREATE" || kind === "DROP") && this.ownSchema !== "") {
       const target = shadowDdlSchema(sql);
-      if (target !== undefined && target === this.ownSchema.toUpperCase()) return;
+      if (target !== undefined && target === this.ownSchema) return; // upper by construction
     }
     const error = new Error(`HANA_READONLY: ${kind === "" ? "statement" : kind} refused in read-only mode (HANA_EXISTING_SCHEMA=1 without OSD_HANA_WRITE=1); the statement was not sent to the database`);
     error.code = "HANA_READONLY";
@@ -461,6 +471,14 @@ export class HanaDatabaseClient {
     // -- a silently wrong run is worse than no run.
     if (this.existingSchema === true && this.logonClient === "") {
       throw new Error(`HANA_EXISTING_SCHEMA=1 refuses to start without OSD_CLIENT: the mode isolates the logon client in HANA (docs/db-backends.md, "Shadow schema: the client lives in HANA"), and a session without a client sees every client-dependent table empty. Set OSD_CLIENT to the logon client.`);
+    }
+    // Refused before a socket is even opened, like the two above: our own
+    // schema spelled as the tenant's would create the shadow views over the
+    // tenant's own tables -- and the guard, reading the owning schema off the
+    // statement, would admit them (critic MUST 2 at f0a248af1). Both names
+    // are upper at construction, so this is the case-folded compare.
+    if (this.existingSchema === true && this.ownSchema !== "" && this.ownSchema === this.schema) {
+      throw new Error(`HANA_OWN_SCHEMA refuses to equal HANA_SCHEMA ("${this.schema}"): the shadow views would sit on the tenant's own tables, and the read-only guard would admit DDL on them. Point HANA_OWN_SCHEMA at a schema of our own.`);
     }
     const hdb = require("hdb");
     this.client = hdb.createClient(hanaConnection(this.options));
@@ -663,9 +681,22 @@ export class HanaDatabaseClient {
    *  caller retries. False means the error is somebody else's problem. */
   async #shadowFor(error) {
     if (this.existingSchema !== true || this.ownSchema === "" || this.connected !== true) return false;
+    if (this.#inShadowFor === true) return false; // never re-enter the fallback
     const name = tableFrom259(error);
     if (name === undefined) return false;
-    return ensureShadowFor(this, {own: this.ownSchema, tenant: this.schema, name});
+    this.#inShadowFor = true;
+    try {
+      return await ensureShadowFor(this, {own: this.ownSchema, tenant: this.schema, name});
+    } catch (fallbackError) {
+      // the fallback's own DD02L / SYS.VIEWS / SYS.SYNONYMS read failed: the
+      // caller's statement keeps its own error -- a 259 stays that 259. The
+      // flag above is what stopped the recursion (probe at f0a248af1: 199
+      // DD02L reads); this is logged, not swallowed silent.
+      if (this.trace) console.error(`shadow fallback for ${name} failed: ${fallbackError?.message ?? fallbackError}`);
+      return false;
+    } finally {
+      this.#inShadowFor = false;
+    }
   }
 
   async #queryWithShadow(sql, retried) {

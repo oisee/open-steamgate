@@ -35,14 +35,16 @@ import {orderRegistry} from "./osd-warm-order.mjs";
 
 /** the table names out of a thrown transpiler validation: the two shapes a
  *  missing DDIC name surfaces in, upper-cased, de-duplicated, anything else in
- *  the same error ignored. Pure, so the contract is testable without a
- *  database or a full build. */
+ *  the same error ignored. A SAP namespace (/ZOSD/CARRIER) is carried -- the
+ *  filter below already admitted it; the captures were what refused it, a
+ *  dead branch (critic SHOULD 4 at f0a248af1). Pure, so the contract is
+ *  testable without a database or a full build. */
 export function tablesFromValidation(message) {
   const names = new Set();
-  for (const match of String(message ?? "").matchAll(/Database table or view "([A-Za-z0-9_]+)" not found/g)) {
+  for (const match of String(message ?? "").matchAll(/Database table or view "([A-Za-z0-9_/]+)" not found/g)) {
     names.add(match[1].toUpperCase());
   }
-  for (const match of String(message ?? "").matchAll(/contains unknown: ([A-Za-z0-9_]+) not found/g)) {
+  for (const match of String(message ?? "").matchAll(/contains unknown: ([A-Za-z0-9_/]+) not found/g)) {
     names.add(match[1].toUpperCase());
   }
   return [...names].filter((name) => /^[A-Z0-9_\/#$]+$/.test(name)).sort();

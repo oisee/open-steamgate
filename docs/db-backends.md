@@ -445,7 +445,12 @@ and then `SET SCHEMA "<own>"`. Joins, FOR ALL ENTRIES and aggregates inherit
 the predicate; no generated SQL changes anywhere. Creation is idempotent:
 the catalog (`SYS.VIEWS` with its `DEFINITION`, `SYS.SYNONYMS`) is read
 first, existing objects are left alone, and a view whose definition drifted
-is recreated with `CREATE OR REPLACE`.
+is recreated with `CREATE OR REPLACE`. HANA holds the view's query string —
+the text after `AS` — in `DEFINITION`, so the drift comparison reads the
+query part out of both sides and accepts the full `CREATE` text as well; a
+connect that finds the view current sends nothing (fix round 2: comparing
+the whole `CREATE` text recreated every view on every connect, and two
+hosts connecting at once raced on the replace).
 
 The flags:
 
@@ -470,7 +475,15 @@ off the statement is `HANA_OWN_SCHEMA`; a `CREATE` on the tenant schema is
 still refused with `HANA_READONLY`, and `CREATE TABLE` on our own schema is
 not a shadow shape and stays refused. And the eager set is only what the
 tenant's `DD02L` holds: a table of our own (`ZSTG_*`) has no shadow, because
-it is not in `DD02L` at all.
+it is not in `DD02L` at all. Table names with a SAP namespace
+(`/DMO/TRAVEL`) shadow like any other: quoted identifiers carry the
+slashes, the 259 parser keeps the namespace, and the eager set admits the
+name. `HANA_OWN_SCHEMA` equal to `HANA_SCHEMA` is refused before a socket
+opens — the shadow views would sit on the tenant's own tables, and the
+read-only guard, reading the owning schema off the statement, would admit
+DDL on them. Both schema names are normalised to upper once at
+construction, so the DDL, the catalog literals and `SET SCHEMA` spell one
+schema.
 
 The lazy half: a statement that fails with HANA error 259 (invalid table
 name) carries the table name in the error; when the tenant's `DD02L` holds

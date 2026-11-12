@@ -20,8 +20,13 @@ import {readFileSync} from "node:fs";
 import {join} from "node:path";
 import {layers} from "./osd-inputs.mjs";
 
-// the same rule the probe applies to a table name before it becomes SQL
-const NAME = /^[A-Za-z_][A-Za-z_0-9]*$/;
+// the rule a table name must pass before it becomes SQL: the probe's
+// plain identifier shape plus the `/` of an SAP namespace (/DMO/TRAVEL).
+// Quoted identifiers carry the slashes and the 259 parser keeps the
+// namespace; the eager filter and the lazy check use this same rule, so
+// a name that parses is a name we shadow (critic SHOULD 4 at f0a248af1:
+// they refused what the parser had faithfully carried).
+const NAME = /^[A-Za-z_/][A-Za-z_0-9/]*$/;
 // the DD* reads name only the columns H1 measured on the bed and pinned in
 // test/hana-ddic-probe.mjs; DD02L's TABNAME and CLIDEP are on that list. The
 // SYS catalog columns (VIEW_NAME, DEFINITION, SYNONYM_NAME) are per HANA's
@@ -121,6 +126,17 @@ async function existingObjects(db, own) {
 // case is safe (the one literal, 'CLIENT', is already upper).
 const normalized = (sql) => String(sql).replace(/\s+/g, " ").trim().toUpperCase();
 
+// SYS.VIEWS.DEFINITION holds the view's query string -- the text after AS
+// (HANA's documentation; the bed run confirms the column). The fakes pinned
+// the full CREATE text, and comparing against it made every connect recreate
+// every view (critic MUST 3 at f0a248af1 -- and two hosts connecting at once
+// would race on CREATE OR REPLACE). The comparison reads the query part out
+// of both sides: a DEFINITION in the documented shape passes through
+// unchanged, one that still carries the CREATE VIEW "own"."name" AS prefix
+// loses exactly that prefix, so both spellings are current when the query is.
+const queryOf = (text) =>
+  normalized(String(text).replace(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?VIEW\s+"[^"]+"\s*\.\s*"[^"]+"\s+AS/i, ""));
+
 /** the eager half: every table of the generation that exists in the tenant
  *  gets its shadow object, unless it is already there and current. Idempotent
  *  by construction: the second run reads the catalog and sends nothing. */
@@ -144,7 +160,7 @@ export async function ensureShadow(db, {own, tenant, tables}) {
       if (current === undefined) {
         await db.execute(wanted);
         report.created.push(name);
-      } else if (normalized(current) !== normalized(wanted)) {
+      } else if (queryOf(current) !== queryOf(wanted)) {
         await db.execute(replaceViewSql(name, own, tenant));
         report.replaced.push(name);
       }
@@ -172,7 +188,7 @@ export async function ensureShadowFor(db, {own, tenant, name}) {
     const current = there.views.get(table);
     if (current === undefined) {
       await db.execute(wanted);
-    } else if (normalized(current) !== normalized(wanted)) {
+    } else if (queryOf(current) !== queryOf(wanted)) {
       await db.execute(replaceViewSql(table, own, tenant));
     }
   } else if (there.synonyms.has(table) === false) {

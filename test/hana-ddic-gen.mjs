@@ -34,6 +34,17 @@ describe("hana-ddic-gen: DDIC from the real DD03L for the build", () => {
     expect(tablesFromValidation("")).to.deep.equal([]);
   });
 
+  it("a /-namespaced name is extracted with its namespace", () => {
+    // critic SHOULD 4 at f0a248af1: the filter admitted `/`, the captures
+    // refused it -- a dead branch. Both shapes of the validation line now
+    // carry a /ZOSD/ namespace through.
+    const message = [
+      `check_syntax, Database table or view "/zosd/carrier" not found, zcl_h3_ref.clas.abap:8`,
+      `unknown_types, Variable "LT_FLAT" contains unknown: /ZOSD/H3_FLAT not found, lookup, zcl_h3_ref.clas.abap:9`,
+    ].join("\n");
+    expect(tablesFromValidation(message)).to.deep.equal(["/ZOSD/CARRIER", "/ZOSD/H3_FLAT"]);
+  });
+
   // the fake answers what the probe's reads ask, the way HANA answers: the
   // rows of the table the statement names, projected to the columns it
   // selected, filtered to the TABNAME the WHERE pinned. ZOSD_H3_* fixtures;
