@@ -90,8 +90,8 @@ private → private; else any unknown → unknown). `publicProvenance`,
 what the transpiler lists (not by extension, so W3MI media count), locked and
 URL libraries whole, root `data/` and `abaplint.jsonc`, BSP and pack folders,
 and what finding the packs reads -- every manifest in the tree's own pack
-place and the identity of each folder it declares, selected by
-`OSD_WEB_PACKS` or not. `OSD_PACKS` places (the extension's per-machine
+place, selected by `OSD_WEB_PACKS` or not (a left-out pack's fetched
+identities are not read; a selected pack's are hashed with it). `OSD_PACKS` places (the extension's per-machine
 scratch pack) are not digested. DSL navigation metadata
 (`*.trace.meta.json`) is neither read nor hashed.
 
