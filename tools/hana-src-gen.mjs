@@ -9,11 +9,20 @@
 // and nothing ever reads the dump's tables/*.jsonl -- the provenance this
 // tool records is what plan.json copied from the dump manifest.
 //
-//   node tools/hana-src-gen.mjs --layers <dir> [--packages <LIKE>]... [--check] [--out <dir>]
+//   node tools/hana-src-gen.mjs --layers <dir> [--layers <dir>]... [--packages <LIKE>]... [--check] [--out <dir>]
 //   node tools/hana-src-gen.mjs --from-dump --dump <dir> --system <prefix> [--packages <LIKE>]... [--check] [--out <dir>]
 //
 //   --layers <dir>      a converter output directory: plan.json +
-//                       layers/<name>/{.abapgit.xml, src/}
+//                       layers/<name>/{.abapgit.xml, src/}. Repeatable
+//                       (H5c round 4): the output is the UNION of the
+//                       plans -- one folder per layer name (the same
+//                       <system>-<package> layer in two dumps is ONE
+//                       folder), each file from the LATER dir that
+//                       carries it, later wins per object (reported),
+//                       folders renumbered 0..n in the flags' order so
+//                       the names sort the way the flags read. One
+//                       --layers behaves as before: the plan's own
+//                       orders, unchanged.
 //   --from-dump         run the converter on --dump first, into a temp dir;
 //                       the dumper itself is not run (its credentials are
 //                       the dump track's own)
@@ -61,11 +70,9 @@ function likeToRegExp(pattern) {
     c === "%" || c === "*" ? ".*" : c === "_" ? "." : c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("") + "$");
 }
 
-/** the write plan: one group per folder, in order, the cycle members merged
- *  into one group at their smallest order. Pure. Throws when a pattern names
- *  no package (the converter refuses the same way) or the plan is not one
- *  this tool reads. */
-export function selectGroups(plan, patterns = []) {
+/** the plan checks, said once: schema 1, a layers array, every layer named
+ *  and ordered. */
+function checkedPlan(plan) {
   if (plan.schema !== 1) {
     throw new Error(`hana-src-gen: plan.json schema ${JSON.stringify(plan.schema)} is not understood; this tool reads schema 1`);
   }
@@ -77,11 +84,23 @@ export function selectGroups(plan, patterns = []) {
       throw new Error("hana-src-gen: plan.json has a layer without a name or an order");
     }
   }
+  return plan;
+}
+
+/** the write plan: one group per folder, in order, the cycle members merged
+ *  into one group at their smallest order. Pure. Throws when a pattern names
+ *  no package (the converter refuses the same way) or the plan is not one
+ *  this tool reads -- except with checkMissing false: the union of several
+ *  --layers dirs checks the patterns against ALL of them (mergedIntended). */
+export function selectGroups(plan, patterns = [], options = {}) {
+  checkedPlan(plan);
   const regexps = patterns.map(likeToRegExp);
   const packages = plan.layers.map((layer) => layer.package).filter((p) => p !== null && p !== undefined);
-  for (const [i, re] of regexps.entries()) {
-    if (packages.some((p) => re.test(p)) === false) {
-      throw new Error(`hana-src-gen: no layer matches --packages ${patterns[i]}`);
+  if (options.checkMissing !== false) {
+    for (const [i, re] of regexps.entries()) {
+      if (packages.some((p) => re.test(p)) === false) {
+        throw new Error(`hana-src-gen: no layer matches --packages ${patterns[i]}`);
+      }
     }
   }
   const byName = new Map(plan.layers.map((layer) => [layer.name, layer]));
@@ -175,6 +194,83 @@ function intended(layersDir, plan, patterns) {
     tree.set(name, files);
   }
   return {tree, groups};
+}
+
+// several --layers dirs (round 4): the UNION of their plans -- one folder
+// per layer name (the same <system>-<package> layer in two dumps is one
+// folder), every file from the LATER dir that carries it (later wins per
+// object), the .abapgit.xml of the later dir, folders renumbered 0..n in
+// the flags' order (each plan's own order kept inside it) so the names
+// sort the way the flags read -- a cross-dump object that lands in two
+// differently named folders is won by the later dump. Same {tree, groups}
+// shape intended() returns; the later-wins takeovers are reported.
+function mergedIntended(dirs, patterns) {
+  const merged = new Map();
+  const packages = [];
+  let order = 0;
+  for (const dir of dirs) {
+    const plan = checkedPlan(JSON.parse(readFileSync(join(dir, "plan.json"), "utf8")));
+    for (const layer of plan.layers) {
+      if (layer.package !== null && layer.package !== undefined) packages.push(layer.package);
+    }
+    for (const group of selectGroups(plan, patterns, {checkMissing: false})) {
+      const key = group.cycle === undefined ? group.layers[0].name : `cycle-${group.cycle.join("+")}`;
+      let entry = merged.get(key);
+      if (entry === undefined) {
+        entry = {key, order: order++, package: group.cycle === undefined ? group.layers[0].package : null,
+          cycle: group.cycle, objects: {}, files: new Map(), taken: 0};
+        merged.set(key, entry);
+      }
+      for (const layer of group.layers) {
+        for (const rel of layerFiles(dir, layer)) {
+          if (entry.files.has(rel)) entry.taken++;
+          entry.files.set(rel, resolve(dir, layer.folder ?? `layers/${layer.name}`, rel));
+        }
+        for (const [kind, count] of Object.entries(layer.objects ?? {})) entry.objects[kind] = count;
+      }
+      entry.files.set(".abapgit.xml", resolve(dir, group.layers[0].folder ?? `layers/${group.layers[0].name}`, ".abapgit.xml"));
+    }
+  }
+  for (const [i, re] of patterns.map(likeToRegExp).entries()) {
+    if (packages.some((p) => re.test(p)) === false) {
+      throw new Error(`hana-src-gen: no layer matches --packages ${patterns[i]}`);
+    }
+  }
+  const width = Math.max(3, String(Math.max(0, order - 1)).length);
+  const tree = new Map();
+  const groups = [];
+  for (const entry of merged.values()) {
+    const folder = groupFolder({order: entry.order, cycle: entry.cycle, layers: [{name: entry.key}]}, width);
+    tree.set(folder, entry.files);
+    groups.push({name: entry.key, package: entry.package, order: entry.order, objects: entry.objects,
+      ...(entry.cycle === undefined ? {} : {cycle: entry.cycle})});
+    if (entry.taken > 0) console.log(`hana-src-gen: ${folder}: ${entry.taken} file(s) from a later dump kept (later wins)`);
+  }
+  return {tree, groups};
+}
+
+// the manifest of a union: the sources are all the dirs, the dump
+// provenance is the LAST dir that carries one (the current dump's -- the
+// generation hash the request reads), no_source and the converter commit
+// merged from the last plan that carries each
+function mergedManifest(dirs, groups) {
+  const noSource = {};
+  let dump;
+  let converterCommit;
+  for (const dir of dirs) {
+    const plan = JSON.parse(readFileSync(join(dir, "plan.json"), "utf8"));
+    for (const [kind, count] of Object.entries(plan.no_source ?? {})) noSource[kind] = count;
+    if (plan.dump !== undefined) dump = plan.dump;
+    if (plan.converter_commit !== undefined) converterCommit = plan.converter_commit;
+  }
+  return {
+    source: [...dirs],
+    ...(dump !== undefined ? {dump} : {}),
+    ...(converterCommit !== undefined ? {converter_commit: converterCommit} : {}),
+    layers: groups,
+    no_source: noSource,
+    generated_at: new Date().toISOString(),
+  };
 }
 
 function manifestFor(source, plan, groups, system) {
@@ -325,7 +421,8 @@ function has(args, flag) {
 
 export async function run(args = process.argv.slice(2), options = {}) {
   const out = take(args, "--out") ?? join("gen", "hana-src");
-  let layers = take(args, "--layers");
+  const layers = [];
+  while (args.includes("--layers")) layers.push(take(args, "--layers"));
   const dump = take(args, "--dump");
   const system = take(args, "--system");
   const packages = [];
@@ -333,9 +430,9 @@ export async function run(args = process.argv.slice(2), options = {}) {
   const check = has(args, "--check");
   const fromDump = has(args, "--from-dump");
   if (args.length > 0) throw new Error(`unknown option ${args.find((a) => a.startsWith("--")) ?? args[0]}`);
-  if (fromDump === true && layers !== undefined) throw new Error("hana-src-gen: choose --layers or --from-dump, not both");
-  if (fromDump === false && layers === undefined) {
-    throw new Error("hana-src-gen: --layers <dir> names a converter output directory, or --from-dump --dump <dir> --system <prefix>");
+  if (fromDump === true && layers.length > 0) throw new Error("hana-src-gen: choose --layers or --from-dump, not both");
+  if (fromDump === false && layers.length === 0) {
+    throw new Error("hana-src-gen: --layers <dir> (repeatable) names converter output directories, or --from-dump --dump <dir> --system <prefix>");
   }
   if (fromDump === true) {
     if (dump === undefined || system === undefined) {
@@ -356,7 +453,7 @@ export async function run(args = process.argv.slice(2), options = {}) {
       const [command, ...argv] = scriptCommandIn(process.env, converter, [dump, "--out", temp, "--system", system]);
       const child = spawnSync(command, argv, {stdio: "inherit"});
       if (child.status !== 0) throw new Error(`hana-src-gen: the converter exited ${child.status ?? "on a signal"}`);
-      layers = temp;
+      layers.push(temp);
       // the manifest's provenance is the dump, not this temp dir: a fresh
       // mkdtemp every run would make --from-dump --check drift on the path
       // alone, and point at a directory that no longer exists
@@ -368,21 +465,32 @@ export async function run(args = process.argv.slice(2), options = {}) {
   return generate(layers, out, packages, check, options);
 }
 
-async function generate(layers, out, packages, check, options, provenance = {}) {
-  withinTree(layers, options.root);
+async function generate(layersDirs, out, packages, check, options, provenance = {}) {
+  for (const dir of layersDirs) withinTree(dir, options.root);
   withinTree(out, options.root, "--out");
-  const plan = JSON.parse(readFileSync(join(layers, "plan.json"), "utf8"));
-  const {tree, groups} = intended(layers, plan, packages);
-  const manifest = manifestFor(provenance.source ?? layers, plan, groups, provenance.system);
+  let tree;
+  let groups;
+  let manifest;
+  if (layersDirs.length === 1) {
+    const layersDir = layersDirs[0];
+    const plan = JSON.parse(readFileSync(join(layersDir, "plan.json"), "utf8"));
+    ({tree, groups} = intended(layersDir, plan, packages));
+    manifest = manifestFor(provenance.source ?? layersDir, plan, groups, provenance.system);
+  } else {
+    // the union (round 4): the loop merges every dump so far, later wins
+    ({tree, groups} = mergedIntended(layersDirs, packages));
+    manifest = mergedManifest(layersDirs, groups);
+  }
+  const source = provenance.source ?? (layersDirs.length === 1 ? layersDirs[0] : `${layersDirs.length} layers dir(s)`);
   if (check === true) {
     const drift = driftOf(out, tree, manifest);
     if (drift.length === 0) {
       const files = [...tree.values()].reduce((n, f) => n + f.size, 0);
-      console.log(`hana-src-gen: ${out} matches ${provenance.source ?? layers} (${tree.size} folder(s), ${files} file(s))`);
+      console.log(`hana-src-gen: ${out} matches ${source} (${tree.size} folder(s), ${files} file(s))`);
       return 0;
     }
     for (const line of drift) console.log(`hana-src-gen: ${line}`);
-    console.log(`hana-src-gen: ${out} has drifted from ${layers}: ${drift.length} difference(s)`);
+    console.log(`hana-src-gen: ${out} has drifted from ${source}: ${drift.length} difference(s)`);
     return 1;
   }
   writeTree(out, tree, manifest);

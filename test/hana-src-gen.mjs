@@ -248,6 +248,71 @@ describe("hana-src-gen: the tenant's sources as input layers", () => {
     }
   });
 
+  it("several --layers dirs accumulate: the union of the plans, later wins per file", async () => {
+    const f1 = converterOutput();
+    const f2 = converterOutput();
+    try {
+      f1.layer("osd-tmp-zosd-h4-a", "$ZOSD_H4_A", 0, [["zosd_h4_a.prog.abap", "REPORT zosd_h4_a.\n"]]);
+      f1.layer("osd-tmp-zosd-h4-b", "$ZOSD_H4_B", 1, [["zosd_h4_b.prog.abap", "REPORT zosd_h4_b from the first dump.\n"]]);
+      f1.plan();
+      f2.layer("osd-tmp-zosd-h4-b", "$ZOSD_H4_B", 0, [
+        ["zosd_h4_b.prog.abap", "REPORT zosd_h4_b from the second dump.\n"],
+        ["zosd_h4_b2.prog.abap", "REPORT zosd_h4_b2.\n"]]);
+      f2.layer("osd-tmp-zosd-h4-c", "$ZOSD_H4_C", 1, [["zosd_h4_c.prog.abap", "REPORT zosd_h4_c.\n"]]);
+      f2.plan({dump: {manifest_sha256: "2".repeat(64), provenance: "the second dump"}});
+      const at = out(f1.root);
+      expect(await run(["--layers", f1.root, "--layers", f2.root, "--out", at])).to.equal(0);
+      // three folders, renumbered in the flags' order; the layer both dumps
+      // carry is ONE folder holding the union of its files
+      expect(readdirSync(at).sort()).to.deep.equal([
+        "000-osd-tmp-zosd-h4-a", "001-osd-tmp-zosd-h4-b", "002-osd-tmp-zosd-h4-c", "manifest.json"]);
+      expect(readFileSync(join(at, "000-osd-tmp-zosd-h4-a", "src", "zosd_h4_a.prog.abap"), "utf8"))
+        .to.equal("REPORT zosd_h4_a.\n");
+      expect(readFileSync(join(at, "001-osd-tmp-zosd-h4-b", "src", "zosd_h4_b.prog.abap"), "utf8"),
+        "the later dump's copy of the shared file wins").to.equal("REPORT zosd_h4_b from the second dump.\n");
+      expect(existsSync(join(at, "001-osd-tmp-zosd-h4-b", "src", "zosd_h4_b2.prog.abap")),
+        "the first dump's extra file stays (union, not replace)").to.equal(true);
+      expect(readFileSync(join(at, "002-osd-tmp-zosd-h4-c", "src", "zosd_h4_c.prog.abap"), "utf8"))
+        .to.equal("REPORT zosd_h4_c.\n");
+      const manifest = JSON.parse(readFileSync(join(at, "manifest.json"), "utf8"));
+      expect(manifest.source).to.deep.equal([f1.root, f2.root]);
+      expect(manifest.dump, "the last dump's provenance is the generation's").to.deep.equal(
+        {manifest_sha256: "2".repeat(64), provenance: "the second dump"});
+      expect(manifest.layers.map((l) => l.name)).to.deep.equal(
+        ["osd-tmp-zosd-h4-a", "osd-tmp-zosd-h4-b", "osd-tmp-zosd-h4-c"]);
+      // the loop merges every iteration: a repeat is stable, --check agrees
+      expect(await run(["--layers", f1.root, "--layers", f2.root, "--check", "--out", at])).to.equal(0);
+    } finally {
+      rmSync(f1.root, {recursive: true, force: true});
+      rmSync(f2.root, {recursive: true, force: true});
+    }
+  });
+
+  it("--packages over several --layers matches the union, and refuses a pattern that names nothing in any of them", async () => {
+    const f1 = converterOutput();
+    const f2 = converterOutput();
+    try {
+      f1.layer("osd-tmp-zosd-h4-a", "$ZOSD_H4_A", 0, [["zosd_h4_a.prog.abap", "REPORT zosd_h4_a.\n"]]);
+      f1.plan();
+      f2.layer("osd-tmp-zosd-h4-c", "$ZOSD_H4_C", 0, [["zosd_h4_c.prog.abap", "REPORT zosd_h4_c.\n"]]);
+      f2.plan();
+      const at = out(f1.root);
+      expect(await run(["--layers", f1.root, "--layers", f2.root, "--packages", "$ZOSD_H4_C", "--out", at])).to.equal(0);
+      expect(readdirSync(at).sort()).to.deep.equal(["000-osd-tmp-zosd-h4-c", "manifest.json"]);
+      let refused;
+      try {
+        await run(["--layers", f1.root, "--layers", f2.root, "--packages", "$ZOSD_H4_NONE", "--out", join(f1.root, "none")]);
+        expect.fail("a pattern that names no layer in any dir must refuse");
+      } catch (error) {
+        refused = error;
+      }
+      expect(refused.message).to.match(/no layer matches --packages \$ZOSD_H4_NONE/);
+    } finally {
+      rmSync(f1.root, {recursive: true, force: true});
+      rmSync(f2.root, {recursive: true, force: true});
+    }
+  });
+
   it("the folders are layers before src/, and a src/ file of the same name wins", () => {
     const root = mkdtempSync(join(tmpdir(), "hana-src-layers-"));
     const write = (rel, body) => {

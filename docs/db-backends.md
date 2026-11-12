@@ -636,17 +636,35 @@ closure. CLAUDE.md's Sprint-0 prediction said the closure is the long pole,
 so the closure is walked by a loop instead of measured once:
 `tools/hana-closure.mjs` iterates to a fixed point.
 
-One iteration: merge the current dump into the inputs (`hana-ddic-gen
---from-dump` writes `gen/hana-ddic`, `hana-src-gen --from-dump` runs the
-converter and writes `gen/hana-src` — both spawned through
-`tools/osd-host.mjs` like every tool a tool starts), run the build's own
+One iteration: merge the current dump into the inputs, run the build's own
 validation over the tree — the same channel `hana-ddic-gen --from-build`
 reads, its `validationMessage` reused, not duplicated — classify every
 finding the transpiler emits, and ask the dumper for the names that are
 missing: the request file (`--ddic-closure`) carries the fresh names per
 TADIR kind, the dictionary kinds closed over transitively on the server,
 `seen` skipped. The loop repeats until a validation names nothing it has
-not already asked for.
+not already asked for — and the build itself vouches for that validation
+(the positive control, below).
+
+The merge **accumulates**. Bed run 5's finding: a `--from-dump` per dump
+REPLACED `gen/hana-src`, so from the second merge on the island held only
+the latest dump's layers — iteration 3 validated a tree without the
+service, and the fixed point was false. The island is the union of the
+seed dump and every dump so far. Each dump is converted once — the
+converter (`OSD_HANA_CONVERTER`, spawned through `scriptCommandIn` like
+every external script) writes `.local/hana-closure/layers-<NNN>/`,
+remembered in `state.json` — and `hana-src-gen` is called with ALL the
+layers dirs (`--layers`, repeatable): one folder per layer name, each
+file from the later dump that carries it (later wins per object,
+reported), folders renumbered in the flags' order. `gen/hana-ddic`
+accumulates by the tool's own write mode: `hana-ddic-gen --from-dump`
+writes per-file overlays and never clears the folder (checked on
+`feat/hana-ddic-from-dump`), so a delta dump's tables land beside the
+earlier ones. After each merge the island's object count — classes,
+interfaces, tables — is compared with the previous iteration's: the count
+rides every iteration line, and a shrink aborts the run with both counts
+instead of letting a later "fixed point" validate a tree the service has
+vanished from.
 
 Only the **island** is classified. The service lives in `gen/hana-src/*`
 and `gen/hana-ddic/*`; findings whose file lies in `src/`, `packs/` or
@@ -694,6 +712,14 @@ findings; the names stay in the private findings log and the leak list):
 | `unable to resolve x` | INTF | 58 |
 | `parser_error ... "FUNCTION"` in a `*.fugr.*` file | FUGR — the name is read off the file | 4 |
 | cascades: `Method (or attribute) "m" not found` (101), `Not an object reference` (107), `"param" not found` with fix `findTop`/`Target` (44+8), `not a table type mt_*` (42), `not found in class or interface` (4), `methodCallChain` (8), `Component "c" not found in structure` (2), the `Type error` tails (9) | skipped — the name is not the thing that is missing | 325 |
+
+Two shapes arrived with bed run 5 and are classified since: a bare
+`unknown_types, X unknown` — the kind is the name's prefix, CLAS for a
+`CL_`/`CX_` prefix, INTF for `IF_`/`ZIF_`, else the kind-less dictionary
+triple (the live case: four `CX_* unknown` findings inside an
+`.intf.abap` file) — and `check_syntax, Friend class X does not exist`
+(CLAS). `Super class "X" not found or contains errors` is still
+unclassified and still reported, not lost.
 
 De-duplicated, the 1,144 name **49 objects** — one iteration's ask. The
 `contains unknown: X not found` shapes carry no dictionary kind (16 of the
@@ -762,10 +788,22 @@ The merges' `--from-dump` needs PR #926 (`feat/hana-ddic-from-dump`);
 until that merges, a tool without the flag is refused with a message
 saying so.
 
+No "fixed point" without a positive control. Bed run 4's: `npm run
+transpile` on the post-iteration tree exited 1 on a generator step with
+ZERO transpiler findings — and the loop read that as convergence. Before
+the loop declares a fixed point now, it runs the build itself
+(`tools/osd-build.mjs`, spawned like every tool) and reads its exit:
+exit 0 stands, and so does a non-zero exit whose log carries findings
+("exit 1 with findings only" — the findings are the walk's material); a
+non-zero exit with no findings aborts the run with the build's FAILED
+line.
+
 Exercised with fakes, the way CI must be (`test/hana-closure.mjs`, fixtures
 `ZOSD_H5C_*`): the loop's validate step is the transpiler's own validation
 over a scratch tree, the merge is a fake host behind `OSD_SELF` (the loop
-owns the two tools' argv), and the dumper is a fixture script that mimics
+owns the tools' argv; the converter is a fixture script keyed by dump path,
+the positive control's build a fake-host mode), and the dumper is a
+fixture script that mimics
 the real binary's CLI contract — the required connection flags, the
 schema-1 request, the refusal of an `--out` inside a git working tree
 unless `--allow-in-repo`, the password from `VSP_HANA_PASSWORD` only —

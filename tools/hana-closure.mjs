@@ -70,12 +70,25 @@
 //   --max-stub-rounds <n> the cap of the stub rounds above (default 5, and
 //                         only read with --stub-unresolved).
 //
+// The layers accumulate (round 4): every dump is converted first, into
+// .local/hana-closure/layers-<NNN>/ (OSD_HANA_CONVERTER through
+// scriptCommandIn, one run per dump, remembered in state.json), and
+// hana-src-gen is called with ALL of them -- the island is the UNION of
+// the seed dump and every dump so far, later wins per object; the DDIC
+// accumulates by hana-ddic-gen's own write mode (per-file overlays). The
+// island's object count (classes+interfaces+tables) rides the iteration
+// line and never shrinks -- a shrink aborts with both counts (bed run 5).
+// No fixed point without a positive control (bed run 4): the build runs
+// first -- exit 0 or non-zero-with-findings stands, non-zero with NO
+// findings aborts with the build's FAILED line.
+//
 // One iteration: merge the current dump into the inputs (hana-ddic-gen
-// --from-dump writes gen/hana-ddic, hana-src-gen --from-dump runs the
-// converter and writes gen/hana-src -- both spawned through
-// tools/osd-host.mjs's toolCommandIn, the way every tool a tool starts is;
-// their --from-dump is PR #926, feat/hana-ddic-from-dump, and a tool that
-// does not know the flag is refused with a message saying so), then run the
+// --from-dump writes gen/hana-ddic, the converters' layers + hana-src-gen
+// --layers write gen/hana-src -- spawned through tools/osd-host.mjs's
+// toolCommandIn and scriptCommandIn, the way every tool a tool starts is;
+// the DDIC tool's --from-dump is PR #926, feat/hana-ddic-from-dump, and a
+// tool that does not know the flag is refused with a message saying so),
+// then run the
 // build's own validation over the tree -- the same channel hana-ddic-gen
 // --from-build reads, the validationMessage exported from there, reused and
 // not duplicated -- and classify the findings OF THE ISLAND: the service
@@ -181,6 +194,7 @@ import {runsAs} from "./osd-main.mjs";
 import {toolCommandIn} from "./osd-host.mjs";
 import {validationMessage} from "./hana-ddic-gen.mjs";
 import {islandClassPaths, stubBodies} from "./hana-closure-stubs.mjs";
+import {buildCheck, ensureLayers, islandObjectCount} from "./hana-closure-merge.mjs";
 
 const TOOLS = fileURLToPath(new URL(".", import.meta.url));
 
@@ -232,6 +246,15 @@ const nameFromAbapFile = (part) => part.replace(/^#([^#]+)#/, "/$1/").toUpperCas
 // type chain would be asked as CLAS and come back as a wrong-kind gap (the
 // dumper answers what the TADIR kind names, and reports the rest missing).
 const objectKind = (name) => (/^if/i.test(name) ? "intf" : "clas");
+// `X unknown` (unknown_types, bed run 5's shape): the kind is the name's
+// prefix -- CLAS for a CL_/CX_ prefix, INTF for IF_/ZIF_, else the ddic
+// triple; a namespace /NS/NAME is stripped first.
+const unknownKind = (name) => {
+  const bare = name.replace(/^\/[^/]+\//, "");
+  if (/^(?:z?cl|z?cx)_/i.test(bare)) return "clas";
+  if (/^(?:z?if)_/i.test(bare)) return "intf";
+  return "ddic";
+};
 
 /** what a validation asks for: `names` carries every requestable name with
  *  its kind (tabl/dtel/doma/ddic -- the DDIC the dumper resolves --
@@ -264,6 +287,14 @@ export function classifyFindings(findings) {
     } else if (fix === "lookupDomain" && (m = new RegExp(`contains unknown: (${NAME})$`).exec(message))) {
       // the domain lookup reports no "not found": its fix field is the shape
       ask(m[1].toUpperCase(), "doma", finding);
+    } else if ((m = new RegExp(`^(${NAME}) unknown$`).exec(message)) !== null) {
+      // bed run 5's shape: a type named bare-unknown (`X unknown`, seen in
+      // an .intf.abap file) -- the kind is the name's prefix
+      ask(m[1].toUpperCase(), unknownKind(m[1]), finding);
+    } else if ((m = new RegExp(`^Friend class (${NAME}) does not exist$`).exec(message))) {
+      // its check_syntax neighbour: a FRIENDS declaration naming a class
+      // the tree does not have
+      ask(m[1].toUpperCase(), "clas", finding);
     } else if ((m = new RegExp(`^(${NAME}) not found$`).exec(message)) !== null) {
       // the bare shape: a type name alone (`X not found`), the way a missing
       // table type surfaces
@@ -517,17 +548,18 @@ function filteredDump(root, dump, without) {
 // merge handled carries the name again -- the generator wrote it at last).
 // A tool that does not know --from-dump yet (PR #926) is refused by its own
 // "unknown option", and the message says what it needs.
-function mergeInputs(root, dump, system, env, say) {
+function mergeInputs(root, dump, layersDirs, env, say) {
   const steps = [
     ["hana-ddic-gen.mjs", ["--from-dump", dump, "--out", join(root, "gen", "hana-ddic")]],
-    ["hana-src-gen.mjs", ["--from-dump", "--dump", dump, "--system", system, "--out", join(root, "gen", "hana-src")]],
+    // the union of every dump so far: ALL the layers dirs, later wins per object
+    ["hana-src-gen.mjs", [...layersDirs.flatMap((d) => ["--layers", d]), "--out", join(root, "gen", "hana-src")]],
   ];
   const refused = new Map();
   for (const [script, argv] of steps) {
     const [command, ...args] = toolCommandIn(env, join(TOOLS, script), argv);
     let stepDump = dump;
     for (let attempt = 0; ; attempt++) {
-      say(`merge: ${script} --from-dump ${stepDump}`);
+      say(`merge: ${script} ${script === "hana-src-gen.mjs" ? `--layers ${layersDirs.length} layer dir(s) (the union so far)` : `--from-dump ${stepDump}`}`);
       const child = spawnSync(command, args.map((a) => (a === dump ? stepDump : a)), {cwd: root, env, stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64 * 1024 * 1024});
       if (child.status === 0) break;
       const tail = [child.stdout, child.stderr].filter(Boolean).join("\n").slice(-2000);
@@ -706,6 +738,13 @@ export async function run(args = process.argv.slice(2), options = {}) {
     dump = resolve(root, state.dump);
   }
 
+  // every merge converts its dump first: no converter configured, no walk
+  // (a pending round without the dumper returned above -- printing the
+  // by-hand command needs no converter)
+  if (env.OSD_HANA_CONVERTER === undefined || env.OSD_HANA_CONVERTER === "") {
+    throw new Error("hana-closure: OSD_HANA_CONVERTER must name the dump->layers converter (a path to dump-to-layers.mjs): every merge converts its dump into .local/hana-closure/layers-<NNN> first");
+  }
+
   // the dumper budget of this run; a resumed run has its own
   let rounds = 0;
   for (;;) {
@@ -738,7 +777,11 @@ export async function run(args = process.argv.slice(2), options = {}) {
       // no manifest, no closure: the findings are the only word
     }
 
-    const {refused} = mergeInputs(root, dump, system, env, say);
+    // the layers dirs of the walk so far, this iteration's dump converted
+    // first when new (round 4's accumulation; the loop saves state.layers)
+    const layersDirs = ensureLayers({root, state, dump, system, env, say});
+    saveState(out, state);
+    const {refused} = mergeInputs(root, dump, layersDirs, env, say);
     // the merge refusals join the state's (the gap stands while the object
     // is in no build) and leave when a dump the merge handled carries the
     // name again without a refusal -- the generator wrote it at last; a
@@ -759,6 +802,16 @@ export async function run(args = process.argv.slice(2), options = {}) {
       for (const name of handled) delete state.refused[name];
       saveState(out, state);
     }
+
+    // the accumulation's control (round 4): the island's object count never
+    // shrinks between iterations -- a shrink is a merge that lost objects,
+    // and a fixed point over it is false (bed run 5's)
+    const objects = islandObjectCount(root);
+    if (state.islandObjects !== undefined && objects.total < state.islandObjects.total) {
+      throw new Error(`hana-closure: the island shrank: ${state.islandObjects.total} -> ${objects.total} object(s) (classes+interfaces+tables, iteration ${state.iteration})`);
+    }
+    state.islandObjects = objects;
+    saveState(out, state);
 
     // only the island's findings are the service's: the validation reports
     // bare file names, so the scope is the island's basename set, and a
@@ -882,10 +935,15 @@ export async function run(args = process.argv.slice(2), options = {}) {
     // recomputed every pass: a gap that a later round resolves leaves the
     // file on its own
     writeFileSync(join(out, "closure-gaps.json"), JSON.stringify({gaps: [...gaps, ...refusedGaps]}, null, 2) + "\n");
-    say(`iteration ${state.iteration}: ${fresh.length} new name(s), ${gaps.length} gap(s), ${unscoped} outside the island (not asked), ${refusedGaps.length} merge-refusal gap(s), ${cascades} cascade finding(s) skipped, ${unclassified.length} unclassified${stubUnresolved === true ? `, ${deferredOnly.length} deferred by stubs, ${stubRecords.length} stubbed method(s)` : ""}`);
+    say(`iteration ${state.iteration}: ${fresh.length} new name(s), ${gaps.length} gap(s), ${unscoped} outside the island (not asked), ${refusedGaps.length} merge-refusal gap(s), ${cascades} cascade finding(s) skipped, ${unclassified.length} unclassified${stubUnresolved === true ? `, ${deferredOnly.length} deferred by stubs, ${stubRecords.length} stubbed method(s)` : ""}, ${objects.total} island object(s)`);
     for (const line of unclassified) say(`unclassified: ${line}`);
 
     if (fresh.length === 0) {
+      // the positive control (round 4): a validation with no findings and a
+      // broken build was bed run 4's false fixed point -- the build's own
+      // exit must agree before the declaration
+      const build = buildCheck({root, env, say});
+      if (build.findings > 0) say(`build: exited ${build.status} with ${build.findings} finding(s) -- exit 1 with findings only, the fixed point stands`);
       say(`fixed point: every unresolved name has been asked and nothing new is named; ${gaps.length + refusedGaps.length} gap(s) -> ${join(out, "closure-gaps.json")}`);
       return {stopped: "fixed-point", iteration: state.iteration, gaps: [...gaps, ...refusedGaps], cascades, unclassified, unscoped,
         ...(stubUnresolved === true ? {stubs: stubRecords, stubRounds} : {})};

@@ -5,6 +5,7 @@ import {basename, join} from "node:path";
 import {fileURLToPath} from "node:url";
 import {classifyFindings, dumperCommand, islandBasenames, parseEnvFile, parseFindings, requestFor, run, tadirKinds} from "../tools/hana-closure.mjs";
 import {methodBlocks, stubBodies, stubNamesText} from "../tools/hana-closure-stubs.mjs";
+import {buildVerdict, islandObjectCount} from "../tools/hana-closure-merge.mjs";
 
 const REPO = fileURLToPath(new URL("..", import.meta.url));
 
@@ -19,7 +20,10 @@ const REPO = fileURLToPath(new URL("..", import.meta.url));
 // OSD_SELF (the real hana-ddic-gen --from-dump and hana-src-gen --from-dump
 // arrive with PR #926; the loop only owns their argv), and the validate step
 // is the transpiler's own validation over a scratch tree whose node_modules
-// is a symlink to this checkout's. No HANA is reachable from CI. Names are
+// is a symlink to this checkout's, the converter the loop starts per dump is
+// a fixture script (OSD_HANA_CONVERTER) that copies staged layers per dump,
+// and the fixed point's positive control (the build) is a fake-host mode. No
+// HANA is reachable from CI. Names are
 // ZOSD_H5C_* fixtures; a real service's names live in the private findings
 // log and its leak list.
 describe("hana-closure: the dependency closure, by iteration", () => {
@@ -58,6 +62,12 @@ describe("hana-closure: the dependency closure, by iteration", () => {
       `check_syntax, "callcontrol" not found, findTop, #zosd#gws_h5c_shexits.fugr.#zosd#gws_h5c_exit.abap:31`,
       `check_syntax, "record_tab" not found, Target, #zosd#gws_h5c_shexits.fugr.#zosd#gws_h5c_exit.abap:32`,
       `check_syntax, RAISE, unknown class zcx_h5c_late, zcl_h5c_app.clas.abap:33`,
+      // bed run 5's shapes: a bare `X unknown` type (the kind is the name's
+      // prefix), and a friend class the tree does not have
+      `unknown_types, ZCX_H5C_API_EXCEPTION unknown, if_h5c_message_buffer.intf.abap:14`,
+      `unknown_types, ZIF_H5C_ENGINE unknown, if_h5c_message_buffer.intf.abap:19`,
+      `unknown_types, ZOSD_H5C_PARAMS unknown, if_h5c_message_buffer.intf.abap:27`,
+      `check_syntax, Friend class zcl_h5c_friend does not exist, cm_h5c_root.clas.abap:7`,
       // not findings at all
       `osd-build: transpile`,
       ``,
@@ -79,6 +89,10 @@ describe("hana-closure: the dependency closure, by iteration", () => {
       ["ZOSD_H5C_PARAMS_TAB", "ddic"],
       ["/ZOSD/H5C_T_NAVI", "ddic"],
       ["ZCX_H5C_LATE", "clas"],
+      ["ZCX_H5C_API_EXCEPTION", "clas"],
+      ["ZIF_H5C_ENGINE", "intf"],
+      ["ZOSD_H5C_PARAMS", "ddic"],
+      ["ZCL_H5C_FRIEND", "clas"],
     ];
     expect(names.map((n) => [n.name, n.kind]), "every name, classified, in first-named order").to.deep.equal(want);
     // the first finding that named it rides along -- the gaps file quotes it
@@ -207,6 +221,50 @@ describe("hana-closure: the dependency closure, by iteration", () => {
     } finally {
       rmSync(root, {recursive: true, force: true});
     }
+  });
+
+  it("counts the island's classes, interfaces and tables -- objects, not files", () => {
+    const root = mkdtempSync(join(tmpdir(), "hana-closure-count-"));
+    try {
+      mkdirSync(join(root, "gen", "hana-src", "001-h5c", "src"), {recursive: true});
+      mkdirSync(join(root, "gen", "hana-ddic"), {recursive: true});
+      for (const f of ["zcl_h5c_one.clas.abap", "zcl_h5c_one.clas.xml", "zcl_h5c_one.clas.locals_imp.abap",
+        "zcl_h5c_two.clas.abap", "if_h5c_three.intf.abap", "if_h5c_three.intf.xml", "zcl_h5c_prog.prog.abap"]) {
+        writeFileSync(join(root, "gen", "hana-src", "001-h5c", "src", f), "x");
+      }
+      for (const f of ["zosd_h5c_head.tabl.xml", "zosd_h5c_el.dtel.xml", "zosd_h5c_head2.tabl.xml"]) {
+        writeFileSync(join(root, "gen", "hana-ddic", f), "x");
+      }
+      // the class's locals include and xml are the same object; dtel and prog
+      // are not in the count (classes+interfaces+tables, the shrink assert's
+      // unit)
+      expect(islandObjectCount(root)).to.deep.equal({clas: 2, intf: 1, tabl: 2, total: 5});
+      expect(islandObjectCount(join(root, "nowhere"))).to.deep.equal({clas: 0, intf: 0, tabl: 0, total: 0});
+    } finally {
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
+
+  it("the positive control: a build that fails with no findings refuses the fixed point", () => {
+    // bed run 4's control: osd-build FAILED on a generator step with zero
+    // transpiler findings -- the shape the loop must never read as convergence
+    const quiet = [
+      "osd-build: osd-transpiler.mjs",
+      "osd-build: FAILED: node --import tools/osd-generator-reads.mjs tools/cds2ddic.mjs exited 1",
+      "osd-build: live generation untouched",
+    ].join("\n");
+    let quietThrow;
+    try {
+      buildVerdict(1, quiet);
+      expect.fail("the quiet failure was accepted");
+    } catch (error) {
+      quietThrow = error;
+    }
+    expect(quietThrow.message, "non-zero exit, zero findings: abort with the FAILED line").to.include("not a fixed point");
+    expect(quietThrow.message).to.include("FAILED: node --import");
+    expect(buildVerdict(0, "")).to.deep.equal({status: 0, findings: 0});
+    expect(buildVerdict(1, `check_syntax, Database table or view "zosd_h5c_head" not found, zcl_h5c_loop.clas.abap:10`),
+      "exit 1 with findings only: the walk's ordinary material").to.deep.equal({status: 1, findings: 1});
   });
 
   // ------------------------------------------------- lazy activation ----
@@ -457,9 +515,9 @@ describe("hana-closure: the dependency closure, by iteration", () => {
   // same input-folder shape (the generated DDIC first, the tenant sources,
   // then src), no libraries, and this checkout's transpiler through a
   // symlinked node_modules. The loop's fixture class is staged OUTSIDE every
-  // input folder; the fake host lays it into gen/hana-src/001-h5c/src/ on
-  // each source merge, the way the real hana-src-gen --from-dump lays the
-  // dumped sources -- so the mixed validate() output names files of the
+  // input folder; the fake converter lays it into gen/hana-src/000-h5c-main/src/
+  // on each merge, the way the real converter+hana-src-gen lay the dumped
+  // sources -- so the mixed validate() output names files of the
   // island and of src/, and only the island's are classified.
   const scratch = (source = CLAS_SOURCE, name = "zcl_h5c_loop", opts = {}) => {
     const root = mkdtempSync(join(tmpdir(), "hana-closure-root-"));
@@ -563,15 +621,23 @@ process.exit(0);
 `;
 
   // the fake host behind OSD_SELF: the argv of hana-ddic-gen --from-dump and
-  // hana-src-gen --from-dump is what the loop owns (the real tools arrive
-  // with PR #926), so the fake asserts it and emulates the merge. The DDIC
-  // half writes the same XML the real mapper writes -- it has to, the
-  // transpiler must resolve it for the fixed point. With H5C_GROW=1 the
-  // second source merge drops one more unresolved table into the tree, so
-  // the closure keeps growing and a cap has something to stop.
+  // hana-src-gen --layers is what the loop owns (the real tools' write modes
+  // are PR #926's and this tree's), so the fake asserts it and emulates the
+  // merge. The DDIC half writes the same XML the real mapper writes -- it
+  // has to, the transpiler must resolve it for the fixed point -- and never
+  // clears the folder, the way the real --from-dump writes per-file overlays.
+  // The source half lays the UNION of the --layers dirs (later wins per
+  // file), the way the real hana-src-gen does; H5C_SHRINK=1 makes it
+  // reproduce the round-3 bug (only the last dump's layers) for the
+  // shrink-assert test. H5C_GROW=1 drops one more unresolved table into the
+  // second merge, so the closure keeps growing and a cap has something to
+  // stop. tool osd-build.mjs is the fixed point's positive control: ok by
+  // default, H5C_BUILD=fail-quiet is the generator crash bed run 4 saw
+  // (non-zero exit, zero findings), H5C_BUILD=fail-findings exits non-zero
+  // carrying a finding line.
   const fakeHostSource = () => `#!/usr/bin/env node
-import {appendFileSync, copyFileSync, mkdirSync, readFileSync, writeFileSync} from "node:fs";
-import {basename, join} from "node:path";
+import {appendFileSync, copyFileSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync} from "node:fs";
+import {join} from "node:path";
 import {ddicFields, tablXml} from ${JSON.stringify(join(REPO, "tools", "hana-ddic-map.mjs"))};
 const args = process.argv.slice(2);
 const tool = args[1];
@@ -606,23 +672,31 @@ if (tool === "hana-ddic-gen.mjs") {
   process.exit(0);
 }
 if (tool === "hana-src-gen.mjs") {
+  // the loop merges LAYERS (the union of every dump so far), never one dump:
+  // --layers <dir>... --out <dir>, the argv tools/hana-src-gen.mjs takes
   const out = at("--out");
+  const dirs = [];
+  for (let i = 0; i < rest.length; i++) if (rest[i] === "--layers") dirs.push(rest[i + 1]);
+  if (dirs.length === 0) {
+    console.error("fake host: the loop must merge layers (--layers), not a dump");
+    process.exit(2);
+  }
+  const shown = process.env.H5C_SHRINK === "1" ? [dirs[dirs.length - 1]] : dirs;
+  rmSync(out, {recursive: true, force: true});
   mkdirSync(out, {recursive: true});
-  writeFileSync(join(out, "manifest.json"), JSON.stringify({dump: {manifest_sha256: "h5c_sha"}}) + "\\n");
-  // the merge lays the dumped sources: here, the staged fixture class into
-  // an island layer, so its findings' file is under gen/hana-src/**
-  const island = process.env.H5C_ISLAND_SRC;
-  if (island !== undefined && island !== "") {
-    const layer = join(out, "001-h5c", "src");
-    mkdirSync(layer, {recursive: true});
-    copyFileSync(island, join(layer, basename(island)));
+  for (const dir of shown) {
+    const plan = JSON.parse(readFileSync(join(dir, "plan.json"), "utf8"));
+    for (const layer of plan.layers ?? []) {
+      const target = join(out, String(layer.order).padStart(3, "0") + "-" + layer.name);
+      mkdirSync(join(target, "src"), {recursive: true});
+      copyFileSync(join(dir, layer.folder, ".abapgit.xml"), join(target, ".abapgit.xml"));
+      for (const file of readdirSync(join(dir, layer.folder, "src"))) {
+        copyFileSync(join(dir, layer.folder, "src", file), join(target, "src", file));
+      }
+    }
   }
-  const island2 = process.env.H5C_ISLAND_SRC2;
-  if (island2 !== undefined && island2 !== "") {
-    const layer = join(out, "001-h5c", "src");
-    mkdirSync(layer, {recursive: true});
-    copyFileSync(island2, join(layer, basename(island2)));
-  }
+  const last = JSON.parse(readFileSync(join(dirs[dirs.length - 1], "plan.json"), "utf8"));
+  writeFileSync(join(out, "manifest.json"), JSON.stringify({dump: last.dump ?? {manifest_sha256: "h5c_sha"}}) + "\\n");
   if (process.env.H5C_GROW === "1") {
     const counter = join(out, "..", "host-invocations");
     const seen = (() => { try { return Number(readFileSync(counter, "utf8")); } catch { return 0; } })();
@@ -646,28 +720,103 @@ if (tool === "hana-src-gen.mjs") {
   }
   process.exit(0);
 }
+if (tool === "osd-build.mjs") {
+  const mode = process.env.H5C_BUILD ?? "ok";
+  if (mode === "fail-quiet") {
+    console.log("osd-build: osd-transpiler.mjs");
+    console.log("osd-build: FAILED: node --import tools/osd-generator-reads.mjs tools/cds2ddic.mjs exited 1");
+    console.log("osd-build: live generation untouched");
+    process.exit(1);
+  }
+  if (mode === "fail-findings") {
+    console.log('check_syntax, Database table or view "zosd_h5c_head" not found, zcl_h5c_loop.clas.abap:10');
+    process.exit(1);
+  }
+  process.exit(0);
+}
 process.exit(2);
 `;
 
-  const envFor = (root, opts = {}) => ({
-    ...process.env,
-    OSD_SELF: JSON.stringify([process.execPath, join(root, "fake-host.mjs")]),
-    H5C_HOST_LOG: join(root, "host-log.jsonl"),
-    H5C_ISLAND_SRC: join(root, "island", opts.island ?? "zcl_h5c_loop.clas.abap"),
-    ...(opts.island2Name !== undefined ? {H5C_ISLAND_SRC2: join(root, "island", opts.island2Name)} : {}),
-    ...(opts.grow ? {H5C_GROW: "1"} : {}),
-    ...(opts.noFromDump ? {H5C_NO_FROM_DUMP: "1"} : {}),
-    ...(opts.missingKinds !== undefined ? {H5C_MISSING_KINDS: opts.missingKinds} : {}),
-    ...(opts.refuse !== undefined ? {H5C_REFUSE: opts.refuse} : {}),
-    ...(opts.dumper === false ? {OSD_HANA_DUMP_ENV: join(root, "dump.env")} : {
-      OSD_HANA_DUMPER: join(root, "fake-dumper.mjs"),
-      OSD_HANA_DUMP_ENV: join(root, "dump.env"),
-      H5C_RECORD: join(root, "dumper-log.jsonl"),
-    }),
-  });
+  // the fake converter the loop starts per dump (OSD_HANA_CONVERTER, an
+  // external script like the real dump-to-layers.mjs): it copies the staged
+  // converter output of the dump it was handed
+  const fakeConverterSource = () => `#!/usr/bin/env node
+import {cpSync, rmSync} from "node:fs";
+const args = process.argv.slice(2);
+const at = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : undefined; };
+const map = JSON.parse(process.env.H5C_CONV_MAP ?? "{}");
+const source = map[args[0]];
+if (source === undefined) {
+  console.error("no staged layers for " + args[0]);
+  process.exit(3);
+}
+rmSync(at("--out"), {recursive: true, force: true});
+cpSync(source, at("--out"), {recursive: true});
+process.exit(0);
+`;
+
+  // a staged converter output (what the fake converter copies into --out):
+  // plan.json with one layer, .abapgit.xml, src/ with the files
+  const ABAPGIT_XML = `<?xml version="1.0" encoding="utf-8"?>
+<asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
+ <asx:values>
+  <DATA><MASTER_LANGUAGE>E</MASTER_LANGUAGE><STARTING_FOLDER>/src/</STARTING_FOLDER><FOLDER_LOGIC>PREFIX</FOLDER_LOGIC></DATA>
+ </asx:values>
+</asx:abap>
+`;
+  const converterOut = (dir, files = []) => {
+    mkdirSync(join(dir, "layers", "h5c-main", "src"), {recursive: true});
+    writeFileSync(join(dir, "layers", "h5c-main", ".abapgit.xml"), ABAPGIT_XML);
+    writeFileSync(join(dir, "plan.json"), JSON.stringify({
+      schema: 1, system: "h5c",
+      dump: {manifest_sha256: "h5c_sha", provenance: "the h5c fixtures' own test bed"},
+      layers: [{name: "h5c-main", package: "$ZOSD_H5C", folder: "layers/h5c-main", order: 0,
+        objects: files.length === 0 ? {} : {CLAS: files.length}, requires: [], requires_outside: [],
+        closure: {unresolved: 0, items: []}}],
+      cycles: [], no_source: {}, orphans: [], errors: [],
+      empty_layers: {count: 0, names: []}, unpackaged_groups: 0,
+    }, null, 2) + "\n");
+    for (const [name, from] of files) copyFileSync(from, join(dir, "layers", "h5c-main", "src", name));
+    return dir;
+  };
+
+  const envFor = (root, opts = {}) => {
+    // every dump's layers are staged here, and the fake converter copies the
+    // staged tree of the dump it was handed (H5C_CONV_MAP keys the dump
+    // paths): dump-001 carries the island class(es), the dumper's dumps are
+    // empty unless opts.convBFiles names more
+    const island = opts.island ?? "zcl_h5c_loop.clas.abap";
+    const filesA = [[island, join(root, "island", island)]];
+    if (opts.island2Name !== undefined) filesA.push([opts.island2Name, join(root, "island", opts.island2Name)]);
+    const filesB = (opts.convBFiles ?? []).map((name) => [name, join(root, "island", name)]);
+    const convMap = JSON.stringify({
+      [join(root, "dump-001")]: converterOut(join(root, "conv-a"), filesA),
+      [dumpDirOf(root, 2)]: converterOut(join(root, "conv-b"), filesB),
+      [dumpDirOf(root, 3)]: converterOut(join(root, "conv-c"), filesB),
+    });
+    return {
+      ...process.env,
+      OSD_SELF: JSON.stringify([process.execPath, join(root, "fake-host.mjs")]),
+      H5C_HOST_LOG: join(root, "host-log.jsonl"),
+      OSD_HANA_CONVERTER: join(root, "fake-converter.mjs"),
+      H5C_CONV_MAP: convMap,
+      ...(opts.shrink ? {H5C_SHRINK: "1"} : {}),
+      ...(opts.build !== undefined ? {H5C_BUILD: opts.build} : {}),
+      ...(opts.grow ? {H5C_GROW: "1"} : {}),
+      ...(opts.noFromDump ? {H5C_NO_FROM_DUMP: "1"} : {}),
+      ...(opts.missingKinds !== undefined ? {H5C_MISSING_KINDS: opts.missingKinds} : {}),
+      ...(opts.refuse !== undefined ? {H5C_REFUSE: opts.refuse} : {}),
+      ...(opts.dumper === false ? {OSD_HANA_DUMP_ENV: join(root, "dump.env")} : {
+        OSD_HANA_DUMPER: join(root, "fake-dumper.mjs"),
+        OSD_HANA_DUMP_ENV: join(root, "dump.env"),
+        H5C_RECORD: join(root, "dumper-log.jsonl"),
+      }),
+    };
+  };
 
   const writeFakes = (root, env) => {
     writeFileSync(join(root, "fake-host.mjs"), fakeHostSource());
+    writeFileSync(join(root, "fake-converter.mjs"), fakeConverterSource());
     writeFileSync(join(root, "fake-dumper.mjs"), fakeDumperSource());
     chmodSync(join(root, "fake-dumper.mjs"), 0o755);
     writeFileSync(join(root, "dump.env"), [
@@ -686,6 +835,7 @@ process.exit(2);
   const hostCalls = (root) => readFileSync(join(root, "host-log.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
   const outFile = (root, name) => join(root, "gen", "hana-closure", name);
   const dumpDirOf = (root, n) => join(root, ".local", "hana-closure", `dump-${String(n).padStart(3, "0")}`);
+  const layersDirOf = (root, n) => join(root, ".local", "hana-closure", `layers-${String(n).padStart(3, "0")}`);
 
   it("runs to the fixed point: ask, dump through the fake, merge, and the name resolves", async function () {
     this.timeout(180000);
@@ -743,14 +893,17 @@ process.exit(2);
       expect(calls[0].argv.join(" "), "no env-file value on the spawned argv").to.not.include("h5c_secret");
       expect(calls[0].argv.join(" ")).to.not.include("--name");
 
-      // both merges ran through the host dispatch, twice (two passes)
+      // both merges ran through the host dispatch, twice (two passes), and
+      // the fixed point's positive control ran the build through it too
       const merges = hostCalls(root);
       expect(merges.map((m) => m.tool)).to.deep.equal(
-        ["hana-ddic-gen.mjs", "hana-src-gen.mjs", "hana-ddic-gen.mjs", "hana-src-gen.mjs"]);
+        ["hana-ddic-gen.mjs", "hana-src-gen.mjs", "hana-ddic-gen.mjs", "hana-src-gen.mjs", "osd-build.mjs"]);
       expect(merges[0].rest).to.deep.equal(["--from-dump", dump, "--out", join(root, "gen", "hana-ddic")]);
-      expect(merges[1].rest).to.deep.equal(
-        ["--from-dump", "--dump", dump, "--system", "h5c", "--out", join(root, "gen", "hana-src")]);
+      expect(merges[1].rest, "the first pass lays the seed dump's layers").to.deep.equal(
+        ["--layers", layersDirOf(root, 1), "--out", join(root, "gen", "hana-src")]);
       expect(merges[2].rest[1], "the second pass merges the dump the dumper wrote").to.equal(dumpDirOf(root, 2));
+      expect(merges[3].rest, "the second pass lays the union of both dumps' layers").to.deep.equal(
+        ["--layers", layersDirOf(root, 1), "--layers", layersDirOf(root, 2), "--out", join(root, "gen", "hana-src")]);
 
       // resolved, so: no gaps, no third round
       expect(JSON.parse(readFileSync(outFile(root, "closure-gaps.json"), "utf8")).gaps).to.deep.equal([]);
@@ -1022,7 +1175,7 @@ process.exit(2);
       expect(state.asked.ZOSD_H5C_HEAD, "the deferred name was never asked").to.equal(undefined);
 
       // the stub is in the island file, byte-checked around the parsed block
-      const stubbedSource = readFileSync(join(root, "gen", "hana-src", "001-h5c", "src", "zcl_h5c_stub.clas.abap"), "utf8");
+      const stubbedSource = readFileSync(join(root, "gen", "hana-src", "000-h5c-main", "src", "zcl_h5c_stub.clas.abap"), "utf8");
       const before = CLAS_STUB_SOURCE.split("\n");
       const after = stubbedSource.split("\n");
       expect(after.slice(0, 10), "everything before the body").to.deep.equal(before.slice(0, 10));
@@ -1035,7 +1188,7 @@ process.exit(2);
       // design: the island grows only on a real miss
       const record = JSON.parse(readFileSync(outFile(root, "closure-stubs.json"), "utf8"));
       expect(record).to.have.lengthOf(1);
-      expect(record[0].file).to.equal(join("gen", "hana-src", "001-h5c", "src", "zcl_h5c_stub.clas.abap"));
+      expect(record[0].file).to.equal(join("gen", "hana-src", "000-h5c-main", "src", "zcl_h5c_stub.clas.abap"));
       expect(record[0].class).to.equal("ZCL_H5C_STUB");
       expect(record[0].method).to.equal("TWO");
       expect(record[0].missing).to.deep.equal(["ZOSD_H5C_HEAD"]);
@@ -1069,7 +1222,7 @@ process.exit(2);
       const gaps = JSON.parse(readFileSync(outFile(root, "closure-gaps.json"), "utf8")).gaps;
       expect(gaps.map((g) => g.name)).to.include("ZCX_OSD_NOT_ACTIVATED");
       expect(gaps.map((g) => g.name), "the stubbed name is not a gap").to.not.include("ZOSD_H5C_HEAD");
-      const stubbedSource = readFileSync(join(root, "gen", "hana-src", "001-h5c", "src", "zcl_h5c_stub.clas.abap"), "utf8");
+      const stubbedSource = readFileSync(join(root, "gen", "hana-src", "000-h5c-main", "src", "zcl_h5c_stub.clas.abap"), "utf8");
       expect(stubbedSource).to.include(`RAISE EXCEPTION TYPE zcx_osd_not_activated EXPORTING missing = 'ZOSD_H5C_HEAD'.`);
     } finally {
       rmSync(root, {recursive: true, force: true});
@@ -1089,9 +1242,112 @@ process.exit(2);
       expect(Object.keys(request), "no deferred key without the flag").to.not.include("deferred");
       expect([...request.requested.TABL].sort()).to.deep.equal(["ZOSD_H5C_DEF", "ZOSD_H5C_HEAD"]);
       expect(existsSync(outFile(root, "closure-stubs.json")), "no stubs file without the flag").to.equal(false);
-      const islandFile = readFileSync(join(root, "gen", "hana-src", "001-h5c", "src", "zcl_h5c_stub.clas.abap"), "utf8");
+      const islandFile = readFileSync(join(root, "gen", "hana-src", "000-h5c-main", "src", "zcl_h5c_stub.clas.abap"), "utf8");
       expect(islandFile).to.not.include("RAISE EXCEPTION");
       expect(said.some((l) => l.startsWith("stub ")), "no stub line without the flag").to.equal(false);
+    } finally {
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
+
+  it("the island accumulates: a second dump that lacks the first's objects cannot erase them", async function () {
+    this.timeout(300000);
+    // FIX-4 (bed run 5): each hana-src-gen --from-dump REPLACED gen/hana-src,
+    // so iteration 2 validated a tree without the service and the fixed point
+    // was false. The island is the UNION of the seed dump and every dump so
+    // far, later wins per object: the fake converter stages each dump's
+    // layers, the fake host lays the union, and the first dump's class must
+    // still be in the island at the fixed point.
+    const SECOND_SOURCE = [
+      `CLASS zcl_h5c_second DEFINITION PUBLIC FINAL CREATE PUBLIC.`,
+      `  PUBLIC SECTION.`,
+      `    METHODS run_it.`,
+      `ENDCLASS.`,
+      `CLASS zcl_h5c_second IMPLEMENTATION.`,
+      `  METHOD run_it.`,
+      `    SELECT SINGLE * FROM zosd_h5c_head INTO @DATA(ls_h5c_second) ##SUBRC_OK.`,
+      `  ENDMETHOD.`,
+      `ENDCLASS.`,
+      ``,
+    ].join("\n");
+    const root = scratch(CLAS_SOURCE, "zcl_h5c_loop", {island2Name: "zcl_h5c_second.clas.abap", island2Source: SECOND_SOURCE});
+    mkdirSync(join(root, ".git"));
+    fixtureDump(join(root, "dump-001"));
+    const env = writeFakes(root, envFor(root, {island: "zcl_h5c_loop.clas.abap", convBFiles: ["zcl_h5c_second.clas.abap"]}));
+    const said = [];
+    try {
+      const result = await run(["--dump", join(root, "dump-001"), "--system", "h5c"], {root, env, say: (m) => said.push(m)});
+      expect(result.stopped).to.equal("fixed-point");
+      expect(result.iteration).to.equal(2);
+      const island = join(root, "gen", "hana-src", "000-h5c-main", "src");
+      expect(existsSync(join(island, "zcl_h5c_loop.clas.abap")), "the first dump's class survived the second merge").to.equal(true);
+      expect(existsSync(join(island, "zcl_h5c_second.clas.abap")), "the second dump's class is there").to.equal(true);
+      expect(existsSync(join(root, "gen", "hana-ddic", "zosd_h5c_head.tabl.xml")), "the DDIC accumulated (per-file overlays)").to.equal(true);
+      // the counts are on the iteration lines and never went down
+      expect(said.filter((l) => /island object/.test(l))).to.have.lengthOf(2);
+      expect(said.some((l) => l.includes("iteration 1:") && l.includes("1 island object(s)"))).to.equal(true);
+      expect(said.some((l) => l.includes("iteration 2:") && l.includes("3 island object(s)"))).to.equal(true);
+      // the state remembers the layers dirs per dump, and the object count
+      const state = JSON.parse(readFileSync(outFile(root, "state.json"), "utf8"));
+      expect(state.layers).to.have.lengthOf(2);
+      expect(state.islandObjects).to.deep.equal({clas: 2, intf: 0, tabl: 1, total: 3});
+    } finally {
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
+
+  it("a shrinking island aborts the run with both counts", async function () {
+    this.timeout(300000);
+    // the assert behind the accumulation: if the merge ever loses objects
+    // (H5C_SHRINK=1 makes the fake host write only the last dump's layers --
+    // the round-3 bug, on demand), the run dies instead of "converging"
+    const root = scratch(CLAS_SOURCE, "zcl_h5c_loop", {island2Name: "zcl_h5c_def.clas.abap", island2Source: CLAS_DEF_SOURCE});
+    fixtureDump(join(root, "dump-001"));
+    const env = writeFakes(root, envFor(root, {island: "zcl_h5c_loop.clas.abap", island2Name: "zcl_h5c_def.clas.abap", shrink: true, missingKinds: "TABL"}));
+    try {
+      try {
+        await run(["--dump", join(root, "dump-001"), "--system", "h5c"], {root, env});
+        expect.fail("the shrinking island was not caught");
+      } catch (error) {
+        expect(error.message).to.include("the island shrank: 2 -> 0");
+        expect(error.message).to.include("classes+interfaces+tables");
+      }
+    } finally {
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
+
+  it("a build that fails with no findings is not a fixed point", async function () {
+    this.timeout(300000);
+    // bed run 4's control: osd-build FAILED on a generator step with zero
+    // transpiler findings, and the loop read that as convergence. The fixed
+    // point now needs the build's own exit code.
+    const root = scratch();
+    fixtureDump(join(root, "dump-001"));
+    const env = writeFakes(root, envFor(root, {build: "fail-quiet"}));
+    try {
+      try {
+        await run(["--dump", join(root, "dump-001"), "--system", "h5c"], {root, env});
+        expect.fail("the empty validate was trusted as a fixed point");
+      } catch (error) {
+        expect(error.message).to.include("not a fixed point");
+        expect(error.message).to.include("FAILED: node --import");
+      }
+    } finally {
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
+
+  it("a failed build that still carries findings leaves the fixed point standing", async function () {
+    this.timeout(300000);
+    const root = scratch();
+    fixtureDump(join(root, "dump-001"));
+    const env = writeFakes(root, envFor(root, {build: "fail-findings"}));
+    const said = [];
+    try {
+      const result = await run(["--dump", join(root, "dump-001"), "--system", "h5c"], {root, env, say: (m) => said.push(m)});
+      expect(result.stopped, "exit 1 with findings only: the walk's ordinary material").to.equal("fixed-point");
+      expect(said.some((l) => l.startsWith("build: exited 1 with 1 finding(s)"))).to.equal(true);
     } finally {
       rmSync(root, {recursive: true, force: true});
     }
