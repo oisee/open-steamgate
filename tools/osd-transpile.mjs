@@ -288,16 +288,7 @@ export function outputFiles(output, config, outputFolder, files) {
     out.push({path: join(outputFolder, "index.mjs"), contents: output.unitTestScript});
     out.push({path: join(outputFolder, "_unit_open.mjs"), contents: output.unitTestScriptOpen});
   }
-  // The generated file owns globalThis.abap (its line 3 creates the
-  // runtime), and initializeABAP is exported for boot RE-runs: every
-  // in-process boot calls it again (tools/osd-data.mjs, test/start.mjs, the
-  // job suites). Between boots another suite's cleanup may have left the
-  // global unset, and the setup then died reading `abap.context` of
-  // undefined -- the suites shards' `.context` failures, fix round 4. A
-  // re-run recreates what the file owns instead of dying.
-  out.push({path: join(outputFolder, "init.mjs"), contents: output.initializationScript +
-    `\nconst __initializeABAP = initializeABAP;\n` +
-    `initializeABAP = async () => { globalThis.abap ??= new runtime.ABAP(); await __initializeABAP(); };\n`});
+  out.push({path: join(outputFolder, "init.mjs"), contents: output.initializationScript});
   out.push({path: join(outputFolder, "_init.mjs"), contents: output.initializationScript2});
   out.push({path: join(outputFolder, "_top.mjs"), contents: `import runtime from "@abaplint/runtime";\nglobalThis.abap = new runtime.ABAP();`});
   return out;
