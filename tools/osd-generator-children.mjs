@@ -10,6 +10,8 @@
 import cp from "node:child_process";
 import {randomUUID} from "node:crypto";
 import {basename, resolve} from "node:path";
+import {fileURLToPath} from "node:url";
+import {realpathSync as liveRealpath} from "node:fs";
 import wt from "node:worker_threads";
 import {GIT_SAFE, devChildEnv, isolatedGit} from "./osd-env.mjs";
 
@@ -29,6 +31,34 @@ export function gitMetadata(args) {
   // only ls-files takes paths, after its "--"
   if (pattern[0] !== "ls-files" ? tail.length !== 0 : tail.some(word => typeof word !== "string" || word.startsWith("-"))) return undefined;
   return {dir, paths: pattern[0] === "ls-files" ? tail : []};
+}
+
+// Preloads a node child runs: --require modules run before any --import, so
+// one ahead of the recorder reads unrecorded. Any preload other than the
+// recorder itself -- in node's own argv, NODE_OPTIONS or a fork's execArgv --
+// makes the child incomplete. Returns the preloads found.
+// the unhooked one: syncBuiltinESMExports later rebinds the named export
+const realpathSync = liveRealpath;
+// ESM loads a module by its real path, so the recorder's URL names the link's target
+const realOr = value => { try { return realpathSync(value.startsWith("file:") ? fileURLToPath(value) : resolve(value)); } catch { return resolve(value); } };
+const PRELOAD = /^(-r|--require|--import|--loader|--experimental-loader)(?:=(.*))?$/;
+export function preloadsOf(args, nodeOptions, execArgv, recorder) {
+  const found = [];
+  const scan = (list, all) => {
+    for (let i = 0; i < list.length; i++) {
+      const word = String(list[i]);
+      if (!all && (word === "--" || !word.startsWith("-"))) break; // the script and its own argv
+      const m = PRELOAD.exec(word);
+      if (m) {
+        const value = m[2] ?? String(list[++i] ?? "");
+        if (!recorder || value !== recorder && realOr(value) !== fileURLToPath(recorder)) found.push(`${m[1]} ${value}`);
+      } else if (/^(-e|--eval|-p|--print)$/.test(word)) i++; // node reads options after the code, too
+    }
+  };
+  scan(args, false);
+  scan(String(nodeOptions ?? "").split(/\s+/).filter(Boolean), true);
+  scan(execArgv ?? [], true);
+  return found;
 }
 
 export function installChildHooks({write, recorder, meta, listed}) {
@@ -65,6 +95,10 @@ export function installChildHooks({write, recorder, meta, listed}) {
     if (kind === "other") return void incomplete(command) ?? options;
     if (options?.detached) incomplete(`${command} (detached)`);
     if (kind === "node" && !recorder) incomplete(`${command} (recorder is not a file)`);
+    if (kind === "node") {
+      const preloads = preloadsOf(forked ? [] : args, (options?.env ?? process.env).NODE_OPTIONS, forked ? options?.execArgv ?? process.execArgv : [], recorder);
+      if (preloads.length) incomplete(`${command} (preload ${preloads.join(", ")})`);
+    }
     return {...options, env: carry(options?.env, kind)};
   };
   // file, [args], [options], [callback]

@@ -11,7 +11,7 @@ import {inspectReadRecord, makeReadRecord, markIncomplete, privacyNow, readGener
 // tree per run, each copying or reading into gen/ the way a real one would.
 const GENERATOR = `
 import fs, {readFileSync, createReadStream, openSync, readSync, closeSync, copyFileSync, cpSync, linkSync, symlinkSync, renameSync, readdirSync, existsSync, statSync, writeFileSync} from "node:fs";
-import {spawn, spawnSync, execFileSync} from "node:child_process";
+import {fork, spawn, spawnSync, execFileSync} from "node:child_process";
 import {Worker} from "node:worker_threads";
 import {readFile, open, copyFile, cp} from "node:fs/promises";
 import {resolve} from "node:path";
@@ -53,6 +53,13 @@ const roads = {
   gitListPrivate: () => execFileSync("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "vault"], {stdio: "pipe"}),
   gitShow: () => spawnSync("git", ["show", "HEAD:open/zpublic.txt"]),
   worker: () => new Promise(ok => new Worker("1", {eval: true}).on("exit", ok)),
+  // (r5 MUST 3) a preload runs before the recorder's --import
+  requirePreload: () => { writeFileSync("open/zbefore.cjs", "require('fs').readFileSync('vault/zsentinel.txt')"); spawnSync(process.execPath, ["--require", "./open/zbefore.cjs", "-e", "0"]); },
+  requirePreloadEnv: () => { writeFileSync("open/zbefore.cjs", "require('fs').readFileSync('vault/zsentinel.txt')"); spawnSync(process.execPath, ["-e", "0"], {env: {...process.env, NODE_OPTIONS: "--require ./open/zbefore.cjs " + (process.env.NODE_OPTIONS ?? "")}}); },
+  forkPreload: () => new Promise(ok => { writeFileSync("open/zbefore.cjs", "require('fs').readFileSync('vault/zsentinel.txt')"); writeFileSync("open/zchild.cjs", ""); fork("./open/zchild.cjs", [], {execArgv: [...process.execArgv, "--require", "./open/zbefore.cjs"]}).on("exit", ok); }),
+  forkPlain: () => new Promise(ok => { writeFileSync("open/zchild.cjs", "require('fs').readFileSync('vault/zsentinel.txt')"); fork("./open/zchild.cjs").on("exit", ok); }),
+  requireAfterEval: () => { writeFileSync("open/zbefore.cjs", "require('fs').readFileSync('vault/zsentinel.txt')"); spawnSync(process.execPath, ["-e", "0", "--require", "./open/zbefore.cjs"]); },
+  scriptArgRequire: () => { writeFileSync("open/zscript.cjs", "require('fs').readFileSync('vault/zsentinel.txt')"); spawnSync(process.execPath, ["./open/zscript.cjs", "--require", "x"]); },
   // (D) a file written by the generator, then read back, is derived
   ownCache: () => { writeFileSync("open/zcache.tmp", "derived"); renameSync("open/zcache.tmp", "open/zcache.bin"); readFileSync("open/zcache.bin"); },
   oldThenOverwrite: () => { readFileSync("open/zpublic.txt"); writeFileSync("open/zpublic.txt", "rewritten"); readFileSync("open/zpublic.txt"); },
@@ -208,6 +215,26 @@ describe("tools/osd-generator-reads: a generator's reads decide the generation's
       expect(publish(log)).to.throw().with.property("code", "UNKNOWN_PRIVACY");
     });
   }
+
+  for (const api of ["requirePreload", "requirePreloadEnv", "requireAfterEval", "forkPreload"]) {
+    it(`${api}: a node child with a preload ahead of the recorder makes the record incomplete`, () => {
+      const log = generate(api);
+      expect(log.incomplete.some(what => /\(preload --require \.\/open\/zbefore\.cjs\)/.test(what)), log.incomplete.join("; ")).to.equal(true);
+      expect(publish(log)).to.throw().with.property("code", "UNKNOWN_PRIVACY");
+    });
+  }
+
+  it("a fork inheriting the generator's execArgv (the recorder) is recorded, not incomplete", () => {
+    const log = generate("forkPlain");
+    expect(log.incomplete).to.deep.equal([]);
+    expect(log.entries.map(entry => entry.path)).to.include("vault/zsentinel.txt");
+  });
+
+  it("a --require after the script is the script's own argument, not a preload", () => {
+    const log = generate("scriptArgRequire");
+    expect(log.incomplete).to.deep.equal([]);
+    expect(log.entries.map(entry => entry.path)).to.include("vault/zsentinel.txt");
+  });
 
   it("gitMetadata: an allow-listed git command in a public repository leaves the record complete", () => {
     const log = generate("gitMetadata");
