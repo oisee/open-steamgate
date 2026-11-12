@@ -117,7 +117,7 @@ export function updateRegistryFiles(registry, replacements) {
   registry.parse();
 }
 
-export function walkStoreFiles(store, dir, out, system = activeSystem(store.root)) {
+export function walkStoreFiles(store, dir, out, system = activeSystem(store.root), skipDirs) {
   let entries;
   try {
     // sorted, so two walks of one tree index it the same way
@@ -130,8 +130,11 @@ export function walkStoreFiles(store, dir, out, system = activeSystem(store.root
       continue;
     }
     const relative = join(dir, entry);
+    // a folder that is a root of its own is walked as its own layer (H3:
+    // gen/hana-ddic inside gen); the parent's walk must not index it again
+    if (skipDirs?.has(relative.split("\\").join("/"))) continue;
     if (statSync(join(store.root, relative)).isDirectory()) {
-      walkStoreFiles(store, relative, out, system);
+      walkStoreFiles(store, relative, out, system, skipDirs);
     } else {
       // the build's exclusions, matched the way the transpiler matches them
       // -- against the path with a leading slash

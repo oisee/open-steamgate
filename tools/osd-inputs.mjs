@@ -83,12 +83,17 @@ export function objectOf(filename) {
 // input both have one (a set's run cockpit and its Set app, DSL L3 slice 6a); a page
 // is no ABAP object, and neither is its sidecar
 const WEB_SIDECAR = /\.(js|html?|json|properties|css)\.trace(?:\.meta)?\.json$/i;
-export function filesIn(base, folder) {
+export function filesIn(base, folder, nested = []) {
   const out = [];
+  // a folder that is an input of its own is walked as its own layer (H3:
+  // gen/hana-ddic inside gen); the parent's walk must not pick it up again,
+  // or the later parent listing would hide the file from the build entirely
+  const skip = new Set(nested);
   const walk = (dir) => {
     for (const entry of readdirSync(resolve(base, dir)).sort()) {
       const path = `${dir}/${entry}`;
       if (statSync(resolve(base, path)).isDirectory()) {
+        if (skip.has(path)) continue;
         walk(path);
       } else if (/\.devc\.xml$/i.test(entry) === false && WEB_SIDECAR.test(entry) === false) {
         const object = objectOf(entry);
@@ -114,7 +119,7 @@ export function layers(base, config = JSON.parse(readFileSync(resolve(base, "aba
   if (discoveryOnly) activeSystem(base, env);
   const folders = discoveryOnly ? [config.input_folder ?? config.input_folders ?? []].flat()
     : inputFoldersOf(base, config.input_folder === undefined ? {input_folder: config.input_folders} : config, env);
-  const byFolder = folders.map((folder) => ({folder, files: filesIn(base, folder)}));
+  const byFolder = folders.map((folder) => ({folder, files: filesIn(base, folder, folders.filter((f) => f !== folder))}));
   // the same file name twice inside one folder: no order decides, so nothing does
   const duplicates = [];
   for (const {folder, files} of byFolder) {

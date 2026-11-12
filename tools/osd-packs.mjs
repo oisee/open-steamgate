@@ -81,10 +81,17 @@ export function sourceMatches(source, entry) {
 
 const slash = (p) => p.split("\\").join("/");
 
-/** Select one copy of each object from folders in layer order. Later folders win. */
+/** Select one copy of each object from folders in layer order. Later folders win.
+ *
+ *  A folder that is not there yields nothing: a listed input may simply not
+ *  exist yet (H3: gen/hana-ddic before the first hana-ddic-gen run; a pack
+ *  without a ddic folder) and the generators reading content through here
+ *  must not crash on the absence -- the build, the transpiler and the store
+ *  already read a missing input folder as an empty one. */
 export function winningByLayer(folders, entriesIn, keyOf) {
   const winners = new Map();
   for (const folder of folders) {
+    if (existsSync(folder) === false) continue;
     for (const entry of entriesIn(folder)) {
       winners.set(keyOf(entry), entry);
     }
