@@ -7,8 +7,15 @@ import {chmodSync, cpSync, existsSync, mkdirSync, readFileSync, readlinkSync, st
 import {basename, dirname, join, relative, resolve} from "node:path";
 import {libraryFiles} from "../tools/osd-inputs.mjs";
 import {unfetched, describeUnfetched} from "../tools/osd-fetch.mjs";
+import {generationHanaSrcProblem} from "../tools/osd-tmp.mjs";
 
 const root = resolve(import.meta.dirname, "..");
+// gen/hana-src (H4) is the tenant's sources: the staged gen/ never carries
+// the raw layers, manifest or not (tools/osd-tmp.mjs guards the generation)
+const inHanaSrc = (path) => {
+  const p = path.replaceAll("\\", "/");
+  return p === "gen/hana-src" || p.startsWith("gen/hana-src/");
+};
 const targets = {
   "linux-amd64": {bun: "osd", archive: ".tar.gz"},
   "linux-arm64": {bun: "osd", archive: ".tar.gz"},
@@ -24,6 +31,10 @@ const generation = readlinkSync(join(root, "build", "live"));
 if (!generation.startsWith("by-input/") || !existsSync(join(root, "build", generation))) {
   throw new Error(`Invalid or missing build/live target: ${generation}`);
 }
+// gen/hana-src (H4) is the tenant's sources: a generation built with it is
+// private, and is never bundled for download (tools/osd-tmp.mjs)
+const hanaProblem = generationHanaSrcProblem(join(root, "build", generation));
+if (hanaProblem) throw new Error(hanaProblem);
 const probe = join(root, ".local", "release-probe", name);
 for (const file of [target.bun]) {
   if (!existsSync(join(probe, file))) throw new Error(`Build ${join(probe, file)} first`);
@@ -62,7 +73,7 @@ const content = ["src", "gen", "data", "webapp", "test", "tools", "bin", "script
 for (const item of content) {
   if (existsSync(join(root, item))) {
     cpSync(join(root, item), join(stage, item), {recursive: true, dereference: true,
-      filter: (path) => basename(path) !== "e2e" && !path.endsWith(".go")});
+      filter: (path) => basename(path) !== "e2e" && !path.endsWith(".go") && !inHanaSrc(path)});
   }
 }
 for (const {files} of libraryFiles(root)) {
