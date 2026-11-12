@@ -86,6 +86,20 @@ private → private; else any unknown → unknown). `publicProvenance`,
   answered the handshake) or a read it could not name;
 - a read of unknown privacy, or one whose identity marker changed.
 
+A node child is also incomplete when anything could run before the recorder
+or start processes past it (`tools/osd-generator-children.mjs` `preloadsOf`):
+a `-r`/`--require`/`--import`/`--loader` other than the recorder itself, an
+env or config file (`--env-file*`, `--experimental-*config-file`), `--run`,
+`--test`, `--watch*` or a snapshot flag -- in node's argv, in `NODE_OPTIONS`
+(osd's own children included) or in a fork's `execArgv`. Every word of the
+argv is scanned, the script's own arguments too: telling them apart would need
+node's full list of flags that take a value, so the check fails closed. **For
+generator authors:** a generator whose child gets an argument spelled like one
+of these flags (`--require`, `--run`, `--test`, ...) makes its generation
+unpublishable. Give such an option another name, or pass the value through a
+file or the child's environment; and start node children with plain
+`node <script>`, not through npm, npx, a shell or `node --run`.
+
 `hashOf` therefore digests every file class the build reads: input folders by
 what the transpiler lists (not by extension, so W3MI media count), locked and
 URL libraries whole, root `data/` and `abaplint.jsonc`, BSP and pack folders,
