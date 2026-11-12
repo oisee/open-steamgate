@@ -418,9 +418,11 @@ export function domaXml(domain) {
  *  included fields expanded again under the base table's own name, are
  *  dropped by the dictionary's own mark: every expanded copy carries
  *  ADMINFIELD '1', every plain row '0' (measured on the real closure dump:
- *  16 copies against 265 plain rows, the 7 marker rows '0' as well), so
- *  the mark is the discriminator and the name only the fallback for rows
- *  that carry no mark at all -- a copy an older read brings without the
+ *  16 copies against 265 plain rows, the 7 marker rows '0' as well), and
+ *  the rule is the mark's value space, abapGit's own `adminfield <> '0'`
+ *  -- anything but '0' is a copy -- so the mark is the discriminator and
+ *  the name only the fallback for rows that carry no mark at all -- a
+ *  copy an older read brings without the
  *  column is still caught by name, suffix and all, since a
  *  .INCLU-<suffix> marker renames its copies by the suffix (the
  *  transpiler's own rename, --AP excepted). The transpiler expands the
@@ -432,7 +434,9 @@ export function domaXml(domain) {
  *  shapes have used -- goes out as .INCLU--AP, the form the transpiler
  *  expands with no rename. A marker whose DD03L is not in the dump is
  *  refused by name: the XML would carry a structure the generation never
- *  writes. `includes` carries the dump's DD03L rows by table name; the
+ *  writes. A plain '0' row named like an include's field is refused too,
+ *  by table and field: the expansion would repeat it (CRITIC-929-r2
+ *  SHOULD 2). `includes` carries the dump's DD03L rows by table name; the
  *  live read keeps plain ddicFields, which refuses an include row. */
 export function ddicFieldsWithIncludes(rows, refs = {}, includes = new Map()) {
   const sorted = [...(rows ?? [])].sort((a, b) => (Number(a.position) || 0) - (Number(b.position) || 0));
@@ -489,15 +493,30 @@ export function ddicFieldsWithIncludes(rows, refs = {}, includes = new Map()) {
       out.push({fieldname: name === ".APPEND" ? ".INCLU--AP" : name, key, marker: true, precfield: include});
       continue;
     }
-    // DDIC's own discriminator first (CRITIC-929 MUST 1): an ADMINFIELD '1'
-    // row is the dump's expansion of an include's field, whatever it is
-    // named, and a marker row is kept whatever its mark -- the transpiler
-    // expands it off PRECFIELD. The name rule fires only for a row that
-    // carries no mark at all (an older read without the column): a marked
-    // row is decided by its mark, not its name.
+    // DDIC's own discriminator first (CRITIC-929 MUST 1; CRITIC-929-r2
+    // SHOULD 2): a row whose ADMINFIELD is anything but '0' is the dump's
+    // expansion of an include's field, whatever it is named -- abapGit's
+    // own rule is `DELETE ... WHERE adminfield <> '0'`, and the '1' every
+    // measured copy carries is only the value the dumps happen to hold --
+    // and a marker row is kept whatever its mark (the transpiler expands
+    // it off PRECFIELD). The name rule fires only for a row that carries
+    // no mark at all (an older read without the column): a marked row is
+    // decided by its mark, not its name. And a row plain by its mark ('0')
+    // whose name is an include's field is refused here, naming the table
+    // and the field (the row's own TABNAME): the marker kept beside it
+    // makes the transpiler expand the include into that same name, and
+    // the duplicate used to be written and die in cds2ddic later
+    // (CRITIC-929-r2 SHOULD 2) -- the refusal belongs at generation time,
+    // like the raw duplicate's in tablXml. The copies ride their markers
+    // in POSITION order in the dumps measured, so the mark and the name
+    // here see the marker first.
     const adminfield = String(row.adminfield ?? "").trim().toUpperCase();
-    if (adminfield === "1") continue;
+    if (adminfield !== "0" && adminfield !== "") continue;
     if (adminfield === "" && shadowed.has(name)) continue;
+    if (shadowed.has(name)) {
+      const table = String(row.tabname ?? "").toUpperCase();
+      throw new Error(`hana-ddic-map: ${table}: the field list repeats ${name} through an include expansion -- nothing is written`);
+    }
     const field = ddicField(row, refs);
     if (field !== undefined) out.push(field);
   }

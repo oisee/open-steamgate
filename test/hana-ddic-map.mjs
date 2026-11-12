@@ -192,7 +192,9 @@ describe("the DD03L to abapGit TABL mapping", () => {
   // are dropped by the dictionary's own mark: every expanded copy carries
   // ADMINFIELD '1', every plain row '0' (measured on the real closure
   // dump: 16 copies against 265 plain rows, the 7 markers '0' as well,
-  // the first copy one position after its marker).
+  // the first copy one position after its marker). The rule is the mark's
+  // value space, abapGit's `adminfield <> '0'` -- the '1' is what the
+  // dumps measure, not the rule.
   it("keeps an .INCLUDE row as the marker and drops the ADMINFIELD-'1' copies (H5d)", () => {
     const rows = [
       {position: "1", fieldname: "MANDT", keyflag: "X", rollname: "MANDT", datatype: "CLNT", leng: "3", decimals: "0", inttype: "C", intlen: "000006", notnull: "X", adminfield: "0"},
@@ -304,6 +306,68 @@ describe("the DD03L to abapGit TABL mapping", () => {
     expect(xml).to.not.include("ZOSD_H1_SFX_A01");
     expect(xml).to.not.include("ZOSD_H1_SFX_B01");
     expect(xml.split("ZOSD_H1_SFX_A").length - 1).to.equal(0);
+  });
+
+  // CRITIC-929-r2 SHOULD 1: the mark decides, and here a test can see it.
+  // Every copy fixture above carries the name the name rule computes, so
+  // there mark and name agree; this row carries the mark and a name NO
+  // include brings -- the only shape where the mark alone decides. The
+  // name-only mutant keeps it and goes red here.
+  it("drops an ADMINFIELD-'1' row whose name no include brings -- the mark, not the name (H5d r2)", () => {
+    const rows = [
+      {position: "1", fieldname: "MANDT", keyflag: "X", rollname: "MANDT", datatype: "CLNT", leng: "3", decimals: "0", inttype: "C", intlen: "000006", notnull: "X", adminfield: "0"},
+      {position: "2", fieldname: ".INCLUDE", precfield: "ZOSD_H1_MARK_INC", adminfield: "0"},
+      // the dictionary's mark is what drops this row: its name is in no
+      // include's rows, so the name rule alone would keep it
+      {position: "3", fieldname: "ZOSD_H1_MARK_GHOST", keyflag: "", rollname: "", datatype: "CHAR", leng: "1", decimals: "0", inttype: "C", intlen: "000002", notnull: "", adminfield: "1"},
+      {position: "4", fieldname: "ZOSD_H1_TAIL", keyflag: "", rollname: "", datatype: "CHAR", leng: "2", decimals: "0", inttype: "C", intlen: "000004", notnull: "", adminfield: "0"},
+    ];
+    const includes = new Map([["ZOSD_H1_MARK_INC", [
+      {position: "1", fieldname: "ZOSD_H1_MARK_REAL", keyflag: "", rollname: "", datatype: "CHAR", leng: "4", decimals: "0", inttype: "C", intlen: "000008", notnull: ""},
+    ]]]);
+    const fields = ddicFieldsWithIncludes(rows, {}, includes);
+    expect(fields.map((f) => f.fieldname)).to.deep.equal(["MANDT", ".INCLUDE", "ZOSD_H1_TAIL"]);
+  });
+
+  // CRITIC-929-r2 SHOULD 2: the mark's value space is abapGit's own rule,
+  // `adminfield <> '0'`, not `= '1'` -- both dumps measure only '0' and
+  // '1', but the rule decides by the mark, not by the value the dumps
+  // happen to carry. Under the old `=== "1"` skip this row is written
+  // beside the marker and dies in the transpiler; the rule drops it.
+  it("drops a row carrying a mark other than '0' or '1' -- abapGit's rule is <> '0' (H5d r2)", () => {
+    const rows = [
+      {position: "1", fieldname: "MANDT", keyflag: "X", rollname: "MANDT", datatype: "CLNT", leng: "3", decimals: "0", inttype: "C", intlen: "000006", notnull: "X", adminfield: "0"},
+      {position: "2", fieldname: ".INCLUDE", precfield: "ZOSD_H1_MARK_INC", adminfield: "0"},
+      {position: "3", fieldname: "ZOSD_H1_MARK_ODD", keyflag: "", rollname: "", datatype: "CHAR", leng: "1", decimals: "0", inttype: "C", intlen: "000002", notnull: "", adminfield: "2"},
+      {position: "4", fieldname: "ZOSD_H1_TAIL", keyflag: "", rollname: "", datatype: "CHAR", leng: "2", decimals: "0", inttype: "C", intlen: "000004", notnull: "", adminfield: "0"},
+    ];
+    const includes = new Map([["ZOSD_H1_MARK_INC", [
+      {position: "1", fieldname: "ZOSD_H1_MARK_REAL", keyflag: "", rollname: "", datatype: "CHAR", leng: "4", decimals: "0", inttype: "C", intlen: "000008", notnull: ""},
+    ]]]);
+    const fields = ddicFieldsWithIncludes(rows, {}, includes);
+    expect(fields.map((f) => f.fieldname)).to.deep.equal(["MANDT", ".INCLUDE", "ZOSD_H1_TAIL"]);
+  });
+
+  // CRITIC-929-r2 SHOULD 2: a plain row ('0') named like an include's
+  // flattened field. Plain by its mark, round 1 kept it -- tablXml's
+  // refusal cannot see the collision, because the include's fields are
+  // not in the final list: the kept marker makes the transpiler expand
+  // them in, and the duplicate died in cds2ddic later. It is refused
+  // here, at generation, naming the table (the row's own TABNAME) and
+  // the field, like the raw duplicate's refusal beside it.
+  it("refuses a plain row that repeats an include's field, naming table and field (H5d r2)", () => {
+    const rows = [
+      {position: "1", fieldname: "MANDT", keyflag: "X", rollname: "MANDT", datatype: "CLNT", leng: "3", decimals: "0", inttype: "C", intlen: "000006", notnull: "X", tabname: "ZOSD_H1_DUPREF", adminfield: "0"},
+      {position: "2", fieldname: ".INCLUDE", precfield: "ZOSD_H1_DUPREF_INC", tabname: "ZOSD_H1_DUPREF", adminfield: "0"},
+      {position: "3", fieldname: "ZOSD_H1_DUPREF_F", keyflag: "", rollname: "", datatype: "CHAR", leng: "1", decimals: "0", inttype: "C", intlen: "000002", notnull: "", tabname: "ZOSD_H1_DUPREF", adminfield: "0"},
+    ];
+    const includes = new Map([["ZOSD_H1_DUPREF_INC", [
+      {position: "1", fieldname: "ZOSD_H1_DUPREF_F", keyflag: "", rollname: "", datatype: "CHAR", leng: "1", decimals: "0", inttype: "C", intlen: "000002", notnull: ""},
+    ]]]);
+    let error;
+    try { ddicFieldsWithIncludes(rows, {}, includes); } catch (e) { error = e; }
+    expect(error?.message, "the table").to.include("ZOSD_H1_DUPREF");
+    expect(error?.message, "the field").to.include("ZOSD_H1_DUPREF_F");
   });
 
   // CRITIC-929 MUST 1 (b): a raw duplicate -- two plain rows of one table

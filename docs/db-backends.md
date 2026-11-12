@@ -688,12 +688,15 @@ dropped by the dictionary's own mark: every expanded copy carries
 dump: 16 copies against 265 plain rows, the 7 marker rows `'0'` as
 well, and the first copy one position after its marker — the "two
 positions later" an earlier sentence here claimed is not what the dump
-measures). The name is only the fallback, for a row that carries no
+measures), and the rule is the mark's value space, abapGit's own
+`ADMINFIELD <> '0'`: anything but `'0'` is a copy, not only the `'1'`
+the dumps measure. The name is only the fallback, for a row that carries no
 mark at all — suffixed spellings included, since a `.INCLU-<suffix>`
 marker renames its copies by the suffix (the splice H5a first wrote
 here put every such field into the XML twice; and a field list that
 still repeats a FIELDNAME is refused at generation, naming table and
-field). `ddicFieldsWithIncludes` keeps the markers and drops the
+field — a plain `'0'` row an include's expansion would collide with
+included). `ddicFieldsWithIncludes` keeps the markers and drops the
 copies; `ddicFields`, which the live
 read keeps, refuses an include row. A structured component
 (DD03L COMPTYPE S, DATATYPE STRU) carries its own COMPTYPE and resolves
