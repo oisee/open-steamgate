@@ -225,7 +225,19 @@ describe("tools/osd-build: the layers, refused before a lock is taken", function
       return text.replace(/unique\d+/g, "uniqueN")
         .replace(/"\.\/project\//g, '"./').replace(/"\.\.\/_init\.mjs"/g, '"./_init.mjs"');
     };
+    // The init the OSG library writes is the CLI's init plus the boot re-run
+    // self-heal (fix round 4: between in-process boots another suite's
+    // cleanup may have left globalThis.abap unset, and the CI shards'
+    // `.context` cluster came from the next boot dying on it). The CLI has
+    // no business carrying the hook, so init.mjs is compared as the CLI's
+    // text plus exactly that hook -- drift on either side still fails.
+    const INIT_HOOK = "\nconst __initializeABAP = initializeABAP;\n" +
+      "initializeABAP = async () => { globalThis.abap ??= new runtime.ABAP(); await __initializeABAP(); };\n";
     for (const name of list("output-cli")) {
+      if (name === "init.mjs") {
+        expect(norm("output-lib", flat(name)), name).to.equal(norm("output-cli", name) + INIT_HOOK);
+        continue;
+      }
       expect(norm("output-lib", flat(name)), name).to.deep.equal(norm("output-cli", name));
     }
     // and the map names its source the way the CLI names it, relative to the output
