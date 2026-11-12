@@ -219,17 +219,30 @@ export function generationTmpProblem(generationDir) {
     : `${generationDir} was built with ${TMP_FOLDER} as a layer (${local.slice(0, 3).join(", ")}): it holds ${TMP_PACKAGE} objects and is never published. Rebuild with OSD_TMP=off (osd-build --publish).`;
 }
 
-// gen/hana-src (H4, tools/hana-src-gen.mjs) is private the way $TMP is: the
-// tenant's own sources, in layers. A generation built with them is refused
-// by every publisher that bundles a build -- the preview, the docker image,
-// the download bundle -- by the twin below, sitting exactly where
-// generationTmpProblem sits in theirs. One difference is deliberate: no
-// second witness. The $TMP check also reads the generation's
-// abap_transpile.json, but this tree's own config names "gen/hana-src/*"
-// whether or not a build ever saw one of these layers; only the generation's
-// manifest -- the EXPANDED folder list the build recorded
+// gen/hana-src (H4, tools/hana-src-gen.mjs) and gen/hana-ddic (H3,
+// tools/hana-ddic-gen.mjs) are private the way $TMP is: the tenant's own
+// sources, and their dictionary -- its table and field names -- in layers. A
+// generation built with either is refused by every publisher that bundles a
+// build -- the preview, the docker image, the download bundle, the release
+// directory -- by the twin below, sitting exactly where
+// generationTmpProblem sits in theirs; and the same ONE list of the two
+// prefixes is what every publisher's gen/ copy filter drops, so a stale
+// folder on disk never rides along with a generation whose record is clean.
+// One difference is deliberate: no second witness. The $TMP check also reads
+// the generation's abap_transpile.json, but this tree's own config names
+// "gen/hana-src/*" whether or not a build ever saw one of these layers; only
+// the generation's manifest -- the EXPANDED folder list the build recorded
 // (tools/osd-build.mjs) -- knows what was actually read.
-const HANA_SRC_FOLDER = "gen/hana-src";
+const HANA_PRIVATE_FOLDERS = ["gen/hana-src", "gen/hana-ddic"];
+
+/** the private gen/ prefix a path sits under, or undefined: the one list,
+ *  shared by the check below and by every publisher's copy filter. Paths
+ *  are root-relative; the bundle and the release see absolute paths from
+ *  cpSync and hand it relative(root, path). */
+export const privateGenFolder = (path) => {
+  const p = String(path).replaceAll("\\", "/");
+  return HANA_PRIVATE_FOLDERS.find((f) => p === f || p.startsWith(f + "/"));
+};
 
 export function generationHanaSrcProblem(generationDir) {
   let folders;
@@ -238,11 +251,11 @@ export function generationHanaSrcProblem(generationDir) {
     folders = manifest.inputs?.folders;
     if (!Array.isArray(folders)) throw new Error("it lists no input folders");
   } catch (e) {
-    return `${generationDir} has no readable record of its layers (manifest.json: ${e.message}); it cannot be shown to be free of ${HANA_SRC_FOLDER} (the tenant's sources)`;
+    return `${generationDir} has no readable record of its layers (manifest.json: ${e.message}); it cannot be shown to be free of ${HANA_PRIVATE_FOLDERS.join(" and ")} (the tenant's content)`;
   }
-  const carrying = folders.filter((f) => f === HANA_SRC_FOLDER || String(f).startsWith(HANA_SRC_FOLDER + "/"));
+  const carrying = folders.filter((f) => privateGenFolder(f) !== undefined);
   return carrying.length === 0 ? undefined
-    : `${generationDir} was built with ${HANA_SRC_FOLDER} layers (${carrying.slice(0, 3).join(", ")}): the tenant's sources are private and are never published. Rebuild without them: move ${HANA_SRC_FOLDER} out of the tree, then run node tools/osd-build.mjs --publish.`;
+    : `${generationDir} was built with private gen/ layers (${carrying.slice(0, 3).join(", ")}): the tenant's sources and DDIC (${HANA_PRIVATE_FOLDERS.join(", ")}) are private and are never published. Rebuild without them: move ${HANA_PRIVATE_FOLDERS.join(" and ")} out of the tree, then run node tools/osd-build.mjs --publish.`;
 }
 
 // ------------------------------------------------------------ names

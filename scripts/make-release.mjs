@@ -27,6 +27,7 @@ import {execFileSync} from "node:child_process";
 import {basename, dirname, join, relative, resolve} from "node:path";
 import {pathToFileURL} from "node:url";
 import {runsAs} from "../tools/osd-main.mjs";
+import {generationHanaSrcProblem, privateGenFolder} from "../tools/osd-tmp.mjs";
 
 // main(argv, {root}) is the testable entry: the command line runs it against
 // the checkout, and test/hana-src-gen.mjs runs the same body against a fake
@@ -36,6 +37,16 @@ export async function main(argv = process.argv.slice(2), {root = resolve(import.
   const out = resolve(argv[0] ?? join(root, ".local", "release"));
   const say = (m) => console.log(`  ${m}`);
 
+  // one generation, and the link the runtime loads it through. Read before
+  // anything is copied or removed: a refusal must not leave the release
+  // half-copied behind it.
+  const live = readlinkSync(join(root, "build", "live"));
+  // gen/hana-src and gen/hana-ddic (H4) are the tenant's content: a
+  // generation built with either is private, and is never released
+  // (tools/osd-tmp.mjs)
+  const hanaProblem = generationHanaSrcProblem(join(root, "build", live));
+  if (hanaProblem) throw new Error(hanaProblem);
+
   rmSync(out, {recursive: true, force: true});
   mkdirSync(out, {recursive: true});
 
@@ -43,7 +54,7 @@ export async function main(argv = process.argv.slice(2), {root = resolve(import.
   const TREE = ["src", "gen", "data", "webapp", "test", "tools", "bin", "scripts", "abap_transpile.json", "package.json", "abaplint.jsonc"];
   for (const entry of TREE) {
     if (existsSync(join(root, entry))) {
-      cpSync(join(root, entry), join(out, entry), {recursive: true, dereference: true, filter: (p) => basename(p) !== "e2e"});
+      cpSync(join(root, entry), join(out, entry), {recursive: true, dereference: true, filter: (p) => basename(p) !== "e2e" && !privateGenFolder(relative(root, p))});
     }
   }
   say(`content: ${TREE.filter((e) => existsSync(join(root, e))).join(", ")}`);
@@ -222,8 +233,6 @@ export async function main(argv = process.argv.slice(2), {root = resolve(import.
     say(`pack ${pack.name}: ${pack.dir}`);
   }
 
-  // one generation, and the link the runtime loads it through
-  const live = readlinkSync(join(root, "build", "live"));
   mkdirSync(join(out, "build", "by-input"), {recursive: true});
   cpSync(join(root, "build", live), join(out, "build", live), {recursive: true});
   symlinkSync(live, join(out, "build", "live"));

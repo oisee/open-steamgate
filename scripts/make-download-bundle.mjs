@@ -7,15 +7,13 @@ import {chmodSync, cpSync, existsSync, mkdirSync, readFileSync, readlinkSync, st
 import {basename, dirname, join, relative, resolve} from "node:path";
 import {libraryFiles} from "../tools/osd-inputs.mjs";
 import {unfetched, describeUnfetched} from "../tools/osd-fetch.mjs";
-import {generationHanaSrcProblem} from "../tools/osd-tmp.mjs";
+import {generationHanaSrcProblem, privateGenFolder} from "../tools/osd-tmp.mjs";
 import {runsAs} from "../tools/osd-main.mjs";
 
-// gen/hana-src (H4) is the tenant's sources: the staged gen/ never carries
-// the raw layers, manifest or not (tools/osd-tmp.mjs guards the generation)
-const inHanaSrc = (path) => {
-  const p = path.replaceAll("\\", "/");
-  return p === "gen/hana-src" || p.startsWith("gen/hana-src/");
-};
+// gen/hana-src and gen/hana-ddic (H4) are the tenant's content: the staged
+// gen/ never carries them, manifest or not. tools/osd-tmp.mjs holds the one
+// list of the two prefixes; cpSync hands its filter absolute paths, so the
+// decision is made on relative(root, path).
 const targets = {
   "linux-amd64": {bun: "osd", archive: ".tar.gz"},
   "linux-arm64": {bun: "osd", archive: ".tar.gz"},
@@ -79,7 +77,7 @@ export async function main(argv = process.argv.slice(2), {root = resolve(import.
   for (const item of content) {
     if (existsSync(join(root, item))) {
       cpSync(join(root, item), join(stage, item), {recursive: true, dereference: true,
-        filter: (path) => basename(path) !== "e2e" && !path.endsWith(".go") && !inHanaSrc(path)});
+        filter: (path) => basename(path) !== "e2e" && !path.endsWith(".go") && !privateGenFolder(relative(root, path))});
     }
   }
   for (const {files} of libraryFiles(root)) {

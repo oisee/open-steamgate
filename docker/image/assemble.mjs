@@ -2,7 +2,7 @@ import {cpSync, existsSync, mkdirSync, readFileSync, readlinkSync, readdirSync, 
 import {basename, join, resolve} from "node:path";
 import {approvedLicenseAssumption} from "./license-assumptions.mjs";
 import {imagePacks} from "./packs.mjs";
-import {generationHanaSrcProblem} from "../../tools/osd-tmp.mjs";
+import {generationHanaSrcProblem, privateGenFolder} from "../../tools/osd-tmp.mjs";
 
 const out = resolve(process.argv[2] ?? "/image");
 if (existsSync(out)) throw new Error(`Output must not exist: ${out}`);
@@ -40,12 +40,11 @@ function browserOnly(path) {
   const normalized = path.replaceAll("\\", "/");
   return [...browserOnlyPackages].some((name) => normalized === name || normalized.endsWith("/" + name));
 }
-// gen/hana-src (H4) is the tenant's sources: never in the image, manifest or
-// not -- an older generation that predates the folder must not drag it in
-function inHanaSrc(path) {
-  const p = path.replaceAll("\\", "/");
-  return p === "gen/hana-src" || p.startsWith("gen/hana-src/");
-}
+// gen/hana-src and gen/hana-ddic (H4) are the tenant's content: never in the
+// image, manifest or not -- an older generation that predates the folders
+// must not drag them in. tools/osd-tmp.mjs holds the one list of the two
+// prefixes; these copies run against the checkout root, so cpSync's filter
+// paths are already relative.
 const selectedPacks = imagePacks(process.cwd(), process.env.OSD_IMAGE_PACKS ?? "");
 for (const pack of selectedPacks) {
   cpSync(pack.dir, join(out, "packs", pack.name), {recursive: true, verbatimSymlinks: true});
@@ -55,7 +54,7 @@ for (const entry of roots) {
   cpSync(entry, join(out, entry), {recursive: true,
     ...(entry === "node_modules" ? {dereference: true} : {verbatimSymlinks: true}),
     filter: path => ![".git", "e2e", "test-results", "playwright-report"].includes(basename(path)) &&
-      !testOnly.has(path.replaceAll("\\", "/")) && !browserOnly(path) && !inHanaSrc(path)});
+      !testOnly.has(path.replaceAll("\\", "/")) && !browserOnly(path) && !privateGenFolder(path)});
 }
 mkdirSync(join(out, "build", "by-input"), {recursive: true});
 cpSync(join("build", live), join(out, "build", live), {recursive: true, verbatimSymlinks: true});
