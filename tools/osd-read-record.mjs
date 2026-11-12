@@ -8,19 +8,31 @@ export const READS = "reads.json";
 export const sha256 = bytes => createHash("sha256").update(bytes).digest("hex");
 const fail = (message, code = "READ_RECORD") => { throw Object.assign(new Error(message), {code}); };
 const inside = (root, path) => { const rel = relative(root, path); return rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel); };
-const privateValue = (file, identity) => {
+// The identity markers of one directory: [{name, marker, privacy, sha256}].
+const markersIn = at => {
+  const found = [];
+  for (const name of [".osd-source.json", ".osd-layer.json"]) {
+    const marker = join(at, name);
+    if (!existsSync(marker)) continue;
+    let bytes, data;
+    try { bytes = readFileSync(marker); data = JSON.parse(bytes.toString("utf8")); } catch { fail(`invalid source identity: ${marker}`); }
+    const privacy = name === ".osd-layer.json" ? data.private === true
+      : typeof data.private === "boolean" ? data.private : null;
+    found.push({name, marker, privacy, sha256: sha256(bytes)});
+  }
+  return found;
+};
+// memo: a Map from directory to its markers, for a caller that reads many
+// files in one short life (a recorded generator); a gate passes none
+const privateValue = (file, identity, memo) => {
   let value = false;
   let sourceIdentity = false;
   for (let at = dirname(file); ; at = dirname(at)) {
-    for (const name of [".osd-source.json", ".osd-layer.json"]) {
-      const marker = join(at, name);
-      if (!existsSync(marker)) continue;
-      let data;
-      try { data = JSON.parse(readFileSync(marker, "utf8")); } catch { fail(`invalid source identity: ${marker}`); }
-      const privacy = name === ".osd-layer.json" ? data.private === true
-        : typeof data.private === "boolean" ? data.private : null;
+    let markers = memo?.get(at);
+    if (markers === undefined) { markers = markersIn(at); memo?.set(at, markers); }
+    for (const {name, marker, privacy, sha256: digest} of markers) {
       if (name === ".osd-source.json") sourceIdentity = true;
-      identity.push({path: marker, sha256: sha256(readFileSync(marker))});
+      identity.push({path: marker, sha256: digest});
       if (privacy === true) value = true;
       else if (privacy === null && value === false) value = null;
     }
@@ -36,10 +48,10 @@ const privateValue = (file, identity) => {
   return value;
 };
 
-export function readEntry(root, file, bytes) {
+export function readEntry(root, file, bytes, memo) {
   const real = realpathSync(file);
   const identities = [];
-  const privacy = privateValue(real, identities);
+  const privacy = privateValue(real, identities, memo);
   const lexical = inside(root, resolve(file)) ? relative(root, resolve(file)).split(sep).join("/") : `external/${sha256(resolve(file)).slice(0, 16)}/${basename(file)}`;
   return {path: lexical, real, sha256: sha256(bytes), privacy, identities};
 }
@@ -49,8 +61,11 @@ export const privacyNow = real => privateValue(real, []);
 
 // The privacy of a real path's ancestry, without recording its identities.
 const ancestry = new Map();
+// the markers of each directory, for the same process-long cache: a recorded
+// generator is one short process, and a gate uses privacyNow instead
+export const markerMemo = new Map();
 export function privacyOf(real) {
-  if (!ancestry.has(real)) ancestry.set(real, privateValue(real, []));
+  if (!ancestry.has(real)) ancestry.set(real, privateValue(real, [], markerMemo));
   return ancestry.get(real);
 }
 
@@ -65,10 +80,10 @@ export function realOf(file) {
 // A name seen rather than bytes read: a listing, a stat, an existence test.
 // Nothing hashes it, so it never covers anything; it is written only when the
 // ancestry is private or unknown, and then it only ever refuses.
-export function metaEntry(root, file, seen) {
+export function metaEntry(root, file, seen, memo) {
   const real = realOf(file);
   const identities = [];
-  const privacy = privateValue(real, identities);
+  const privacy = privateValue(real, identities, memo);
   const lexical = inside(root, resolve(file)) ? relative(root, resolve(file)).split(sep).join("/") : `external/${sha256(resolve(file)).slice(0, 16)}/${basename(file)}`;
   return {kind: "meta", path: lexical || ".", real, sha256: sha256(seen), privacy, identities};
 }

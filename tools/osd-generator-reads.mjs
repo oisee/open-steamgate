@@ -17,7 +17,7 @@ import {syncBuiltinESMExports} from "node:module";
 import {dirname, join, relative, resolve, sep} from "node:path";
 import {fileURLToPath} from "node:url";
 import {installChildHooks} from "./osd-generator-children.mjs";
-import {metaEntry, privacyOf, readEntry, realOf, sha256} from "./osd-read-record.mjs";
+import {markerMemo, metaEntry, privacyOf, readEntry, realOf, sha256} from "./osd-read-record.mjs";
 
 const log = process.env.OSD_GENERATOR_READS;
 if (log) {
@@ -77,7 +77,7 @@ if (log) {
         const key = `${one}\0${sha256(data)}`;
         if (!watched(one, projected) || logged.has(key)) continue;
         logged.add(key);
-        write(readEntry(root, one, data));
+        write(readEntry(root, one, data, markerMemo));
       }
     } catch { write({incomplete: true, path: String(pathOf(file) ?? file)}); } finally { busy = false; }
   };
@@ -90,7 +90,7 @@ if (log) {
     try {
       const path = resolve(given);
       if (!watched(path, false) || privacyOf(realOf(path)) === false) return;
-      const entry = metaEntry(root, path, typeof seen === "string" ? seen : JSON.stringify(seen ?? path));
+      const entry = metaEntry(root, path, typeof seen === "string" ? seen : JSON.stringify(seen ?? path), markerMemo);
       const key = `meta\0${path}\0${entry.sha256}`;
       if (logged.has(key)) return;
       logged.add(key);

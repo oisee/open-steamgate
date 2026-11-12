@@ -977,7 +977,10 @@ async function makePackSeeds(root, inputs, hash, log, named) {
   const [cmd, ...argv] = toolCommand(script, ["--ensure", "--output", join(layout(root).byInput, hash, "output")]);
   const generation = join(layout(root).byInput, hash);
   const readsLog = join(generation, "seed-reads.jsonl");
-  const env = {...process.env, OSD_ROOT: root, OSD_READ_EXCLUDE_PREFIXES: JSON.stringify([join(root, "packs/rap-flight/data"), join(root, ".local/activation")]), OSD_BUILD_VERIFIED: buildVerified(root)};
+  // the capture boots a runtime: its activation lock owner's pid and the
+  // database image cache (.local/db/base, keyed by the digest of what made
+  // it) are its own state, never source bytes of the rows it writes
+  const env = {...process.env, OSD_ROOT: root, OSD_READ_EXCLUDE_PREFIXES: JSON.stringify([join(root, "packs/rap-flight/data"), join(root, ".local/activation"), join(root, ".local/db/base")]), OSD_BUILD_VERIFIED: buildVerified(root)};
   if (!hosted()) argv.unshift("--import", join(TOOLS, "osd-generator-reads.mjs"));
   for (const line of recordedRun(cmd, argv, root, env, readsLog, "seed-capture.mjs").split("\n")) {
     if (line.trim() !== "") log(line);
