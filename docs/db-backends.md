@@ -541,13 +541,18 @@ dump:
 `tools/hana-src-gen.mjs` copies the selected layers into
 `gen/hana-src/<NNN>-<name>/` — NNN is the plan's order, zero-padded, so the
 names sort in dependency order — and writes `gen/hana-src/manifest.json`
-with the layers' provenance: the source directory, the dump manifest's
-provenance and hash when plan.json carries them, the converter's commit
-when plan.json carries one. A cycle group is one folder, the members' src
+with the layers' provenance: the source directory — for `--from-dump`, the
+dump directory and the `--system` prefix, not the converter's temp
+directory (a fresh mkdtemp every run would make `--from-dump --check` drift
+on the path alone, and point at a directory that no longer exists) —, the
+dump manifest's provenance and hash when plan.json carries them, the
+converter's commit when plan.json carries one. A cycle group is one folder, the members' src
 merged and the members named in the manifest, because no order between
-them is valid. `--packages <LIKE>` scopes it, `--check` exits 1 when the
-existing gen/hana-src has drifted, and `--from-dump` runs the converter
-itself (`OSD_HANA_CONVERTER` names its path) on a dump directory:
+them is valid. `--packages <LIKE>` scopes it (the converter's own glob:
+`%` or `*` is any run of characters, `_` is one character), `--check`
+exits 1 when the existing gen/hana-src has drifted, and `--from-dump` runs
+the converter itself (`OSD_HANA_CONVERTER` names its path) on a dump
+directory:
 
     node <converter> <dump> --out <layers> --system <prefix>
     node tools/hana-src-gen.mjs --layers <layers>
@@ -556,9 +561,27 @@ itself (`OSD_HANA_CONVERTER` names its path) on a dump directory:
 Dumps and layer directories live outside git — they hold a real tenant's
 sources, and the tool refuses a `--layers` inside this tree unless it sits
 under `gen/` or `.local/`, both untracked, so neither the layers nor the
-manifest is ever committed. The tool never reads the dump's
-`tables/*.jsonl` at all; the provenance it records is what plan.json
-copied from the dump manifest.
+manifest is ever committed; `--out` is held to the same rule. The tool
+never reads the dump's `tables/*.jsonl` at all; the provenance it records
+is what plan.json copied from the dump manifest.
+
+A generation built with a gen/hana-src layer in its inputs is private like
+the layers themselves — the tenant's sources reached the transpile — and
+every publisher that bundles a build refuses it: the preview
+(scripts/build-preview.mjs:59, beside its $TMP refusals), the docker image
+(docker/image/assemble.mjs:17 guards `build/live` before anything is
+copied, and its gen/ copy drops the raw layers; the build context is
+covered by docker/image/Dockerfile.dockerignore, which names gen/hana-src
+and gen/hana-ddic) and the download bundle
+(scripts/make-download-bundle.mjs:36, before anything is staged). The
+refusal reads the generation's own record of what it was built from
+(`manifest.inputs.folders`, the expanded folder list tools/osd-build.mjs
+writes), so it is decided by what the build read, not by what the tree
+holds now; the helper is `generationHanaSrcProblem` in tools/osd-tmp.mjs,
+beside the `$TMP` one. Two publishers are safe by construction and stage
+`gen/` never: the VSIX seed (scripts/build-vsix.mjs:353-354 stages src,
+webapp, tools, data and four files) and the OCI system publish
+(scripts/system-stage.mjs:12 stages src, data, webapp).
 
 The layering rule is the one `gen/hana-ddic` already established, one step
 further: one entry `gen/hana-src/*` in `abap_transpile.json`, after
