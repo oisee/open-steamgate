@@ -96,20 +96,40 @@ can mask slowdowns, so retain raw measurements for investigation.
 The VSP family's `params.timeout` is a functional-result bound, not part of the
 TIMING rule, and the 90 s the lifecycle passed for every operation was too thin
 for one family: a DDLS activation re-runs the CDS generator and a cold build
-inside the same call, and three CI runs — #922 at 6e3b2ca7f, #908 at 60c10bcfe
-and #926 at 43224485647 — failed only on `WriteSource timed out after 90s`,
-while every full rerun passed. The measured numbers behind the fix: about
-50 s per DDLS update on a green CI runner, about 90 s on a loaded box, and
-48.9–52.9 s per DDLS update sample in the DIAG-7 i3 measurement under one lock;
-a4h-i7 had already given the osd-adt-one-runtime root hook 180 s for the same
-reason (#908). The DDLS family now derives its budget the way the warm deadline
-does: 90 s × the measured-speed factor of `tools/warm-deadline` (honoring
-`OSD_WARM_SPEED_FACTOR`), clamped to [90, 240] s — the ceiling is about 4x the
-CI median. Every other operation keeps 90 s, the client-side rpc ceiling in
-`adt-lifecycle-vsp.mjs` rides above the widest budget by a minute of slack (it
-only ever catches a dead VSP, never a slow activation), and the timing rule is
-unchanged: a slow DDLS still can never fail the gate, a timed-out one always
-did. `test/adt-lifecycle-report.mjs` pins the values, the three call sites and
+inside the same call, and two CI runs — #922 at 6e3b2ca7f and #908 at
+60c10bcfe — failed on `WriteSource timed out after 90s` while every full rerun
+passed. #926 at 43224485647 is sometimes named beside them and was a different
+failure: both of its attempts were cancelled at the job's 40-minute cap on a
+slow runner, its only FAIL row is an INCL warm-swap, and neither attempt's log
+holds a DDLS timeout — a failure this margin does not address. The measured
+numbers behind the fix: about 50 s per DDLS update on a green CI runner; 79–92 s
+on the runner classes that failed, where the failing activations were cut at
+the budget and their true duration is unknown; 98.1 s for an ABAP-FS
+activation-edit on the slowest of those runners; and 48.9–52.9 s per DDLS
+update sample in the DIAG-7 i3 measurement under one lock. a4h-i7 had already
+given the osd-adt-one-runtime root hook 180 s for the same reason (#908).
+
+The DDLS family's budget is therefore 240 s — about 4x the green-runner median
+— as a floor rather than a ceiling: 240 s × the measured-speed factor of
+`tools/warm-deadline` (honoring `OSD_WARM_SPEED_FACTOR`), clamped to
+[240, 480] s. The floor is load-bearing because the calibration under-tracks
+this cost: it runs single-threaded and idle in the harness process while the
+activation builds under the lifecycle's own concurrent load. Across the
+recorded runs the factor moved only 1.00–1.29 while the DDLS cost moved 1.7–2x,
+so the first cut of this fix — 90 s × factor, clamped to [90, 240] s — would
+have handed the very runners that failed a budget of 104–116 s against
+activations that had just outgrown 90 s. With the factors CI has actually
+measured (1.00–1.29), a runner receives 240–310 s. Every other operation keeps
+90 s, the client-side rpc ceiling in `adt-lifecycle-vsp.mjs` rides above the
+widest budget by a minute of slack (it only ever catches a dead VSP, never a
+slow activation), and the timing rule is unchanged: a slow DDLS still can never
+fail the gate, a timed-out one always did. The adt-lifecycle job's
+`timeout-minutes: 40` stays as it is: a green run measures 21–24 minutes, a
+DDLS call that consumes its whole budget fails the gate regardless, and the cap
+bounds a pathological run's wall time — the price is that a slow failure can
+arrive as a cancellation rather than a red row (as #926 shows), so read the job
+log for the cancel marker before treating a cancellation as flakiness.
+`test/adt-lifecycle-report.mjs` pins the values, the three call sites and
 the ceiling ("DDLS call timeout margin").
 
 `test/adt-lifecycle-report.mjs` transcribes the real #635/#633/#636 tables as

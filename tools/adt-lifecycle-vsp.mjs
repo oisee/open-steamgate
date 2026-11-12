@@ -9,15 +9,19 @@ import {speed} from "./warm-deadline/warm-deadline.mjs";
 // when the operation needs no special margin.
 export const CALL_TIMEOUT_S = 90;
 // DDLS activation re-runs the CDS generator and a cold build inside one call:
-// ~50 s per DDLS update on a green CI runner, ~90 s on a loaded box, against
-// this 90 s budget -- CI #922/#908/#926 failed only here, every full rerun
-// passed. The warm deadline answers the same shape by scaling its base with
-// the measured-speed factor (tools/warm-deadline, docs/warm-compile.md), so
-// the DDLS budget does the same: 90 s x factor, never below today's 90 s,
-// never above 240 s -- about 4x the CI median, the room a loaded runner's
-// activation needs.
+// ~50 s per DDLS update on a green CI runner, but 79-92 s on the loaded runner
+// classes that failed -- CI #922/#908 failed on the 90 s budget, every full
+// rerun passed, and the failing activations were cut at the budget (an
+// ABAP-FS activation-edit measured 98.1 s on the slowest of those runners;
+// #926's failure was the job's 40-minute cap, not a DDLS timeout). The
+// warm-deadline factor tracks this cost poorly: the calibration runs idle in
+// the harness while the activation builds under the lifecycle's own load, so
+// across those runs the factor moved 1.00-1.29 while the DDLS cost moved
+// 1.7-2x. The measured-speed factor (tools/warm-deadline, docs/warm-compile.md)
+// therefore scales a 240 s floor -- about 4x the CI median -- never below it,
+// never above 480 s.
 export function ddlsCallTimeoutS(env = process.env) {
-  return Math.min(240, Math.max(CALL_TIMEOUT_S, Math.round(CALL_TIMEOUT_S * speed(env).factor)));
+  return Math.min(480, Math.max(240, Math.round(240 * speed(env).factor)));
 }
 
 export async function vspClient(url) {
@@ -45,8 +49,8 @@ export async function vspClient(url) {
   child.on("exit", () => { exited = true; fail(Error("VSP exited")); });
   // The ceiling only catches a dead or silent VSP; it must never be the
   // binding budget, so it rides above the widest params.timeout the lifecycle
-  // sends (the DDLS budget) by a minute of readback slack. At the old 90 s
-  // budgets this stays 120 s.
+  // sends (the DDLS budget) by a minute of readback slack. With the DDLS
+  // budget at [240, 480] s this is 300-540 s.
   const ceilingMs = Math.max(120000, (ddlsCallTimeoutS() + 60) * 1000);
   const rpc = (method, params) => new Promise((resolve, reject) => {
     const id = ++serial;

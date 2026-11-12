@@ -338,16 +338,21 @@ describe("CI lifecycle timing history collection",()=>{
 describe("DDLS call timeout margin",()=>{
  const lifecycle = readFileSync("tools/adt-lifecycle.mjs","utf8");
  const vspClient = readFileSync("tools/adt-lifecycle-vsp.mjs","utf8");
- it("keeps 90 s for the other families and scales the DDLS budget with the measured-speed factor",()=>{
+ it("keeps 90 s for the other families and floors the DDLS budget at 240 s under the measured-speed factor",()=>{
   expect(CALL_TIMEOUT_S).to.equal(90);
-  // Forced factors, as a CI job that knows its runner would set them.
-  expect(ddlsCallTimeoutS({OSD_WARM_SPEED_FACTOR:"1"})).to.equal(90);
-  expect(ddlsCallTimeoutS({OSD_WARM_SPEED_FACTOR:"2"})).to.equal(180);
-  expect(ddlsCallTimeoutS({OSD_WARM_SPEED_FACTOR:"4"})).to.equal(240);
-  expect(ddlsCallTimeoutS({OSD_WARM_SPEED_FACTOR:"8"})).to.equal(240);
-  // Factor below one is clamped to the floor by warm-deadline: never below
-  // today's 90 s.
-  expect(ddlsCallTimeoutS({OSD_WARM_SPEED_FACTOR:"0.5"})).to.equal(90);
+  // Forced factors, as a CI job that knows its runner would set them. The
+  // factors CI has measured are 1.00-1.29: the budget those runners receive
+  // is 240-310 s.
+  expect(ddlsCallTimeoutS({OSD_WARM_SPEED_FACTOR:"1"})).to.equal(240);
+  expect(ddlsCallTimeoutS({OSD_WARM_SPEED_FACTOR:"1.29"})).to.equal(310);
+  expect(ddlsCallTimeoutS({OSD_WARM_SPEED_FACTOR:"2"})).to.equal(480);
+  expect(ddlsCallTimeoutS({OSD_WARM_SPEED_FACTOR:"8"})).to.equal(480);
+  // 240 s is the floor, not the ceiling: the calibration runs idle in the
+  // harness while the activation builds under the lifecycle's own load, and
+  // across the failing runs it moved 1.00-1.29 while the DDLS cost moved
+  // 1.7-2x -- a budget derived from it must never land under 240 s. A factor
+  // below one is clamped to the floor by warm-deadline first.
+  expect(ddlsCallTimeoutS({OSD_WARM_SPEED_FACTOR:"0.5"})).to.equal(240);
  });
  it("gives every VSP call of the DDLS family the measured budget and keeps the others at 90 s",()=>{
   const budget = String.raw`timeout:vspTimeout\(f\)`;
