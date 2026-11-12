@@ -93,6 +93,25 @@ PASS/FAIL or CI exit code. Raw main milliseconds are shown for context only.
 A uniform runner slowdown cancels out; a regression in the reference controls
 can mask slowdowns, so retain raw measurements for investigation.
 
+The VSP family's `params.timeout` is a functional-result bound, not part of the
+TIMING rule, and the 90 s the lifecycle passed for every operation was too thin
+for one family: a DDLS activation re-runs the CDS generator and a cold build
+inside the same call, and three CI runs — #922 at 6e3b2ca7f, #908 at 60c10bcfe
+and #926 at 43224485647 — failed only on `WriteSource timed out after 90s`,
+while every full rerun passed. The measured numbers behind the fix: about
+50 s per DDLS update on a green CI runner, about 90 s on a loaded box, and
+48.9–52.9 s per DDLS update sample in the DIAG-7 i3 measurement under one lock;
+a4h-i7 had already given the osd-adt-one-runtime root hook 180 s for the same
+reason (#908). The DDLS family now derives its budget the way the warm deadline
+does: 90 s × the measured-speed factor of `tools/warm-deadline` (honoring
+`OSD_WARM_SPEED_FACTOR`), clamped to [90, 240] s — the ceiling is about 4x the
+CI median. Every other operation keeps 90 s, the client-side rpc ceiling in
+`adt-lifecycle-vsp.mjs` rides above the widest budget by a minute of slack (it
+only ever catches a dead VSP, never a slow activation), and the timing rule is
+unchanged: a slow DDLS still can never fail the gate, a timed-out one always
+did. `test/adt-lifecycle-report.mjs` pins the values, the three call sites and
+the ceiling ("DDLS call timeout margin").
+
 `test/adt-lifecycle-report.mjs` transcribes the real #635/#633/#636 tables as
 JSON fixtures (all QUIET), injects one 2x operation slowdown (WARN), uniform
 1.6x runner slowdown (QUIET), isolated sample outliers, and five-run history

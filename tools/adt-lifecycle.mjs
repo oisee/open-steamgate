@@ -4,7 +4,7 @@ import {createRequire} from 'node:module';
 import {mkdirSync, writeFileSync} from 'node:fs';
 import {startLifecycleServer, lifecycleIdentity} from './adt-lifecycle-server.mjs';
 import {MISSING_VALIDATIONS, checkReport, renderReport, checkVspSyntax} from './adt-lifecycle-report.mjs';
-import {vspClient} from './adt-lifecycle-vsp.mjs';
+import {vspClient, CALL_TIMEOUT_S, ddlsCallTimeoutS} from './adt-lifecycle-vsp.mjs';
 import {resolve, join} from 'node:path';
 const url = process.env.URL ?? `http://127.0.0.1:${process.env.STG_PORT ?? 8099}`;
 const target = new URL(url);
@@ -48,6 +48,9 @@ async function step(f, operation, fn, sample) {
 }
 function na(f, operation, note) { results.push({client:f.client,type:f.type,operation,status:'N/A',note}); flush(); }
 const is404 = e => e.err === 404 || e.response?.status === 404 || e.status === 404;
+// Every VSP call of the DDLS family gets the measured budget (the activation
+// re-runs the CDS generator and a cold build); the other families keep 90 s.
+const vspTimeout = f => f.type === 'DDLS' ? ddlsCallTimeoutS() : CALL_TIMEOUT_S;
 async function absent(f) { try {await c.objectStructure(f.uri);} catch(e) {if(is404(e)) return; throw e;} throw Error('Object already exists / remains after cleanup'); }
 async function write(f, source) {
  const lock=await c.lock(f.uri); assert(lock.LOCK_HANDLE,'Empty lock handle');
@@ -127,15 +130,15 @@ try {
    await step(f,'create',async()=>{await tool('CreatePackage',{name:f.name,description:'Disposable lifecycle probe',parent:'$TMP'});await c.objectStructure(f.uri);});
    na(f,'edit','VSP has CreatePackage; no package metadata update tool');na(f,'activate','Created active');continue;
   }
-  const made=await step(f,'create+write+activate',async()=>{await tool('WriteSource',{object_type:f.type,name:f.name,package:'$TMP',mode:'create',description:'Disposable lifecycle probe',source:f.source,timeout:90});assert(unchanged(await c.getObjectSource(`${f.uri}/source/main`),f.source),'Create source mismatch');});
+  const made=await step(f,'create+write+activate',async()=>{await tool('WriteSource',{object_type:f.type,name:f.name,package:'$TMP',mode:'create',description:'Disposable lifecycle probe',source:f.source,timeout:vspTimeout(f)});assert(unchanged(await c.getObjectSource(`${f.uri}/source/main`),f.source),'Create source mismatch');});
   if(!made.ok) continue;
   let edited;
   for(let sample=0; sample<repeats; sample++) {
   await warmReady(f); edited=changed(f.source,sample);
-  await step(f,'edit+check+activate',()=>warmOperation(f,async()=>{await tool('WriteSource',{object_type:f.type,name:f.name,mode:'update',source:edited,timeout:90});assert(unchanged(await c.getObjectSource(`${f.uri}/source/main`,{version:'active'}),edited),'Active source mismatch');}),sample);
+  await step(f,'edit+check+activate',()=>warmOperation(f,async()=>{await tool('WriteSource',{object_type:f.type,name:f.name,mode:'update',source:edited,timeout:vspTimeout(f)});assert(unchanged(await c.getObjectSource(`${f.uri}/source/main`,{version:'active'}),edited),'Active source mismatch');}),sample);
   }
   await step(f,'check-explicit',async()=>checkVspSyntax(await tool('SyntaxCheck',{object_url:f.uri,content:edited})));
-  await step(f,'activate-explicit',()=>tool('Activate',{object_url:f.uri,object_name:f.name,timeout:90}));
+  await step(f,'activate-explicit',()=>tool('Activate',{object_url:f.uri,object_name:f.name,timeout:vspTimeout(f)}));
   await step(f,'readback-vsp',async()=>{const r=await tool('GetSource',{object_type:f.type,name:f.name,include_context:false});assert(r.content?.some(b=>b.text?.includes(edited.trim())),'VSP readback mismatch');});
  }
  report.complete=true;
