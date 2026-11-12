@@ -437,6 +437,12 @@ describe("packaging a prebuilt generation (T2, docs/ideas.md)", function () {
       const {ensureMaterializedHome, ensureWorkspacePacks} = createRequire(import.meta.url)(join(extensionDir, "launcher.js"));
       // another path than the one it was built under: the name must not depend on it
       const home = await ensureMaterializedHome(join(extensionDir, "osd"), join(scratch, "elsewhere", "globalStorage"));
+      // the read record ships without the builder's paths, and marks the
+      // generation as not publishable from here (#908 r5 MUST 2)
+      const shipped = readFileSync(join(home, "build", "by-input", generations[0], "reads.json"), "utf8");
+      expect(shipped, "no builder path in the shipped read record").to.not.include(scratch);
+      const shippedRecord = JSON.parse(shipped);
+      expect([shippedRecord.root, shippedRecord.reads.length, shippedRecord.incomplete]).to.deep.equal(["/", 0, true]);
       const mapsDir = join(home, "build", "by-input", generations[0], "output");
       const maps = readdirSync(mapsDir).filter((name) => name.endsWith(".mjs.map"));
       expect(maps.length, "the published seed includes source maps").to.be.greaterThan(0);

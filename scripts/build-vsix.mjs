@@ -579,6 +579,13 @@ function prebuildGeneration(seedRoot, env) {
   for (const name of readdirSync(join(seedRoot, "build", "by-input"))) {
     if (name !== hash) rmSync(join(seedRoot, "build", "by-input", name), {recursive: true, force: true});
   }
+  // The read record names real paths under this builder's staging tree: it
+  // would leak them and change the seed ID per build. Its job (the public
+  // check above) is done. The seed ships a record that names no path and is
+  // incomplete: a first start still reuses the generation, and publishing
+  // from it is refused (UNKNOWN_PRIVACY) until it is rebuilt where it runs.
+  writeFileSync(join(seedRoot, "build", "by-input", hash, "reads.json"), `${JSON.stringify({schema: 1, root: "/", reads: [], uncovered: [],
+    incomplete: true, incompleteReads: ["prebuilt seed generation: its read record is not shipped"]}, null, 2)}\n`);
   rmSync(join(seedRoot, "output"), {force: true});
   const dropLinks = (dir) => {
     for (const entry of readdirSync(dir, {withFileTypes: true})) {
