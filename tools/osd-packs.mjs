@@ -370,6 +370,38 @@ export function folderOf(root, dir) {
   return rel === "" ? "." : rel;
 }
 
+/** one config entry, many folders on disk: "<parent>/*" expands to the
+ *  parent's immediate subdirectories, in their name order, and the entry
+ *  itself is not a layer. H4: "gen/hana-src/*" is the dump->layers
+ *  converter's output -- one folder per package layer, in the plan.json
+ *  order its zero-padded names already sort by. The children are expanded
+ *  here rather than listed in abap_transpile.json because the names are the
+ *  converter's <system>-<package> of private packages: the config stays
+ *  static and carries no dump-derived name. A parent that is not there
+ *  yields nothing, the same absence rule as a missing input folder
+ *  (winningByLayer): only the read's own ENOENT is swallowed. */
+export function expandedFolders(folders, root) {
+  const out = [];
+  for (const entry of folders ?? []) {
+    const parent = typeof entry === "string" && entry.endsWith("/*") ? entry.slice(0, -2) : undefined;
+    if (parent === undefined || parent === "" || parent.endsWith("/")) {
+      out.push(entry);
+      continue;
+    }
+    let children;
+    try {
+      children = readdirSync(join(root, parent), {withFileTypes: true});
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+      continue;
+    }
+    for (const child of children.filter((c) => c.isDirectory()).map((c) => c.name).sort()) {
+      out.push(`${parent}/${child}`);
+    }
+  }
+  return out;
+}
+
 /** the layers: source, then every pack, then generated overlays.
  *
  * A pack must win over the tree's source when it deliberately replaces an
@@ -388,7 +420,9 @@ export function inputFoldersOf(root, config, env, {extraPacks = true} = {}) {
     return [...folders, "gen"];
   }
   env ??= layerEnvironment(root);
-  const listed = config?.input_folder === undefined ? [] : [config.input_folder].flat();
+  // expanded before anything reads the list as paths (H4: "gen/hana-src/*"),
+  // so the pack slot below and every consumer see the same folders
+  const listed = expandedFolders(config?.input_folder === undefined ? [] : [config.input_folder].flat(), root);
   const packs = extraPacks ? packsOf(root, env).flatMap((p) => p.abap.map((f) => folderOf(root, f))) : [];
   const added = packs.filter((f) => listed.includes(f) === false);
   const generated = listed.lastIndexOf("gen");
