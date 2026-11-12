@@ -520,3 +520,68 @@ per table, countable in the corpus before anyone needs it; and writes into
 the tenant schema, which the grant forbids today (OSG is SELECT-only there).
 The mode stays read-only; the shadow DDL is our schema's own and is the one
 explicit exception the guard admits.
+
+## Sources out of the tenant: gen/hana-src
+
+The other half of the tenant's content is its sources. They do not arrive
+through a loader (the H4 decision, 2026-11-12: vsp already holds the decoder
+and a second one would be a new wheel) — they arrive as **input layers**,
+made by two tools that live outside this repository and read nothing but a
+dump:
+
+1. `vsp hana dump` (the a4h sibling's private binary) writes a dump
+   directory: `manifest.json`, `reposrc.jsonl`, `src/*.abap` and the raw
+   cross-reference tables under `tables/*.jsonl`. The dumper holds the
+   credentials; this repository never runs it.
+2. the dump→layers converter (`dump-to-layers.mjs`, Node builtins only)
+   reads a dump and writes `plan.json` plus `layers/<name>/{.abapgit.xml,
+   src/}` — one abapGit repository per package, `order` topological with
+   dependencies first, `cycles` the package SCCs it cannot order.
+
+`tools/hana-src-gen.mjs` copies the selected layers into
+`gen/hana-src/<NNN>-<name>/` — NNN is the plan's order, zero-padded, so the
+names sort in dependency order — and writes `gen/hana-src/manifest.json`
+with the layers' provenance: the source directory, the dump manifest's
+provenance and hash when plan.json carries them, the converter's commit
+when plan.json carries one. A cycle group is one folder, the members' src
+merged and the members named in the manifest, because no order between
+them is valid. `--packages <LIKE>` scopes it, `--check` exits 1 when the
+existing gen/hana-src has drifted, and `--from-dump` runs the converter
+itself (`OSD_HANA_CONVERTER` names its path) on a dump directory:
+
+    node <converter> <dump> --out <layers> --system <prefix>
+    node tools/hana-src-gen.mjs --layers <layers>
+    # or: node tools/hana-src-gen.mjs --from-dump --dump <dump> --system <prefix>
+
+Dumps and layer directories live outside git — they hold a real tenant's
+sources, and the tool refuses a `--layers` inside this tree unless it sits
+under `gen/` or `.local/`, both untracked, so neither the layers nor the
+manifest is ever committed. The tool never reads the dump's
+`tables/*.jsonl` at all; the provenance it records is what plan.json
+copied from the dump manifest.
+
+The layering rule is the one `gen/hana-ddic` already established, one step
+further: one entry `gen/hana-src/*` in `abap_transpile.json`, after
+`gen/hana-ddic` and before `src/`, expanded to its children wherever the
+folder list is read (`expandedFolders` in tools/osd-packs.mjs; the inputs
+report, the transpiler, the store and the capture all read the same
+expansion). The children are expanded and not listed because their names
+are the converter's `<system>-<package>` of private packages, and a
+tracked config should carry neither the churn nor the names. The later
+folder wins, so the real system's sources lose only to a hand-written
+`src/` override, on purpose — a generated copy of an object `src/` now
+holds is reported by `node tools/osd-inputs.mjs` like any override. A
+layer's `.abapgit.xml` is a repository marker, not an object, and the
+store keeps every child non-writable under `$STG_HANA_SRC`, the way gen/
+is kept.
+
+What the converter cannot source is counted, not lost: plan.json's
+`no_source` — IWSV/IWMO/IWOM/IWSG/IWPR, TABL, SHLP, SICF, WAPA, W3MI,
+DTEL, FUGR and friends — is copied into gen/hana-src/manifest.json and
+reported. Those kinds have other routes: TABL come from `gen/hana-ddic`
+(H3), the SEGW kinds from the SEGW tables (H5); gen/hana-src reports them
+and carries the sources only.
+
+Exercised with fixtures (`test/hana-src-gen.mjs`, synthetic `ZOSD_H4_*`
+converter output built in a temp dir); no tenant content is reachable
+from CI.
