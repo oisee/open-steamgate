@@ -138,6 +138,7 @@
   "test/gogen-host-io.mjs": 1.745255716,
   "test/gogen-typing-proof.mjs": 1.745255716,
   "test/gui-reports.mjs": 2.902957231,
+  "test/hana-closure.mjs": 5.3,
   "test/hana-ddic-gen.mjs": 1.081,
   "test/hana-ddic-map.mjs": 0.482,
   "test/hana-ddic-probe.mjs": 0.49,

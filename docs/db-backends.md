@@ -773,3 +773,57 @@ spawned by path, with the argv, the request file, the dump directory, the
 provenance and the child's environment all asserted (the password never on
 the argv). No HANA is reachable from CI; the real iteration is dell's,
 on the bed.
+
+## Lazy activation: stubbing what the island cannot close
+
+A class compiles as a whole or not at all. That is why the closure above
+had to close every name an island class MENTIONS: a method no request will
+ever run still keeps the whole class out of the build until its types
+exist. The iterator has a mode that stops paying that price:
+`--stub-unresolved`. After the classification and before the request, it
+takes every island class file (`gen/hana-src/**/*.clas.abap`, the locals
+includes beside them), finds the METHOD ... ENDMETHOD block each finding
+sits in — cut at abaplint's parsed positions, the way
+`tools/amdp-extract.mjs` cuts AMDP bodies, never a regex over ABAP — and
+replaces the bodies that do not resolve with one line:
+
+    RAISE EXCEPTION TYPE zcx_osd_not_activated EXPORTING missing = '<names>'.
+
+`zcx_osd_not_activated` (`src/hana/`, a `cx_no_check` subclass, so the stub
+carries no RAISING clause) answers `get_text( )` with
+`not activated here: needs <missing>` — the names, comma-joined, ~200
+characters at most. The stubbed source is written back into the island
+file — generated content, so rewriting in place is what the merge does
+anyway — and recorded in `gen/hana-closure/closure-stubs.json` as
+`[{file, class, method, missing, finding}]`. Findings outside any method
+body — the definition part: attributes, signatures, types, and the MPC's
+types — cannot be stubbed; their names stay in the request as today. The
+loop then builds again and stubs what the new build still cannot resolve,
+until no stubbable finding remains or `--max-stub-rounds` (default 5)
+stops the rewriting; only then is the dumper request written, for the
+names that remain. Per round the iterator says what it did per class: the
+count of stubbed methods and the generation hash.
+
+The names a stub waits for are not gaps: the service ACTIVATES without
+them, so they leave `requested` and the gaps file and travel in a new
+optional request key, `deferred: {kind: [names]}`, beside
+`requested`/`seen`. The dumper's reader reads `requested`/`seen` and
+ignores unknown keys — the file stays schema 1, and nobody asks the
+dictionary for a deferred name today. That is the point: the island grows
+only on a real miss. A request that reaches a stubbed method fails with
+`zcx_osd_not_activated`'s text — `not activated here: needs <missing>` —
+naming exactly what the method waits for. That failure is the signal to
+run the iterator again: without the flag the walk asks for everything
+(round 2's behaviour) and the dump closes the missed method's names; with
+the flag on afterwards, the method resolves, loses its stub, and the next
+build carries it for real. Without the flag at all, behaviour is round 2's,
+byte for byte.
+
+Exercised with the fixtures (`test/hana-closure.mjs`, `ZOSD_H5C_*`): one
+resolvable and one unresolvable method — only the second loses its body,
+byte-checked around the parsed block; a definition-level finding is not
+stubbed and stays in the request; `deferred` written; the loop reaches "no
+stubbable finding" and stops at the cap; mode off is round 2. The
+exception class carries its own ABAP Unit test
+(`src/hana/zcx_osd_not_activated.clas.testclasses.abap`), which asserts
+the text and the raise. No HANA is reachable from CI.

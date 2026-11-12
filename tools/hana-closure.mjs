@@ -11,6 +11,7 @@
 //
 //   node tools/hana-closure.mjs --dump <dir> --system <prefix>
 //        [--out <dir>] [--max-iterations <n>] [--dry-run]
+//        [--stub-unresolved] [--max-stub-rounds <n>]
 //
 //   --dump <dir>          the current dump directory (iteration 1's input;
 //                         what `vsp hana dump` wrote for the service, the
@@ -36,6 +37,38 @@
 //   --dry-run             merge, validate, classify, write and print the
 //                         request -- and stop, even when the dumper is
 //                         configured.
+//   --stub-unresolved     lazy activation (round 3): a class compiles as a
+//                         whole or not at all, so the island must close
+//                         every name a class MENTIONS -- even in methods no
+//                         request will ever run. With the flag, the body of
+//                         every method whose findings do not resolve is
+//                         replaced by the stub raise
+//                           RAISE EXCEPTION TYPE zcx_osd_not_activated
+//                             EXPORTING missing = '<names>'.
+//                         The method block is cut at abaplint's parsed
+//                         positions, the way tools/amdp-extract.mjs cuts
+//                         AMDP bodies -- never a regex over ABAP. The
+//                         stubbed source is written back into the island
+//                         file in gen/hana-src (generated content) and
+//                         recorded in closure-stubs.json
+//                         ([{file, class, method, missing, finding}]), and
+//                         the loop builds again until no stubbable finding
+//                         remains (--max-stub-rounds <n>, default 5) --
+//                         only then is the dumper request written, for the
+//                         names that remain (definition-level). The names
+//                         the stubs wait for are not gaps, they are "not
+//                         needed yet": the request carries them in an extra
+//                         `deferred: {kind: [names]}` key beside
+//                         requested/seen -- the dumper's reader reads
+//                         requested/seen and ignores unknown keys, so the
+//                         file stays schema 1. A request that hits a
+//                         stubbed method fails with the exception's text
+//                         ("not activated here: needs <missing>") -- that
+//                         is the signal to run the iterator again: the
+//                         island grows on the miss. Without the flag,
+//                         behaviour is round 2's.
+//   --max-stub-rounds <n> the cap of the stub rounds above (default 5, and
+//                         only read with --stub-unresolved).
 //
 // One iteration: merge the current dump into the inputs (hana-ddic-gen
 // --from-dump writes gen/hana-ddic, hana-src-gen --from-dump runs the
@@ -147,6 +180,7 @@ import {join, resolve} from "node:path";
 import {runsAs} from "./osd-main.mjs";
 import {toolCommandIn} from "./osd-host.mjs";
 import {validationMessage} from "./hana-ddic-gen.mjs";
+import {islandClassPaths, stubBodies} from "./hana-closure-stubs.mjs";
 
 const TOOLS = fileURLToPath(new URL(".", import.meta.url));
 
@@ -242,6 +276,11 @@ export function classifyFindings(findings) {
       ask(m[1].toUpperCase(), objectKind(m[1]), finding);
     } else if ((m = new RegExp(`^CATCH, unknown class (${NAME})$`).exec(message))) {
       ask(m[1].toUpperCase(), "clas", finding);
+    } else if ((m = new RegExp(`^RAISE, unknown class (${NAME})$`).exec(message))) {
+      // RAISE EXCEPTION TYPE x with x not in the build -- the shape a stub
+      // raise produces when the stub's own class is missing (round 3's cap
+      // path leaves it in the request)
+      ask(m[1].toUpperCase(), objectKind(m[1]), finding);
     } else if ((m = new RegExp(`could not resolve top (${NAME})$`, "i").exec(message))) {
       ask(m[1].toUpperCase(), objectKind(m[1]), finding);
     } else if ((m = new RegExp(`unable to resolve (${NAME})$`).exec(message))) {
@@ -319,8 +358,11 @@ export function tadirKinds(kind, finding) {
  *  reader reads (`schema`, `iteration`, `requested`, `seen`; the rest is
  *  provenance for the walk): the fresh names per kind, every name an
  *  earlier iteration asked under the kinds it was requested under (so the
- *  dumper skips it), and the current gaps. Pure. */
-export function requestFor({iteration, generation, fresh, asked, gaps}) {
+ *  dumper skips it), and the current gaps. `deferred` -- the stubbed
+ *  methods' names, only with --stub-unresolved -- is the one OPTIONAL key:
+ *  the dumper's reader takes requested/seen and ignores unknown keys, so
+ *  the file stays schema 1 with it beside them. Pure. */
+export function requestFor({iteration, generation, fresh, asked, gaps, deferred}) {
   const perKind = () => {
     const kinds = {};
     for (const kind of TADIR) kinds[kind] = [];
@@ -339,7 +381,7 @@ export function requestFor({iteration, generation, fresh, asked, gaps}) {
       if (seen[kind] !== undefined && seen[kind].includes(name) === false) seen[kind].push(name);
     }
   }
-  return {
+  const result = {
     schema: 1,
     iteration,
     generation: generation ?? "",
@@ -348,6 +390,16 @@ export function requestFor({iteration, generation, fresh, asked, gaps}) {
     seen,
     gaps: (gaps ?? []).map((g) => ({name: g.name, kind: g.kind, first_finding: g.first_finding, iterations_requested: g.iterations_requested})),
   };
+  if (deferred !== undefined) {
+    const list = perKind();
+    for (const n of deferred) {
+      for (const kind of tadirKinds(n.kind, n.finding)) {
+        if (list[kind].includes(n.name) === false) list[kind].push(n.name);
+      }
+    }
+    result.deferred = list;
+  }
+  return result;
 }
 
 /** the dumper's argv and child environment -- the contract the real binary
@@ -603,10 +655,15 @@ export async function run(args = process.argv.slice(2), options = {}) {
   const dumpArg = take(args, "--dump");
   const system = take(args, "--system");
   const maxIterations = Number(take(args, "--max-iterations") ?? "10");
+  const maxStubRounds = Number(take(args, "--max-stub-rounds") ?? "5");
+  const stubUnresolved = has(args, "--stub-unresolved");
   const dryRun = has(args, "--dry-run");
   if (args.length > 0) throw new Error(`hana-closure: unknown option ${args.find((a) => a.startsWith("--")) ?? args[0]}`);
   if (Number.isInteger(maxIterations) === false || maxIterations < 0) {
     throw new Error("hana-closure: --max-iterations needs a number >= 0");
+  }
+  if (Number.isInteger(maxStubRounds) === false || maxStubRounds < 0) {
+    throw new Error("hana-closure: --max-stub-rounds needs a number >= 0");
   }
   if (system === undefined) {
     throw new Error("hana-closure: --system <prefix> is required (the dump->layers converter names its layers <system>-<package>)");
@@ -708,10 +765,87 @@ export async function run(args = process.argv.slice(2), options = {}) {
     // finding outside it -- src/, packs/, another gen/ folder -- is the
     // tree's own business, counted once, never asked
     const island = islandBasenames(root);
-    const all = parseFindings(await validationMessage(root));
-    const findings = all.filter((f) => island.has(f.file));
+    let all = parseFindings(await validationMessage(root));
+    let findings = all.filter((f) => island.has(f.file));
+
+    // lazy activation (--stub-unresolved, round 3): the method bodies whose
+    // findings do not resolve lose their bodies -- replaced by the stub
+    // raise of zcx_osd_not_activated (src/hana/) at abaplint's parsed
+    // positions -- and the loop builds again, until no stubbable finding
+    // remains or --max-stub-rounds stops the rewriting; only then is the
+    // request written, for the names that remain (definition-level). The
+    // stubbed source is written back into the island file in gen/hana-src
+    // (generated content) and recorded in closure-stubs.json. A request
+    // that hits a stubbed method fails with the exception's text ("not
+    // activated here: needs ...") -- the signal to run the iterator again:
+    // the island grows on the miss.
+    const stubRecords = [];
+    const deferredPairs = new Map();
+    let stubRounds = 0;
+    if (stubUnresolved === true) {
+      const classPaths = islandClassPaths(root);
+      for (;;) {
+        const byFile = new Map();
+        for (const f of findings) {
+          if (/\.(?:clas\.abap|clas\.locals_imp\.abap)$/.test(f.file) === false) continue;
+          const list = byFile.get(f.file) ?? [];
+          list.push(f);
+          byFile.set(f.file, list);
+        }
+        if (byFile.size === 0) {
+          say(`stub: no stubbable finding remains after ${stubRounds} round(s)`);
+          break;
+        }
+        if (stubRounds >= maxStubRounds) {
+          say(`stub cap: --max-stub-rounds ${maxStubRounds} reached with ${byFile.size} class file(s) still naming findings; their names stay in the request`);
+          break;
+        }
+        const applied = [];
+        for (const [basename, list] of byFile) {
+          for (const path of (classPaths.get(basename) ?? []).sort()) {
+            let result;
+            try {
+              result = stubBodies(readFileSync(path, "utf8"), list, basename);
+            } catch (error) {
+              say(`stub: ${basename} could not be read or parsed (${error.message}); its findings stay in the request`);
+              continue;
+            }
+            if (result.stubs.length === 0) continue;
+            writeFileSync(path, result.source);
+            for (const stub of result.stubs) {
+              applied.push(stub.className);
+              stubRecords.push({file: path.slice(root.length + 1), class: stub.className, method: stub.method, missing: stub.missing, finding: stub.finding});
+              for (const nk of stub.missingKinds ?? []) deferredPairs.set(nk.name, {name: nk.name, kind: nk.kind, finding: stub.finding});
+            }
+          }
+        }
+        if (applied.length === 0) {
+          say(`stub: ${byFile.size} class file(s) name findings, but none could be stubbed (definition-level, or not under gen/hana-src); the names stay in the request`);
+          break;
+        }
+        stubRounds += 1;
+        const perClass = new Map();
+        for (const cls of applied) perClass.set(cls, (perClass.get(cls) ?? 0) + 1);
+        for (const [cls, count] of perClass) {
+          say(`stub round ${stubRounds}: ${cls}: ${count} method(s) stubbed (generation ${generationOf(root) || "none"})`);
+        }
+        all = parseFindings(await validationMessage(root));
+        findings = all.filter((f) => island.has(f.file));
+      }
+      writeFileSync(join(out, "closure-stubs.json"), JSON.stringify(stubRecords, null, 2) + "\n");
+    }
     const unscoped = all.length - findings.length;
     const {names, cascades, unclassified} = classifyFindings(findings);
+
+    // the names the stubs wait for are not gaps, they are "not needed yet":
+    // they leave requested and the gaps file and travel in the request's
+    // `deferred` -- unless a finding that was not stubbed still names them
+    // (a definition-level use), which is the request's business as today
+    const deferredOnly = [];
+    for (const [name, entry] of deferredPairs) {
+      if (names.some((n) => n.name === name) === false) deferredOnly.push(entry);
+    }
+    const deferredOnlyNames = new Set(deferredOnly.map((d) => d.name));
     const fresh = names.filter((n) => state.asked[n.name] === undefined);
     // asked and still unresolved; the dumper's missing answer names the kind
     // when it has one. iterations_requested counts the validation passes
@@ -735,6 +869,7 @@ export async function run(args = process.argv.slice(2), options = {}) {
     for (const name of Object.keys(state.missing).sort()) {
       const a = state.asked[name];
       if (a === undefined || gapNames.has(name)) continue;
+      if (stubUnresolved === true && deferredOnlyNames.has(name) === true) continue;
       gaps.push(gapOf(name, state.missing[name].kind, a));
     }
     // and the merge refusals: objects the dictionary HAS but the generator
@@ -747,18 +882,20 @@ export async function run(args = process.argv.slice(2), options = {}) {
     // recomputed every pass: a gap that a later round resolves leaves the
     // file on its own
     writeFileSync(join(out, "closure-gaps.json"), JSON.stringify({gaps: [...gaps, ...refusedGaps]}, null, 2) + "\n");
-    say(`iteration ${state.iteration}: ${fresh.length} new name(s), ${gaps.length} gap(s), ${unscoped} outside the island (not asked), ${refusedGaps.length} merge-refusal gap(s), ${cascades} cascade finding(s) skipped, ${unclassified.length} unclassified`);
+    say(`iteration ${state.iteration}: ${fresh.length} new name(s), ${gaps.length} gap(s), ${unscoped} outside the island (not asked), ${refusedGaps.length} merge-refusal gap(s), ${cascades} cascade finding(s) skipped, ${unclassified.length} unclassified${stubUnresolved === true ? `, ${deferredOnly.length} deferred by stubs, ${stubRecords.length} stubbed method(s)` : ""}`);
     for (const line of unclassified) say(`unclassified: ${line}`);
 
     if (fresh.length === 0) {
       say(`fixed point: every unresolved name has been asked and nothing new is named; ${gaps.length + refusedGaps.length} gap(s) -> ${join(out, "closure-gaps.json")}`);
-      return {stopped: "fixed-point", iteration: state.iteration, gaps: [...gaps, ...refusedGaps], cascades, unclassified, unscoped};
+      return {stopped: "fixed-point", iteration: state.iteration, gaps: [...gaps, ...refusedGaps], cascades, unclassified, unscoped,
+        ...(stubUnresolved === true ? {stubs: stubRecords, stubRounds} : {})};
     }
 
     const iteration = state.iteration + 1;
     const dumpDir = join(root, ".local", "hana-closure", `dump-${String(iteration).padStart(3, "0")}`);
     const freshCount = fresh.length;
-    const request = requestFor({iteration, generation: generationOf(root), fresh, asked: state.asked, gaps});
+    const request = requestFor({iteration, generation: generationOf(root), fresh, asked: state.asked, gaps,
+      ...(stubUnresolved === true ? {deferred: deferredOnly} : {})});
     writeFileSync(requestPath, JSON.stringify(request, null, 2) + "\n");
     say(`request ${iteration}: ${freshCount} new name(s) -> ${requestPath}`);
 
