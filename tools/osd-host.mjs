@@ -55,10 +55,6 @@ export function toolCommandIn(env, script, args = []) {
 // process.execPath is the executable itself, so the interpreter is OSD_NODE
 // when set, else "node" off the PATH (Bun.which, where Bun exists), and a
 // named refusal when neither is there.
-export function scriptCommand(script, args = []) {
-  return scriptCommandIn(process.env, script, args);
-}
-
 export function scriptCommandIn(env, script, args = []) {
   const value = env.OSD_SELF;
   const me = value === undefined || value === "" ? undefined : JSON.parse(value);

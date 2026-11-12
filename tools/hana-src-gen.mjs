@@ -53,7 +53,7 @@ import {spawnSync} from "node:child_process";
 import {tmpdir} from "node:os";
 import {join, relative, resolve, sep} from "node:path";
 import {runsAs} from "./osd-main.mjs";
-import {scriptCommand} from "./osd-host.mjs";
+import {scriptCommandIn} from "./osd-host.mjs";
 
 // the converter's --package glob: % and * are any run of characters, _ is one
 function likeToRegExp(pattern) {
@@ -350,8 +350,10 @@ export async function run(args = process.argv.slice(2), options = {}) {
       // the converter's argv is pinned by test: <dump> --out <temp> --system
       // <prefix>. It is an external script, not a tool of this tree, so it
       // starts through tools/osd-host.mjs like every other spawn of another
-      // tool: inside a binary, scriptCommand resolves a real node for it.
-      const [command, ...argv] = scriptCommand(converter, [dump, "--out", temp, "--system", system]);
+      // tool: scriptCommandIn with this process's environment -- the env is
+      // forwarded HERE, not through a second wrapper on the host, whose lint
+      // pins exactly one whole-environment forward.
+      const [command, ...argv] = scriptCommandIn(process.env, converter, [dump, "--out", temp, "--system", system]);
       const child = spawnSync(command, argv, {stdio: "inherit"});
       if (child.status !== 0) throw new Error(`hana-src-gen: the converter exited ${child.status ?? "on a signal"}`);
       layers = temp;

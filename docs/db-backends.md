@@ -553,8 +553,10 @@ them is valid. `--packages <LIKE>` scopes it (the converter's own glob:
 exits 1 when the existing gen/hana-src has drifted, and `--from-dump` runs
 the converter itself (`OSD_HANA_CONVERTER` names its path) on a dump
 directory, started through `tools/osd-host.mjs` like every tool a tool
-starts (`scriptCommand`: a compiled binary is its own `process.execPath`,
-so there the interpreter is `OSD_NODE`, else the `node` on the `PATH`):
+starts (`scriptCommandIn` with this process's environment: a compiled
+binary is its own `process.execPath`, so there the interpreter is
+`OSD_NODE`, else the `node` on the `PATH` — the SEA build's variable
+already, `scripts/build-sea.mjs` naming the Node that goes inside):
 
     node <converter> <dump> --out <layers> --system <prefix>
     node tools/hana-src-gen.mjs --layers <layers>

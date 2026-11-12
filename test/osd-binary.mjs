@@ -121,9 +121,9 @@ describe("the binary: the same system, one file", function () {
   });
 
   it("an external script starts with node in a checkout, and with OSD_NODE or a named refusal in a binary", () => {
-    // scriptCommand is how a tool runs a script that is not a tool of this
-    // tree (the converter of hana-src-gen --from-dump): the positive side of
-    // the scan above
+    // scriptCommandIn with the process's environment is how a tool runs a
+    // script that is not a tool of this tree (the converter of hana-src-gen
+    // --from-dump): the positive side of the scan above
     const checkout = scriptCommandIn({}, "dump-to-layers.mjs", ["--out", "x"]);
     expect(checkout[0], "the plain checkout runs it with this node").to.equal(process.execPath);
     expect(checkout.slice(1), "the script and its arguments, unchanged").to.deep.equal(["dump-to-layers.mjs", "--out", "x"]);
