@@ -2,8 +2,8 @@ import {cpSync, existsSync, mkdirSync, readFileSync, readlinkSync, readdirSync, 
 import {basename, join, resolve} from "node:path";
 import {approvedLicenseAssumption} from "./license-assumptions.mjs";
 import {imagePacks} from "./packs.mjs";
+import {generationHanaSrcProblem, privateGenFolder, segwPrivateGen} from "../../tools/osd-tmp.mjs";
 import {writePublicArtefact} from "../../tools/osd-public-tree.mjs";
-import {generationHanaSrcProblem, privateGenFolder} from "../../tools/osd-tmp.mjs";
 
 const out = resolve(process.argv[2] ?? "/image");
 if (existsSync(out)) throw new Error(`Output must not exist: ${out}`);
@@ -55,7 +55,11 @@ for (const entry of roots) {
   cpSync(entry, join(out, entry), {recursive: true,
     ...(entry === "node_modules" ? {dereference: true} : {verbatimSymlinks: true}),
     filter: path => ![".git", "e2e", "test-results", "playwright-report"].includes(basename(path)) &&
-      !testOnly.has(path.replaceAll("\\", "/")) && !browserOnly(path) && !privateGenFolder(path)});
+      !testOnly.has(path.replaceAll("\\", "/")) && !browserOnly(path) && !privateGenFolder(path) &&
+      // and gen/segw while its manifest names a dump (H5b, tools/osd-tmp.mjs):
+      // this copy runs against the checkout root, so the filter paths are
+      // already relative
+      !segwPrivateGen(path, process.cwd())});
 }
 mkdirSync(join(out, "build", "by-input"), {recursive: true});
 cpSync(join("build", live), join(out, "build", live), {recursive: true, verbatimSymlinks: true});

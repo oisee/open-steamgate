@@ -25,6 +25,7 @@ import {join, relative} from "node:path";
 import {deserialize, serialize} from "node:v8";
 import {deflateRawSync, inflateRawSync} from "node:zlib";
 import {compileProgram, defaultValue, aliasTarget} from "./frontend.mjs";
+import {listListed} from "./host-io-compat.mjs";
 import {caughtIndex} from "./frontend-hierarchy.mjs";
 import {referencedClasses} from "./emit-go.mjs";
 import {callsIn, goSymbol} from "./go-layers.mjs";
@@ -38,7 +39,11 @@ import {readSealedCache, unsealCache} from "./osgo-incr-meta.mjs";
 export const SCHEMA = "osgo-incr/6";
 const sha = (value) => createHash("sha256").update(value).digest("hex");
 const upper = (text) => String(text).toUpperCase();
-const walk = (d) => readdirSync(d, {withFileTypes: true}).sort((a, b) => a.name.localeCompare(b.name))
+// listListed, not readdirSync: the folders here are compileOsg's layer list,
+// and a listed folder that is not on disk reads as empty, the one rule
+// tools/osd-inputs.mjs walkListed states (H3/FIX-4; H5b fix round 2: the
+// registryFiles/proof walks hit the same list the full front end walks)
+const walk = (d) => listListed(d).sort((a, b) => a.name.localeCompare(b.name))
   .flatMap((e) => (e.isDirectory() ? walk(join(d, e.name)) : [join(d, e.name)]));
 /** every ABAP word of a source, namespace forms included */
 const wordsOf = (text) => new Set(text.toUpperCase().match(/(?:\/[A-Z0-9_]+\/)?[A-Z_][A-Z0-9_]*/g) ?? []);
