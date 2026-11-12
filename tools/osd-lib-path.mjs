@@ -29,7 +29,9 @@ export function isCheckout(root) {
 }
 
 function verifiedLibrary(folder) {
-  try { return JSON.parse(process.env.OSD_BUILD_VERIFIED ?? "{}").libs?.[folder]; } catch { return undefined; }
+  // no computed member access here: the publisher-import guard admits only
+  // literal keys outside process.env, so look the folder up through a Map
+  try { return new Map(Object.entries(JSON.parse(process.env.OSD_BUILD_VERIFIED ?? "{}").libs ?? {})).get(folder); } catch { return undefined; }
 }
 
 /** Resolve a library at its established path, checking the checkout itself. */

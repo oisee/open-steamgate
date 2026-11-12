@@ -32,7 +32,7 @@ export function isolatedGitEnv(base, cwd, args) {
 // repository itself): a git a gate or the read recorder trusts runs with it
 // off and with no system, global or environment-injected config
 export const GIT_SAFE = ['-c', 'core.fsmonitor=false'];
-export function isolatedGit(env = process.env) {
+export function isolatedGit(env) {
   const out = Object.fromEntries(Object.entries(env).filter(([name]) => !/^GIT_CONFIG_(PARAMETERS|COUNT|KEY_|VALUE_)/.test(name)));
   return {...out, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null'};
 }

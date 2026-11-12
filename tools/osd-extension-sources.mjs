@@ -4,9 +4,9 @@ import {existsSync, lstatSync, readdirSync, readFileSync} from "node:fs";
 import {join, relative, resolve, sep} from "node:path";
 import {verifyPublicArtefact} from "./osd-provenance.mjs";
 import {readEntry} from "./osd-read-record.mjs";
-import {GIT_SAFE, isolatedGit} from "./osd-env.mjs";
+import {GIT_SAFE, devChildEnv, isolatedGit} from "./osd-env.mjs";
 
-const git = (args, options = {}) => execFileSync("git", [...GIT_SAFE, ...args], {env: isolatedGit(), stdio: ["ignore", "pipe", "pipe"], ...options});
+const git = (args, options = {}) => execFileSync("git", [...GIT_SAFE, ...args], {env: isolatedGit(devChildEnv()), stdio: ["ignore", "pipe", "pipe"], ...options});
 // the bytes on disk as a Git blob id: skip-worktree and assume-unchanged
 // hide a change from git's own diff, never from the bytes
 const blobOf = (bytes, length) => createHash(length === 64 ? "sha256" : "sha1").update(`blob ${bytes.length}\0`).update(bytes).digest("hex");

@@ -4,14 +4,14 @@ import {createHash} from "node:crypto";
 import {execFileSync} from "node:child_process";
 import {existsSync, lstatSync, readFileSync, readdirSync, realpathSync, writeFileSync} from "node:fs";
 import {join, relative, resolve} from "node:path";
-import {GIT_SAFE, isolatedGit} from "./osd-env.mjs";
+import {GIT_SAFE, devChildEnv, isolatedGit} from "./osd-env.mjs";
 import {privacyNow} from "./osd-read-record.mjs";
 
 const fail = message => { throw Object.assign(new Error(message), {code: "CI_TRANSPILER"}); };
 const digest = file => createHash("sha256").update(readFileSync(file)).digest("hex");
 const marker = /(^|\/)\.osd-(source|layer)\.json$/;
 
-const git = (dir, args) => execFileSync("git", [...GIT_SAFE, "-C", dir, ...args], {env: isolatedGit(), encoding: "utf8", stdio: ["ignore", "pipe", "pipe"]});
+const git = (dir, args) => execFileSync("git", [...GIT_SAFE, "-C", dir, ...args], {env: isolatedGit(devChildEnv()), encoding: "utf8", stdio: ["ignore", "pipe", "pipe"]});
 
 function filesOf(dir) {
   // a marker above the tree marks it too: public, or it is not shipped

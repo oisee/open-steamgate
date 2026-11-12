@@ -11,7 +11,7 @@ import cp from "node:child_process";
 import {randomUUID} from "node:crypto";
 import {basename, resolve} from "node:path";
 import wt from "node:worker_threads";
-import {GIT_SAFE, isolatedGit} from "./osd-env.mjs";
+import {GIT_SAFE, devChildEnv, isolatedGit} from "./osd-env.mjs";
 
 const CARRIED = ["OSD_GENERATOR_READS", "OSD_READ_ROOT", "OSD_READ_EXTERNAL", "OSD_READ_EXCLUDE_PREFIXES", "OSD_BUILD_VERIFIED"];
 // metadata of .git, never file content: the argv after any `-C <dir>`
@@ -60,7 +60,7 @@ export function installChildHooks({write, recorder, meta, listed}) {
       meta(repository, command);
       // ls-files names what is under its paths
       for (const path of paths) listed(resolve(repository, path), command);
-      return {...options, env: isolatedGit(options?.env ?? process.env), git: true};
+      return {...options, env: isolatedGit(options?.env ?? devChildEnv()), git: true};
     }
     if (kind === "other") return void incomplete(command) ?? options;
     if (options?.detached) incomplete(`${command} (detached)`);
