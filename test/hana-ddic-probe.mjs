@@ -4,6 +4,7 @@ import {existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync}
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {run} from "../tools/hana-ddic-probe.mjs";
+import {giveBackHdb} from "./hdb-stub.mjs";
 
 // The DDIC probe's reads, against the columns a real schema actually has.
 //
@@ -18,6 +19,10 @@ import {run} from "../tools/hana-ddic-probe.mjs";
 // list does not carry, with HANA's own words -- so a guessed column fails
 // here instead of on a system somebody owns.
 describe("the DDIC probe's reads name only measured columns", () => {
+  // the stand-in is given back after every test, so the next hdb consumer in
+  // the shard's process meets the real driver (test/hdb-stub.mjs)
+  afterEach(giveBackHdb);
+
   // the measured lists, in the order the measurement recorded them
   const DD_COLUMNS = {
     DD02L: [
@@ -283,6 +288,10 @@ describe("the DDIC probe's reads name only measured columns", () => {
     let code;
     process.env.OSD_CLIENT = "001"; // the mode refuses to start without a logon client (H3)
     try {
+      // this run's own stand-in: the --diff tests never installed one and ran
+      // on the previous test's leftover, which the give-back in afterEach now
+      // deletes -- a test that needs the fake installs it (test/hdb-stub.mjs)
+      fakeHdb();
       console.log = (line) => lines.push(String(line));
       process.chdir(root);
       code = await run(["--tables", "ZOSD_H1_PROBE", "--diff"]);
