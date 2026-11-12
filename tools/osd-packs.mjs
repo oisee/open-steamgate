@@ -87,14 +87,24 @@ const slash = (p) => p.split("\\").join("/");
  *  exist yet (H3: gen/hana-ddic before the first hana-ddic-gen run; a pack
  *  without a ddic folder) and the generators reading content through here
  *  must not crash on the absence -- the build, the transpiler and the store
- *  already read a missing input folder as an empty one. Only string paths
- *  are checked: callers such as the BSP app derivation hand in source
- *  descriptors ({kind, folder} objects), which carry their own existence. */
+ *  already read a missing input folder as an empty one. The absence is the
+ *  read's own ENOENT and never a stat of the folder name: these folders walk
+ *  in more than one path space (binaryDdIC resolves them against a root of
+ *  its own and names a libraries layer that is not a path at all; the BSP
+ *  app derivation hands in source descriptors), so an existsSync from here
+ *  would answer about this process's cwd and silently drop a layer that is
+ *  there. Only ENOENT is swallowed; every other error still throws. */
 export function winningByLayer(folders, entriesIn, keyOf) {
   const winners = new Map();
   for (const folder of folders) {
-    if (typeof folder === "string" && existsSync(folder) === false) continue;
-    for (const entry of entriesIn(folder)) {
+    let entries;
+    try {
+      entries = entriesIn(folder);
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+      continue;
+    }
+    for (const entry of entries) {
       winners.set(keyOf(entry), entry);
     }
   }

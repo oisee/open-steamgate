@@ -1,8 +1,8 @@
 import {expect} from "chai";
-import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from "node:fs";
+import {mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
-import {SOURCE, isSourceIdentity, BadPack, contentFoldersOf, dataDirsOf, ddicDirsOf, generatorFoldersOf, inputFoldersOf, packAt, packRootsOf, packsOf, webappsOf} from "../tools/osd-packs.mjs";
+import {SOURCE, isSourceIdentity, BadPack, contentFoldersOf, dataDirsOf, ddicDirsOf, generatorFoldersOf, inputFoldersOf, packAt, packRootsOf, packsOf, webappsOf, winningByLayer} from "../tools/osd-packs.mjs";
 import {ObjectStore, rootsOf} from "../tools/osd-store.mjs";
 import {loadConfig} from "../tools/osd-build.mjs";
 import {generate as generateBsp, packApplications, packApps, packLaunchpad} from "../tools/osd-bsp-registry.mjs";
@@ -379,5 +379,31 @@ describe("tools/osd-packs: a pack is a directory", () => {
     expect(roots).to.have.length(1);
     expect(roots[0]).to.include({package: "$VIBES", pack: "vibes", writable: true});
     expect(roots[0].path.endsWith("packs/vibes/src")).to.equal(true);
+  });
+
+  it("winningByLayer reads absence off the read, not off this cwd's paths", () => {
+    // binaryDdIC hands winningByLayer folders relative to a root of its own
+    // (test/hana-dialect.mjs): "packs/over" is there under that root and not
+    // under the cwd this process runs in, and an existsSync from here stats
+    // the wrong tree -- the pack layer is dropped and an earlier folder's
+    // copy wins. A folder that is not there still yields nothing (H3:
+    // gen/hana-ddic before its first run); the absence is the read's own
+    // ENOENT, which no path-space assumption can get wrong.
+    const space = mkdtempSync(join(tmpdir(), "osd-packs-space-"));
+    try {
+      mkdirSync(join(space, "src"), {recursive: true});
+      mkdirSync(join(space, "packs", "over", "src"), {recursive: true});
+      writeFileSync(join(space, "src", "zbin.tabl.xml"), "src");
+      writeFileSync(join(space, "packs", "over", "src", "zbin.tabl.xml"), "pack");
+      const winners = winningByLayer(["src", join("packs", "over", "src")],
+        (folder) => readdirSync(join(space, folder)).map((entry) => join(folder, entry)),
+        (file) => file.split(/[\\/]/).at(-1).toLowerCase());
+      expect(winners, "the later folder wins in the caller's own path space")
+        .to.deep.equal([join("packs", "over", "src", "zbin.tabl.xml")]);
+      expect(winningByLayer(["gone"], (folder) => readdirSync(join(space, folder)), (file) => file),
+        "a folder that is not there yields nothing").to.deep.equal([]);
+    } finally {
+      rmSync(space, {recursive: true, force: true});
+    }
   });
 });
