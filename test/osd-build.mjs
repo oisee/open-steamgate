@@ -119,8 +119,8 @@ describe("tools/osd-build: the layers, refused before a lock is taken", function
     expect(named.has(join(root, "packs/test/empty/.osd-source.json"))).to.equal(true);
   });
 
-  // FIX8 M2: finding the packs reads every manifest and the identity of each
-  // folder it declares, before OSD_WEB_PACKS narrows what is built
+  // FIX8 M2: finding the packs reads every manifest before OSD_WEB_PACKS
+  // narrows what is built
   it("hashes what finding the packs reads, a pack the selection leaves out too", () => {
     const oci = `localhost:5000/synthetic/left@sha256:${"c".repeat(64)}`;
     write("src/zsel.prog.abap", "REPORT zsel.\n");
@@ -136,7 +136,9 @@ describe("tools/osd-build: the layers, refused before a lock is taken", function
       {cwd: root, env: {...process.env, OSD_ROOT: root, OSD_GENERATOR_READS: log}, encoding: "utf8"});
       expect(child.status, child.stderr).to.equal(0);
       const entries = readFileSync(log, "utf8").trim().split("\n").map(JSON.parse);
-      expect(entries.map(entry => entry.path)).to.include.members(["packs/zleft/osd-pack.json", "packs/zleft/upstream/.osd-source.json"]);
+      expect(entries.map(entry => entry.path)).to.include("packs/zleft/osd-pack.json");
+      // an identity carries a fetch time: a left-out pack's is not read at all
+      expect(entries.map(entry => entry.path)).not.to.include("packs/zleft/upstream/.osd-source.json");
       const inputs = inputsOf(root);
       expect(inputs.packFiles).to.deep.equal([]);
       const named = new Map();
