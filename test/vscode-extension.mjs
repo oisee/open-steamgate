@@ -3066,7 +3066,7 @@ describe("editors/vscode: Test Explorer grouping (Project / Packs / Workspace la
   const layers = transpileLayers(transpileConfig);
 
   it("reads abap_transpile.json's own libs and input folders, not a hardcoded list", () => {
-    expect(layers.inputFolders).to.deep.equal(["src", "test", "gen"]);
+    expect(layers.inputFolders).to.deep.equal(["gen/hana-ddic", "src", "test", "gen"]);
     const names = layers.libs.map((l) => l.name).sort();
     expect(names).to.deep.equal(
       ["abapgit", "ajson", "express-icf-shim", "open-abap-apc", "open-abap-core", "open-abap-gui", "open-abap-odata"].sort());

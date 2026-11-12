@@ -232,6 +232,12 @@ export function generatorClosure(toolsDir = TOOLS, generators = GENERATORS) {
 /** the generators, in order, writing into the working `gen/` as they always do */
 export function runGenerators(root, log = () => {}, overlay = undefined) {
   let output = "";
+  // the generated-input folder the config lists (H3: gen/hana-ddic) exists
+  // from the first build on, empty until hana-ddic-gen --from-build writes
+  // it. Readers tolerate its absence anyway (a fresh clone runs the osgo
+  // host before any transpile, FIX-4); this only keeps a tree that HAS
+  // transpiled from walking a listed folder that is not there at all.
+  mkdirSync(join(root, "gen", "hana-ddic"), {recursive: true});
   for (const [script, ...args] of GENERATORS) {
     log(`${script} ${args.join(" ")}`.trim());
     const [cmd, ...argv] = toolCommand(join(TOOLS, script), args);

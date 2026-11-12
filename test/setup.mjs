@@ -574,7 +574,16 @@ async function setupDatabase(abap, schemas, insert) {
     // held then; the specifier is a variable so no bundler resolves it.
     const ddicBinaryModule = "../gen/osd-ddic-binary.mjs";
     const {ddicBinary} = await import(/* webpackIgnore: true */ ddicBinaryModule);
-    db = new HanaDatabaseClient({trace: process.env.STG_DB_TRACE === "1", ddicBinary});
+    // H3: with HANA_OWN_SCHEMA the existing-schema session sits in our own
+    // shadow schema (docs/db-backends.md); the tables the build knows are
+    // the eager set, the 259 fallback covers the rest.
+    let shadowTables;
+    if (process.env.HANA_EXISTING_SCHEMA === "1" && process.env.HANA_OWN_SCHEMA) {
+      const {ddicTables} = await import("../tools/hana-shadow-schema.mjs");
+      shadowTables = ddicTables(process.env.OSD_ROOT ?? process.cwd());
+    }
+    db = new HanaDatabaseClient({trace: process.env.STG_DB_TRACE === "1", ddicBinary,
+      ...(shadowTables === undefined ? {} : {shadowTables})});
     abap.context.databaseConnections["DEFAULT"] = traced(db);
     await db.connect();
     // HANA_EXISTING_SCHEMA=1: a schema an SAP system already holds, read-only

@@ -118,6 +118,21 @@ describe("the DDIC probe's reads name only measured columns", () => {
   // cache a real require would use is pointed at a stand-in first (the way
   // test/hana-existing-schema.mjs does it). No prepare: query() takes the
   // plain exec path.
+  // the fake stands in through the CJS cache a real require uses; the
+  // suites runner runs a shard's files in ONE process, so the stand-in is
+  // given back after every test -- the next hdb consumer in the shard
+  // otherwise gets a driver without prepare (FIX-4, the sqlscript suites).
+  // the give-back is a DELETE, not a restore: at the first fakeHdb call the
+  // real driver has never been required (hana-client loads hdb inside
+  // connect()), so a saved original would be undefined and every restore
+  // would return early -- the stand-in then survived the suite (the second
+  // hold's GREEN 3: sqlscript-eager connected through it, prepare missing).
+  // The next require after the delete loads the real driver fresh.
+  afterEach(() => {
+    const req = createRequire(import.meta.url);
+    delete req.cache[req.resolve("hdb")];
+  });
+
   const fakeHdb = () => {
     const sent = [];
     const refused = [];
@@ -180,9 +195,11 @@ describe("the DDIC probe's reads name only measured columns", () => {
     const say = console.log;
     console.log = (line) => lines.push(String(line));
     let code;
+    process.env.OSD_CLIENT = "001"; // the mode refuses to start without a logon client (H3)
     try {
       code = await run(["--tables", "ZOSD_H1_PROBE", "--out", out, "--mandt"]);
     } finally {
+      delete process.env.OSD_CLIENT;
       console.log = say;
     }
     try {
@@ -261,6 +278,7 @@ describe("the DDIC probe's reads name only measured columns", () => {
   // console.log captured the way the reads test does and the cwd restored
   // before any assertion runs.
   const diffRun = async (tablXml) => {
+    fakeHdb(); // its own stand-in: no test may rely on a previous test's (the give-back deletes it, FIX-4)
     const root = mkdtempSync(join(tmpdir(), "hana-ddic-diff-"));
     const cwd = process.cwd();
     const lines = [];
@@ -268,6 +286,7 @@ describe("the DDIC probe's reads name only measured columns", () => {
     mkdirSync(join(root, "src"), {recursive: true});
     writeFileSync(join(root, "src", "zosd_h1_probe.tabl.xml"), tablXml);
     let code;
+    process.env.OSD_CLIENT = "001"; // the mode refuses to start without a logon client (H3)
     try {
       // this run's own stand-in: the --diff tests never installed one and ran
       // on the previous test's leftover, which the give-back in afterEach now
@@ -277,6 +296,7 @@ describe("the DDIC probe's reads name only measured columns", () => {
       process.chdir(root);
       code = await run(["--tables", "ZOSD_H1_PROBE", "--diff"]);
     } finally {
+      delete process.env.OSD_CLIENT;
       process.chdir(cwd);
       console.log = say;
       rmSync(root, {recursive: true, force: true});
