@@ -73,6 +73,9 @@ export const seedsBuilt = (dataDir) => dataDir !== undefined && existsSync(join(
 
 export function sourceMatches(source, entry) {
   if (!entry || entry.path !== source.path
+      // privacy: boolean, null (unknown, empty-config OCI) or absent (fetched
+      // before it was recorded) all build; publishing refuses the last two
+      || !(entry.private === undefined || entry.private === null || typeof entry.private === "boolean")
       || JSON.stringify(entry.exclude) !== JSON.stringify(source.exclude)) return false;
   return source.oci !== undefined
     ? entry.oci === source.oci && entry.repo === undefined && entry.ref === undefined
@@ -232,13 +235,16 @@ export function packAt(root, dir) {
   if (declared.ddic === undefined) {
     for (const candidate of [dir, ...abapCandidates]) directoryRequirements.push(join(candidate, "ddic"));
   }
+  directoryRequirements.push(...sources.map((s) => s.dir));
   return {
     root,
     sources,
     // absent folders and stale identities: an unfetched pack is a
     // different system, and it is said rather than built smaller
     directoryRequirements,
-    missing: sources.filter((s) => !packDirectory(s.dir) || !sourceMatches(s, sourceOf(s.dir))),
+    // read when asked (osd-fetch), so a pack a selection leaves out has its
+    // manifest read and nothing else: an identity carries a fetch time
+    get missing() { return sources.filter((s) => !isDir(s.dir) || !sourceMatches(s, sourceOf(s.dir))); },
     name,
     description: declared.description === undefined ? undefined : String(declared.description),
     dir,
@@ -362,6 +368,18 @@ export function packsOf(root, env) {
     return pack;
   });
   return packs.sort((a, b) => a.order - b.order || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+}
+
+/** what finding the packs reads in the tree's own place, selected or not:
+ *  each manifest (packAt). A selection (OSD_WEB_PACKS) narrows what is
+ *  built, not what is read; identities are read only for selected packs. */
+export function packReadsOf(root, env) {
+  const place = placesOf(root, env)[0];
+  if (isDir(place) === false) return [];
+  const dirs = existsSync(join(place, MANIFEST)) ? [place] : readdirSync(place).sort().map((e) => join(place, e));
+  return dirs.flatMap((dir) => {
+    return packAt(root, dir) === undefined ? [] : [join(dir, MANIFEST)];
+  });
 }
 
 /** a pack's ABAP folder as the build and the store name it: root-relative */

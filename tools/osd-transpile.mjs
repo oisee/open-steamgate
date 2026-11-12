@@ -29,6 +29,7 @@ import {hostModules} from "./osd-host.mjs";
 import {expandedFolders, isSourceIdentity, inputFoldersOf} from "./osd-packs.mjs";
 import {mapStatementStarts} from "./osd-source-map-starts.mjs";
 import {lowerDerived, readRapBindings} from "./rap/lower-derived.mjs";
+import {urlLibraryPath} from "./osd-url-lib.mjs";
 import {lowerNarrowSubmit} from "./osd-narrow-submit.mjs";
 import {installRfcMessage} from "./osd-rfc-message.mjs";
 import {libraryPath} from "./osd-lib-path.mjs";
@@ -197,12 +198,14 @@ export function listFiles(root, config) {
     : expandedFolders(Array.isArray(config.input_folder) ? config.input_folder : [config.input_folder], root);
   const wanted = [];
   let skipped = 0;
-  for (const folder of folders) {
+  for (const folder of folders.filter((f) => typeof f === "string")) {
     const skipDirs = new Set(folders.filter((f) => f !== folder).map((f) => resolve(root, f)));
     for (const filename of walk(resolve(root, folder), [], skipDirs)) {
       // a repository marker is not source in either mode (H4: the converter's
       // layers are abapGit repositories; a system's layers carry .osd-layer.json)
-      if (isSourceIdentity(filename) || [".osd-layer.json", ".abapgit.xml"].includes(basename(filename))) {
+      // DSL navigation metadata (*.trace.meta.json) is volatile and no object:
+      // never read here, so it never names a generation (osd-build hashOf)
+      if (isSourceIdentity(filename) || /\.trace\.meta\.json$/i.test(filename) || [".osd-layer.json", ".abapgit.xml"].includes(basename(filename))) {
         skipped++;
       } else if (include.length > 0 && matchesSourcePath(root, filename, include, system) === false) {
         skipped++;
@@ -224,7 +227,12 @@ export async function loadLibs(root, config, log = () => {}, onRead = undefined)
   for (const lib of config.libs ?? []) {
     let dir;
     let cleanup = false;
-    if (system || existsSync(join(root, "libs.lock.json"))) {
+    const cached = urlLibraryPath(root, lib);
+    if (cached) {
+      if (!existsSync(cached)) throw new Error(`pinned URL library is not cached: ${lib.url}`);
+      dir = cached;
+      log(`lib from pinned URL cache: ${lib.url}`);
+    } else if (system || existsSync(join(root, "libs.lock.json"))) {
       dir = libraryPath(root, basename(lib.folder));
       log(`lib from locked folder: ${lib.folder}`);
     } else
@@ -236,6 +244,12 @@ export async function loadLibs(root, config, log = () => {}, onRead = undefined)
       log(`lib clone: ${lib.url}`);
       execFileSync("git", ["clone", "--quiet", "--depth", "1", "--", lib.url, "."], {cwd: dir, stdio: "pipe",
         env: {...process.env, GIT_CEILING_DIRECTORIES: dirname(dir)}});
+      if (lib.commit) {
+        if (!/^[0-9a-f]{40}$/.test(lib.commit)) throw new Error(`URL library commit must be a full SHA-1: ${lib.url}`);
+        execFileSync("git", ["checkout", "--quiet", "--detach", lib.commit], {cwd: dir, stdio: "pipe"});
+        const actual = execFileSync("git", ["rev-parse", "HEAD"], {cwd: dir, encoding: "utf8"}).trim();
+        if (actual !== lib.commit) throw new Error(`URL library checkout differs from configured commit: ${lib.url}`);
+      }
       cleanup = true;
     } else {
       throw new Error(`a lib needs a folder or a url: ${JSON.stringify(lib)}`);

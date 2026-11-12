@@ -25,17 +25,21 @@
 import {cpSync, existsSync, mkdirSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync} from "node:fs";
 import {execFileSync} from "node:child_process";
 import {basename, dirname, join, relative, resolve} from "node:path";
-import {pathToFileURL} from "node:url";
+import {fileURLToPath, pathToFileURL} from "node:url";
+import {assertPublicTree, verifyTreeArtefact, writePublicArtefact} from "../tools/osd-public-tree.mjs";
 import {runsAs} from "../tools/osd-main.mjs";
-import {generationHanaSrcProblem, privateGenFolder} from "../tools/osd-tmp.mjs";
+import {generationHanaSrcProblem, privateGenFolder, segwPrivateGen} from "../tools/osd-tmp.mjs";
 
 // main(argv, {root}) is the testable entry: the command line runs it against
 // the checkout, and test/hana-src-gen.mjs runs the same body against a fake
 // tree -- a generation whose manifest lists a tenant layer must refuse, and
 // a clean one must copy the tree without the private gen/ folders.
-export async function main(argv = process.argv.slice(2), {root = resolve(import.meta.dir ?? process.cwd(), "..")} = {}) {
+export async function main(argv = process.argv.slice(2), {root = resolve(dirname(fileURLToPath(import.meta.url)), "..")} = {}) {
   const out = resolve(argv[0] ?? join(root, ".local", "release"));
   const say = (m) => console.log(`  ${m}`);
+  // the tree is what is copied: it must be the public live generation now,
+  // before anything else is read from it
+  assertPublicTree(root);
 
   // one generation, and the link the runtime loads it through. Read before
   // anything is copied or removed: a refusal must not leave the release
@@ -54,7 +58,9 @@ export async function main(argv = process.argv.slice(2), {root = resolve(import.
   const TREE = ["src", "gen", "data", "webapp", "test", "tools", "bin", "scripts", "abap_transpile.json", "package.json", "abaplint.jsonc"];
   for (const entry of TREE) {
     if (existsSync(join(root, entry))) {
-      cpSync(join(root, entry), join(out, entry), {recursive: true, dereference: true, filter: (p) => basename(p) !== "e2e" && !privateGenFolder(relative(root, p))});
+      cpSync(join(root, entry), join(out, entry), {recursive: true, dereference: true, filter: (p) => basename(p) !== "e2e" && !privateGenFolder(relative(root, p)) &&
+        // and gen/segw while its manifest names a dump (H5b, tools/osd-tmp.mjs)
+        !segwPrivateGen(relative(root, p), root)});
     }
   }
   say(`content: ${TREE.filter((e) => existsSync(join(root, e))).join(", ")}`);
@@ -143,6 +149,7 @@ export async function main(argv = process.argv.slice(2), {root = resolve(import.
         `contain it -- which is how an evening was spent testing code that was ` +
         `not running. Build it first: ${how}`);
     }
+    verifyTreeArtefact(from, root);
     cpSync(from, join(out, name));
     say(`host: ${name}, built ${new Date(built).toISOString()}`);
   };
@@ -284,6 +291,9 @@ case "\${1:-bun}" in
 esac
 `);
   execFileSync("chmod", ["+x", join(out, "run.sh")]);
+  // checked again now that it is copied: a fetch while this ran is refused
+  writePublicArtefact(out, root);
+  verifyTreeArtefact(out, root);
   const size = execFileSync("du", ["-sh", out], {encoding: "utf8"}).split(/\s+/)[0];
   console.log(`${out}: ${size}`);
 }

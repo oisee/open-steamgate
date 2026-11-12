@@ -22,6 +22,7 @@ packs/*/.osd-fetched.json
 gen/hana-src
 gen/hana-ddic
 gen/hana-closure
+gen/hana-segw
 **/.git
 **/.env*
 **/*.pcap

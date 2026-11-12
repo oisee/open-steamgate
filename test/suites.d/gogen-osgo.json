@@ -27,6 +27,7 @@
     "test/osd-fetch.mjs",
     "test/osd-oci.mjs",
     "test/osd-layer.mjs",
+    "test/osd-generator-reads.mjs",
     "test/osd-git.mjs",
     "test/osd-git-history.mjs",
     "test/osd-host.mjs",

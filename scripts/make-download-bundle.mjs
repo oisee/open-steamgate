@@ -7,8 +7,12 @@ import {chmodSync, cpSync, existsSync, mkdirSync, readFileSync, readlinkSync, st
 import {basename, dirname, join, relative, resolve} from "node:path";
 import {libraryFiles} from "../tools/osd-inputs.mjs";
 import {unfetched, describeUnfetched} from "../tools/osd-fetch.mjs";
-import {generationHanaSrcProblem, privateGenFolder} from "../tools/osd-tmp.mjs";
+import {generationHanaSrcProblem, privateGenFolder, segwPrivateGen} from "../tools/osd-tmp.mjs";
 import {runsAs} from "../tools/osd-main.mjs";
+import {fileURLToPath} from "node:url";
+import {assertPublicSystem} from "../tools/osd-system.mjs";
+import {verifyPublicArtefact} from "../tools/osd-provenance.mjs";
+import {assertPublicTree, verifyTreeArtefact, writePublicArtefact} from "../tools/osd-public-tree.mjs";
 
 // gen/hana-src and gen/hana-ddic (H4) are the tenant's content: the staged
 // gen/ never carries them, manifest or not. tools/osd-tmp.mjs holds the one
@@ -25,7 +29,11 @@ const targets = {
 // the checkout, and test/hana-src-gen.mjs runs the same body against a fake
 // tree -- a generation whose manifest lists a tenant layer must refuse, and
 // a clean one must stage the tree without the private gen/ folders.
-export async function main(argv = process.argv.slice(2), {root = resolve(import.meta.dirname, "..")} = {}) {
+export async function main(argv = process.argv.slice(2), {root = resolve(dirname(fileURLToPath(import.meta.url)), "..")} = {}) {
+  // the tree is what is staged: it must be the public live generation now,
+  // before anything else is read from it
+  assertPublicSystem(root);
+  assertPublicTree(root);
   const name = argv[0];
   const target = targets[name];
   if (!target) throw new Error(`Expected one of ${Object.keys(targets).join(", ")}`);
@@ -55,6 +63,9 @@ export async function main(argv = process.argv.slice(2), {root = resolve(import.
   const archive = join(probe, `${folder}${target.archive}`);
   if (existsSync(stage) || existsSync(archive)) {
     if (!existsSync(stage) || !existsSync(archive)) throw new Error(`Incomplete existing bundle: ${stage}`);
+    verifyPublicArtefact(join(probe, target.bun));
+    verifyTreeArtefact(stage, root);
+    verifyTreeArtefact(archive, root);
     const manifest = JSON.parse(readFileSync(join(stage, "release.json"), "utf8"));
     for (const file of [target.bun]) {
       const digest = createHash("sha256").update(readFileSync(join(probe, file))).digest("hex");
@@ -77,7 +88,9 @@ export async function main(argv = process.argv.slice(2), {root = resolve(import.
   for (const item of content) {
     if (existsSync(join(root, item))) {
       cpSync(join(root, item), join(stage, item), {recursive: true, dereference: true,
-        filter: (path) => basename(path) !== "e2e" && !path.endsWith(".go") && !privateGenFolder(relative(root, path))});
+        filter: (path) => basename(path) !== "e2e" && !path.endsWith(".go") && !privateGenFolder(relative(root, path)) &&
+          // and gen/segw while its manifest names a dump (H5b, tools/osd-tmp.mjs)
+          !segwPrivateGen(relative(root, path), root)});
     }
   }
   for (const {files} of libraryFiles(root)) {
@@ -97,6 +110,7 @@ export async function main(argv = process.argv.slice(2), {root = resolve(import.
   cpSync(join(root, "build", generation), join(stage, "build", generation), {recursive: true});
   symlinkSync(generation, join(stage, "build", "live"));
   symlinkSync(join("build", "live", "output"), join(stage, "output"));
+  verifyPublicArtefact(join(probe, target.bun));
   cpSync(join(probe, target.bun), join(stage, target.bun));
   const launcher = name === "windows-x64" ? "run.ps1" : "run.sh";
   cpSync(join(root, "scripts", "release", launcher), join(stage, launcher));
@@ -119,6 +133,7 @@ export async function main(argv = process.argv.slice(2), {root = resolve(import.
     "Private test artifact. Do not redistribute before dependency-notice and provenance review.\n" +
     "Mini-Zork public-domain claim: https://www.inform-fiction.org/zmachine/standards/z1point1/appf.html\n" +
     "SQLite data is stored outside this directory by run.sh or run.ps1.\n");
+  writePublicArtefact(stage, root);
   if (target.archive === ".zip") {
     execFileSync("zip", ["-q", "-r", archive, folder], {cwd: probe, stdio: "inherit"});
   } else {
@@ -126,6 +141,7 @@ export async function main(argv = process.argv.slice(2), {root = resolve(import.
   }
   const digest = createHash("sha256").update(readFileSync(archive)).digest("hex");
   writeFileSync(`${archive}.sha256`, `${digest}  ${basename(archive)}\n`);
+  writePublicArtefact(archive, root);
   console.log(`${archive} (${Math.round(statSync(archive).size / 1e6)} MB, sha256 ${digest})`);
   return archive;
 }

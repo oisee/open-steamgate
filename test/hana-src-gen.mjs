@@ -4,7 +4,9 @@ import {tmpdir} from "node:os";
 import {execFileSync, spawnSync} from "node:child_process";
 import {dirname, join, resolve} from "node:path";
 import {run} from "../tools/hana-src-gen.mjs";
-import {build} from "../tools/osd-build.mjs";
+import {build, hashOf} from "../tools/osd-build.mjs";
+import {syntheticReads} from "./helpers/fix7-fixtures.mjs";
+import {writePublicArtefact} from "../tools/osd-public-tree.mjs";
 import {generationHanaSrcProblem} from "../tools/osd-tmp.mjs";
 import {expandedFolders} from "../tools/osd-packs.mjs";
 import {layers} from "../tools/osd-inputs.mjs";
@@ -614,7 +616,10 @@ describe("hana-src-gen: the tenant's sources as input layers", () => {
 
   describe("the publishers that bundle a build, against a fake tree", () => {
     const REPO = resolve(import.meta.dirname, "..");
-    const GENERATION = "0123456789abcdef";
+    // each tree's generation is named by the hash of the tree itself, and
+    // carries a complete, public read record (#908): the publishers gate on
+    // both before they look at gen/hana-src
+    const GENERATION = new Map();
     let home;
     // the preview's module graph resolves bare specifiers (@abaplint/core
     // and friends) from node_modules beside the importing folder: its tree
@@ -630,24 +635,34 @@ describe("hana-src-gen: the tenant's sources as input layers", () => {
       mkdirSync(dirname(join(tree, rel)), {recursive: true});
       cpSync(join(REPO, rel), join(tree, rel), {recursive: true});
     };
-    const generationManifest = (tree, folders) => writeIn(tree, join("build", "by-input", GENERATION, "manifest.json"),
-      `${JSON.stringify({inputs: {folders}}, undefined, 2)}\n`);
+    const generationManifest = (tree, folders) => {
+      writeIn(tree, join("build", "by-input", GENERATION.get(tree), "manifest.json"),
+        `${JSON.stringify({hash: GENERATION.get(tree), inputs: {folders}, systemDigest: null, systemPrivate: false, provenance: []}, undefined, 2)}\n`);
+      syntheticReads(tree, GENERATION.get(tree));
+    };
     // the children see a tree of their own, not this checkout's packs or layers
     const runInTree = (tree, script, args = []) => spawnSync("node", [script, ...args],
       {cwd: tree, encoding: "utf8", env: {...process.env,
         OSD_PACKS: "", OSD_WEB_PACKS: "", OSD_TMP: "", OSD_LAYERS: "",
         OSD_LAYER_PACKAGE: "", OSD_IMAGE_PACKS: "", OSD_PREVIEW_GENERATE_ONLY: "1"}});
+    // the same environment runInTree hands a child: empty, not unset -- an
+    // unset OSD_WEB_PACKS selects every pack, an empty one none, and the two
+    // name different generations of one tree. Restored when fn has settled,
+    // a promise included.
     const withTreeEnv = (fn) => {
       const names = ["OSD_PACKS", "OSD_WEB_PACKS", "OSD_TMP", "OSD_LAYERS", "OSD_LAYER_PACKAGE", "OSD_IMAGE_PACKS"];
       const saved = Object.fromEntries(names.map((n) => [n, process.env[n]]));
-      try {
-        for (const n of names) delete process.env[n];
-        return fn();
-      } finally {
+      const restore = () => {
         for (const [n, v] of Object.entries(saved)) {
           if (v === undefined) delete process.env[n]; else process.env[n] = v;
         }
-      }
+      };
+      for (const n of names) process.env[n] = "";
+      let result;
+      try { result = fn(); } catch (error) { restore(); throw error; }
+      if (typeof result?.then === "function") return result.finally(restore);
+      restore();
+      return result;
     };
     const freshProbe = () => {
       rmSync(join(home, ".local", "release-probe", "linux-amd64"), {recursive: true, force: true});
@@ -675,7 +690,14 @@ describe("hana-src-gen: the tenant's sources as input layers", () => {
         copyFromRepo(tree, "tools");
         for (const dir of ["src", "data", "webapp", "test", "bin", "scripts"]) mkdirSync(join(tree, dir), {recursive: true});
         if (linkedNodeModules) symlinkSync(join(REPO, "node_modules"), join(tree, "node_modules"));
-        else mkdirSync(join(tree, "node_modules"), {recursive: true});
+        else {
+          // the public-tree gate imports the parser, and the hash names the
+          // transpiler and runtime installed in the tree: link those three, so
+          // a publisher run in this process and one run in the tree agree
+          mkdirSync(join(tree, "node_modules", "@abaplint"), {recursive: true});
+          for (const name of ["core", "transpiler", "runtime"])
+            symlinkSync(join(REPO, "node_modules", "@abaplint", name), join(tree, "node_modules", "@abaplint", name));
+        }
         for (const file of ["test/seed.mjs", "web/preview-socket.mjs", "docker/image/assemble.mjs",
           "docker/image/license-assumptions.mjs", "docker/image/packs.mjs", "scripts/build-preview.mjs",
           "scripts/make-download-bundle.mjs", "scripts/release/run.sh", "scripts/release/run.ps1", "LICENSE"]) {
@@ -694,9 +716,6 @@ describe("hana-src-gen: the tenant's sources as input layers", () => {
         // through (dirname(realpath(output)) is the generation, the way
         // osd-build lays it out), and build-preview reads it before its
         // guards run
-        writeIn(tree, join("build", "by-input", GENERATION, "output", "init.mjs"), "export default {};\n");
-        symlinkSync(join("by-input", GENERATION), join(tree, "build", "live"));
-        symlinkSync(join("build", "live", "output"), join(tree, "output"));
         writeIn(tree, join("gen", "amdp", "procedures.json"), `${JSON.stringify({procedures: []})}\n`);
         writeIn(tree, join("gen", "zosd_h4_gen_control.tabl.xml"), "<abapGit><TABNAME>ZOSD_H4_GEN_CONTROL</TABNAME></abapGit>");
         writeIn(tree, join("gen", "hana-src", "000-osd-tmp-zosd-h4-a", "src", "zosd_h4_a.prog.abap"), "REPORT zosd_h4_a.\n");
@@ -709,6 +728,11 @@ describe("hana-src-gen: the tenant's sources as input layers", () => {
         execFileSync("git", ["init", "-q"], {cwd: tree});
         execFileSync("git", ["-c", "user.name=fixture", "-c", "user.email=fixture@localhost",
           "commit", "--allow-empty", "-q", "-m", "fixture"], {cwd: tree});
+        const generation = withTreeEnv(() => hashOf(tree));
+        GENERATION.set(tree, generation);
+        writeIn(tree, join("build", "by-input", generation, "output", "init.mjs"), "export default {};\n");
+        symlinkSync(join("by-input", generation), join(tree, "build", "live"));
+        symlinkSync(join("build", "live", "output"), join(tree, "output"));
       };
       buildTree(home, {});
       buildTree(previewHome, {linkedNodeModules: true});
@@ -760,7 +784,7 @@ describe("hana-src-gen: the tenant's sources as input layers", () => {
       const clean = runInTree(home, join(home, "docker", "image", "assemble.mjs"), [out]);
       expect(clean.status, clean.stderr).to.equal(0);
       stagesNoPrivateGen(join("image-out", "gen"));
-      expect(existsSync(join(out, "build", "by-input", GENERATION, "manifest.json")),
+      expect(existsSync(join(out, "build", "by-input", GENERATION.get(home), "manifest.json")),
         "the guarded generation itself is copied").to.equal(true);
       // the build context names the private folders, so a widened allowlist
       // cannot carry them in
@@ -783,6 +807,9 @@ describe("hana-src-gen: the tenant's sources as input layers", () => {
         .to.deep.equal(["osd"]);
       generationManifest(home, ["src", "gen"]);
       freshProbe();
+      // the binary the bundle ships carries its public record, as
+      // build-binary stamps it from the tree's live generation
+      withTreeEnv(() => writePublicArtefact(join(home, ".local", "release-probe", "linux-amd64", "osd"), home));
       const archive = await withTreeEnv(() => main(["linux-amd64"], {root: home}));
       expect(archive, "the bundle is written").to.match(/osd-bun-.*\.tar\.gz$/);
       const stage = readdirSync(join(home, ".local", "release-probe", "linux-amd64")).find((e) => e.startsWith("osd-bun-"));
@@ -802,7 +829,7 @@ describe("hana-src-gen: the tenant's sources as input layers", () => {
       await withTreeEnv(() => main([out], {root: home}));
       stagesNoPrivateGen(join("release-out", "gen"));
       expect(existsSync(join(out, "src")), "the tree itself is copied").to.equal(true);
-      expect(existsSync(join(out, "build", "by-input", GENERATION, "manifest.json")),
+      expect(existsSync(join(out, "build", "by-input", GENERATION.get(home), "manifest.json")),
         "the guarded generation is copied").to.equal(true);
     });
   });

@@ -268,6 +268,11 @@ Prior art built on: `abaplint/transpiler`, `open-abap/open-abap-odata`,
   abapGit-named; `tools/segw-registry.mjs` (part of `transpile`) writes
   `gen/segw/zcl_stg_segw_registry`, which `test/start.mjs` and the preview
   call. `npm run segw -- <folder> --list` shows what a repo would register.
+  Out of a tenant dump the same writer is fed by `tools/hana-segw-gen.mjs`
+  from the Gateway backend registration tables (facts + manifest under
+  `gen/hana-segw`, private like the other tenant folders; the merged
+  registry class stays at `gen/segw`, which the publishers drop while the
+  facts exist — `docs/db-backends.md`, "Registration out of a tenant").
 - Analytics: `ZSTG_FLIGHTFACT` (`data/zstg_flightfact.tabu.json`, 24 seed
   rows) → CDS cube `ZC_STG_FLIGHTCUBE` (`@Analytics.dataCategory: #CUBE`,
   `@Aggregation.default: #SUM`) served by `ZSTG_SADL_SRV`; the SADL runtime

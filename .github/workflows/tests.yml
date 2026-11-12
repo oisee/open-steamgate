@@ -88,9 +88,11 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.2
+      # --unstamped: no generation exists before the transpile, so this test
+      # binary carries no provenance and no publishing path accepts it.
       - name: Build the binary from the clean checkout
         run: |
-          bun scripts/build-binary.mjs "$RUNNER_TEMP/osd"
+          bun scripts/build-binary.mjs --unstamped "$RUNNER_TEMP/osd"
           "$RUNNER_TEMP/osd" doctor
 
       # libs.lock.json includes the pinned repository and commit. Hashing the
@@ -187,11 +189,14 @@ jobs:
           tar -C "$RUNNER_TEMP" --exclude='node_modules' -cf - transpiler | tar -C .local/ci-artifact -xf -
           mkdir -p .local/ci-artifact/transpiler/packages/transpiler/node_modules/@abaplint
           cp -a "$RUNNER_TEMP/transpiler/packages/transpiler/node_modules/@abaplint/core" .local/ci-artifact/transpiler/packages/transpiler/node_modules/@abaplint/core
+          node tools/osd-ci-transpiler.mjs prepare
           node tools/osd-ci-artifact.mjs pack "$RUNNER_TEMP/built-tree.tar"
       - uses: actions/upload-artifact@v4
         with:
           name: built-tree
-          path: ${{ runner.temp }}/built-tree.tar
+          path: |
+            ${{ runner.temp }}/built-tree.tar
+            ${{ runner.temp }}/built-tree.tar.osd-provenance.json
           if-no-files-found: error
           retention-days: 1
 
@@ -279,6 +284,7 @@ jobs:
           path: ${{ runner.temp }}
       - name: Restore and verify this run's build
         run: |
+          node tools/osd-provenance.mjs verify "$RUNNER_TEMP/built-tree.tar"
           tar -xf "$RUNNER_TEMP/built-tree.tar"
           test -f gen/osd-ddic-binary.mjs
           test -f output/init.mjs
@@ -333,6 +339,7 @@ jobs:
           path: ${{ runner.temp }}
       - name: Restore and verify this run's build
         run: |
+          node tools/osd-provenance.mjs verify "$RUNNER_TEMP/built-tree.tar"
           tar -xf "$RUNNER_TEMP/built-tree.tar"
           test -f gen/osd-ddic-binary.mjs
           test -f output/init.mjs
@@ -372,6 +379,7 @@ jobs:
           path: ${{ runner.temp }}
       - name: Restore and verify this run's build
         run: |
+          node tools/osd-provenance.mjs verify "$RUNNER_TEMP/built-tree.tar"
           tar -xf "$RUNNER_TEMP/built-tree.tar"
           test -f gen/osd-ddic-binary.mjs
           test -f output/init.mjs
@@ -461,6 +469,7 @@ jobs:
           path: ${{ runner.temp }}
       - name: Restore and verify this run's build
         run: |
+          node tools/osd-provenance.mjs verify "$RUNNER_TEMP/built-tree.tar"
           tar -xf "$RUNNER_TEMP/built-tree.tar"
           test -f build/live/manifest.json
           test -d .local/lars/open-abap-core
@@ -711,6 +720,7 @@ jobs:
       - name: Restore this run's pinned runtime and libraries
         timeout-minutes: 5
         run: |
+          node tools/osd-provenance.mjs verify "$RUNNER_TEMP/built-tree.tar"
           tar -xf "$RUNNER_TEMP/built-tree.tar"
           test -d .local/lars/open-abap-core
           test -f .local/ci-artifact/transpiler/packages/transpiler/build/src/index.js
@@ -764,6 +774,7 @@ jobs:
           path: ${{ runner.temp }}
       - name: Restore and verify the build used by the shards
         run: |
+          node tools/osd-provenance.mjs verify "$RUNNER_TEMP/built-tree.tar"
           tar -xf "$RUNNER_TEMP/built-tree.tar"
           echo "TRANSPILER=$PWD/.local/ci-artifact/transpiler" >> "$GITHUB_ENV"
           TRANSPILER="$PWD/.local/ci-artifact/transpiler" node tools/osd-link.mjs transpiler packages/transpiler

@@ -40,15 +40,12 @@ import {dirname, resolve} from "node:path";
 import {createRequire} from "node:module";
 import {buildIdentity} from "../tools/osd-transpiler.mjs";
 import {systemId} from "../tools/osd-identity.mjs";
-import {spawnSync} from "node:child_process";
-import {toolCommand, setHostedLeakScanner, compiled, setHostModules, dataDirOf, ensureBinaryHome, homesIn, isCheckout, layerList} from "../tools/osd-host.mjs";
+import {compiled, setHostModules, dataDirOf, ensureBinaryHome, homesIn, isCheckout, layerList} from "../tools/osd-host.mjs";
+import {installHostedLeakScanner} from "../tools/osd-hosted-leak-scanner.mjs";
 
 // The binary owns hosted subprocess dispatch; the plain Node publisher has
 // no dependency on this entry point and always runs its fixed scanner script.
-setHostedLeakScanner((cwd, paths) => {
-  const [command, ...args] = toolCommand("tools/osd-leak-scan.mjs", ["--redact", "--publication-allow", "--paths", ...paths]);
-  return spawnSync(command, args, {cwd, encoding: "utf8", maxBuffer: 4 * 1024 * 1024});
-});
+installHostedLeakScanner();
 
 // Bundles retain the identity of the packages actually embedded at build
 // time. Reading a later checkout here would falsely describe old code.
@@ -152,6 +149,7 @@ const GENERATORS = {
   "cds2ddic.mjs": () => import("../tools/cds2ddic.mjs"),
   "stg-compile.mjs": () => import("../tools/stg-compile.mjs"),
   "segw-registry.mjs": () => import("../tools/segw-registry.mjs"),
+  "hana-segw-gen.mjs": () => import("../tools/hana-segw-gen.mjs"),
   "segw-shlp.mjs": () => import("../tools/segw-shlp.mjs"),
   "amdp-gen.mjs": () => import("../tools/amdp-gen.mjs"),
   "amdp-tablefunc.mjs": () => import("../tools/amdp-tablefunc.mjs"),
@@ -173,6 +171,10 @@ const GENERATORS = {
   "seed-capture.mjs": () => import(pathToFileURL(resolve(process.env.OSD_ROOT ?? process.cwd(),
     "tools", "rap-flight", "seed-capture.mjs")).href),
 };
+
+// A child of a recorded generator (the seed capture's runtime, say) records
+// in every mode, so it owes its parent the same handshake as `gen` does.
+if (process.env.OSD_GENERATOR_READS) await import("../tools/osd-generator-reads.mjs");
 
 switch (mode) {
   case "compiler": {
@@ -206,6 +208,7 @@ switch (mode) {
   case "gen": {
     const {installGeneratorView} = await import("../tools/osd-generator-view.mjs");
     installGeneratorView();
+    await import("../tools/osd-generator-reads.mjs");
     const [name, ...args] = rest;
     if (GENERATORS[name] === undefined) {
       console.error(`osd gen: not a generator: ${name}`);
