@@ -36,6 +36,7 @@ import {fileURLToPath} from "node:url";
 import {generatorIdentity, hashOf, inputsOf, layout, liveHash, lock, linkRoots, ownConfig, prepare, rootsWanted, switchTo} from "./osd-build.mjs";
 import {sourceBuildOverlay, sourceBuildStore} from "./osd-source-build-view.mjs";
 import {assertToolchain} from "./osd-transpiler.mjs";
+import {generationSystem} from "./osd-system.mjs";
 import {mapStatementStarts} from "./osd-source-map-starts.mjs";
 import {runsAs} from "./osd-main.mjs";
 import {isBinaryFilename, listFiles, loadLibs, selectedModules, outputFiles, readAll} from "./osd-transpile.mjs";
@@ -851,6 +852,7 @@ export class WarmCompiler {
           writeFileSync(join(tmp, "manifest.json"), JSON.stringify({
             hash, builtAt: new Date().toISOString(), ms: Date.now() - started, objects: manifest.objects,
             transpiler, toolchain: this.loaded.identity, inputs: manifest.inputs, gen: manifest.gen, overridden: manifest.overridden,
+            ...generationSystem(root, manifest.inputs),
           }, null, 2));
           const sharedSources = keepSourceInputs(root, tmp, digests, actual, overlay,
             {generation: join(paths.byInput, from), digests: this.digests});
