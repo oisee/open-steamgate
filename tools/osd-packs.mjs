@@ -102,6 +102,17 @@ export function winningByLayer(folders, entriesIn, keyOf) {
       entries = entriesIn(folder);
     } catch (error) {
       if (error?.code !== "ENOENT") throw error;
+      // the FOLDER'S OWN absence yields nothing (H3: gen/hana-ddic before
+      // its first run). An ENOENT naming something INSIDE the folder -- one
+      // unreadable entry in the walk -- is not absence: read as absence it
+      // dropped every registration of the folder at once (the A10 live diff
+      // answered 404 for services that are there; segw-registry's walk stats
+      // each entry, fix round 4). fs errors carry .path; a walker that
+      // throws an ENOENT without one is answered as folder-absence, as
+      // before, because the caller's path space is its own.
+      const missing = String(error.path ?? "").split("\\").join("/");
+      const own = `/${slash(folder).replace(/^\/+|\/+$/g, "")}`;
+      if (missing !== "" && missing !== slash(folder) && missing.endsWith(own) === false) throw error;
       continue;
     }
     for (const entry of entries) {

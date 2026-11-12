@@ -26,6 +26,21 @@ describe("the HANA shadow schema", () => {
     // the flight table's view with * expanded into the column list.
     {TABNAME: "SCARR", CLIDEP: "X"},
   ];
+  // the fake stands in through the CJS cache a real require uses; the
+  // suites runner runs a shard's files in ONE process, so the stand-in is
+  // given back after every test -- the next hdb consumer in the shard
+  // otherwise gets a driver without prepare (FIX-4, the sqlscript suites).
+  // the give-back is a DELETE, not a restore: at the first fakeHdb call the
+  // real driver has never been required (hana-client loads hdb inside
+  // connect()), so a saved original would be undefined and every restore
+  // would return early -- the stand-in then survived the suite (the second
+  // hold's GREEN 3: sqlscript-eager connected through it, prepare missing).
+  // The next require after the delete loads the real driver fresh.
+  afterEach(() => {
+    const req = createRequire(import.meta.url);
+    delete req.cache[req.resolve("hdb")];
+  });
+
   const fakeHdb = ({views = [], synonyms = [], failName, failTimes = 0, failDd02lTimes = 0} = {}) => {
     const sent = [];
     const options = [];
@@ -452,17 +467,26 @@ describe("the HANA shadow schema", () => {
 
   it("the session client is the sy-mandt the ABAP reads", async () => {
     let mandt;
+    // the stub is GIVEN BACK, not deleted: a shard's process boots the
+    // runtime at load (a suite importing start.mjs), and deleting the global
+    // here threw the booted runtime away -- the next boot re-run then built
+    // a hollow instance (setup fine, generated modules missing) and
+    // job-periodic / osd-rfc / rap-r6 died on their first FunctionModules
+    // call (the third hold's GREEN 7). With shard 4's file order the same
+    // delete was the CI shards' '.context' failure.
+    const priorAbap = globalThis.abap;
     globalThis.abap = {builtin: {sy: {get: () => ({
       dbsys: {set: () => undefined},
       mandt: {set: (value) => { mandt = value; }},
     })}}};
     try {
+      fakeHdb(); // its own stand-in: no test may rely on a previous test's (the give-back deletes it, FIX-4)
       const db = new HanaDatabaseClient({existingSchema: true, schema: "ZOSD_H3_TENANT", client: "042"});
       await db.connect();
       expect(mandt, "sy-mandt is the logon client").to.equal("042");
       await db.disconnect();
     } finally {
-      delete globalThis.abap;
+      globalThis.abap = priorAbap;
     }
   });
 

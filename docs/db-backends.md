@@ -502,7 +502,10 @@ The DDIC the build knows comes from the real system:
 `--from-build` discovers them (a missing DDIC name surfaces in the
 transpile's own validation output, `check_syntax, Database table or view "x"
 not found` / `unknown_types, ... contains unknown: X not found`; the tool
-reads the transpiler's words, never parses ABAP). `gen/hana-ddic` is listed
+reads the transpiler's words, never parses ABAP). `npm run transpile` creates the folder
+empty from the first build on (only a database-backed `--from-build` fills it), and the readers
+tolerate its absence regardless, because a fresh clone runs the osgo host before any transpile.
+`gen/hana-ddic` is listed
 in `abap_transpile.json` **before** `src/`: the later folder wins, so a
 hand-written `src/<table>.tabl.xml` of the same name shadows the generated
 copy — the real system's DDIC loses to an override only on purpose, and a

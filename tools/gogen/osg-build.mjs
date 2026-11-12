@@ -8,7 +8,11 @@ import {dbCacheRead, dbCacheWrite, dbContributions, dbFlat, incrAssemble, incrRe
 import {home} from "./home.mjs";
 import {libraryPath} from "../osd-lib-path.mjs";
 
-const walk = (d) => readdirSync(d, {withFileTypes: true}).flatMap((e) => (e.isDirectory() ? walk(join(d, e.name)) : [join(d, e.name)]));
+// a listed folder that is not on disk reads as empty (H3/FIX-4:
+// gen/hana-ddic is listed before its first build writes it, and the osgo
+// host imports this module on a fresh clone): tools/osd-inputs.mjs
+// walkListed, the one walker the layer list shares
+const walk = (d) => walkListed(d);
 
 /*
  * The layers in the order the Node build reads them (tools/osd-inputs.mjs):
@@ -19,7 +23,7 @@ const walk = (d) => readdirSync(d, {withFileTypes: true}).flatMap((e) => (e.isDi
  * (`hidden`), the way osd-build.mjs hands the transpiler the winner only.
  */
 const {inputFoldersOf} = await import(`${home}/tools/osd-packs.mjs`);
-const {layers: layersOf} = await import(`${home}/tools/osd-inputs.mjs`);
+const {layers: layersOf, walkListed} = await import(`${home}/tools/osd-inputs.mjs`);
 const {unfetched, describeUnfetched} = await import(`${home}/tools/osd-fetch.mjs`);
 const transpileConfig = JSON.parse(readFileSync(`${home}/abap_transpile.json`, "utf8"));
 const layerFolders = inputFoldersOf(home, transpileConfig).filter((f) => f !== "test");

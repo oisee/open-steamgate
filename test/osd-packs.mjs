@@ -1,5 +1,5 @@
 import {expect} from "chai";
-import {mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync} from "node:fs";
+import {mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {SOURCE, isSourceIdentity, BadPack, contentFoldersOf, dataDirsOf, ddicDirsOf, generatorFoldersOf, inputFoldersOf, packAt, packRootsOf, packsOf, webappsOf, winningByLayer} from "../tools/osd-packs.mjs";
@@ -402,6 +402,29 @@ describe("tools/osd-packs: a pack is a directory", () => {
         .to.deep.equal([join("packs", "over", "src", "zbin.tabl.xml")]);
       expect(winningByLayer(["gone"], (folder) => readdirSync(join(space, folder)), (file) => file),
         "a folder that is not there yields nothing").to.deep.equal([]);
+    } finally {
+      rmSync(space, {recursive: true, force: true});
+    }
+  });
+
+  it("winningByLayer throws for an entry that is unreadable inside a folder that is there", () => {
+    // one dangling name in the walk is not the folder's absence: swallowing
+    // its ENOENT dropped every registration of the folder at once -- the A10
+    // live diff answered 404 for services that are there (fix round 4; the
+    // swallow is the FOLDER'S OWN ENOENT, and fs errors carry .path).
+    const space = mkdtempSync(join(tmpdir(), "osd-packs-entry-"));
+    try {
+      mkdirSync(join(space, "src"), {recursive: true});
+      writeFileSync(join(space, "src", "zhere.tabl.xml"), "x");
+      symlinkSync(join(space, "absent"), join(space, "src", "zbroken.iwsv.xml"));
+      const entriesIn = (folder) => readdirSync(join(space, folder)).map((entry) => {
+        statSync(join(space, folder, entry)); // the walk stats every entry
+        return join(folder, entry);
+      });
+      expect(() => winningByLayer(["src"], entriesIn, (file) => file.split(/[\\/]/).at(-1).toLowerCase()))
+        .to.throw();
+      expect(winningByLayer(["gone"], entriesIn, (file) => file), "a folder that is not there still yields nothing")
+        .to.deep.equal([]);
     } finally {
       rmSync(space, {recursive: true, force: true});
     }

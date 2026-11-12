@@ -74,6 +74,21 @@ describe("hana-ddic-gen: DDIC from the real DD03L for the build", () => {
     const pinned = /TABNAME\s*=\s*'([A-Z0-9_]+)'/.exec(sql)?.[1];
     return (ROWS[table] ?? []).filter((row) => pinned === undefined || row.TABNAME === pinned);
   };
+  // the fake stands in through the CJS cache a real require uses; the
+  // suites runner runs a shard's files in ONE process, so the stand-in is
+  // given back after every test -- the next hdb consumer in the shard
+  // otherwise gets a driver without prepare (FIX-4, the sqlscript suites).
+  // the give-back is a DELETE, not a restore: at the first fakeHdb call the
+  // real driver has never been required (hana-client loads hdb inside
+  // connect()), so a saved original would be undefined and every restore
+  // would return early -- the stand-in then survived the suite (the second
+  // hold's GREEN 3: sqlscript-eager connected through it, prepare missing).
+  // The next require after the delete loads the real driver fresh.
+  afterEach(() => {
+    const req = createRequire(import.meta.url);
+    delete req.cache[req.resolve("hdb")];
+  });
+
   const fakeHdb = () => {
     const sent = [];
     const require = createRequire(import.meta.url);

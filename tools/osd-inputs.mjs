@@ -25,7 +25,7 @@ import {activeSystem, layerDir, logicalSystemPath, matchesSourcePath} from "./os
 // Neither is an error; both are said out loud, here and in the builder's
 // log.
 import {readFileSync, readdirSync, statSync, existsSync} from "node:fs";
-import {basename, resolve} from "node:path";
+import {basename, join, resolve} from "node:path";
 import {inputFoldersOf} from "./osd-packs.mjs";
 import {runsAs} from "./osd-main.mjs";
 
@@ -105,6 +105,30 @@ export function filesIn(base, folder, nested = []) {
   };
   if (existsSync(resolve(base, folder))) {
     walk(folder);
+  }
+  return out;
+}
+
+/** every file of a folder, absolute, in the disk's own readdir order (the
+ *  walkers over the layer list keep the order the tree gives them): a listed
+ *  folder that is not on disk reads as EMPTY, never as an error -- H3 lists
+ *  gen/hana-ddic in abap_transpile.json before the first build that writes
+ *  it, and a fresh clone runs the osgo host before any transpile (FIX-4).
+ *  One helper, because the walkers that walk the list by hand are the ones
+ *  that crashed on the absence (tools/gogen/osg-build.mjs walk, at import).
+ *  Only the read's own ENOENT is swallowed; anything else still throws. */
+export function walkListed(d, out = []) {
+  let entries;
+  try {
+    entries = readdirSync(d, {withFileTypes: true});
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+    return out;
+  }
+  for (const e of entries) {
+    const p = join(d, e.name);
+    if (e.isDirectory()) walkListed(p, out);
+    else out.push(p);
   }
   return out;
 }
