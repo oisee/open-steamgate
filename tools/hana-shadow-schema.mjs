@@ -126,16 +126,34 @@ async function existingObjects(db, own) {
 // case is safe (the one literal, 'CLIENT', is already upper).
 const normalized = (sql) => String(sql).replace(/\s+/g, " ").trim().toUpperCase();
 
-// SYS.VIEWS.DEFINITION holds the view's query string -- the text after AS
-// (HANA's documentation; the bed run confirms the column). The fakes pinned
-// the full CREATE text, and comparing against it made every connect recreate
-// every view (critic MUST 3 at f0a248af1 -- and two hosts connecting at once
-// would race on CREATE OR REPLACE). The comparison reads the query part out
-// of both sides: a DEFINITION in the documented shape passes through
-// unchanged, one that still carries the CREATE VIEW "own"."name" AS prefix
-// loses exactly that prefix, so both spellings are current when the query is.
-const queryOf = (text) =>
-  normalized(String(text).replace(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?VIEW\s+"[^"]+"\s*\.\s*"[^"]+"\s+AS/i, ""));
+// SYS.VIEWS.DEFINITION holds the view's query string -- the text after AS,
+// with `SELECT *` expanded into the quoted column list. Measured on the bed
+// 2026-11-12 (FIX-3): the SCARR view this module sent as SELECT * FROM
+// "<tenant>"."SCARR" WHERE MANDT = SESSION_CONTEXT('CLIENT') reads back as
+// SELECT "MANDT" , "CARRID" , "CARRNAME" , "CURRCODE" , "URL" FROM
+// "<tenant>"."SCARR" WHERE MANDT = SESSION_CONTEXT('CLIENT'), so round 2's
+// textual compare of the query part still recreated every view on every
+// connect (round 1 compared the whole CREATE text; critic MUST 3 at
+// f0a248af1 -- and two hosts connecting at once would race on the replace).
+// The decision is structural now: the query, whitespace-normalised, must
+// read SELECT <columns or *> FROM "<tenant>"."<T>" WHERE MANDT =
+// SESSION_CONTEXT('CLIENT'), with <columns> any quoted column list. The FROM
+// target and the predicate are the contract; the projection is HANA's to
+// spell. A view whose FROM names another schema or table, or whose predicate
+// differs (a hard-coded client), is drifted and recreated. A DEFINITION
+// still carrying the full CREATE VIEW prefix (the fakes' spelling before
+// the bed run) loses exactly that prefix first, so that spelling stays
+// current too.
+const isCurrentView = (definition, tenant, table) => {
+  const query = normalized(String(definition).replace(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?VIEW\s+"[^"]+"\s*\.\s*"[^"]+"\s+AS/i, ""));
+  const schema = String(tenant).toUpperCase();
+  const name = String(table).toUpperCase();
+  // both pass assertSchema's NAME rule (letters, digits, underscore, slash):
+  // no regex metacharacters, safe to embed.
+  return new RegExp(
+    `^SELECT (?:\\*|"[^"]+"(?:\\s*,\\s*"[^"]+")*) FROM "${schema}"\\."${name}" WHERE MANDT = SESSION_CONTEXT\\('CLIENT'\\)$`)
+    .test(query);
+};
 
 /** the eager half: every table of the generation that exists in the tenant
  *  gets its shadow object, unless it is already there and current. Idempotent
@@ -160,7 +178,7 @@ export async function ensureShadow(db, {own, tenant, tables}) {
       if (current === undefined) {
         await db.execute(wanted);
         report.created.push(name);
-      } else if (queryOf(current) !== queryOf(wanted)) {
+      } else if (isCurrentView(current, tenant, name) === false) {
         await db.execute(replaceViewSql(name, own, tenant));
         report.replaced.push(name);
       }
@@ -188,7 +206,7 @@ export async function ensureShadowFor(db, {own, tenant, name}) {
     const current = there.views.get(table);
     if (current === undefined) {
       await db.execute(wanted);
-    } else if (queryOf(current) !== queryOf(wanted)) {
+    } else if (isCurrentView(current, tenant, table) === false) {
       await db.execute(replaceViewSql(table, own, tenant));
     }
   } else if (there.synonyms.has(table) === false) {

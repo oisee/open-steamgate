@@ -22,6 +22,9 @@ describe("the HANA shadow schema", () => {
     {TABNAME: "ZOSD_H3_FREE", CLIDEP: ""},
     {TABNAME: "ZOSD_H3_LAZY", CLIDEP: "X"},
     {TABNAME: "/ZOSD/H3_NS", CLIDEP: "X"},
+    // SCARR stands in for the bed-measured view of fix round 3: HANA stored
+    // the flight table's view with * expanded into the column list.
+    {TABNAME: "SCARR", CLIDEP: "X"},
   ];
   const fakeHdb = ({views = [], synonyms = [], failName, failTimes = 0, failDd02lTimes = 0} = {}) => {
     const sent = [];
@@ -138,6 +141,27 @@ describe("the HANA shadow schema", () => {
     }
   });
 
+  it("the DEFINITION measured on the bed (columns expanded from *) is current", async () => {
+    // FIX-3, bed 2026-11-12: HANA stores the view's query with * expanded
+    // into the quoted column list, so round 2's textual compare of the query
+    // part still called this view stale and recreated it on every connect
+    // (and two hosts would race on CREATE OR REPLACE). The comparison reads
+    // the FROM target and the predicate now; the projection is HANA's to
+    // spell. The text below is the bed's, with this fixture's schema in the
+    // tenant's place.
+    const there = {
+      views: [{VIEW_NAME: "SCARR",
+        DEFINITION: `SELECT "MANDT" , "CARRID" , "CARRNAME" , "CURRCODE" , "URL" FROM "ZOSD_H3_TENANT"."SCARR" WHERE MANDT = SESSION_CONTEXT('CLIENT')`}],
+      synonyms: [{SYNONYM_NAME: "ZOSD_H3_FREE"}],
+    };
+    const {db, sent} = await connect({shadowTables: ["SCARR", "ZOSD_H3_FREE"]}, there);
+    try {
+      expect(sent.filter((s) => /^\s*CREATE/i.test(s)), "the expanded text is current").to.deep.equal([]);
+    } finally {
+      await db.disconnect();
+    }
+  });
+
   it("a view whose definition drifted is recreated; a synonym is not touched", async () => {
     const drifted = {
       views: [{VIEW_NAME: "ZOSD_H3_CLI", DEFINITION: `CREATE VIEW "OLD"."SHAPE" AS SELECT 1 FROM DUMMY`}],
@@ -153,6 +177,45 @@ describe("the HANA shadow schema", () => {
     }
   });
 
+  it("a hard-coded client in the predicate is drift: the view is recreated", async () => {
+    // FIX-3: the predicate is half of the contract. A view an older build
+    // made with a literal client reads the wrong rows after a logon with
+    // another client -- recreated with CREATE OR REPLACE.
+    const stale = {
+      views: [{VIEW_NAME: "ZOSD_H3_CLI",
+        DEFINITION: `SELECT * FROM "ZOSD_H3_TENANT"."ZOSD_H3_CLI" WHERE MANDT = '001'`}],
+      synonyms: [{SYNONYM_NAME: "ZOSD_H3_FREE"}],
+    };
+    const {db, sent} = await connect({shadowTables: ["ZOSD_H3_CLI"]}, stale);
+    try {
+      expect(sent).to.include(
+        `CREATE OR REPLACE VIEW "ZOSD_H3_OWN"."ZOSD_H3_CLI" AS SELECT * FROM "ZOSD_H3_TENANT"."ZOSD_H3_CLI" WHERE MANDT = SESSION_CONTEXT('CLIENT')`);
+    } finally {
+      await db.disconnect();
+    }
+  });
+
+  it("a view whose FROM names another schema or table is drift: recreated", async () => {
+    // FIX-3: keep refusing what is not our view -- either half of the FROM
+    // target not being ours is drift even when the predicate is right.
+    for (const definition of [
+      `SELECT * FROM "OTHER_SCHEMA"."ZOSD_H3_CLI" WHERE MANDT = SESSION_CONTEXT('CLIENT')`,
+      `SELECT * FROM "ZOSD_H3_TENANT"."OTHER_TABLE" WHERE MANDT = SESSION_CONTEXT('CLIENT')`,
+    ]) {
+      const stale = {
+        views: [{VIEW_NAME: "ZOSD_H3_CLI", DEFINITION: definition}],
+        synonyms: [{SYNONYM_NAME: "ZOSD_H3_FREE"}],
+      };
+      const {db, sent} = await connect({shadowTables: ["ZOSD_H3_CLI"]}, stale);
+      try {
+        expect(sent).to.include(
+          `CREATE OR REPLACE VIEW "ZOSD_H3_OWN"."ZOSD_H3_CLI" AS SELECT * FROM "ZOSD_H3_TENANT"."ZOSD_H3_CLI" WHERE MANDT = SESSION_CONTEXT('CLIENT')`);
+      } finally {
+        await db.disconnect();
+      }
+    }
+  });
+
   it("a 259 for a tenant table creates the shadow and retries once, and only once", async () => {
     const {db, sent} = await connect({shadowTables: []}, {failName: "ZOSD_H3_LAZY", failTimes: 1});
     try {
@@ -162,6 +225,27 @@ describe("the HANA shadow schema", () => {
       expect(attempts.length, "the failed statement and exactly one retry").to.equal(2);
       expect(sent).to.include(
         `CREATE VIEW "ZOSD_H3_OWN"."ZOSD_H3_LAZY" AS SELECT * FROM "ZOSD_H3_TENANT"."ZOSD_H3_LAZY" WHERE MANDT = SESSION_CONTEXT('CLIENT')`);
+    } finally {
+      await db.disconnect();
+    }
+  });
+
+  it("the lazy fallback takes the measured expanded DEFINITION as current: retry only, no DDL", async () => {
+    // the same drift decision runs in ensureShadowFor: the 259 for a table
+    // whose shadow view already holds the bed's stored text (any quoted
+    // column list, FROM and predicate ours) must be answered with the retry
+    // alone -- a CREATE OR REPLACE here is the race two hosts lose (FIX-3).
+    const {db, sent} = await connect({shadowTables: []}, {
+      failName: "ZOSD_H3_LAZY", failTimes: 1,
+      views: [{VIEW_NAME: "ZOSD_H3_LAZY",
+        DEFINITION: `SELECT "MANDT" , "CARRNAME" , "URL" FROM "ZOSD_H3_TENANT"."ZOSD_H3_LAZY" WHERE MANDT = SESSION_CONTEXT('CLIENT')`}],
+    });
+    try {
+      const rows = await db.query(`SELECT * FROM zosd_h3_lazy`);
+      expect(rows).to.deep.equal([]);
+      const attempts = sent.filter((s) => /FROM\s+zosd_h3_lazy/i.test(s) && /^\s*SELECT/i.test(s));
+      expect(attempts.length, "the failed statement and exactly one retry").to.equal(2);
+      expect(sent.some((s) => /^\s*CREATE/i.test(s)), "the view is current: no DDL").to.equal(false);
     } finally {
       await db.disconnect();
     }

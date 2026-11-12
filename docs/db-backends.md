@@ -446,10 +446,16 @@ the predicate; no generated SQL changes anywhere. Creation is idempotent:
 the catalog (`SYS.VIEWS` with its `DEFINITION`, `SYS.SYNONYMS`) is read
 first, existing objects are left alone, and a view whose definition drifted
 is recreated with `CREATE OR REPLACE`. HANA holds the view's query string —
-the text after `AS` — in `DEFINITION`, so the drift comparison reads the
-query part out of both sides and accepts the full `CREATE` text as well; a
-connect that finds the view current sends nothing (fix round 2: comparing
-the whole `CREATE` text recreated every view on every connect, and two
+the text after `AS`, with `*` expanded into the quoted column list — in
+`DEFINITION`, and "current" is decided structurally: whitespace-normalised,
+the query must select anything (`*` or any quoted column list) from
+`"<tenant>"."<T>"` with `WHERE MANDT = SESSION_CONTEXT('CLIENT')`. The FROM
+target and the predicate decide, the projection is HANA's to spell, and a
+view pointing at another schema or table, or filtering by a hard-coded
+client, is recreated. A connect that finds the view current sends nothing
+(fix round 2: comparing the whole `CREATE` text recreated every view on
+every connect; fix round 3, bed-measured 2026-11-12: comparing even the
+query text did the same, because HANA stores the expanded columns — and two
 hosts connecting at once raced on the replace).
 
 The flags:
