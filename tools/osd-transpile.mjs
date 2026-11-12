@@ -193,7 +193,7 @@ export function listFiles(root, config) {
   const folders = system ? inputFoldersOf(root, config) : Array.isArray(config.input_folder) ? config.input_folder : [config.input_folder];
   const wanted = [];
   let skipped = 0;
-  for (const folder of folders) {
+  for (const folder of folders.filter((f) => typeof f === "string")) {
     for (const filename of walk(resolve(root, folder))) {
       // DSL navigation metadata (*.trace.meta.json) is volatile and no object:
       // never read here, so it never names a generation (osd-build hashOf)
