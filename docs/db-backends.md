@@ -552,7 +552,9 @@ them is valid. `--packages <LIKE>` scopes it (the converter's own glob:
 `%` or `*` is any run of characters, `_` is one character), `--check`
 exits 1 when the existing gen/hana-src has drifted, and `--from-dump` runs
 the converter itself (`OSD_HANA_CONVERTER` names its path) on a dump
-directory:
+directory, started through `tools/osd-host.mjs` like every tool a tool
+starts (`scriptCommand`: a compiled binary is its own `process.execPath`,
+so there the interpreter is `OSD_NODE`, else the `node` on the `PATH`):
 
     node <converter> <dump> --out <layers> --system <prefix>
     node tools/hana-src-gen.mjs --layers <layers>
