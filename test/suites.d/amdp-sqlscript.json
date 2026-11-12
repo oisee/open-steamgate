@@ -22,6 +22,7 @@
     "test/hana-existing-schema.mjs",
     "test/hana-readonly.mjs",
     "test/hana-shadow-schema.mjs",
+    "test/hana-src-gen.mjs",
     "test/sqlscript-canary.mjs",
     "test/sqlscript-check.mjs",
     "test/sqlscript-clause-audit.mjs",
