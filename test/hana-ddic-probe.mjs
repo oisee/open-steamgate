@@ -265,11 +265,13 @@ describe("the DDIC probe's reads name only measured columns", () => {
     mkdirSync(join(root, "src"), {recursive: true});
     writeFileSync(join(root, "src", "zosd_h1_probe.tabl.xml"), tablXml);
     let code;
+    process.env.OSD_CLIENT = "001"; // the mode refuses to start without a logon client (H3)
     try {
       console.log = (line) => lines.push(String(line));
       process.chdir(root);
       code = await run(["--tables", "ZOSD_H1_PROBE", "--diff"]);
     } finally {
+      delete process.env.OSD_CLIENT;
       process.chdir(cwd);
       console.log = say;
       rmSync(root, {recursive: true, force: true});
