@@ -565,23 +565,35 @@ manifest is ever committed; `--out` is held to the same rule. The tool
 never reads the dump's `tables/*.jsonl` at all; the provenance it records
 is what plan.json copied from the dump manifest.
 
-A generation built with a gen/hana-src layer in its inputs is private like
-the layers themselves — the tenant's sources reached the transpile — and
-every publisher that bundles a build refuses it: the preview
-(scripts/build-preview.mjs:59, beside its $TMP refusals), the docker image
-(docker/image/assemble.mjs:17 guards `build/live` before anything is
-copied, and its gen/ copy drops the raw layers; the build context is
-covered by docker/image/Dockerfile.dockerignore, which names gen/hana-src
-and gen/hana-ddic) and the download bundle
-(scripts/make-download-bundle.mjs:36, before anything is staged). The
-refusal reads the generation's own record of what it was built from
-(`manifest.inputs.folders`, the expanded folder list tools/osd-build.mjs
-writes), so it is decided by what the build read, not by what the tree
-holds now; the helper is `generationHanaSrcProblem` in tools/osd-tmp.mjs,
-beside the `$TMP` one. Two publishers are safe by construction and stage
-`gen/` never: the VSIX seed (scripts/build-vsix.mjs:353-354 stages src,
-webapp, tools, data and four files) and the OCI system publish
-(scripts/system-stage.mjs:12 stages src, data, webapp).
+A generation built with a private gen/ layer in its inputs is private like
+the layers themselves — the tenant's sources (`gen/hana-src`) and their
+dictionary (`gen/hana-ddic`, the DD03L shapes the H3 generation writes)
+reached the transpile — and every publisher that bundles a build refuses
+it: the preview (scripts/build-preview.mjs:59, beside its $TMP refusals),
+the docker image (docker/image/assemble.mjs:17 guards `build/live` before
+anything is copied), the download bundle
+(scripts/make-download-bundle.mjs:40, before anything is staged) and the
+release directory (scripts/make-release.mjs:47, before the tree and the
+generation are copied — the directory docs/docker.md documents as "the
+release the image copies"). The refusal reads the generation's own record
+of what it was built from (`manifest.inputs.folders`, the expanded folder
+list tools/osd-build.mjs writes), so it is decided by what the build read,
+not by what the tree holds now; the helper is `generationHanaSrcProblem`
+in tools/osd-tmp.mjs, beside the `$TMP` one, and its one list of the two
+private prefixes is also what every publisher's gen/ copy filter drops
+(docker/image/assemble.mjs:57, scripts/make-download-bundle.mjs:79,
+scripts/make-release.mjs:57), so a stale `gen/hana-src` or `gen/hana-ddic`
+on disk never rides along with a generation whose record is clean. The
+build context is covered separately by
+docker/image/Dockerfile.dockerignore, which names both folders.
+Publishers that stage `gen/` never are safe by construction: the VSIX seed
+(scripts/build-vsix.mjs:353-354 stages src, webapp, tools, data and four
+files; the binary's seed tars the same staging), the OCI system publish
+(scripts/system-stage.mjs:12 stages src, data, webapp) and the preview
+itself (it writes bundles under web/generated and build/preview only).
+The CI artifact tar (tools/osd-ci-artifact.mjs:17, `gen output build`)
+packs a fresh CI checkout, which holds no tenant folders, and feeds the
+CI suite jobs — it publishes nothing.
 
 The layering rule is the one `gen/hana-ddic` already established, one step
 further: one entry `gen/hana-src/*` in `abap_transpile.json`, after
