@@ -624,3 +624,83 @@ and carries the sources only.
 Exercised with fixtures (`test/hana-src-gen.mjs`, synthetic `ZOSD_H4_*`
 converter output built in a temp dir); no tenant content is reachable
 from CI.
+
+## The closure, by iteration
+
+H5a's first transpile of a real SEGW service's layer measured where the work
+is: the four classes transpile against this tree's libraries with **zero**
+`/IWBEP/` framework errors — open-abap-odata provides the contract — and the
+1,144 findings are everything else they name: the service's dependency
+closure. CLAUDE.md's Sprint-0 prediction said the closure is the long pole,
+so the closure is walked by a loop instead of measured once:
+`tools/hana-closure.mjs` iterates to a fixed point.
+
+One iteration: merge the current dump into the inputs (`hana-ddic-gen
+--from-dump` writes `gen/hana-ddic`, `hana-src-gen --from-dump` runs the
+converter and writes `gen/hana-src` — both spawned through
+`tools/osd-host.mjs` like every tool a tool starts), run the build's own
+validation over the tree — the same channel `hana-ddic-gen --from-build`
+reads, its `validationMessage` reused, not duplicated — classify every
+finding the transpiler emits, and ask the dumper for the names that are
+missing. The dumper writes a complete dump per round (the loop passes it the
+whole closure, not only the new names), so the next iteration's merge is a
+`--from-dump` of one directory, and the loop repeats until a validation
+names nothing it has not already asked for.
+
+What the transpiler's words classify as, measured on the H5a log (1,144
+findings; the names stay in the private findings log and the leak list):
+
+| shape | kind | count |
+| --- | --- | ---: |
+| `Database table or view "x" not found` | TABL | 66 |
+| `... contains unknown: X not found` (fix `lookup`) | DDIC (the kind the dumper resolves) | 249 |
+| the same, fix `lookupDataElement` | DTEL | 115 |
+| `contains unknown: X, lookupDomain` | DOMA | 27 |
+| `Contains unknown, X not found` — the error's first line | DDIC | 1 |
+| `X not found` alone, and `Loop, not a table type, X not found` | DDIC (table types) | 2 |
+| `field not part of structure x-comp` | TABL | 2 |
+| `Class x not found` | CLAS | 58 |
+| `Unknown class x` | CLAS, INTF for an `if_*` name | 55 |
+| `CATCH, unknown class CX_*` | CLAS | 46 |
+| `could not resolve top X` (fix `resolveTypeChain`) | INTF/CLAS by prefix | 139 |
+| `unable to resolve x` | INTF | 58 |
+| `parser_error ... "FUNCTION"` in a `*.fugr.*` file | FUGR — the name is read off the file | 4 |
+| cascades: `Method (or attribute) "m" not found` (101), `Not an object reference` (107), `"param" not found` with fix `findTop`/`Target` (44+8), `not a table type mt_*` (54), `not found in class or interface` (4), `methodCallChain` (8), `Component "c" not found in structure` (2), the `Type error` and `Select, buildStructureTypeError` tails (2+) | skipped — the name is not the thing that is missing | 328 |
+
+De-duplicated, the 1,144 name **49 objects** — one iteration's ask. A name
+the dumper answered but the next validation still names is a **gap** (not in
+the tenant, or a kind this route cannot source yet): `closure-gaps.json`
+carries its kind and the first finding that named it, recomputed each pass,
+so a gap a later round resolves leaves the file on its own. Everything the
+loop keeps sits under `gen/hana-closure/` (untracked, like the dumps it
+holds): `state.json` — the iteration, the current dump, every name asked so
+far with its kind, its iteration and its first finding —,
+`closure-request.json` — names per kind, the iteration, what was asked
+before —, and one `dump-<NNN>/` per round.
+
+The dumper runs only where its credentials are:
+
+    $OSD_HANA_DUMPER hana dump --name <every name so far, comma-joined> --ddic --out <out>/dump-<NNN>
+
+`OSD_HANA_DUMPER` names the binary and `OSD_HANA_DUMP_ENV` an env file with
+the connection (`KEY=VALUE` lines, `#` comments, `export ` allowed); the
+file's variables travel in the child's environment. The dumper is a foreign
+binary — another project's, not a tool of this tree and not a Node script —
+so it is spawned by the path the environment names, never through
+`toolCommand`/`scriptCommandIn` (which would dispatch it through `osd gen`
+or put a node interpreter in front of it) and never `process.execPath`.
+Without both variables the loop stops and prints the command, and the next
+run continues with `--dump <that directory>`. `--dry-run` writes and prints
+the request and stops; `--max-iterations <n>` bounds the dumper rounds of a
+run (default 10) and stops after writing the pending request, so the next
+run picks up where this one stopped. Its `--from-dump` needs PR #926
+(`feat/hana-ddic-from-dump`); until that merges, the loop runs on that
+branch's tools.
+
+Exercised with fakes, the way CI must be (`test/hana-closure.mjs`, fixtures
+`ZOSD_H5C_*`): the loop's validate step is the transpiler's own validation
+over a scratch tree, the merge is a fake host behind `OSD_SELF` (the loop
+owns the two tools' argv), and the dumper is a fixture script spawned by
+path — its argv, its `--ddic`, its directory and the env file's connection
+are all asserted. No HANA is reachable from CI; the real iteration is dell's,
+on the bed.

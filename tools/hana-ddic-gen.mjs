@@ -56,7 +56,9 @@ export function tablesFromValidation(message) {
  *  layers excluded, so the names are the ones the build is missing and not
  *  artifacts of a different file selection. Heavy: it loads the libraries,
  *  like the transpile it stands in for. */
-async function validationMessage(root) {
+/** exported for tools/hana-closure.mjs (H5c), which reads the same channel
+ *  and classifies more of it; this file reads the two DDIC shapes only. */
+export async function validationMessage(root) {
   const config = JSON.parse(readFileSync(join(root, "abap_transpile.json"), "utf8"));
   const stack = layers(root, config);
   const listing = {...config, exclude_filter: [...(config.exclude_filter ?? []), ...excludePatterns(stack.hidden)]};
