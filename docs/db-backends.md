@@ -625,6 +625,68 @@ Exercised with fixtures (`test/hana-src-gen.mjs`, synthetic `ZOSD_H4_*`
 converter output built in a temp dir); no tenant content is reachable
 from CI.
 
+## The dump's dictionary: --from-dump
+
+`vsp hana dump --ddic` also writes the DD* tables it measured as JSONL next
+to the sources (`tables/DD02L.jsonl`, DD03L, DD04L, DD01L, DD02T, DD04T,
+DD01T, DD07L, DD40L — one row per line, the table's full measured column
+set, the keys as HANA stores them). `tools/hana-ddic-gen.mjs --from-dump
+<dir>` reads those files and feeds them through the same mapper as the live
+read — one mapping, and the dump path is its second consumer (2026-11-12,
+H5a). The keys arrive upper case and are folded and trimmed here, the way
+the hana-client folds and trims on its way out of HANA; the rows are
+filtered to the active version the live read's WHERE pins (`AS4LOCAL 'A'`,
+`AS4VERS '0000'`), so a table dumped with an inactive version does not
+yield its fields twice. A DD* file the dump does not carry is no rows, not
+an error.
+
+The live read never needed the kinds the dump carries beyond tables, so
+this path writes what H3's could not: `*.tabl.xml` for every active DD02L
+row — TABCLASS INTTAB as an include structure (no DD09L, no client),
+TABCLASS TRANSP in the transport shape with its DD09L, and any other
+TABCLASS (an APPEND, a VIEW, a POOL or CLUSTER) refused by name rather
+than written as a structure it is not (2026-11-12, fix round 1) — and
+`*.dtel.xml` and `*.doma.xml` for the DD04L and DD01L rows, in the DD04V
+shape a system's own export writes: a domain-typed element (REFKIND D)
+goes out with DOMNAME and none of the type tags the DD04L row carries as
+the domain's copy, a predefined-typed one with its type after DTELMASTER
+and the initial values dropped. The writers are the tree's first
+DD04V/DD01V writers (until now those files existed only hand-written),
+beside `tablXml` in `tools/hana-ddic-map.mjs`, in the envelope the tree's
+own files carry. The texts are the T table's row in the L row's master
+language (`MASTERLANG`/`DTELMASTER`/`DOMMASTER`, E when none is named —
+the live read's `DDLANGUAGE 'E'`, said per object instead of per query);
+the TABL header's `DDLANGUAGE` is that language too, and a table with no
+text in it goes out without the `DDTEXT`, not with an empty tag. The
+labels come from DD04T, which is where the dictionary keeps
+DDTEXT and REPTEXT and the three SCRTEXTs (DD04L carries only the lengths
+they are shown in). A domain's fixed values come from DD07L, whose rows
+carry no words (DD07T is not in --ddic), so a domain with values goes out
+without them. An `.INCLUDE` row is not a refusal here: the dump carries
+every DD02L table's DD03L, so the include's fields splice in from it, in
+the include's place, in their own POSITION order — and neither is any
+other dot row: every `.INCLU-<suffix>` and `.APPEND` names its structure
+in PRECFIELD and splices the same way, a suffixed include with the suffix
+appended to each name it brings in, the rename abaplint reads out of the
+same DD03P (`ddicFieldsWithIncludes` beside `ddicFields`, which the live
+read keeps). A structured component
+(DD03L COMPTYPE S, DATATYPE STRU) carries its own COMPTYPE and resolves
+through the structure's own tabl.xml, which the same run writes. File names
+are the abapGit ones (lower case, a /namespace/ spelled #namespace#), the
+one rule `abapGitFileName` gives both the live read and the dump read; the
+layering is the H3 one, unchanged — `gen/hana-ddic` stays listed before
+`src/`, and the later folder wins.
+
+`--check` compares an existing `--out` with what the dump would write and
+exits 1 on drift — a file missing, a content difference, a file the plan
+does not write; the live read has no plan to compare against, so `--check`
+refuses it. Not covered, and said so in the run's last line: search helps
+(SHLP — DD30L-DD33L are not in --ddic), messages (MSAG), and table types
+(DD40L rows are counted, not written). Everything is exercised with
+fixtures (`test/hana-ddic-gen.mjs`, synthetic `ZOSD_H5_*` JSONL in a temp
+dir, carrying the real files' measured column sets); no tenant content is
+reachable from CI, and the acceptance runs against a real dump, by hand.
+
 ## Registration out of a tenant: gen/segw from the dump
 
 The XML path reads the registration facts out of abapGit's `*.iwsv.xml`
