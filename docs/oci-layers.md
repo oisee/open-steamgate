@@ -65,6 +65,43 @@ public build is refused; any other change asks for a rebuild. The sidecar of
 a directory artefact records links by their target and refuses a link that
 leaves the artefact.
 
+**The read record.** A generation's privacy comes from what its build
+actually read, not from a second walk of what it should have read. Every
+reader of source bytes (the transpiler's file and library loads, media,
+RAP bindings, BSP and pack files, source layers) reports each read, and every
+generator child runs under `tools/osd-generator-reads.mjs`, which hooks
+`node:fs` and `node:child_process` and logs each read with its real path and
+digest. The build writes them to `build/by-input/<hash>/reads.json`
+(`tools/osd-read-record.mjs`): `{schema, root, reads: [{path, real, sha256,
+privacy, identities}], uncovered}`. A read's privacy is that of the
+`.osd-source.json` / `.osd-layer.json` markers in its real ancestry (any
+private → private; else any unknown → unknown). `publicProvenance`,
+`assertPublicSystem` and `osd-ci-artifact pack` require the record
+(`READ_RECORD` when missing or invalid) and refuse, as `UNKNOWN_PRIVACY`:
+
+- a read outside what `hashOf` digested (`uncovered`), or one whose bytes or
+  target changed since;
+- an incomplete record: a child the recorder cannot follow (a shell, a
+  non-node program, a worker, a detached child, a node child that never
+  answered the handshake) or a read it could not name;
+- a read of unknown privacy, or one whose identity marker changed.
+
+`hashOf` therefore digests every file class the build reads: input folders by
+what the transpiler lists (not by extension, so W3MI media count), locked and
+URL libraries whole, root `data/` and `abaplint.jsonc`, BSP and pack folders,
+and what finding the packs reads -- every manifest in the tree's own pack
+place and the identity of each folder it declares, selected by
+`OSD_WEB_PACKS` or not. `OSD_PACKS` places (the extension's per-machine
+scratch pack) are not digested. DSL navigation metadata
+(`*.trace.meta.json`) is neither read nor hashed.
+
+What the record does not cover: reads by native code or by a program that
+is not node (they make the record incomplete rather than wrong, except git,
+which runs only for a fixed list of metadata commands); bytes that reach the
+output without a file read (environment variables, network); and the
+transpiler and generator code itself, which is named by the generator
+identity in the hash rather than by the record.
+
 A binary built before any generation exists (the fresh-clone check in
 `tests.yml`) is built with `build-binary --unstamped`: test only, refused with
 `--seed` or a release target, and without a sidecar, so make-release,
@@ -88,7 +125,13 @@ live's cross-reference rows `build/xref/<key>.json`. Each is listed with its
 digest in `.local/ci-artifact/closure.json`; `osd-ci-artifact verify` checks
 every listed digest and refuses an unlisted file. `pack` derives live's rows
 when no host wrote them and exits 3 when a fast-path input would still be
-missing; a shared store linked out of the tree is refused.
+missing; a shared store linked out of the tree is refused. The CI
+transpiler it carries (`.local/ci-artifact/transpiler`) is bound by
+`tools/osd-ci-transpiler.mjs` to the pinned commit and a digest list of its
+files: no tracked change, no file that is neither tracked nor ignored by the
+clone (its ignored build output ships as listed), no source identity marker
+inside it or above it. Its `.git` ships, because a consumer names the linked
+transpiler by `git rev-parse HEAD` in it.
 
 From a shell, `node tools/osd-public-tree.mjs write|verify <artefact>` stamps or
 verifies against the tree; `node tools/osd-provenance.mjs verify <artefact>`
