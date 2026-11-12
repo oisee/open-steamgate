@@ -20,11 +20,13 @@ const REPO = fileURLToPath(new URL("..", import.meta.url));
 // --out inside a git working tree unless --allow-in-repo, the password read
 // from VSP_HANA_PASSWORD only), the dump merge is a fake host behind
 // OSD_SELF (the real hana-ddic-gen --from-dump and hana-src-gen --from-dump
-// arrive with PR #926; the loop only owns their argv), and the validate step
+// are PR #926, merged; the loop only owns their argv), and the validate step
 // is the transpiler's own validation over a scratch tree whose node_modules
 // is a symlink to this checkout's, the converter the loop starts per dump is
-// a fixture script (OSD_HANA_CONVERTER) that copies staged layers per dump,
-// and the fixed point's positive control (the build) is a fake-host mode. No
+// a fixture script (OSD_HANA_CONVERTER) that copies staged layers per dump
+// and refuses an --out inside the working tree without --allow-in-repo, like
+// the real one, and the fixed point's positive control (the build) is a
+// fake-host mode. No
 // HANA is reachable from CI. Names are
 // ZOSD_H5C_* fixtures; a real service's names live in the private findings
 // log and its leak list.
@@ -824,11 +826,32 @@ process.exit(2);
 
   // the fake converter the loop starts per dump (OSD_HANA_CONVERTER, an
   // external script like the real dump-to-layers.mjs): it copies the staged
-  // converter output of the dump it was handed
+  // converter output of the dump it was handed -- and refuses an --out
+  // inside a git working tree unless --allow-in-repo, the real converter's
+  // own refusal (dump-to-layers.mjs rejectGit, word for word), and records
+  // its argv the way the fake dumper does. The loop's layers dir sits under
+  // .local/ INSIDE the tree, so every loop scenario is green only when the
+  // flag travels (the .git scenarios run the refusal end to end).
   const fakeConverterSource = () => `#!/usr/bin/env node
-import {cpSync, rmSync} from "node:fs";
+import {appendFileSync, cpSync, existsSync, rmSync} from "node:fs";
+import {dirname, join, resolve} from "node:path";
 const args = process.argv.slice(2);
 const at = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : undefined; };
+// an --out inside a git working tree is refused unless --allow-in-repo
+const out = resolve(at("--out"));
+for (let dir = out; ; dir = dirname(dir)) {
+  if (existsSync(join(dir, ".git"))) {
+    if (args.includes("--allow-in-repo") === false) {
+      console.error("Refusing to write inside a git working tree: " + out + " (use --allow-in-repo)");
+      process.exit(3);
+    }
+    break;
+  }
+  const parent = dirname(dir);
+  if (parent === dir) break;
+}
+const record = process.env.H5C_CONV_RECORD;
+if (record) appendFileSync(record, JSON.stringify({argv: args, out, allowInRepo: args.includes("--allow-in-repo")}) + "\\n");
 const map = JSON.parse(process.env.H5C_CONV_MAP ?? "{}");
 const source = map[args[0]];
 if (source === undefined) {
@@ -888,6 +911,7 @@ process.exit(0);
       H5C_HOST_LOG: join(root, "host-log.jsonl"),
       OSD_HANA_CONVERTER: join(root, "fake-converter.mjs"),
       H5C_CONV_MAP: convMap,
+      H5C_CONV_RECORD: join(root, "converter-log.jsonl"),
       ...(opts.shrink ? {H5C_SHRINK: "1"} : {}),
       ...(opts.build !== undefined ? {H5C_BUILD: opts.build} : {}),
       ...(opts.grow ? {H5C_GROW: "1"} : {}),
@@ -921,6 +945,7 @@ process.exit(0);
   };
 
   const dumperCalls = (root) => readFileSync(join(root, "dumper-log.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+  const converterCalls = (root) => readFileSync(join(root, "converter-log.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
   const hostCalls = (root) => readFileSync(join(root, "host-log.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
   const outFile = (root, name) => join(root, "gen", "hana-closure", name);
   const dumpDirOf = (root, n) => join(root, ".local", "hana-closure", `dump-${String(n).padStart(3, "0")}`);
@@ -1233,7 +1258,7 @@ process.exit(0);
         await run(["--dump", join(root, "dump-001"), "--system", "h5c"], {root, env});
         expect.fail("the unknown option was swallowed");
       } catch (error) {
-        expect(error.message).to.include("needs PR #926 (hana-ddic-gen --from-dump)");
+        expect(error.message).to.include("predates --from-dump (PR #926, merged)");
       }
     } finally {
       rmSync(root, {recursive: true, force: true});
@@ -1414,6 +1439,17 @@ process.exit(0);
         ["hana-src-gen.mjs", "osd-build.mjs"]);
       expect(merges[0].rest).to.deep.equal(
         ["--layers", layersDirOf(root, 1), "--out", join(root, "gen", "hana-src")]);
+      // the converter's argv is the real converter's contract, with the flag
+      // the in-tree layers dir needs: .local/hana-closure/ sits inside the
+      // git working tree, which the converter refuses to write without
+      // --allow-in-repo (the fake refuses it with the real wording; the
+      // .git scenarios run that refusal end to end)
+      const convs = converterCalls(root);
+      expect(convs).to.have.lengthOf(1);
+      expect(convs[0].argv.slice(0, 1)).to.deep.equal([join(root, "dump-001")]);
+      expect(convs[0].out).to.equal(layersDirOf(root, 1));
+      expect(convs[0].argv.join(" ")).to.include("--system h5c");
+      expect(convs[0].allowInRepo, "the layers land inside the tree: the flag must travel").to.equal(true);
       expect(said.some((l) => l.includes("the layers carry the DDIC XML (1 file(s)) -- hana-ddic-gen --from-dump is skipped, the converter is the writer of record")),
         "the skip says itself").to.equal(true);
       expect(existsSync(join(root, "gen", "hana-ddic")), "gen/hana-ddic is not written").to.equal(false);

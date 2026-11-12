@@ -89,8 +89,8 @@
 // XML -- with the converter as the DDIC's writer of record the step is
 // skipped, one log line says so -- spawned through tools/osd-host.mjs's
 // toolCommandIn and scriptCommandIn, the way every tool a tool starts is;
-// the DDIC tool's --from-dump is PR #926, feat/hana-ddic-from-dump, and a
-// tool that does not know the flag is refused with a message saying so),
+// the DDIC tool's --from-dump is PR #926 (merged), and a tool that does
+// not know the flag is refused with a message saying so),
 // then run the
 // build's own validation over the tree -- the same channel hana-ddic-gen
 // --from-build reads, the validationMessage exported from there, reused and

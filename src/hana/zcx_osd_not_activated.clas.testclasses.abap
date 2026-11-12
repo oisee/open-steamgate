@@ -19,7 +19,11 @@ CLASS ltcl_lazy IMPLEMENTATION.
 
   METHOD text_names_the_missing.
     DATA lo_cut TYPE REF TO zcx_osd_not_activated.
+* a no-op handler for this test: the constructor's kernel hook otherwise
+* prints "not activated: ..." on console.error in every unit run
+    WRITE '@KERNEL globalThis.osdNotActivated = () => {};'.
     CREATE OBJECT lo_cut EXPORTING missing = 'ZOSD_H5C_HEAD, ZOSD_H5C_ROLE'.
+    WRITE '@KERNEL delete globalThis.osdNotActivated;'.
     cl_abap_unit_assert=>assert_equals(
       act = lo_cut->get_text( )
       exp = |not activated here: needs ZOSD_H5C_HEAD, ZOSD_H5C_ROLE| ).
@@ -28,11 +32,14 @@ CLASS ltcl_lazy IMPLEMENTATION.
   METHOD raise_carries_missing.
     DATA lo_cut TYPE REF TO zcx_osd_not_activated.
     DATA lv_text TYPE string.
+* the same no-op handler: the signal must not reach the console here
+    WRITE '@KERNEL globalThis.osdNotActivated = () => {};'.
     TRY.
         RAISE EXCEPTION TYPE zcx_osd_not_activated EXPORTING missing = 'ZOSD_H5C_W'.
       CATCH zcx_osd_not_activated INTO lo_cut.
         lv_text = lo_cut->get_text( ).
     ENDTRY.
+    WRITE '@KERNEL delete globalThis.osdNotActivated;'.
     IF lo_cut IS NOT BOUND.
       cl_abap_unit_assert=>fail( msg = 'the stub raise did not raise' ).
     ENDIF.

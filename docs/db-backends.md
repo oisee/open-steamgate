@@ -781,8 +781,12 @@ the latest dump's layers — iteration 3 validated a tree without the
 service, and the fixed point was false. The island is the union of the
 seed dump and every dump so far. Each dump is converted once — the
 converter (`OSD_HANA_CONVERTER`, spawned through `scriptCommandIn` like
-every external script) writes `.local/hana-closure/layers-<NNN>/`,
-remembered in `state.json` — and `hana-src-gen` is called with ALL the
+every external script, its argv the converter's own contract — `<dump>
+--out <dir> --system <prefix> --allow-in-repo`, the flag because the
+layers dir sits inside the git working tree, under the untracked
+`.local/`, and the converter refuses that without it) writes
+`.local/hana-closure/layers-<NNN>/`, remembered in `state.json` — and
+`hana-src-gen` is called with ALL the
 layers dirs (`--layers`, repeatable): one folder per layer name, each
 file from the later dump that carries it (later wins per object,
 reported), folders renumbered in the flags' order. `gen/hana-ddic`

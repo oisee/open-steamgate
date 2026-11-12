@@ -125,7 +125,7 @@ export function convertDump({root, env, dump, system, dir, say}) {
   }
   rmSync(dir, {recursive: true, force: true});
   mkdirSync(join(dir, ".."), {recursive: true});
-  const [command, ...argv] = scriptCommandIn(env, converter, [dump, "--out", dir, "--system", system]);
+  const [command, ...argv] = scriptCommandIn(env, converter, [dump, "--out", dir, "--system", system, "--allow-in-repo"]);
   say(`layers: ${basename(converter)} ${dump} -> ${dir}`);
   const child = spawnSync(command, argv, {cwd: root, env, stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64 * 1024 * 1024});
   if (child.status !== 0) {
@@ -235,8 +235,8 @@ function filteredDump(root, dump, without) {
  *  is parsed, the object joins the gaps, and the step retries against a
  *  filtered copy of the dump (the refusal leaves when a dump the merge
  *  handled carries the name again -- the generator wrote it at last). A
- *  tool that does not know --from-dump yet (PR #926) is refused by its own
- *  "unknown option", and the message says what it needs. */
+ *  tool that does not know --from-dump (PR #926, merged) is refused by its
+ *  own "unknown option", and the message says what it needs. */
 export function mergeInputs(root, dump, layersDirs, env, say) {
   const layersDdic = layersDdicCount(layersDirs);
   const steps = [
@@ -262,7 +262,7 @@ export function mergeInputs(root, dump, layersDirs, env, say) {
         .filter((r) => refused.has(r.name) === false);
       if (fresh.length === 0 || attempt >= 64) {
         const hint = /unknown option/.test(tail)
-          ? `\nhana-closure: ${script} refused --from-dump: needs PR #926 (hana-ddic-gen --from-dump)`
+          ? `\nhana-closure: ${script} refused --from-dump: this hana-ddic-gen predates --from-dump (PR #926, merged) -- the tree needs updating`
           : "";
         throw new Error(`hana-closure: ${script} exited ${child.status ?? "on a signal"} merging ${stepDump}${tail === "" ? "" : `:\n${tail}`}${hint}`);
       }
