@@ -5,7 +5,7 @@ import {closeSync, existsSync, mkdirSync, mkdtempSync, openSync, realpathSync, r
 import {tmpdir} from "node:os";
 import {join, resolve} from "node:path";
 import {runGeneratorsOf} from "../tools/osd-build-generators.mjs";
-import {inspectReadRecord, makeReadRecord, markIncomplete, readGeneratorLog, READS, withSeedReads} from "../tools/osd-read-record.mjs";
+import {inspectReadRecord, makeReadRecord, markIncomplete, privacyNow, readGeneratorLog, READS, withSeedReads} from "../tools/osd-read-record.mjs";
 
 // A synthetic generator: one road from node:fs to the bytes of a private
 // tree per run, each copying or reading into gen/ the way a real one would.
@@ -262,6 +262,14 @@ describe("tools/osd-generator-reads: a generator's reads decide the generation's
     expect(log.incomplete).to.deep.equal([]);
     expect(log.entries.some(entry => entry.real === join(base, "elsewhere/zfar.txt") && entry.privacy === true)).to.equal(true);
     expect(publish(log)).to.throw().with.property("code", "PRIVATE_LAYER");
+  });
+
+  it("an unmarked library clone's directory is unknown; a file merely named osd-lib-* is not", () => {
+    mkdirSync(join(base, "osd-lib-zclone"));
+    writeFileSync(join(base, "osd-lib-zclone/zcl_synthetic.clas.abap"), "synthetic\n");
+    writeFileSync(join(root, "open/osd-lib-zhelper.mjs"), "export const synthetic = 1;\n");
+    expect(privacyNow(join(base, "osd-lib-zclone/zcl_synthetic.clas.abap"))).to.equal(null);
+    expect(privacyNow(join(root, "open/osd-lib-zhelper.mjs"))).to.equal(false);
   });
 
   it("a child announced by a recorder that never answers makes the record incomplete", () => {

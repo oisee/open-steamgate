@@ -31,7 +31,7 @@ const privateValue = (file, identity) => {
     const before = file.slice(0, cacheAt + `${sep}.local${sep}url-libs${sep}`.length);
     const id = file.slice(before.length).split(sep)[0];
     if (!existsSync(join(before, id, ".osd-source.json"))) return value === true ? true : null;
-  } else if (!sourceIdentity && file.split(sep).some(part => part.startsWith("osd-lib-")))
+  } else if (!sourceIdentity && dirname(file).split(sep).some(part => part.startsWith("osd-lib-"))) // a clone's directory, never a file's name
     return value === true ? true : null;
   return value;
 };
