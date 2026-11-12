@@ -83,6 +83,15 @@
 // first -- exit 0 or non-zero-with-findings stands, non-zero with NO
 // findings aborts with the build's FAILED line.
 //
+// The writer of record is per NAME (round 7): every DDIC name the dumps
+// RESOLVED (manifest.closure.resolved per kind, accumulated in state.json)
+// must have an XML in the island; the names without one -- the converter's
+// TADIR package selection skipped them -- are written by hana-ddic-gen
+// --from-dump --names for exactly those names, into gen/hana-ddic, where
+// the converter's file wins where it wrote one (the later layer folder
+// wins). The iteration line carries the per-kind gap counts and the
+// resolved-vs-written DDIC counts, so a writer-of-record hole is visible.
+//
 // One iteration: merge the current dump into the inputs (hana-src-gen
 // --layers writes gen/hana-src from ALL the layers dirs; gen/hana-ddic is
 // written by hana-ddic-gen --from-dump ONLY when the layers carry no DDIC
@@ -117,6 +126,9 @@
 //                   x-comp` (a TABL structure)
 //   program object  `Class x not found`, `Unknown class x` (CLAS, INTF for
 //                   an if_* name), `CATCH, unknown class CX_*` (CLAS),
+//                   `Super class "X" not found or contains errors` (CLAS,
+//                   round 7), `Target type unknown, X` (round 7: the
+//                   kind-less dictionary triple),
 //                   `could not resolve top X` / `unable to resolve x`
 //                   (INTF for an IF_* name), and a `parser_error` naming
 //                   "FUNCTION" in a `*.fugr.*` file (the function group
@@ -126,8 +138,12 @@
 //                   `not a table type mt_*`, `... not found in class or
 //                   interface`, `"param" not found` with fix findTop/Target
 //                   -- the search-help exits' TABLES signatures, whose
-//                   types arrive with the function group. Skipped: the name
-//                   is not the thing that is missing.
+//                   types arrive with the function group -- and since round
+//                   7 (bed run 10): `Definition for "X" not found in
+//                   scope(AttributeName)`, `Method parameter type not
+//                   compatible`, `N cannot be instantiated, class is
+//                   defined as protected`. Skipped: the name is not the
+//                   thing that is missing.
 //
 // Names are upper-cased, de-duplicated, and split into fresh (never asked)
 // and gaps (asked in an earlier round, still unresolved -- not in the
@@ -149,12 +165,18 @@
 //       --user <HANA_USER> --schema <HANA_SCHEMA> \
 //       --provenance "hana-closure iteration <n>: the closure request's names" \
 //       --ddic-closure <out>/closure-request.json \
-//       --out <root>/.local/hana-closure/dump-<NNN> --allow-in-repo
+//       --out <root>/.local/hana-closure/dump-<NNN> \
+//       --skip-test-includes --allow-in-repo
 //
 // The loop's own log line for that command is redacted -- `--host <env>`
 // and the like, never the values: a loop log is exactly what gets pasted
 // into a report, and the values travel only in the by-hand command printed
 // when no dumper is configured (and in the child's environment).
+// --skip-test-includes is the dumper's own flag (round 7, off by default
+// there) and rides on every call: the closure must never carry CCAU test
+// includes (bed run 12 pulled SAP's unit-test assertion class through a
+// facade's test include and stubbed six of its methods). The island rule
+// for the files a dump carries anyway is hana-src-gen's (round 7).
 //
 // A name the transpiler names without a dictionary kind (the `ddic` bucket:
 // the message says only that the type is unknown) is requested under TABL,
@@ -195,7 +217,7 @@ import {join, resolve} from "node:path";
 import {runsAs} from "./osd-main.mjs";
 import {validationMessage} from "./hana-ddic-gen.mjs";
 import {islandClassPaths, stubBodies} from "./hana-closure-stubs.mjs";
-import {buildCheck, ensureLayers, islandObjectCount, islandShrinkCheck, mergeInputs} from "./hana-closure-merge.mjs";
+import {buildCheck, ddicWritten, ensureLayers, islandObjectCount, islandShrinkCheck, mergeInputs} from "./hana-closure-merge.mjs";
 
 // ------------------------------------------------------------ findings ----
 
@@ -233,6 +255,10 @@ const cascadeOf = (message) => [
   [/ not found in class or interface$/, "local-type"],
   [/contains unknown: Select, [A-Za-z]+ not found$/, "select-type"],
   [/contains unknown: Type error,/, "type-error"],
+  // round 7 (bed run 10's shapes): cascades of an unknown type or class
+  [/^Definition for "[^"]*" not found in scope\([A-Za-z]+\)$/, "scope"],
+  [/^Method parameter type not(?: compatible)?$/, "param-type"],
+  [/^[^,]+ cannot be instantiated, class is defined as(?: protected)?$/, "protected"],
 ].find(([re]) => re.test(message));
 
 // an abapGit file name's object part to the name it stands for: the
@@ -317,6 +343,19 @@ export function classifyFindings(findings) {
       ask(m[1].toUpperCase(), objectKind(m[1]), finding);
     } else if ((m = new RegExp(`unable to resolve (${NAME})$`).exec(message))) {
       ask(m[1].toUpperCase(), objectKind(m[1]), finding);
+    } else if ((m = new RegExp(`^Super class "(${NAME})" not found or contains(?: errors)?$`).exec(message))) {
+      // bed run 10's shape (round 7): an island class's superclass is not
+      // in the build -- the class itself is the request (the line's parse
+      // reads the last comma-word as the fix field, so `errors` may have
+      // left the message)
+      ask(m[1].toUpperCase(), "clas", finding);
+    } else if ((m = new RegExp(`^Target type unknown, (${NAME})$`).exec(message)) !== null) {
+      // bed run 12's shape (round 7): a type target the wording names no
+      // dictionary kind for -- the kind-less triple; the parse may also
+      // read the name as the line's fix field, which the next branch takes
+      ask(m[1].toUpperCase(), "ddic", finding);
+    } else if (message === "Target type unknown" && /^[A-Za-z][A-Za-z0-9_]*$/.test(fix ?? "") === true) {
+      ask(fix.toUpperCase(), "ddic", finding);
     } else if (message.startsWith("Statement does not exist in the configured ABAP version") === true) {
       // the function-group compile shape: the transpiler compiles a *.abap
       // include as a program, and "FUNCTION" is not in its dialect -- the
@@ -441,10 +480,11 @@ export function requestFor({iteration, generation, fresh, asked, gaps, deferred}
  *  provenance, out): the connection flags from the env file's
  *  HANA_HOST/HANA_PORT/HANA_USER/HANA_SCHEMA, the request as a file, the
  *  dump directory inside gitignored .local/ -- inside the working tree,
- *  which the dumper refuses without --allow-in-repo -- and the password
- *  ONLY in the child's environment (VSP_HANA_PASSWORD), never on the argv.
- *  Throws when the env file cannot answer a required flag, before any
- *  connection travels. Pure. */
+ *  which the dumper refuses without --allow-in-repo -- the password
+ *  ONLY in the child's environment (VSP_HANA_PASSWORD), never on the argv,
+ *  and --skip-test-includes: the closure must never carry CCAU test
+ *  includes (round 7). Throws when the env file cannot answer a required
+ *  flag, before any connection travels. Pure. */
 export function dumperCommand({dumper, connection, requestPath, dumpDir, provenance}) {
   for (const [key, flag] of [["HANA_HOST", "--host"], ["HANA_USER", "--user"], ["HANA_SCHEMA", "--schema"]]) {
     if (connection[key] === undefined || connection[key] === "") {
@@ -463,6 +503,9 @@ export function dumperCommand({dumper, connection, requestPath, dumpDir, provena
     "--provenance", provenance,
     "--ddic-closure", requestPath,
     "--out", dumpDir,
+    // the closure must never carry CCAU test includes (round 7): the real
+    // dumper's flag, off by default there
+    "--skip-test-includes",
     "--allow-in-repo",
   ];
   return {argv, env: {VSP_HANA_PASSWORD: connection.HANA_PASSWORD}};
@@ -571,6 +614,7 @@ function printedCommand(env, requestPath, dumpDir, provenance) {
     `--provenance ${JSON.stringify(provenance)}`,
     `--ddic-closure ${requestPath}`,
     `--out ${dumpDir}`,
+    "--skip-test-includes",
     "--allow-in-repo",
   ].join(" ");
 }
@@ -682,8 +726,14 @@ export async function run(args = process.argv.slice(2), options = {}) {
     try {
       const manifest = JSON.parse(readFileSync(join(dump, "manifest.json"), "utf8"));
       const resolved = new Set();
-      for (const list of Object.values(manifest.closure?.resolved ?? {})) {
-        for (const name of list) resolved.add(String(name).trim().toUpperCase());
+      // and they accumulate per kind (round 7): the per-name DDIC fill and
+      // the resolved-vs-written counts of the iteration line read them
+      // across all the dumps of the walk
+      state.resolved ??= {};
+      for (const [kind, list] of Object.entries(manifest.closure?.resolved ?? {})) {
+        state.resolved[kind] = [...new Set([...(state.resolved[kind] ?? []),
+          ...list.map((n) => String(n).trim().toUpperCase())])];
+        for (const name of state.resolved[kind]) resolved.add(name);
       }
       for (const name of resolved) delete state.missing[name];
       for (const [kind, list] of Object.entries(manifest.closure?.missing ?? {})) {
@@ -715,7 +765,13 @@ export async function run(args = process.argv.slice(2), options = {}) {
     // first when new (round 4's accumulation; the loop saves state.layers)
     const layersDirs = ensureLayers({root, state, dump, system, env, say});
     saveState(out, state);
-    const {refused} = mergeInputs(root, dump, layersDirs, env, say);
+    // the per-name DDIC fill (round 7): the names the dumps RESOLVED minus
+    // the DDIC XMLs the island already carries, written by
+    // hana-ddic-gen --from-dump --names, newest dump first
+    const fill = Object.keys(state.resolved ?? {}).length > 0
+      ? {resolved: state.resolved, dumps: [...state.layers].reverse().map((l) => l.dump)}
+      : undefined;
+    const {refused} = mergeInputs(root, dump, layersDirs, env, say, fill);
     // the merge refusals join the state's (the gap stands while the object
     // is in no build) and leave when a dump the merge handled carries the
     // name again without a refusal -- the generator wrote it at last; a
@@ -869,7 +925,15 @@ export async function run(args = process.argv.slice(2), options = {}) {
     // recomputed every pass: a gap that a later round resolves leaves the
     // file on its own
     writeFileSync(join(out, "closure-gaps.json"), JSON.stringify({gaps: [...gaps, ...refusedGaps]}, null, 2) + "\n");
-    say(`iteration ${state.iteration}: ${fresh.length} new name(s), ${gaps.length} gap(s), ${unscoped} outside the island (not asked), ${refusedGaps.length} merge-refusal gap(s), ${cascades} cascade finding(s) skipped, ${unclassified.length} unclassified${stubUnresolved === true ? `, ${deferredOnly.length} deferred by stubs, ${stubRecords.length} stubbed method(s)` : ""}, ${objects.total} island object(s)`);
+    // per-kind gap counts and resolved-vs-written DDIC counts on the line
+    // (round 7): a writer-of-record hole is written < resolved, visible
+    // before anything asks
+    const gapKinds = [...new Set(gaps.map((g) => g.kind))].sort()
+      .map((k) => `${k} ${gaps.filter((g) => g.kind === k).length}`).join(", ");
+    const writtenDdic = ddicWritten(root);
+    const ddicCounts = TADIR.filter((k) => (state.resolved?.[k] ?? []).length > 0)
+      .map((k) => `${k} ${state.resolved[k].length}/${writtenDdic[k]?.size ?? 0}`).join(", ");
+    say(`iteration ${state.iteration}: ${fresh.length} new name(s), ${gaps.length} gap(s), ${unscoped} outside the island (not asked), ${refusedGaps.length} merge-refusal gap(s), ${cascades} cascade finding(s) skipped, ${unclassified.length} unclassified${stubUnresolved === true ? `, ${deferredOnly.length} deferred by stubs, ${stubRecords.length} stubbed method(s)` : ""}, ${objects.total} island object(s)${gapKinds !== "" ? `, gaps by kind: ${gapKinds}` : ""}${ddicCounts !== "" ? `, DDIC resolved/written: ${ddicCounts}` : ""}`);
     for (const line of unclassified) say(`unclassified: ${line}`);
 
     if (fresh.length === 0) {

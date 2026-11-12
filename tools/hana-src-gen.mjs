@@ -70,6 +70,17 @@ function likeToRegExp(pattern) {
     c === "%" || c === "*" ? ".*" : c === "_" ? "." : c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("") + "$");
 }
 
+// the island's test-code rule (H5c round 7, the same rule
+// tools/hana-closure-merge.mjs's object count applies): a test-classes
+// include (any object's *.testclasses.abap) and a *_TEST class are not
+// island content -- the dumper's --skip-test-includes keeps the closure
+// from pulling test frameworks (the bed run pulled SAP's unit-test
+// assertion class through a facade's test include), and a dump that
+// carries them anyway does not stage them into gen/hana-src; findings in
+// them are not island findings
+const isTestCode = (name) =>
+  /\.testclasses\.abap$/i.test(name) === true || /^[^.]*_test\.clas\./i.test(name) === true;
+
 /** the plan checks, said once: schema 1, a layers array, every layer named
  *  and ordered. */
 function checkedPlan(plan) {
@@ -169,6 +180,10 @@ function layerFiles(layersDir, layer) {
       throw new Error(`hana-src-gen: ${layer.folder}/src/${entry.name} is a folder -- a converter layer's src/ is flat`);
     }
     if (entry.name === ".abapgit.xml") continue;
+    if (isTestCode(entry.name) === true) {
+      console.log(`hana-src-gen: ${layer.name}: ${entry.name} skipped (test code)`);
+      continue;
+    }
     files.push(`src/${entry.name}`);
   }
   return files;

@@ -406,6 +406,37 @@ describe("hana-ddic-gen: DDIC from the dump's DD* tables", () => {
     }
   });
 
+  it("--names writes exactly the named objects of the dump", async () => {
+    // the loop's per-name fill (H5c round 7): a DDIC name the dumps RESOLVED
+    // but the converter's TADIR selection did not write is written by
+    // --from-dump --names for exactly that name
+    const dump = dumpFixture();
+    try {
+      const out = join(dump, "out");
+      expect(await run(["--from-dump", dump, "--out", out, "--names", "ZOSD_H5_HEAD,zosd_h5_doma"])).to.equal(0);
+      expect(readdirSync(out).sort()).to.deep.equal(["zosd_h5_doma.doma.xml", "zosd_h5_head.tabl.xml"]);
+      // a name the dump's rows do not carry writes nothing and still exits 0:
+      // the fill tries the dumps newest-first and stops when nothing is left
+      const out2 = join(dump, "out2");
+      expect(await run(["--from-dump", dump, "--out", out2, "--names", "ZOSD_H5_ABSENT"])).to.equal(0);
+      expect(readdirSync(out2).sort()).to.deep.equal([]);
+      // the selection is refused where it makes no sense
+      const refuse = async (promise, pattern) => {
+        let error;
+        try {
+          await promise;
+        } catch (thrown) {
+          error = thrown;
+        }
+        expect(error?.message ?? "(no refusal)", `expected a refusal matching ${pattern}`).to.match(pattern);
+      };
+      await refuse(run(["--from-dump", dump, "--out", join(dump, "out3"), "--names", "ZOSD_H5_HEAD", "--check"]), /--check/);
+      await refuse(run(["--names", "ZOSD_H5_HEAD", "--out", join(dump, "out4")]), /--names/);
+    } finally {
+      rmSync(dump, {recursive: true, force: true});
+    }
+  });
+
   it("a DD* file the dump does not carry is no rows, not an error", async () => {
     const dump = dumpFixture({omit: ["DD07L", "DD40L", "DD01T"]});
     const out = join(dump, "out");

@@ -75,6 +75,32 @@ describe("hana-src-gen: the tenant's sources as input layers", () => {
     }
   });
 
+  it("test code stays out of the island: *.testclasses.abap and *_TEST classes are not copied", async () => {
+    // H5c round 7: the island must not include test code (the same rule
+    // tools/hana-closure-merge.mjs's object count applies) -- a dump that
+    // carries a class's test-classes include, or a *_TEST class the closure
+    // pulled, stages neither; a name that only ends in _test inside a word
+    // (latest) is not a test class
+    const f = converterOutput();
+    try {
+      f.layer("osd-tmp-zosd-h4-a", "$ZOSD_H4_A", 0, [
+        ["zosd_h4_a.prog.abap", "REPORT zosd_h4_a.\n"],
+        ["zcl_h4_a_own.clas.testclasses.abap", "CLASS ltcl_h4_a_test DEFINITION FOR TESTING. ENDCLASS.\n"],
+        ["zcl_h4_a_helper_test.clas.abap", "CLASS zcl_h4_a_helper_test DEFINITION PUBLIC FINAL. ENDCLASS.\n"],
+        ["zcl_h4_a_keeper.clas.abap", "CLASS zcl_h4_a_keeper DEFINITION PUBLIC FINAL. ENDCLASS.\n"],
+        ["zosd_h4_a_latest.clas.abap", "CLASS zcl_h4_a_latest DEFINITION PUBLIC FINAL. ENDCLASS.\n"],
+      ]);
+      f.plan();
+      expect(await run(["--layers", f.root, "--out", out(f.root)])).to.equal(0);
+      expect(readdirSync(join(out(f.root), "000-osd-tmp-zosd-h4-a", "src")).sort()).to.deep.equal(
+        ["zcl_h4_a_keeper.clas.abap", "zosd_h4_a.prog.abap", "zosd_h4_a_latest.clas.abap"]);
+      // the plan and the disk agree, so --check passes
+      expect(await run(["--layers", f.root, "--check", "--out", out(f.root)])).to.equal(0);
+    } finally {
+      rmSync(f.root, {recursive: true, force: true});
+    }
+  });
+
   it("a cycle group is one folder, the members' src merged, and the manifest says so", async () => {
     const f = converterOutput();
     try {
