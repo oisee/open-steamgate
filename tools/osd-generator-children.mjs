@@ -48,6 +48,9 @@ export function preloadsOf(args, nodeOptions, execArgv, recorder) {
     for (let i = 0; i < list.length; i++) {
       const word = String(list[i]);
       if (!all && (word === "--" || !word.startsWith("-"))) break; // the script and its own argv
+      // an env file or config file can set NODE_OPTIONS (and so a preload) itself
+      const file = /^(--env-file(?:-if-exists)?|--experimental-config-file|--experimental-default-config-file)(?:=|$)/.exec(word);
+      if (file) { found.push(word); if (!word.includes("=") && file[1] !== "--experimental-default-config-file") i++; continue; }
       const m = PRELOAD.exec(word);
       if (m) {
         const value = m[2] ?? String(list[++i] ?? "");
