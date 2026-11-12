@@ -43,7 +43,7 @@ if (log) {
   const watched = (path, projected) => {
     if (!skipped(path, projected)) return true;
     const real = realOf(path);
-    return real !== path && (!skipped(real, projected) || privacyOf(real) !== false);
+    return (real !== path && !skipped(real, projected)) || privacyOf(real) !== false;
   };
   const pathOf = file => typeof file === "string" ? file : file instanceof URL ? fileURLToPath(file)
     : file instanceof Uint8Array ? Buffer.from(file).toString() : undefined;
@@ -101,9 +101,14 @@ if (log) {
   const listed = (file, list) => { const given = pathOf(file); if (given !== undefined) meta(join(resolve(given), "*"), names(list)); };
   // A file this process wrote holds what it read, which is recorded: a later
   // read of it (a cache it renames into place, say) is derived, not a source.
+  // Only when the bytes are all this process's: a truncating write or a file
+  // it created. An append (or r+) keeps what was there, which stays a source.
   // Links are not writes: reading through one reads its target.
-  const wrote = file => {
-    if (busy) return;
+  const absent = file => { const given = pathOf(file); return given !== undefined && !o.existsSync(given); };
+  const truncates = flags => typeof flags === "string" ? flags.includes("w") : typeof flags === "number" && (flags & fs.constants.O_TRUNC) !== 0;
+  const flagOf = (options, key, fallback) => (options !== null && typeof options === "object" && options[key] !== undefined ? options[key] : fallback);
+  const wrote = (file, whole = true) => {
+    if (busy || !whole) return;
     const given = pathOf(file);
     if (given === undefined) return;
     busy = true;
@@ -135,15 +140,16 @@ if (log) {
   const viaCallback = (name, after) => {
     fs[name] = (...args) => {
       const at = callback(args);
+      const created = absent(args[0]);
       if (at >= 0) {
         const done = args[at];
-        args[at] = (error, ...rest) => { if (!error) after(args, rest[0]); done(error, ...rest); };
+        args[at] = (error, ...rest) => { if (!error) after(args, rest[0], created); done(error, ...rest); };
       }
       return o[name](...args);
     };
   };
   const viaPromise = (name, after) => {
-    promises[name] = async (...args) => { const value = await op[name](...args); after(args, value); return value; };
+    promises[name] = async (...args) => { const created = absent(args[0]); const value = await op[name](...args); after(args, value, created); return value; };
   };
 
   fs.readFileSync = (file, ...args) => {
@@ -157,12 +163,12 @@ if (log) {
     record(viewed, asBytes(value, args[0]), {projected: given !== undefined && actual !== undefined && resolve(actual) !== resolve(given)});
     return value;
   };
-  const opened = (args, fd) => {
+  const opened = (args, fd, created) => {
     if (readable(args[1])) record(args[0]);
-    if (writable(args[1])) wrote(args[0]);
+    if (writable(args[1])) wrote(args[0], created || truncates(args[1]));
     fdSeen.delete(typeof fd === "number" ? fd : fd?.fd);
   };
-  fs.openSync = (...args) => { const fd = o.openSync(...args); opened(args, fd); return fd; };
+  fs.openSync = (...args) => { const created = absent(args[0]); const fd = o.openSync(...args); opened(args, fd, created); return fd; };
   for (const name of ["readSync", "readvSync"]) fs[name] = (fd, ...args) => { fdRead(fd); return o[name](fd, ...args); };
   for (const name of ["read", "readv"]) fs[name] = (fd, ...args) => { fdRead(fd); return o[name](fd, ...args); };
   fs.copyFileSync = (src, dest, ...args) => { const value = quiet(() => o.copyFileSync(src, dest, ...args)); record(src); wrote(dest); return value; };
@@ -174,8 +180,18 @@ if (log) {
     return value;
   };
   fs.renameSync = (src, dest, ...args) => { record(src, undefined, {missingOk: true}); const value = o.renameSync(src, dest, ...args); wrote(dest); return value; };
-  for (const name of ["writeFileSync", "appendFileSync"]) fs[name] = (file, ...args) => { const value = o[name](file, ...args); if (typeof file !== "number") wrote(file); return value; };
-  fs.createWriteStream = (file, options) => { const stream = o.createWriteStream(file, options); if (options?.fd === undefined || options.fd === null) wrote(file); return stream; };
+  for (const [name, flag] of [["writeFileSync", "w"], ["appendFileSync", "a"]]) fs[name] = (file, ...args) => {
+    const created = typeof file !== "number" && absent(file);
+    const value = o[name](file, ...args);
+    if (typeof file !== "number") wrote(file, created || truncates(flagOf(args[1], "flag", flag)));
+    return value;
+  };
+  fs.createWriteStream = (file, options) => {
+    const created = absent(file);
+    const stream = o.createWriteStream(file, options);
+    if (options?.fd === undefined || options.fd === null) wrote(file, created || truncates(flagOf(options, "flags", "w")));
+    return stream;
+  };
   fs.createReadStream = (file, options) => {
     if (options?.fd !== undefined && options.fd !== null) fdRead(options.fd);
     else record(file, undefined, {missingOk: true});
@@ -193,8 +209,9 @@ if (log) {
     return o.readFile(file, ...args);
   };
   viaCallback("open", opened);
-  viaCallback("writeFile", args => { if (typeof args[0] !== "number") wrote(args[0]); });
-  viaCallback("appendFile", args => { if (typeof args[0] !== "number") wrote(args[0]); });
+  const written = flag => (args, value, created) => { if (typeof args[0] !== "number") wrote(args[0], created || truncates(flagOf(args[2], "flag", flag))); };
+  viaCallback("writeFile", written("w"));
+  viaCallback("appendFile", written("a"));
   viaCallback("copyFile", args => record(args[0]));
   viaCallback("cp", args => record(args[0]));
   viaCallback("link", args => record(args[0]));
@@ -207,8 +224,9 @@ if (log) {
     return value;
   };
   viaPromise("open", opened);
-  viaPromise("writeFile", args => { if (typeof args[0] === "string" || args[0] instanceof URL || args[0] instanceof Uint8Array) wrote(args[0]); });
-  viaPromise("appendFile", args => { if (typeof args[0] === "string" || args[0] instanceof URL || args[0] instanceof Uint8Array) wrote(args[0]); });
+  const named = flag => (args, value, created) => { if (typeof args[0] === "string" || args[0] instanceof URL || args[0] instanceof Uint8Array) wrote(args[0], created || truncates(flagOf(args[2], "flag", flag))); };
+  viaPromise("writeFile", named("w"));
+  viaPromise("appendFile", named("a"));
   viaPromise("copyFile", args => record(args[0]));
   viaPromise("cp", args => record(args[0]));
   viaPromise("link", args => record(args[0]));

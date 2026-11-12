@@ -56,6 +56,12 @@ const roads = {
   // (D) a file written by the generator, then read back, is derived
   ownCache: () => { writeFileSync("open/zcache.tmp", "derived"); renameSync("open/zcache.tmp", "open/zcache.bin"); readFileSync("open/zcache.bin"); },
   oldThenOverwrite: () => { readFileSync("open/zpublic.txt"); writeFileSync("open/zpublic.txt", "rewritten"); readFileSync("open/zpublic.txt"); },
+  // (S3) an append keeps the source's bytes: still a source, not derived
+  appendThenRead: () => { fs.appendFileSync(one, "appended"); readFileSync(one); },
+  openAppendThenRead: () => { closeSync(openSync(one, "a")); readFileSync(one); },
+  promisesAppendThenRead: async () => { await fs.promises.appendFile(one, "appended"); readFileSync(one); },
+  // (S4) a plain read of a private file outside the root, by its real path
+  outsidePrivate: () => readFileSync(process.env.OSD_TEST_OUTSIDE),
 };
 await roads[api]();
 `;
@@ -229,6 +235,24 @@ describe("tools/osd-generator-reads: a generator's reads decide the generation's
     const reads = log.entries.filter(entry => entry.path === "open/zpublic.txt");
     expect(reads).to.have.length(1);
     expect(reads[0].sha256).to.equal(createHash("sha256").update("SYNTHETIC-PUBLIC\n").digest("hex"));
+  });
+
+  for (const api of ["appendThenRead", "openAppendThenRead", "promisesAppendThenRead"]) {
+    it(`S3 ${api}: an append to a private source and a read back is still a private source`, () => {
+      const log = generate(api);
+      expect(log.incomplete).to.deep.equal([]);
+      expect(log.entries.some(entry => entry.path === "vault/zsentinel.txt" && entry.privacy === true)).to.equal(true);
+      expect(publish(log)).to.throw().with.property("code", "PRIVATE_LAYER");
+    });
+  }
+
+  it("S4: a plain read of a private file outside the root is recorded", () => {
+    process.env.OSD_TEST_OUTSIDE = join(base, "elsewhere/zfar.txt");
+    let log;
+    try { log = generate("outsidePrivate"); } finally { delete process.env.OSD_TEST_OUTSIDE; }
+    expect(log.incomplete).to.deep.equal([]);
+    expect(log.entries.some(entry => entry.real === join(base, "elsewhere/zfar.txt") && entry.privacy === true)).to.equal(true);
+    expect(publish(log)).to.throw().with.property("code", "PRIVATE_LAYER");
   });
 
   it("a child announced by a recorder that never answers makes the record incomplete", () => {
