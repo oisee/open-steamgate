@@ -119,8 +119,11 @@ export function isBinaryFilename(filename) {
 }
 
 // every file under a folder, absolute, forward slashes, sorted: the order
-// the registry sees is then a property of the tree and not of the disk
-export function walk(dir, out = []) {
+// the registry sees is then a property of the tree and not of the disk.
+// `skipDirs`: a folder that is an input of its own is walked as its own layer
+// (H3: gen/hana-ddic inside gen); the parent's walk must not pick it up again
+// -- the same rule as tools/osd-inputs.mjs filesIn, which decides hiding.
+export function walk(dir, out = [], skipDirs) {
   let entries;
   try {
     entries = readdirSync(dir).sort();
@@ -130,8 +133,9 @@ export function walk(dir, out = []) {
   for (const entry of entries) {
     if (entry === ".git") continue;
     const p = join(dir, entry);
+    if (skipDirs?.has(p)) continue;
     if (statSync(p).isDirectory()) {
-      walk(p, out);
+      walk(p, out, skipDirs);
     } else {
       out.push(p.split(sep).join("/"));
     }
@@ -193,7 +197,8 @@ export function listFiles(root, config) {
   const wanted = [];
   let skipped = 0;
   for (const folder of folders) {
-    for (const filename of walk(resolve(root, folder))) {
+    const skipDirs = new Set(folders.filter((f) => f !== folder).map((f) => resolve(root, f)));
+    for (const filename of walk(resolve(root, folder), [], skipDirs)) {
       if (isSourceIdentity(filename) || system && [".osd-layer.json", ".abapgit.xml"].includes(basename(filename))) {
         skipped++;
       } else if (include.length > 0 && matchesSourcePath(root, filename, include, system) === false) {

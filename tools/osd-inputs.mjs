@@ -25,7 +25,7 @@ import {activeSystem, layerDir, logicalSystemPath, matchesSourcePath} from "./os
 // Neither is an error; both are said out loud, here and in the builder's
 // log.
 import {readFileSync, readdirSync, statSync, existsSync} from "node:fs";
-import {basename, resolve} from "node:path";
+import {basename, join, resolve} from "node:path";
 import {inputFoldersOf} from "./osd-packs.mjs";
 import {runsAs} from "./osd-main.mjs";
 
@@ -83,12 +83,17 @@ export function objectOf(filename) {
 // input both have one (a set's run cockpit and its Set app, DSL L3 slice 6a); a page
 // is no ABAP object, and neither is its sidecar
 const WEB_SIDECAR = /\.(js|html?|json|properties|css)\.trace(?:\.meta)?\.json$/i;
-export function filesIn(base, folder) {
+export function filesIn(base, folder, nested = []) {
   const out = [];
+  // a folder that is an input of its own is walked as its own layer (H3:
+  // gen/hana-ddic inside gen); the parent's walk must not pick it up again,
+  // or the later parent listing would hide the file from the build entirely
+  const skip = new Set(nested);
   const walk = (dir) => {
     for (const entry of readdirSync(resolve(base, dir)).sort()) {
       const path = `${dir}/${entry}`;
       if (statSync(resolve(base, path)).isDirectory()) {
+        if (skip.has(path)) continue;
         walk(path);
       } else if (/\.devc\.xml$/i.test(entry) === false && WEB_SIDECAR.test(entry) === false) {
         const object = objectOf(entry);
@@ -104,6 +109,30 @@ export function filesIn(base, folder) {
   return out;
 }
 
+/** every file of a folder, absolute, in the disk's own readdir order (the
+ *  walkers over the layer list keep the order the tree gives them): a listed
+ *  folder that is not on disk reads as EMPTY, never as an error -- H3 lists
+ *  gen/hana-ddic in abap_transpile.json before the first build that writes
+ *  it, and a fresh clone runs the osgo host before any transpile (FIX-4).
+ *  One helper, because the walkers that walk the list by hand are the ones
+ *  that crashed on the absence (tools/gogen/osg-build.mjs walk, at import).
+ *  Only the read's own ENOENT is swallowed; anything else still throws. */
+export function walkListed(d, out = []) {
+  let entries;
+  try {
+    entries = readdirSync(d, {withFileTypes: true});
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+    return out;
+  }
+  for (const e of entries) {
+    const p = join(d, e.name);
+    if (e.isDirectory()) walkListed(p, out);
+    else out.push(p);
+  }
+  return out;
+}
+
 // the layers as the config lists them, resolved: which folder owns each
 // object, which files an earlier layer hides, and where nothing decides
 export function layers(base, config = JSON.parse(readFileSync(resolve(base, "abap_transpile.json"), "utf8")), env = process.env, {discoveryOnly = false} = {}) {
@@ -114,7 +143,7 @@ export function layers(base, config = JSON.parse(readFileSync(resolve(base, "aba
   if (discoveryOnly) activeSystem(base, env);
   const folders = discoveryOnly ? [config.input_folder ?? config.input_folders ?? []].flat()
     : inputFoldersOf(base, config.input_folder === undefined ? {input_folder: config.input_folders} : config, env);
-  const byFolder = folders.map((folder) => ({folder, files: filesIn(base, folder)}));
+  const byFolder = folders.map((folder) => ({folder, files: filesIn(base, folder, folders.filter((f) => f !== folder))}));
   // the same file name twice inside one folder: no order decides, so nothing does
   const duplicates = [];
   for (const {folder, files} of byFolder) {

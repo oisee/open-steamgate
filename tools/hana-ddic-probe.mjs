@@ -27,8 +27,9 @@ import {HanaDatabaseClient} from "./hana-client.mjs";
 import {ddicFields, mandtFirstKey, tablXml} from "./hana-ddic-map.mjs";
 
 // names go into single-quoted literals; anything that is not a name this
-// tool would send is refused before it becomes SQL
-const nameList = (value) => (value ?? "").split(",").map((s) => s.trim()).filter((s) => s !== "")
+// tool would send is refused before it becomes SQL. Exported for
+// tools/hana-ddic-gen.mjs (H3): the same refusal for its --tables list.
+export const nameList = (value) => (value ?? "").split(",").map((s) => s.trim()).filter((s) => s !== "")
   .map((s) => {
     const name = s.toUpperCase();
     if (/^[A-Z0-9_/#$]+$/.test(name) === false) {
@@ -47,8 +48,10 @@ const quoted = (names) => names.map((n) => `'${n}'`).join(",");
  *  column the list does not carry (the first run against a real system died
  *  on DD04L's INTTYPE, which lives on DD03L only). Every read is pinned to
  *  the active version -- AS4LOCAL 'A', AS4VERS '0000' -- or a table with an
- *  inactive version would yield its fields twice. */
-async function readTables(db, names) {
+ *  inactive version would yield its fields twice. Exported for
+ *  tools/hana-ddic-gen.mjs (H3), which maps the same rows a second way never:
+ *  the probe reads, the map shapes. */
+export async function readTables(db, names) {
   const tables = new Map();
   for (const name of names) {
     const head = await db.query(`SELECT TABNAME, TABCLASS, CLIDEP FROM DD02L WHERE TABNAME = '${name}' AND AS4LOCAL = 'A' AND AS4VERS = '0000'`);

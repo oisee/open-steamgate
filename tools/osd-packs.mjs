@@ -81,11 +81,41 @@ export function sourceMatches(source, entry) {
 
 const slash = (p) => p.split("\\").join("/");
 
-/** Select one copy of each object from folders in layer order. Later folders win. */
+/** Select one copy of each object from folders in layer order. Later folders win.
+ *
+ *  A folder that is not there yields nothing: a listed input may simply not
+ *  exist yet (H3: gen/hana-ddic before the first hana-ddic-gen run; a pack
+ *  without a ddic folder) and the generators reading content through here
+ *  must not crash on the absence -- the build, the transpiler and the store
+ *  already read a missing input folder as an empty one. The absence is the
+ *  read's own ENOENT and never a stat of the folder name: these folders walk
+ *  in more than one path space (binaryDdIC resolves them against a root of
+ *  its own and names a libraries layer that is not a path at all; the BSP
+ *  app derivation hands in source descriptors), so an existsSync from here
+ *  would answer about this process's cwd and silently drop a layer that is
+ *  there. Only ENOENT is swallowed; every other error still throws. */
 export function winningByLayer(folders, entriesIn, keyOf) {
   const winners = new Map();
   for (const folder of folders) {
-    for (const entry of entriesIn(folder)) {
+    let entries;
+    try {
+      entries = entriesIn(folder);
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+      // the FOLDER'S OWN absence yields nothing (H3: gen/hana-ddic before
+      // its first run). An ENOENT naming something INSIDE the folder -- one
+      // unreadable entry in the walk -- is not absence: read as absence it
+      // dropped every registration of the folder at once (the A10 live diff
+      // answered 404 for services that are there; segw-registry's walk stats
+      // each entry, fix round 4). fs errors carry .path; a walker that
+      // throws an ENOENT without one is answered as folder-absence, as
+      // before, because the caller's path space is its own.
+      const missing = String(error.path ?? "").split("\\").join("/");
+      const own = `/${slash(folder).replace(/^\/+|\/+$/g, "")}`;
+      if (missing !== "" && missing !== slash(folder) && missing.endsWith(own) === false) throw error;
+      continue;
+    }
+    for (const entry of entries) {
       winners.set(keyOf(entry), entry);
     }
   }
