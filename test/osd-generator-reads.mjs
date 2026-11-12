@@ -60,6 +60,12 @@ const roads = {
   forkPlain: () => new Promise(ok => { writeFileSync("open/zchild.cjs", "require('fs').readFileSync('vault/zsentinel.txt')"); fork("./open/zchild.cjs").on("exit", ok); }),
   envFilePreload: () => { writeFileSync("open/zbefore.cjs", "require('fs').readFileSync('vault/zsentinel.txt')"); writeFileSync("open/zpre.env", "NODE_OPTIONS=--require ./open/zbefore.cjs"); spawnSync(process.execPath, ["--env-file=open/zpre.env", "-e", "0"]); },
   nodeRun: () => { writeFileSync("open/package.json", JSON.stringify({scripts: {zleak: "cat ../vault/zsentinel.txt"}})); spawnSync(process.execPath, ["--run", "zleak"], {cwd: "open"}); },
+  // (r6 3a) a value-taking flag ahead of the preload
+  redirectWarnings: () => { writeFileSync("open/zbefore.cjs", "require('fs').readFileSync('vault/zsentinel.txt')"); spawnSync(process.execPath, ["--redirect-warnings", "open/zwarn.log", "--require", "./open/zbefore.cjs", "-e", "0"]); },
+  // (r6 3b) osd itself as the child, with a preload in NODE_OPTIONS
+  selfHostile: () => { writeFileSync("open/zbefore.cjs", "require('fs').readFileSync('vault/zsentinel.txt')"); const self = JSON.parse(process.env.OSD_SELF);
+    spawnSync(self[0], [...self.slice(1), "gen", "zgen.mjs", "listPublic"], {env: {...process.env, NODE_OPTIONS: "--require ./open/zbefore.cjs " + (process.env.NODE_OPTIONS ?? "")}}); },
+  quotedPreload: () => { writeFileSync("open/zbefore.cjs", "require('fs').readFileSync('vault/zsentinel.txt')"); spawnSync(process.execPath, ["-e", "0"], {env: {...process.env, NODE_OPTIONS: '--require "./open/zbefore.cjs" ' + (process.env.NODE_OPTIONS ?? "")}}); },
   requireAfterEval: () => { writeFileSync("open/zbefore.cjs", "require('fs').readFileSync('vault/zsentinel.txt')"); spawnSync(process.execPath, ["-e", "0", "--require", "./open/zbefore.cjs"]); },
   scriptArgRequire: () => { writeFileSync("open/zscript.cjs", "require('fs').readFileSync('vault/zsentinel.txt')"); spawnSync(process.execPath, ["./open/zscript.cjs", "--require", "x"]); },
   // (D) a file written by the generator, then read back, is derived
@@ -218,7 +224,7 @@ describe("tools/osd-generator-reads: a generator's reads decide the generation's
     });
   }
 
-  for (const api of ["requirePreload", "requirePreloadEnv", "requireAfterEval", "forkPreload"]) {
+  for (const api of ["requirePreload", "requirePreloadEnv", "requireAfterEval", "forkPreload", "redirectWarnings", "quotedPreload"]) {
     it(`${api}: a node child with a preload ahead of the recorder makes the record incomplete`, () => {
       const log = generate(api);
       expect(log.incomplete.some(what => /\(preload --require \.\/open\/zbefore\.cjs\)/.test(what)), log.incomplete.join("; ")).to.equal(true);
@@ -244,10 +250,16 @@ describe("tools/osd-generator-reads: a generator's reads decide the generation's
     expect(log.entries.map(entry => entry.path)).to.include("vault/zsentinel.txt");
   });
 
-  it("a --require after the script is the script's own argument, not a preload", () => {
+  it("a --require after the script fails closed: node's options are not told from the script's", () => {
     const log = generate("scriptArgRequire");
-    expect(log.incomplete).to.deep.equal([]);
-    expect(log.entries.map(entry => entry.path)).to.include("vault/zsentinel.txt");
+    expect(log.incomplete.some(what => what.includes("(preload --require x)")), log.incomplete.join("; ")).to.equal(true);
+    expect(publish(log)).to.throw().with.property("code", "UNKNOWN_PRIVACY");
+  });
+
+  it("r6 3b: osd itself as a child, with a preload in NODE_OPTIONS, makes the record incomplete", () => {
+    const log = generate("selfHostile", [process.execPath, join(tools, "host-recorded.mjs")]);
+    expect(log.incomplete.some(what => what.includes("(preload --require ./open/zbefore.cjs)")), log.incomplete.join("; ")).to.equal(true);
+    expect(publish(log)).to.throw().with.property("code", "UNKNOWN_PRIVACY");
   });
 
   it("gitMetadata: an allow-listed git command in a public repository leaves the record complete", () => {

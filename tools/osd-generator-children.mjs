@@ -33,38 +33,39 @@ export function gitMetadata(args) {
   return {dir, paths: pattern[0] === "ls-files" ? tail : []};
 }
 
-// Preloads a node child runs: --require modules run before any --import, so
-// one ahead of the recorder reads unrecorded. Any preload other than the
-// recorder itself -- in node's own argv, NODE_OPTIONS or a fork's execArgv --
-// makes the child incomplete. Returns the preloads found.
 // the unhooked one: syncBuiltinESMExports later rebinds the named export
 const realpathSync = liveRealpath;
 // ESM loads a module by its real path, so the recorder's URL names the link's target
 const realOr = value => { try { return realpathSync(value.startsWith("file:") ? fileURLToPath(value) : resolve(value)); } catch { return resolve(value); } };
+const unquote = value => /^(["'])(.*)\1$/.exec(value)?.[2] ?? value;
 const PRELOAD = /^(-r|--require|--import|--loader|--experimental-loader)(?:=(.*))?$/;
+// an env or config file can set NODE_OPTIONS (and so a preload) itself; node
+// starts the children of --run, --test and --watch* past the hooked
+// child_process; a snapshot runs its own entry before any preload
+const UNRECORDED = /^(--env-file(?:-if-exists)?|--experimental-config-file|--experimental-default-config-file|--run|--test|--watch|--watch-path|--watch-preserve-output|--snapshot-blob|--build-snapshot|--build-snapshot-config)(?:=|$)/;
+
+// Preloads a node child runs: --require modules run before any --import, so
+// one ahead of the recorder reads unrecorded. Any preload other than the
+// recorder itself, and any flag in UNRECORDED, makes the child incomplete --
+// in node's argv, NODE_OPTIONS or a fork's execArgv. Every word is scanned,
+// the script's own argv too: telling node's options from the script's needs
+// node's whole list of flags that take a value, so a script argument that
+// looks like one fails closed. Returns what was found.
 export function preloadsOf(args, nodeOptions, execArgv, recorder) {
   const found = [];
-  const scan = (list, all) => {
+  const scan = list => {
     for (let i = 0; i < list.length; i++) {
-      const word = String(list[i]);
-      if (!all && (word === "--" || !word.startsWith("-"))) break; // the script and its own argv
-      // an env file or config file can set NODE_OPTIONS (and so a preload) itself
-      const file = /^(--env-file(?:-if-exists)?|--experimental-config-file|--experimental-default-config-file)(?:=|$)/.exec(word);
-      if (file) { found.push(word); if (!word.includes("=") && file[1] !== "--experimental-default-config-file") i++; continue; }
-      // node itself starts these children (a package script's shell, test
-      // files, a watched restart), past the hooked child_process
-      const runner = /^(--run|--test|--watch|--watch-path|--watch-preserve-output)(?:=|$)/.exec(word);
-      if (runner) { found.push(word); if (word === "--run" || word === "--watch-path") i++; continue; }
+      const word = unquote(String(list[i]));
+      if (UNRECORDED.test(word)) { found.push(word); continue; }
       const m = PRELOAD.exec(word);
-      if (m) {
-        const value = m[2] ?? String(list[++i] ?? "");
-        if (!recorder || value !== recorder && realOr(value) !== fileURLToPath(recorder)) found.push(`${m[1]} ${value}`);
-      } else if (/^(-e|--eval|-p|--print)$/.test(word)) i++; // node reads options after the code, too
+      if (!m) continue;
+      const value = unquote(m[2] ?? String(list[++i] ?? ""));
+      if (!recorder || value !== recorder && realOr(value) !== fileURLToPath(recorder)) found.push(`${m[1]} ${value}`);
     }
   };
-  scan(args, false);
-  scan(String(nodeOptions ?? "").split(/\s+/).filter(Boolean), true);
-  scan(execArgv ?? [], true);
+  scan(args.map(String));
+  scan(String(nodeOptions ?? "").split(/\s+/).filter(Boolean));
+  scan(execArgv ?? []);
   return found;
 }
 
@@ -102,10 +103,11 @@ export function installChildHooks({write, recorder, meta, listed}) {
     if (kind === "other") return void incomplete(command) ?? options;
     if (options?.detached) incomplete(`${command} (detached)`);
     if (kind === "node" && !recorder) incomplete(`${command} (recorder is not a file)`);
-    if (kind === "node") {
-      const preloads = preloadsOf(forked ? [] : args, (options?.env ?? process.env).NODE_OPTIONS, forked ? options?.execArgv ?? process.execArgv : [], recorder);
-      if (preloads.length) incomplete(`${command} (preload ${preloads.join(", ")})`);
-    }
+    // osd itself (kind "self") gets the same NODE_OPTIONS through carry(); its
+    // argv is osd's own, never node's
+    const preloads = preloadsOf(kind === "node" && !forked ? args : [], (options?.env ?? process.env).NODE_OPTIONS,
+      forked ? options?.execArgv ?? process.execArgv : [], recorder);
+    if (preloads.length) incomplete(`${command} (preload ${preloads.join(", ")})`);
     return {...options, env: carry(options?.env, kind)};
   };
   // file, [args], [options], [callback]
