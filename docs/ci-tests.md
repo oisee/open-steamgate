@@ -180,8 +180,8 @@ Six separate steps run the fleet slice on SQLite and DuckDB, the Go CLI,
 jobs, DSL L3 and C in ABAP. All six are attempted after earlier failures.
 Node 24, Go 1.26 (CLI only) and Ubuntu's `cc` are used; browser checks are
 disabled with `SLICE_SKIP_UI=1`. Setup needs network for checkouts, `npm ci`
-and bootstrap's pinned library/pack fetches; the tests use local services,
-with Go dependency downloads disabled. The initial consumer pin has no
+and bootstrap's pinned transpiler build/link and library/pack fetches; the
+tests use local services, with Go dependency downloads disabled. The initial consumer pin has no
 `package.json` or npm lockfile, so its install step reports no dependencies;
 a later pin with a package manifest must support `npm ci`.
 
