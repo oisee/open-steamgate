@@ -44,6 +44,9 @@ export function readEntry(root, file, bytes) {
   return {path: lexical, real, sha256: sha256(bytes), privacy, identities};
 }
 
+// The privacy of a real path's ancestry as it is now: for a gate, never cached.
+export const privacyNow = real => privateValue(real, []);
+
 // The privacy of a real path's ancestry, without recording its identities.
 const ancestry = new Map();
 export function privacyOf(real) {

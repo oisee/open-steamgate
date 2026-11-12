@@ -15,7 +15,7 @@ import {stageVscodeWeb} from "../scripts/stage-vscode-web.mjs";
 import {assertExtensionSources} from "../tools/osd-extension-sources.mjs";
 import {verifiedWebBundle} from "../scripts/build-vsix.mjs";
 import {syntheticCiTranspiler, syntheticReads} from "./helpers/fix7-fixtures.mjs";
-import {verifyCiTranspiler} from "../tools/osd-ci-transpiler.mjs";
+import {prepareCiTranspiler, verifyCiTranspiler} from "../tools/osd-ci-transpiler.mjs";
 
 const elf = (machine) => {
   const b = Buffer.alloc(64);
@@ -238,6 +238,20 @@ describe("scripts/release-verify: an artefact by its content", () => {
     expect(() => assertExtensionSources(extension, ["package.json"])).not.to.throw();
     writeFileSync(join(extension, "extra.txt"), "unrecorded");
     expect(() => assertExtensionSources(extension, ["package.json"])).to.throw().with.property("code", "BAD_PROVENANCE");
+  });
+
+  // FIX8 S5: a marker above the tree marks it too; a stray file is no build output
+  it("refuses a CI transpiler under a private marker or with untracked files", () => {
+    const root = join(dir, "ci-transpiler-above");
+    syntheticCiTranspiler(root);
+    const stray = join(root, ".local/ci-artifact/transpiler/zstray.txt");
+    writeFileSync(stray, "untracked");
+    expect(() => prepareCiTranspiler(root)).to.throw(/untracked/).with.property("code", "CI_TRANSPILER");
+    rmSync(stray);
+    expect(() => prepareCiTranspiler(root)).not.to.throw();
+    writeFileSync(join(root, ".local/.osd-source.json"), JSON.stringify({private: true}));
+    expect(() => verifyCiTranspiler(root)).to.throw(/private or unknown/).with.property("code", "CI_TRANSPILER");
+    expect(() => prepareCiTranspiler(root)).to.throw(/private or unknown/).with.property("code", "CI_TRANSPILER");
   });
 
   it("binds CI transpiler files to its pinned commit and refuses additions or source markers", () => {
