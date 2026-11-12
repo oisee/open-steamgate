@@ -153,13 +153,15 @@ export function readDumpDdic(dir) {
 
 /** what --from-dump writes, as abapGit file name -> XML. The rows go through
  *  the live read's mapper: ddicFieldsWithIncludes for the tables (the dump
- *  carries every DD02L table's DD03L, so an include row splices, a
- *  .INCLU-<suffix> with its suffix kept on the names), then tablXml /
- *  dtelXml / domaXml. An object's text is its T table's row in the L row's
- *  master language, E when none is named -- the live read's DDLANGUAGE 'E',
- *  said per object instead of per query; the TABL header's DDLANGUAGE
- *  carries that language too, and a TABCLASS outside TRANSP and INTTAB
- *  refuses the run. */
+ *  carries every DD02L table's DD03L, so an include row goes out as the
+ *  marker a system's own export spells and the included fields' expanded
+ *  copies are dropped -- H5d), then tablXml / dtelXml / domaXml. An
+ *  object's text is its T table's row in the L row's master language, E
+ *  when none is named -- the live read's DDLANGUAGE 'E', said per object
+ *  instead of per query; the TABL header's DDLANGUAGE carries that language
+ *  too, TABCLASS APPEND carries the SQLTAB target its DD02L row names,
+ *  POOL and CLUSTER refuse the run, and the summary line says what a VIEW
+ *  became and where its reads stand (H5d). */
 export function dumpGeneration(dd) {
   const elements = new Map(dd.dd04l.map((row) => [String(row.rollname ?? "").toUpperCase(), row]));
   const domains = new Map(dd.dd01l.map((row) => [String(row.domname ?? "").toUpperCase(), row]));
@@ -179,7 +181,7 @@ export function dumpGeneration(dd) {
   const byName = (rows, key) => [...rows].sort((a, b) =>
     String(a[key] ?? "").localeCompare(String(b[key] ?? "")));
   const files = new Map();
-  const counts = {tabl: 0, dtel: 0, doma: 0};
+  const counts = {tabl: 0, dtel: 0, doma: 0, view: 0};
   for (const head of byName(dd.dd02l, "tabname")) {
     const name = String(head.tabname ?? "").toUpperCase();
     files.set(abapGitFileName(name, "tabl"), tablXml({
@@ -187,9 +189,11 @@ export function dumpGeneration(dd) {
       text: textOf(dd.dd02t, "tabname", name, head.masterlang),
       clidep: String(head.clidep ?? "").toUpperCase() === "X",
       tabclass: String(head.tabclass ?? "").trim() || "TRANSP",
+      sqltab: String(head.sqltab ?? "").trim(),
       language: head.masterlang,
       fields: ddicFieldsWithIncludes(includes.get(name) ?? [], {elements, domains}, includes),
     }));
+    if (String(head.tabclass ?? "").trim().toUpperCase() === "VIEW") counts.view++;
     counts.tabl++;
   }
   for (const row of byName(dd.dd04l, "rollname")) {
@@ -281,6 +285,11 @@ export async function run(args = process.argv.slice(2)) {
       writeFileSync(join(out, file), xml);
     }
     console.log(`hana-ddic-gen: ${dump}: ${counts.tabl} table(s), ${counts.dtel} data element(s), ${counts.doma} domain(s) -> ${out}`);
+    // what a view became and where its reads stand, said in the run's
+    // summary and not in a POOL refusal's tail (CRITIC-929 SHOULD 4)
+    if (counts.view > 0) {
+      console.log(`hana-ddic-gen: ${counts.view} view(s) written as read-only structure type(s): outside the HANA existing-schema mode a read of a view fails at SQL time; in the mode the shadow schema names the tenant's SQL view with a synonym`);
+    }
     console.log(`hana-ddic-gen: not covered by --from-dump: search helps (SHLP, DD30L-DD33L) and messages (MSAG) are not in --ddic, ${notCovered.ttyp} table type(s) (DD40L) counted here`);
     return 0;
   }
@@ -301,8 +310,14 @@ export async function run(args = process.argv.slice(2)) {
     mkdirSync(out, {recursive: true});
     for (const [name, table] of found) {
       const fields = ddicFields(table.rows, {elements, domains});
+      // the TABCLASS/SQLTAB the DD02L row carries go through to the shared
+      // writer, the dump path's equality (CRITIC-929 SHOULD 1): without
+      // them --tables on an append or a view wrote TABCLASS TRANSP with a
+      // DD09L, silently
       const xml = tablXml({name, text: texts.get(name) ?? "",
-        clidep: String(table.head.clidep ?? "").toUpperCase() === "X", fields});
+        clidep: String(table.head.clidep ?? "").toUpperCase() === "X",
+        tabclass: String(table.head.tabclass ?? "").trim() || "TRANSP",
+        sqltab: String(table.head.sqltab ?? "").trim(), fields});
       const file = join(out, abapGitFileName(name, "tabl"));
       writeFileSync(file, xml);
       console.log(`hana-ddic-gen: ${name}: ${fields.length} fields -> ${file}`);

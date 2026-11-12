@@ -209,6 +209,9 @@ describe("the DDIC probe's reads name only measured columns", () => {
       const selects = fake.sent.map(selectOf).filter((s) => s !== undefined);
       expect(selects.map((s) => s.table), "the reads")
         .to.deep.equal(["DD02L", "DD03L", "DD04L", "DD01L", "DD02T"]);
+      // TABCLASS/SQLTAB ride in the DD02L read, for the shared writer's
+      // APPEND/VIEW shapes (CRITIC-929 SHOULD 1)
+      expect(selects[0].columns, "the DD02L read").to.include("SQLTAB");
       for (const select of selects) {
         const outside = select.columns.filter((c) => DD_COLUMNS[select.table].includes(c) === false);
         expect(outside, `${select.table}: columns outside the measured list`).to.deep.equal([]);

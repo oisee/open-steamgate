@@ -16,6 +16,7 @@
     "test/amdp-pack.mjs",
     "test/reserved-words.mjs",
     "test/hana-ddic-map.mjs",
+    "test/hana-ddic-append-view.mjs",
     "test/hana-ddic-gen.mjs",
     "test/hana-ddic-probe.mjs",
     "test/hana-dialect.mjs",

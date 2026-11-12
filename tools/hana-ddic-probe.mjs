@@ -54,7 +54,7 @@ const quoted = (names) => names.map((n) => `'${n}'`).join(",");
 export async function readTables(db, names) {
   const tables = new Map();
   for (const name of names) {
-    const head = await db.query(`SELECT TABNAME, TABCLASS, CLIDEP FROM DD02L WHERE TABNAME = '${name}' AND AS4LOCAL = 'A' AND AS4VERS = '0000'`);
+    const head = await db.query(`SELECT TABNAME, TABCLASS, SQLTAB, CLIDEP FROM DD02L WHERE TABNAME = '${name}' AND AS4LOCAL = 'A' AND AS4VERS = '0000'`);
     if (head.length === 0) {
       console.log(`hana-ddic-probe: ${name}: not in DD02L (no active version); skipped`);
       continue;
@@ -239,6 +239,11 @@ export async function run(args = process.argv.slice(2)) {
         name,
         text: texts.get(name) ?? "",
         clidep: String(t.head.clidep ?? "").toUpperCase() === "X",
+        // TABCLASS/SQLTAB through to the shared writer, the dump path's
+        // equality (CRITIC-929 SHOULD 1): without them --tables on an
+        // append or a view wrote TABCLASS TRANSP with a DD09L, silently
+        tabclass: String(t.head.tabclass ?? "").trim() || "TRANSP",
+        sqltab: String(t.head.sqltab ?? "").trim(),
         fields: ddicFields(t.rows, {elements, domains}),
       });
     }

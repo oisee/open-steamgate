@@ -212,14 +212,41 @@ export function tablXml(table) {
   // the TABCLASS the DD02L row carries, through to the writer (H5a): the
   // dump's structures arrive as INTTAB and go out in the include shape --
   // no DD09L, no client, TABCLASS INTTAB. A row without one stays TRANSP,
-  // which is what the live read has always produced. Anything else --
-  // APPEND, VIEW, POOL, CLUSTER -- is refused by name (CRITIC-926
-  // SHOULD 3): TABCLASS reduced to a boolean wrote an APPEND as a
-  // free-standing INTTAB structure and a POOL as a type that holds no
-  // rows, silently.
+  // which is what the live read has always produced. H5d lifts the two
+  // refusals the real closure run hit: an APPEND goes out as its own TABL,
+  // TABCLASS APPEND, the SQLTAB target its DD02L row names beside it, the
+  // include shape otherwise -- no DD09L, no client (the fetched pack's own
+  // append export is the shape); a VIEW goes out as a read-only structure
+  // type, TABCLASS VIEW, the shape the transpiler resolves the name
+  // through -- the join tables a .view.xml needs (DD26S/DD27S) are not in
+  // --ddic, so the CDS route's DDIC-view shape is out of reach here.
+  // POOL and CLUSTER stay refused by name (CRITIC-926 SHOULD 3): TABCLASS
+  // reduced to a boolean wrote a POOL as a type that holds no rows,
+  // silently. The refusal is about the TABCLASS and nothing else
+  // (CRITIC-929 SHOULD 4): what a VIEW became and where its reads stand is
+  // said in the dump run's summary view line (tools/hana-ddic-gen.mjs) and
+  // in docs/db-backends.md's shadow-schema paragraph, not tacked onto a
+  // POOL error about a different kind.
   const tabclass = String(table.tabclass ?? "TRANSP").toUpperCase();
-  if (tabclass !== "TRANSP" && tabclass !== "INTTAB") {
-    throw new Error(`hana-ddic-map: ${table.name}: TABCLASS ${tabclass} is not written here -- only TRANSP and INTTAB are`);
+  if (tabclass !== "TRANSP" && tabclass !== "INTTAB" && tabclass !== "APPEND" && tabclass !== "VIEW") {
+    throw new Error(`hana-ddic-map: ${table.name}: TABCLASS ${tabclass} is not written here -- TRANSP, INTTAB, APPEND and VIEW are.`);
+  }
+  // a repeated FIELDNAME in the final list is refused here, before anything
+  // is written, naming table and field (CRITIC-929 MUST 1): the raw
+  // duplicate a dump's own DD03L rows can carry, or an expansion the skip
+  // in ddicFieldsWithIncludes missed, used to be written twice and die
+  // later in cds2ddic as a transpiler error -- the failure belongs at
+  // generation time. Marker rows stand outside the check: two .INCLU--AP
+  // markers naming two appends are the dictionary's own spelling, and the
+  // transpiler expands both off PRECFIELD.
+  const seen = new Set();
+  for (const field of table.fields ?? []) {
+    if (field.marker === true) continue;
+    const fieldname = String(field.fieldname ?? "").toUpperCase();
+    if (seen.has(fieldname)) {
+      throw new Error(`hana-ddic-map: ${table.name}: the field list repeats ${fieldname} -- nothing is written`);
+    }
+    seen.add(fieldname);
   }
   const fields = (table.fields ?? []).map((f) => ({
     // tabl marks a DDIC field so the writer's include shape keeps it: that
@@ -227,7 +254,16 @@ export function tablXml(table) {
     // a marked field is never one of those
     tabl: true,
     name: f.fieldname,
-    dd03p: f.mandt === true ? f.tags : {
+    dd03p: f.marker === true ? {
+      // an include/append marker row, spelled the way the fetched pack's
+      // own exports spell them, minus the DDTEXT the dump's DD03L does not
+      // carry: KEYFLAG when the marker is a key include, COMPTYPE S, the
+      // structure in PRECFIELD, the component kind in MASK
+      ...(f.key === true ? {KEYFLAG: "X"} : {}),
+      COMPTYPE: "S",
+      PRECFIELD: f.precfield,
+      MASK: "      S",
+    } : f.mandt === true ? f.tags : {
       ...(f.key ? {KEYFLAG: "X"} : {}),
       ...(f.rollname !== undefined ? {ROLLNAME: f.rollname, COMPTYPE: f.comptype ?? "E"} : {}),
       ADMINFIELD: "0",
@@ -253,8 +289,9 @@ export function tablXml(table) {
   }));
   // the header's DDLANGUAGE is the master language the text was picked in,
   // not a hard-coded E (CRITIC-926 SHOULD 4)
-  return structureXml({name: table.name, label: table.text, clidep: table.clidep !== false, fields},
-    {transport: tabclass === "TRANSP", ddlanguage: table.language});
+  return structureXml({name: table.name, label: table.text, clidep: table.clidep !== false, fields,
+    sqltab: String(table.sqltab ?? "").trim().toUpperCase()},
+  {transport: tabclass === "TRANSP", ddlanguage: table.language, tabclass});
 }
 
 // ------------------------------------------------------------- the dump ----
@@ -374,44 +411,114 @@ export function domaXml(domain) {
   return abapGitEnvelope("DOMA", `   <DD01V>\n${tagLines("    ", tags)}   </DD01V>\n${valuesBlock}`);
 }
 
-/** the fields of one DD03L read, with the include rows spliced from the
- *  other reads of the same dump (H5a): the dump carries every DD02L
- *  table's DD03L, so the include's rows arrive in the include's place, in
- *  their own POSITION order. Every dot row names its structure in
- *  PRECFIELD -- .INCLUDE, .INCLU-<suffix> and .APPEND alike -- and a
- *  suffixed include keeps the suffix (CRITIC-926 SHOULD 5): its fields go
- *  out with the suffix appended to each name, the rename abaplint applies
- *  reading the same DD03P; .INCLU--AP, the dictionary's append spelling,
- *  renames nothing. The spliced rows are deliberately NOT re-sorted
- *  against the outer ones -- their positions are their own table's, and
- *  sorting them together would interleave them by number. `includes`
- *  carries the dump's DD03L rows by table name; the live read keeps plain
- *  ddicFields, which refuses an include row it cannot splice. */
-export function ddicFieldsWithIncludes(rows, refs = {}, includes = new Map(), seen = new Set()) {
+/** the fields of one DD03L read, as a system's own abapGit export spells
+ *  them (H5d): the marker rows STAY -- .INCLUDE, .INCLU-<suffix> and
+ *  .INCLU--AP, the dictionary's append spelling, each naming its structure
+ *  in PRECFIELD -- and the copies the dump's DD03L also carries, the
+ *  included fields expanded again under the base table's own name, are
+ *  dropped by the dictionary's own mark: every expanded copy carries
+ *  ADMINFIELD '1', every plain row '0' (measured on the real closure dump:
+ *  16 copies against 265 plain rows, the 7 marker rows '0' as well), and
+ *  the rule is the mark's value space, abapGit's own `adminfield <> '0'`
+ *  -- anything but '0' is a copy -- so the mark is the discriminator and
+ *  the name only the fallback for rows that carry no mark at all -- a
+ *  copy an older read brings without the
+ *  column is still caught by name, suffix and all, since a
+ *  .INCLU-<suffix> marker renames its copies by the suffix (the
+ *  transpiler's own rename, --AP excepted). The transpiler expands the
+ *  markers itself, off PRECFIELD, the way it expands the fetched pack's
+ *  own exports -- so the target table's type gains the appended fields
+ *  with no second writer, and a .INCLU-<suffix> keeps its suffix on the
+ *  names by the transpiler's own rename (CRITIC-926 SHOULD 5). FIELDNAME
+ *  .APPEND -- a spelling the dictionary does not write but hand-built
+ *  shapes have used -- goes out as .INCLU--AP, the form the transpiler
+ *  expands with no rename. A marker whose DD03L is not in the dump is
+ *  refused by name: the XML would carry a structure the generation never
+ *  writes. A plain '0' row named like an include's field is refused too,
+ *  by table and field: the expansion would repeat it (CRITIC-929-r2
+ *  SHOULD 2). `includes` carries the dump's DD03L rows by table name; the
+ *  live read keeps plain ddicFields, which refuses an include row. */
+export function ddicFieldsWithIncludes(rows, refs = {}, includes = new Map()) {
   const sorted = [...(rows ?? [])].sort((a, b) => (Number(a.position) || 0) - (Number(b.position) || 0));
   const out = [];
+  // the fieldnames the markers of this table bring in, flattened through
+  // the include chain: an outer row carrying one of them is the dump's
+  // expanded copy of the include's field -- DDIC names are unique in the
+  // flattened structure, so the name cannot be anything else
+  const shadowed = new Set();
+  const flattened = (name, chain) => {
+    if (chain.has(name)) {
+      throw new Error(`hana-ddic-map: the include chain closes a cycle at ${name}`);
+    }
+    const inner = includes.get(name);
+    if (inner === undefined) {
+      throw new Error(`hana-ddic-map: the include chain reaches ${name}, whose DD03L is not in the dump`);
+    }
+    const names = new Set();
+    for (const row of [...(inner ?? [])].sort((a, b) => (Number(a.position) || 0) - (Number(b.position) || 0))) {
+      const fieldname = String(row.fieldname ?? "").toUpperCase();
+      if (fieldname === "" || fieldname.startsWith(".")) {
+        const nested = String(row.precfield ?? "").trim().toUpperCase();
+        if (nested !== "") {
+          for (const deep of flattened(nested, new Set([...chain, name]))) names.add(deep);
+        }
+        continue;
+      }
+      names.add(fieldname);
+    }
+    return names;
+  };
   for (const row of sorted) {
     const name = String(row.fieldname ?? "").toUpperCase();
-    if (name.startsWith(".") === false) {
-      const field = ddicField(row, refs);
-      if (field !== undefined) out.push(field);
+    if (name.startsWith(".")) {
+      const include = String(row.precfield ?? "").trim().toUpperCase();
+      if (include === "") {
+        throw new Error(`hana-ddic-map: the table carries an include row (${name}) with no PRECFIELD naming its structure`);
+      }
+      if (includes.has(include) === false) {
+        throw new Error(`hana-ddic-map: the table carries an include row (${name}) whose DD03L (${include}) is not in the dump`);
+      }
+      const deep = flattened(include, new Set());
+      for (const field of deep) shadowed.add(field);
+      // the suffix the marker carries renames the copies (the transpiler's
+      // own rename, table.js; the append form --AP renames nothing), so the
+      // fallback's name set carries the suffixed spellings too. The real
+      // dump's 7 markers are all plain .INCLUDE -- this is the fallback's
+      // own bookkeeping, for a read without the ADMINFIELD column.
+      const suffix = /^\.INCLU-(.+)$/.exec(name)?.[1];
+      if (suffix !== undefined && suffix !== "-AP") {
+        for (const field of deep) shadowed.add(field + suffix);
+      }
+      const key = String(row.keyflag ?? "").toUpperCase() === "X";
+      out.push({fieldname: name === ".APPEND" ? ".INCLU--AP" : name, key, marker: true, precfield: include});
       continue;
     }
-    const include = String(row.precfield ?? "").trim().toUpperCase();
-    if (include === "") {
-      throw new Error(`hana-ddic-map: the table carries an include row (${name}) with no PRECFIELD naming its structure`);
+    // DDIC's own discriminator first (CRITIC-929 MUST 1; CRITIC-929-r2
+    // SHOULD 2): a row whose ADMINFIELD is anything but '0' is the dump's
+    // expansion of an include's field, whatever it is named -- abapGit's
+    // own rule is `DELETE ... WHERE adminfield <> '0'`, and the '1' every
+    // measured copy carries is only the value the dumps happen to hold --
+    // and a marker row is kept whatever its mark (the transpiler expands
+    // it off PRECFIELD). The name rule fires only for a row that carries
+    // no mark at all (an older read without the column): a marked row is
+    // decided by its mark, not its name. And a row plain by its mark ('0')
+    // whose name is an include's field is refused here, naming the table
+    // and the field (the row's own TABNAME): the marker kept beside it
+    // makes the transpiler expand the include into that same name, and
+    // the duplicate used to be written and die in cds2ddic later
+    // (CRITIC-929-r2 SHOULD 2) -- the refusal belongs at generation time,
+    // like the raw duplicate's in tablXml. The copies ride their markers
+    // in POSITION order in the dumps measured, so the mark and the name
+    // here see the marker first.
+    const adminfield = String(row.adminfield ?? "").trim().toUpperCase();
+    if (adminfield !== "0" && adminfield !== "") continue;
+    if (adminfield === "" && shadowed.has(name)) continue;
+    if (shadowed.has(name)) {
+      const table = String(row.tabname ?? "").toUpperCase();
+      throw new Error(`hana-ddic-map: ${table}: the field list repeats ${name} through an include expansion -- nothing is written`);
     }
-    const suffix = /^\.INCLU-(.+)$/.exec(name)?.[1];
-    const rename = suffix !== undefined && suffix !== "-AP";
-    if (seen.has(include)) {
-      throw new Error(`hana-ddic-map: the include chain closes a cycle at ${include}`);
-    }
-    const inner = includes.get(include);
-    if (inner === undefined) {
-      throw new Error(`hana-ddic-map: the table carries an include row (${name}) whose DD03L (${include}) is not in the dump`);
-    }
-    const spliced = ddicFieldsWithIncludes(inner, refs, includes, new Set([...seen, include]));
-    out.push(...(rename ? spliced.map((f) => ({...f, fieldname: `${f.fieldname}${suffix}`})) : spliced));
+    const field = ddicField(row, refs);
+    if (field !== undefined) out.push(field);
   }
   return out;
 }
