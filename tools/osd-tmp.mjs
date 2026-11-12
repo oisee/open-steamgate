@@ -222,18 +222,20 @@ export function generationTmpProblem(generationDir) {
 // gen/hana-src (H4, tools/hana-src-gen.mjs) and gen/hana-ddic (H3,
 // tools/hana-ddic-gen.mjs) are private the way $TMP is: the tenant's own
 // sources, and their dictionary -- its table and field names -- in layers. A
-// generation built with either is refused by every publisher that bundles a
-// build -- the preview, the docker image, the download bundle, the release
-// directory -- by the twin below, sitting exactly where
-// generationTmpProblem sits in theirs; and the same ONE list of the two
+// generation built with any of them is refused by every publisher that
+// bundles a build -- the preview, the docker image, the download bundle, the
+// release directory -- by the twin below, sitting exactly where
+// generationTmpProblem sits in theirs; and the same ONE list of the private
 // prefixes is what every publisher's gen/ copy filter drops, so a stale
 // folder on disk never rides along with a generation whose record is clean.
 // One difference is deliberate: no second witness. The $TMP check also reads
 // the generation's abap_transpile.json, but this tree's own config names
 // "gen/hana-src/*" whether or not a build ever saw one of these layers; only
 // the generation's manifest -- the EXPANDED folder list the build recorded
-// (tools/osd-build.mjs) -- knows what was actually read.
-const HANA_PRIVATE_FOLDERS = ["gen/hana-src", "gen/hana-ddic"];
+// (tools/osd-build.mjs) -- knows what was actually read. gen/hana-closure
+// holds the closure walk's state, request and gaps files (H5c fix round 1):
+// tenant object names, private the same way.
+const HANA_PRIVATE_FOLDERS = ["gen/hana-src", "gen/hana-ddic", "gen/hana-closure"];
 
 /** the private gen/ prefix a path sits under, or undefined: the one list,
  *  shared by the check below and by every publisher's copy filter. Paths

@@ -16,19 +16,19 @@
 //                         what `vsp hana dump` wrote for the service, the
 //                         same directory hana-ddic-gen --from-dump reads).
 //                         After a dumper round the loop's own dump is the
-//                         one it just wrote, and the state remembers it.
+//                         one it just wrote, and the state remembers it. A
+//                         --dump also answers a pending round by hand.
 //   --system <prefix>     required: the dump->layers converter names its
 //                         layers <system>-<package>, and hana-src-gen
 //                         --from-dump needs the prefix.
 //   --out <dir>           where the loop keeps its files; default
-//                         gen/hana-closure (untracked: dumps hold a real
-//                         tenant's content, and so do the request's raw
-//                         findings). Inside: state.json (the iteration, the
-//                         current dump, every name asked so far with its
-//                         kind, its iteration and the first finding that
-//                         named it), closure-request.json (the request the
-//                         dumper answers), closure-gaps.json, and one
-//                         dump-<NNN>/ directory per dumper round.
+//                         gen/hana-closure -- state.json,
+//                         closure-request.json and closure-gaps.json, all
+//                         carrying a real tenant's object names, which is
+//                         why gen/hana-closure is on the private gen/ list
+//                         (tools/osd-tmp.mjs). The dumps are NOT here: they
+//                         go to .local/hana-closure/dump-<NNN>/ (gitignored,
+//                         private), one directory per dumper round.
 //   --max-iterations <n>  at most n dumper rounds in this run (default 10).
 //                         The cap stops the loop AFTER writing the pending
 //                         request, so the next run picks up where this one
@@ -41,11 +41,11 @@
 // --from-dump writes gen/hana-ddic, hana-src-gen --from-dump runs the
 // converter and writes gen/hana-src -- both spawned through
 // tools/osd-host.mjs's toolCommandIn, the way every tool a tool starts is;
-// their --from-dump is PR #926, feat/hana-ddic-from-dump, and until it
-// merges this loop needs that branch's tools), then run the build's own
-// validation over the tree -- the same channel hana-ddic-gen --from-build
-// reads, the validationMessage exported from there, reused and not
-// duplicated -- and classify every finding the transpiler emits:
+// their --from-dump is PR #926, feat/hana-ddic-from-dump, and a tool that
+// does not know the flag is refused with a message saying so), then run the
+// build's own validation over the tree -- the same channel hana-ddic-gen
+// --from-build reads, the validationMessage exported from there, reused and
+// not duplicated -- and classify every finding the transpiler emits:
 //
 //   DDIC            `Database table or view "x" not found` (TABL);
 //                   `contains unknown: X not found` (data element or the
@@ -70,29 +70,57 @@
 //
 // Names are upper-cased, de-duplicated, and split into fresh (never asked)
 // and gaps (asked in an earlier round, still unresolved -- not in the
-// tenant, or a kind this route cannot source yet) -- the gaps file carries
-// each name's kind and the first finding that named it. No fresh names is
-// the fixed point. Otherwise a request goes to closure-request.json (names
-// per kind, the iteration, what was asked before) and the dumper runs:
+// tenant, or a kind this route cannot source yet). The gaps file carries
+// each gap's TADIR kind, the first finding that named it and the number of
+// validation passes that have named it; a dump manifest's `closure.missing`
+// -- the requested names the dictionary does not have -- joins them with
+// the kind they are missing under, read on every continuation. No fresh
+// names is the fixed point. Otherwise the request goes to
+// closure-request.json -- schema 1, the file the dumper's reader reads:
+// requested/seen under the nine upper-case TADIR kinds, seen = every name
+// an earlier iteration asked (so the dumper skips it), gaps = the current
+// gaps, generation = the hash the merge's manifest carries of the dump's
+// own manifest -- and the dumper runs:
 //
-//   $OSD_HANA_DUMPER hana dump --name <every name so far, comma-joined>
-//                    --ddic --out <out>/dump-<NNN>
+//   $OSD_HANA_DUMPER hana dump --host <HANA_HOST> --port <HANA_PORT> \
+//       --user <HANA_USER> --schema <HANA_SCHEMA> \
+//       --provenance "hana-closure iteration <n>: the closure request's names" \
+//       --ddic-closure <out>/closure-request.json \
+//       --out <root>/.local/hana-closure/dump-<NNN> --allow-in-repo
+//
+// A name the transpiler names without a dictionary kind (the `ddic` bucket:
+// the message says only that the type is unknown) is requested under TABL,
+// DTEL and TTYP -- SHLP too when the finding itself says search help; the
+// dumper answers what exists and reports the rest in `closure.missing`.
 //
 // OSD_HANA_DUMPER names the binary and OSD_HANA_DUMP_ENV an env file with
-// the connection (KEY=VALUE lines, `#` comments, `export ` allowed); the
-// file's variables are merged into the child's environment. The dumper is
-// a foreign binary -- another project's, with credentials of its own -- so
-// it is spawned by the path the environment names, never through
-// toolCommand/scriptCommandIn (which would dispatch it through `osd gen` or
-// put a node interpreter in front of it) and never process.execPath. The
-// names are the whole closure, not only the fresh ones: the dumper writes
-// a complete dump each round, which is what makes the merge a --from-dump
-// of one directory. Without both variables the loop stops and prints the
-// command, and the next run continues from the dumped directory.
+// the connection (KEY=VALUE lines, `#` comments, `export ` allowed):
+// HANA_HOST/HANA_PORT/HANA_USER/HANA_SCHEMA become the argv flags the real
+// dumper marks required, and HANA_PASSWORD becomes VSP_HANA_PASSWORD in the
+// child's environment -- the one thing the dumper reads from the
+// environment, and the one secret: nothing from the env file but the
+// connection flags is on the argv. The dump lands under .local/
+// (gitignored, inside the working tree, which the dumper refuses -- hence
+// --allow-in-repo). The dumper is a foreign binary -- another project's,
+// with credentials of its own -- so it is spawned by the path the
+// environment names, never through toolCommand/scriptCommandIn (which would
+// dispatch it through `osd gen` or put a node interpreter in front of it)
+// and never process.execPath.
+//
+// The request is written BEFORE any dumper round, and writing it marks its
+// names asked (state.json) and the round pending: with the dumper
+// configured the next run executes the pending round first; a hand-run dump
+// is continued with --dump <dir>, and names still unresolved there surface
+// as gaps. --dry-run writes and prints the request and stops;
+// --max-iterations bounds the rounds of a run and stops with the pending
+// request on disk.
 //
 // **No HANA from here**: everything above the dumper is tested against a
-// scratch tree and a fake dumper (test/hana-closure.mjs, fixtures
-// ZOSD_H5C_*); the real iteration is dell's, on the bed.
+// scratch tree and a fake dumper that mimics the real CLI contract (the
+// required flags, the schema-1 request, the git-tree refusal unless
+// --allow-in-repo, the password from VSP_HANA_PASSWORD only) --
+// test/hana-closure.mjs, fixtures ZOSD_H5C_*; the real iteration is dell's,
+// on the bed.
 import {existsSync, mkdirSync, readFileSync, writeFileSync} from "node:fs";
 import {spawnSync} from "node:child_process";
 import {fileURLToPath} from "node:url";
@@ -145,6 +173,11 @@ const cascadeOf = (message) => [
 // namespace is escaped as #ns#, one rule for both directions
 // (tools/hana-ddic-map.mjs abapGitFileName)
 const nameFromAbapFile = (part) => part.replace(/^#([^#]+)#/, "/$1/").toUpperCase();
+// INTF or CLAS is a NAME-PREFIX heuristic (`if*` -> INTF, anything else
+// CLAS), not a TADIR lookup: on the measured log every name in these shapes
+// is IF_*, so it is correct there, but a dictionary object dragged into a
+// type chain would be asked as CLAS and come back as a wrong-kind gap (the
+// dumper answers what the TADIR kind names, and reports the rest missing).
 const objectKind = (name) => (/^if/i.test(name) ? "intf" : "clas");
 
 /** what a validation asks for: `names` carries every requestable name with
@@ -212,26 +245,91 @@ export function classifyFindings(findings) {
 
 // ------------------------------------------------------------- request ----
 
-/** the request file's content: the iteration it asks for, the dump it
- *  extends, the directory the dumper writes, the fresh names per kind, the
- *  names asked before (name -> kind, iteration, first finding), and every
- *  name so far -- the dumper writes the whole closure each round, which is
- *  what makes each dump self-contained for the next merge. Pure. */
-export function requestFor({iteration, dump, dumpDir, fresh, asked, names}) {
-  const newNames = {};
-  for (const kind of ["tabl", "dtel", "doma", "ddic", "clas", "intf", "fugr"]) {
-    const list = fresh.filter((n) => n.kind === kind).map((n) => n.name);
-    if (list.length > 0) newNames[kind] = list;
+// the nine TADIR kinds, in the order the request file lists them
+const TADIR = ["TABL", "DTEL", "DOMA", "TTYP", "SHLP", "CLAS", "INTF", "FUGR", "PROG"];
+
+/** the TADIR kinds a classified name is requested under. A `ddic` name has
+ *  no kind of its own -- the transpiler's wording says only that the type
+ *  is unknown -- so it is asked under every dictionary kind the dumper
+ *  resolves by name: TABL, DTEL and TTYP, plus SHLP when the finding
+ *  itself says search help. The dumper resolves what exists and reports
+ *  the rest in its manifest's `closure.missing`, which the loop reads into
+ *  the gaps. Pure. */
+export function tadirKinds(kind, finding) {
+  if (kind === "ddic") {
+    const kinds = ["TABL", "DTEL", "TTYP"];
+    if (/search[ -]?help/i.test(String(finding ?? ""))) kinds.push("SHLP");
+    return kinds;
+  }
+  const of = {tabl: "TABL", dtel: "DTEL", doma: "DOMA", clas: "CLAS", intf: "INTF", fugr: "FUGR"};
+  return [of[kind] ?? "PROG"];
+}
+
+/** the request file's content, schema 1 -- exactly the keys the dumper's
+ *  reader reads (`schema`, `iteration`, `requested`, `seen`; the rest is
+ *  provenance for the walk): the fresh names per kind, every name an
+ *  earlier iteration asked under the kinds it was requested under (so the
+ *  dumper skips it), and the current gaps. Pure. */
+export function requestFor({iteration, generation, fresh, asked, gaps}) {
+  const perKind = () => {
+    const kinds = {};
+    for (const kind of TADIR) kinds[kind] = [];
+    return kinds;
+  };
+  const requested = perKind();
+  for (const n of fresh ?? []) {
+    for (const kind of tadirKinds(n.kind, n.finding)) {
+      if (requested[kind].includes(n.name) === false) requested[kind].push(n.name);
+    }
+  }
+  const seen = perKind();
+  for (const [name, a] of Object.entries(asked ?? {})) {
+    const kinds = a.kinds ?? [String(a.kind ?? "").toUpperCase()].filter((k) => k !== "");
+    for (const kind of kinds) {
+      if (seen[kind] !== undefined && seen[kind].includes(name) === false) seen[kind].push(name);
+    }
   }
   return {
+    schema: 1,
     iteration,
-    generated_at: new Date().toISOString(),
-    dump,
-    out: dumpDir,
-    new: newNames,
-    asked_before: asked,
-    names,
+    generation: generation ?? "",
+    source: "transpile validate() findings",
+    requested,
+    seen,
+    gaps: (gaps ?? []).map((g) => ({name: g.name, kind: g.kind, first_finding: g.first_finding, iterations_requested: g.iterations_requested})),
   };
+}
+
+/** the dumper's argv and child environment -- the contract the real binary
+ *  refuses to run without (cobra MarkFlagRequired: host, user, schema,
+ *  provenance, out): the connection flags from the env file's
+ *  HANA_HOST/HANA_PORT/HANA_USER/HANA_SCHEMA, the request as a file, the
+ *  dump directory inside gitignored .local/ -- inside the working tree,
+ *  which the dumper refuses without --allow-in-repo -- and the password
+ *  ONLY in the child's environment (VSP_HANA_PASSWORD), never on the argv.
+ *  Throws when the env file cannot answer a required flag, before any
+ *  connection travels. Pure. */
+export function dumperCommand({dumper, connection, requestPath, dumpDir, provenance}) {
+  for (const [key, flag] of [["HANA_HOST", "--host"], ["HANA_USER", "--user"], ["HANA_SCHEMA", "--schema"]]) {
+    if (connection[key] === undefined || connection[key] === "") {
+      throw new Error(`hana-closure: the env file carries no ${key}; the dumper refuses to run without ${flag}`);
+    }
+  }
+  if (connection.HANA_PASSWORD === undefined || connection.HANA_PASSWORD === "") {
+    throw new Error("hana-closure: the env file carries no HANA_PASSWORD (VSP_HANA_PASSWORD); the dumper refuses to run without a password");
+  }
+  const argv = [
+    dumper, "hana", "dump",
+    "--host", connection.HANA_HOST,
+    ...(connection.HANA_PORT === undefined || connection.HANA_PORT === "" ? [] : ["--port", connection.HANA_PORT]),
+    "--user", connection.HANA_USER,
+    "--schema", connection.HANA_SCHEMA,
+    "--provenance", provenance,
+    "--ddic-closure", requestPath,
+    "--out", dumpDir,
+    "--allow-in-repo",
+  ];
+  return {argv, env: {VSP_HANA_PASSWORD: connection.HANA_PASSWORD}};
 }
 
 /** the dumper's connection: KEY=VALUE lines, `#` comments, `export `
@@ -269,7 +367,9 @@ const saveState = (out, state) => {
 // the two folders abap_transpile.json already lists before src/. Both tools
 // are tools of this tree, so they start through toolCommandIn -- in a
 // compiled binary that is `osd gen <name>`, not a path off import.meta.url
-// -- and their exits are this loop's failures.
+// -- and their exits are this loop's failures. A tool that does not know
+// --from-dump yet (PR #926) is refused by its own "unknown option", and the
+// message says what it needs.
 function mergeInputs(root, dump, system, env, say) {
   const steps = [
     ["hana-ddic-gen.mjs", ["--from-dump", dump, "--out", join(root, "gen", "hana-ddic")]],
@@ -281,9 +381,78 @@ function mergeInputs(root, dump, system, env, say) {
     const child = spawnSync(command, args, {cwd: root, env, stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64 * 1024 * 1024});
     if (child.status !== 0) {
       const tail = [child.stdout, child.stderr].filter(Boolean).join("\n").slice(-2000);
-      throw new Error(`hana-closure: ${script} exited ${child.status ?? "on a signal"} merging ${dump}${tail === "" ? "" : `:\n${tail}`}`);
+      const hint = /unknown option/.test(tail)
+        ? `\nhana-closure: ${script} refused --from-dump: needs PR #926 (hana-ddic-gen --from-dump)`
+        : "";
+      throw new Error(`hana-closure: ${script} exited ${child.status ?? "on a signal"} merging ${dump}${tail === "" ? "" : `:\n${tail}`}${hint}`);
     }
   }
+}
+
+// the identity of the inputs the findings came from, for the request's
+// `generation`: the sha256 the dump->layers converter recorded of the
+// dump's manifest.json, copied into gen/hana-src/manifest.json by the
+// merge; empty when no merge has written one yet. (The build here is
+// validationMessage over the tree -- it writes no manifest of its own; the
+// dump's is the manifest on the path.)
+const generationOf = (root) => {
+  try {
+    const manifest = JSON.parse(readFileSync(join(root, "gen", "hana-src", "manifest.json"), "utf8"));
+    return String(manifest.dump?.manifest_sha256 ?? "");
+  } catch {
+    return "";
+  }
+};
+
+const provenanceFor = (iteration) =>
+  `hana-closure iteration ${iteration}: the closure request's names (tools/hana-closure.mjs)`;
+
+const dumperConfigured = (env) =>
+  env.OSD_HANA_DUMPER !== undefined && env.OSD_HANA_DUMPER !== "" &&
+  env.OSD_HANA_DUMP_ENV !== undefined && env.OSD_HANA_DUMP_ENV !== "";
+
+// one dumper round, when the dumper is configured: undefined when it is
+// not (the caller prints the command instead), a throw when the round
+// fails. The binary is foreign (see the header): spawned by the path the
+// environment names, its connection the env file's flags on the argv and
+// the password in the child's environment only.
+function dumpRound({root, env, say, requestPath, dumpDir, provenance}) {
+  if (dumperConfigured(env) === false) return undefined;
+  const connection = parseEnvFile(readFileSync(env.OSD_HANA_DUMP_ENV, "utf8"));
+  const {argv, env: childEnv} = dumperCommand({dumper: env.OSD_HANA_DUMPER, connection, requestPath, dumpDir, provenance});
+  say(`dump: ${argv.slice(1).join(" ")}`);
+  const child = spawnSync(argv[0], argv.slice(1), {cwd: root, env: {...env, ...childEnv}, stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64 * 1024 * 1024});
+  if (child.status !== 0) {
+    const tail = [child.stdout, child.stderr].filter(Boolean).join("\n").slice(-2000);
+    throw new Error(`hana-closure: the dumper exited ${child.status ?? "on a signal"}${tail === "" ? "" : `:\n${tail}`}`);
+  }
+}
+
+// the command a human runs by hand when no dumper is configured here: the
+// real argv, with the env file's values when it is readable and
+// placeholders when it is not -- and no password, ever (it is env-only)
+function printedCommand(env, requestPath, dumpDir, provenance) {
+  let connection;
+  try {
+    connection = parseEnvFile(readFileSync(env.OSD_HANA_DUMP_ENV ?? "", "utf8"));
+  } catch {
+    connection = undefined;
+  }
+  const shown = dumperConfigured(env) === false && (env.OSD_HANA_DUMPER === undefined || env.OSD_HANA_DUMPER === "")
+    ? "$OSD_HANA_DUMPER" : env.OSD_HANA_DUMPER;
+  const value = (key, placeholder) =>
+    connection?.[key] !== undefined && connection?.[key] !== "" ? connection[key] : placeholder;
+  return [
+    shown, "hana", "dump",
+    `--host ${value("HANA_HOST", "<HANA_HOST>")}`,
+    `--port ${value("HANA_PORT", "<HANA_PORT>")}`,
+    `--user ${value("HANA_USER", "<HANA_USER>")}`,
+    `--schema ${value("HANA_SCHEMA", "<HANA_SCHEMA>")}`,
+    `--provenance ${JSON.stringify(provenance)}`,
+    `--ddic-closure ${requestPath}`,
+    `--out ${dumpDir}`,
+    "--allow-in-repo",
+  ].join(" ");
 }
 
 function take(args, name) {
@@ -324,25 +493,94 @@ export async function run(args = process.argv.slice(2), options = {}) {
   }
   mkdirSync(out, {recursive: true});
   const state = loadState(out) ?? {iteration: 1, asked: {}};
+  state.missing ??= {};
   if (dumpArg === undefined && state.dump === undefined) {
     throw new Error(`hana-closure: no dump known: pass --dump <dir> (the dump the build's inputs are made of)`);
   }
   if (dumpArg !== undefined) state.dump = resolve(root, dumpArg);
   let dump = resolve(root, state.dump);
   saveState(out, state);
+  const requestPath = join(out, "closure-request.json");
+
+  // a pending round: a request was written and its names are asked, but no
+  // dump has answered it yet. With the dumper configured this run executes
+  // the pending round first (the promise the dry-run and the cap make: the
+  // next run picks up where the last one stopped); --dump on the command
+  // line is a hand-run answer and supersedes it; without the dumper the
+  // pending command is printed again, and nothing is merged -- the pending
+  // dump does not exist.
+  if (state.pending !== undefined && dumpArg === undefined) {
+    if (existsSync(requestPath) === false) {
+      throw new Error(`hana-closure: the state's pending round (iteration ${state.pending.iteration}) has no request on disk: ${requestPath} is gone; remove state.json's pending or start over`);
+    }
+    if (dumperConfigured(env) === false) {
+      const dumpDir = state.pending.dumpDir;
+      const command = printedCommand(env, requestPath, dumpDir, provenanceFor(state.pending.iteration));
+      say(`no dumper here: OSD_HANA_DUMPER (the binary) and OSD_HANA_DUMP_ENV (an env file with the connection) are not both set. The pending request is ${requestPath}; run the dumper by hand and continue with --dump ${dumpDir}:`);
+      say(`  ${command}`);
+      return {stopped: "no-dumper", iteration: state.pending.iteration, command};
+    }
+    dumpRound({root, env, say, requestPath, dumpDir: state.pending.dumpDir, provenance: provenanceFor(state.pending.iteration)});
+    state.dump = state.pending.dumpDir;
+    state.iteration = state.pending.iteration;
+    delete state.pending;
+    saveState(out, state);
+    dump = resolve(root, state.dump);
+  }
 
   // the dumper budget of this run; a resumed run has its own
   let rounds = 0;
   for (;;) {
+    // what the dump's own manifest says the dictionary answered, read on
+    // every continuation: every name in closure.missing (the requested
+    // names the dictionary does not have) joins the gaps with the kind it
+    // is missing under; a name a later round reports resolved leaves them.
+    // A hand-written dump without a manifest answers nothing here.
+    try {
+      const manifest = JSON.parse(readFileSync(join(dump, "manifest.json"), "utf8"));
+      for (const list of Object.values(manifest.closure?.resolved ?? {})) {
+        for (const name of list) delete state.missing[String(name).trim().toUpperCase()];
+      }
+      for (const [kind, list] of Object.entries(manifest.closure?.missing ?? {})) {
+        for (const name of list) {
+          const upper = String(name).trim().toUpperCase();
+          if (state.asked[upper] !== undefined) {
+            state.missing[upper] = {kind, iteration: state.asked[upper].iteration};
+          }
+        }
+      }
+      saveState(out, state);
+    } catch {
+      // no manifest, no closure: the findings are the only word
+    }
+
     mergeInputs(root, dump, system, env, say);
     const {names, cascades, unclassified} = classifyFindings(parseFindings(await validationMessage(root)));
     const fresh = names.filter((n) => state.asked[n.name] === undefined);
-    const gaps = names.filter((n) => state.asked[n.name] !== undefined).map((n) => ({
-      name: n.name,
-      kind: n.kind,
-      iteration: state.asked[n.name].iteration,
-      finding: state.asked[n.name].finding,
-    }));
+    // asked and still unresolved; the dumper's missing answer names the kind
+    // when it has one. iterations_requested counts the validation passes
+    // that have named the gap, the first one included.
+    const gapNames = new Set();
+    const gaps = [];
+    const gapOf = (name, kind, a) => {
+      gapNames.add(name);
+      return {
+        name,
+        kind,
+        first_finding: a.finding,
+        iterations_requested: state.iteration - a.iteration + 2,
+      };
+    };
+    for (const n of names) {
+      const a = state.asked[n.name];
+      if (a === undefined) continue;
+      gaps.push(gapOf(n.name, state.missing[n.name]?.kind ?? a.kinds[0], a));
+    }
+    for (const name of Object.keys(state.missing).sort()) {
+      const a = state.asked[name];
+      if (a === undefined || gapNames.has(name)) continue;
+      gaps.push(gapOf(name, state.missing[name].kind, a));
+    }
     // recomputed every pass: a gap that a later round resolves leaves the
     // file on its own
     writeFileSync(join(out, "closure-gaps.json"), JSON.stringify({gaps}, null, 2) + "\n");
@@ -355,45 +593,39 @@ export async function run(args = process.argv.slice(2), options = {}) {
     }
 
     const iteration = state.iteration + 1;
-    const dumpDir = join(out, `dump-${String(iteration).padStart(3, "0")}`);
-    const allNames = [...new Set([...Object.keys(state.asked), ...fresh.map((n) => n.name)])].sort();
-    const request = requestFor({iteration, dump, dumpDir, fresh, asked: state.asked, names: allNames});
-    writeFileSync(join(out, "closure-request.json"), JSON.stringify(request, null, 2) + "\n");
-    say(`request ${iteration}: ${allNames.length} name(s), ${fresh.length} new -> ${join(out, "closure-request.json")}`);
+    const dumpDir = join(root, ".local", "hana-closure", `dump-${String(iteration).padStart(3, "0")}`);
+    const freshCount = fresh.length;
+    const request = requestFor({iteration, generation: generationOf(root), fresh, asked: state.asked, gaps});
+    writeFileSync(requestPath, JSON.stringify(request, null, 2) + "\n");
+    say(`request ${iteration}: ${freshCount} new name(s) -> ${requestPath}`);
+
+    // the request is written: its names are ASKED from this moment, so a
+    // hand-run dump + --dump continuation sees them as asked and gaps the
+    // ones still unresolved; the round is pending until a dump answers it
+    for (const n of fresh) {
+      state.asked[n.name] = {kinds: tadirKinds(n.kind, n.finding), iteration, finding: n.finding};
+    }
+    state.iteration = iteration;
+    state.pending = {iteration, dumpDir};
+    saveState(out, state);
 
     if (dryRun === true) {
       say(`dry run: stopping before the dumper; run it by hand and continue with --dump ${dumpDir}`);
       return {stopped: "dry-run", iteration, request, fresh, gaps, cascades, unclassified};
     }
     if (rounds >= maxIterations) {
-      say(`cap: --max-iterations ${maxIterations} reached after ${rounds} dumper round(s); the pending request is ${join(out, "closure-request.json")}`);
+      say(`cap: --max-iterations ${maxIterations} reached after ${rounds} dumper round(s); the pending request is ${requestPath}`);
       return {stopped: "cap", iteration, request, fresh, gaps, cascades, unclassified};
     }
-    const dumper = env.OSD_HANA_DUMPER;
-    const envFile = env.OSD_HANA_DUMP_ENV;
-    if (dumper === undefined || dumper === "" || envFile === undefined || envFile === "") {
-      const command = `${dumper === undefined || dumper === "" ? "$OSD_HANA_DUMPER" : dumper} hana dump --name ${allNames.join(",")} --ddic --out ${dumpDir}`;
-      say(`no dumper here: OSD_HANA_DUMPER (the binary) and OSD_HANA_DUMP_ENV (an env file with the connection) are not both set. The request is ${join(out, "closure-request.json")}; run the dumper by hand and continue with --dump ${dumpDir}:`);
+    if (dumperConfigured(env) === false) {
+      const command = printedCommand(env, requestPath, dumpDir, provenanceFor(iteration));
+      say(`no dumper here: OSD_HANA_DUMPER (the binary) and OSD_HANA_DUMP_ENV (an env file with the connection) are not both set. The request is ${requestPath}; run the dumper by hand and continue with --dump ${dumpDir}:`);
       say(`  ${command}`);
       return {stopped: "no-dumper", iteration, request, command, fresh, gaps, cascades, unclassified};
     }
-
-    // a foreign binary, spawned by the path the environment names (see the
-    // header); its connection is the env file's variables in its own
-    // environment, and its failure is this loop's failure
-    const connection = parseEnvFile(readFileSync(envFile, "utf8"));
-    say(`dump: ${dumper} hana dump --name ${allNames.join(",")} --ddic --out ${dumpDir}`);
-    const child = spawnSync(dumper, ["hana", "dump", "--name", allNames.join(","), "--ddic", "--out", dumpDir],
-      {cwd: root, env: {...env, ...connection}, stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64 * 1024 * 1024});
-    if (child.status !== 0) {
-      const tail = [child.stdout, child.stderr].filter(Boolean).join("\n").slice(-2000);
-      throw new Error(`hana-closure: the dumper exited ${child.status ?? "on a signal"}${tail === "" ? "" : `:\n${tail}`}`);
-    }
-    for (const n of fresh) {
-      state.asked[n.name] = {kind: n.kind, iteration, finding: n.finding};
-    }
-    state.iteration = iteration;
+    dumpRound({root, env, say, requestPath, dumpDir, provenance: provenanceFor(iteration)});
     state.dump = dumpDir;
+    delete state.pending;
     saveState(out, state);
     rounds++;
     dump = dumpDir;

@@ -414,15 +414,16 @@ describe("hana-src-gen: the tenant's sources as input layers", () => {
     }
   });
 
-  it("generationHanaSrcProblem: both private gen/ prefixes refuse, a clean generation publishes", async () => {
-    // the helper, unit-first: an inputs.folders entry under either private
+  it("generationHanaSrcProblem: the private gen/ prefixes refuse, a clean generation publishes", async () => {
+    // the helper, unit-first: an inputs.folders entry under any private
     // folder is a private generation, a clean one publishes, an unreadable
     // record is a refusal (fail closed). No second witness, unlike the $TMP
     // check: this tree's own config names "gen/hana-src/*" whether or not a
     // build ever saw one of these layers, so only the generation's expanded
     // folder list decides. gen/hana-ddic is private the same way -- the
-    // dockerignore names both folders, and its DDIC shapes are the tenant's
-    // table and field names.
+    // dockerignore names the folders, and its DDIC shapes are the tenant's
+    // table and field names; gen/hana-closure too -- the closure's state,
+    // request and gaps files carry the tenant's object names.
     const {generationHanaSrcProblem} = await import("../tools/osd-tmp.mjs");
     const generation = mkdtempSync(join(tmpdir(), "hana-src-pub-"));
     try {
@@ -433,6 +434,10 @@ describe("hana-src-gen: the tenant's sources as input layers", () => {
       writeFileSync(join(generation, "manifest.json"), JSON.stringify({
         inputs: {folders: ["src", "gen", "gen/hana-ddic"]}}));
       expect(generationHanaSrcProblem(generation), "the generated DDIC is private the same way").to.match(/gen\/hana-ddic/);
+      expect(generationHanaSrcProblem(generation)).to.match(/private/);
+      writeFileSync(join(generation, "manifest.json"), JSON.stringify({
+        inputs: {folders: ["src", "gen", "gen/hana-closure"]}}));
+      expect(generationHanaSrcProblem(generation), "the closure's state and request are tenant content too").to.match(/gen\/hana-closure/);
       expect(generationHanaSrcProblem(generation)).to.match(/private/);
       writeFileSync(join(generation, "manifest.json"), JSON.stringify({
         inputs: {folders: ["src", "gen", "gen/hana-srcx"]}}));
@@ -587,6 +592,7 @@ describe("hana-src-gen: the tenant's sources as input layers", () => {
       const entries = readdirSync(join(home, rel), {recursive: true}).join(",");
       expect(entries, `${rel} drops the stale gen/hana-src`).to.not.match(/hana-src/);
       expect(entries, `${rel} drops the stale gen/hana-ddic`).to.not.match(/hana-ddic/);
+      expect(entries, `${rel} drops the stale gen/hana-closure`).to.not.match(/hana-closure/);
       expect(entries, `${rel} stages gen/ itself`).to.match(/zosd_h4_gen_control/);
     };
 
@@ -630,6 +636,7 @@ describe("hana-src-gen: the tenant's sources as input layers", () => {
         writeIn(tree, join("gen", "zosd_h4_gen_control.tabl.xml"), "<abapGit><TABNAME>ZOSD_H4_GEN_CONTROL</TABNAME></abapGit>");
         writeIn(tree, join("gen", "hana-src", "000-osd-tmp-zosd-h4-a", "src", "zosd_h4_a.prog.abap"), "REPORT zosd_h4_a.\n");
         writeIn(tree, join("gen", "hana-ddic", "zosd_h4_tab.tabl.xml"), "<abapGit><TABNAME>ZOSD_H4_TAB</TABNAME></abapGit>");
+        writeIn(tree, join("gen", "hana-closure", "state.json"), "{}\n");
         // the bundle fingerprints the host and the launchers, probes a binary,
         // wants the three packs, and reads the commit of the tree it stages
         freshProbeAt(tree);
@@ -676,7 +683,7 @@ describe("hana-src-gen: the tenant's sources as input layers", () => {
       expect(existsSync(join(previewHome, "build", "preview")), "GENERATE_ONLY stops before the bundle").to.equal(false);
     });
 
-    it("the docker image refuses it before anything is copied, and its gen/ copy drops both private folders", function () {
+    it("the docker image refuses it before anything is copied, and its gen/ copy drops the private folders", function () {
       this.timeout(120000);
       const out = join(home, "image-out");
       generationManifest(home, ["src", "gen/hana-src/000-osd-tmp-zosd-h4-a", "gen/hana-ddic"]);
@@ -695,9 +702,10 @@ describe("hana-src-gen: the tenant's sources as input layers", () => {
       const ignore = readFileSync(new URL("../docker/image/Dockerfile.dockerignore", import.meta.url), "utf8");
       expect(ignore, "the context excludes the tenant's sources").to.match(/^gen\/hana-src$/m);
       expect(ignore, "and the generated DDIC beside them").to.match(/^gen\/hana-ddic$/m);
+      expect(ignore, "and the closure walk's files beside them").to.match(/^gen\/hana-closure$/m);
     });
 
-    it("the download bundle refuses it before staging, and the staged gen/ drops both private folders", async function () {
+    it("the download bundle refuses it before staging, and the staged gen/ drops the private folders", async function () {
       this.timeout(120000);
       const {main} = await import(new URL("../scripts/make-download-bundle.mjs", import.meta.url).href);
       generationManifest(home, ["src", "gen", "gen/hana-ddic"]);
@@ -716,7 +724,7 @@ describe("hana-src-gen: the tenant's sources as input layers", () => {
       stagesNoPrivateGen(join(".local", "release-probe", "linux-amd64", stage, "gen"));
     });
 
-    it("the release directory refuses it before anything is copied, and its tree drops both private folders", async function () {
+    it("the release directory refuses it before anything is copied, and its tree drops the private folders", async function () {
       this.timeout(120000);
       const {main} = await import(new URL("../scripts/make-release.mjs", import.meta.url).href);
       const out = join(home, "release-out");

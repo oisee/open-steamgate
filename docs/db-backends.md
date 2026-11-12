@@ -583,13 +583,14 @@ release the image copies"). The refusal reads the generation's own record
 of what it was built from (`manifest.inputs.folders`, the expanded folder
 list tools/osd-build.mjs writes), so it is decided by what the build read,
 not by what the tree holds now; the helper is `generationHanaSrcProblem`
-in tools/osd-tmp.mjs, beside the `$TMP` one, and its one list of the two
+in tools/osd-tmp.mjs, beside the `$TMP` one, and its one list of the
 private prefixes is also what every publisher's gen/ copy filter drops
 (docker/image/assemble.mjs:57, scripts/make-download-bundle.mjs:79,
-scripts/make-release.mjs:57), so a stale `gen/hana-src` or `gen/hana-ddic`
-on disk never rides along with a generation whose record is clean. The
-build context is covered separately by
-docker/image/Dockerfile.dockerignore, which names both folders.
+scripts/make-release.mjs:57), so a stale `gen/hana-src`, `gen/hana-ddic`
+or `gen/hana-closure` (the closure walk's state, request and gaps files,
+which carry tenant object names) on disk never rides along with a
+generation whose record is clean. The build context is covered separately
+by docker/image/Dockerfile.dockerignore, which names them.
 Publishers that stage `gen/` never are safe by construction: the VSIX seed
 (scripts/build-vsix.mjs:353-354 stages src, webapp, tools, data and four
 files; the binary's seed tars the same staging), the OCI system publish
@@ -642,10 +643,10 @@ converter and writes `gen/hana-src` — both spawned through
 validation over the tree — the same channel `hana-ddic-gen --from-build`
 reads, its `validationMessage` reused, not duplicated — classify every
 finding the transpiler emits, and ask the dumper for the names that are
-missing. The dumper writes a complete dump per round (the loop passes it the
-whole closure, not only the new names), so the next iteration's merge is a
-`--from-dump` of one directory, and the loop repeats until a validation
-names nothing it has not already asked for.
+missing: the request file (`--ddic-closure`) carries the fresh names per
+TADIR kind, the dictionary kinds closed over transitively on the server,
+`seen` skipped. The loop repeats until a validation names nothing it has
+not already asked for.
 
 What the transpiler's words classify as, measured on the H5a log (1,144
 findings; the names stay in the private findings log and the leak list):
@@ -665,42 +666,72 @@ findings; the names stay in the private findings log and the leak list):
 | `could not resolve top X` (fix `resolveTypeChain`) | INTF/CLAS by prefix | 139 |
 | `unable to resolve x` | INTF | 58 |
 | `parser_error ... "FUNCTION"` in a `*.fugr.*` file | FUGR — the name is read off the file | 4 |
-| cascades: `Method (or attribute) "m" not found` (101), `Not an object reference` (107), `"param" not found` with fix `findTop`/`Target` (44+8), `not a table type mt_*` (54), `not found in class or interface` (4), `methodCallChain` (8), `Component "c" not found in structure` (2), the `Type error` and `Select, buildStructureTypeError` tails (2+) | skipped — the name is not the thing that is missing | 328 |
+| cascades: `Method (or attribute) "m" not found` (101), `Not an object reference` (107), `"param" not found` with fix `findTop`/`Target` (44+8), `not a table type mt_*` (42), `not found in class or interface` (4), `methodCallChain` (8), `Component "c" not found in structure` (2), the `Type error` tails (9) | skipped — the name is not the thing that is missing | 325 |
 
-De-duplicated, the 1,144 name **49 objects** — one iteration's ask. A name
-the dumper answered but the next validation still names is a **gap** (not in
-the tenant, or a kind this route cannot source yet): `closure-gaps.json`
-carries its kind and the first finding that named it, recomputed each pass,
-so a gap a later round resolves leaves the file on its own. Everything the
-loop keeps sits under `gen/hana-closure/` (untracked, like the dumps it
-holds): `state.json` — the iteration, the current dump, every name asked so
-far with its kind, its iteration and its first finding —,
-`closure-request.json` — names per kind, the iteration, what was asked
-before —, and one `dump-<NNN>/` per round.
+De-duplicated, the 1,144 name **49 objects** — one iteration's ask. The
+`contains unknown: X not found` shapes carry no dictionary kind (16 of the
+49), so the name is requested under TABL, DTEL **and** TTYP — SHLP too when
+the finding itself says search help — and the dumper answers what exists,
+reporting the rest in the dump manifest's `closure.missing`, which the loop
+reads into the gaps on every continuation. A name the dumper answered but
+the next validation still names is a **gap** (not in the tenant, or a kind
+this route cannot source yet): `closure-gaps.json` carries the gap's kind,
+the first finding that named it and how many validation passes have named
+it (`first_finding`, `iterations_requested`), recomputed each pass, so a
+gap a later round resolves leaves the file on its own. The loop's files sit
+under `gen/hana-closure/` — `state.json` (the iteration, the current dump,
+every name asked with its kinds, its iteration and its first finding, the
+names `closure.missing` reported, and the round still pending a dump),
+`closure-request.json`, `closure-gaps.json` — and they are tenant content
+like the layers: `gen/hana-closure` is on the private gen/ list. The dumps
+are not: they go to gitignored `.local/hana-closure/dump-<NNN>/`.
 
-The dumper runs only where its credentials are:
+The dumper runs only where its credentials are, with the argv its CLI
+refuses to run without:
 
-    $OSD_HANA_DUMPER hana dump --name <every name so far, comma-joined> --ddic --out <out>/dump-<NNN>
+    $OSD_HANA_DUMPER hana dump --host <HANA_HOST> --port <HANA_PORT> \
+        --user <HANA_USER> --schema <HANA_SCHEMA> \
+        --provenance "hana-closure iteration <n>: the closure request's names" \
+        --ddic-closure gen/hana-closure/closure-request.json \
+        --out .local/hana-closure/dump-<NNN> --allow-in-repo
 
 `OSD_HANA_DUMPER` names the binary and `OSD_HANA_DUMP_ENV` an env file with
-the connection (`KEY=VALUE` lines, `#` comments, `export ` allowed); the
-file's variables travel in the child's environment. The dumper is a foreign
-binary — another project's, not a tool of this tree and not a Node script —
-so it is spawned by the path the environment names, never through
-`toolCommand`/`scriptCommandIn` (which would dispatch it through `osd gen`
-or put a node interpreter in front of it) and never `process.execPath`.
-Without both variables the loop stops and prints the command, and the next
-run continues with `--dump <that directory>`. `--dry-run` writes and prints
-the request and stops; `--max-iterations <n>` bounds the dumper rounds of a
-run (default 10) and stops after writing the pending request, so the next
-run picks up where this one stopped. Its `--from-dump` needs PR #926
-(`feat/hana-ddic-from-dump`); until that merges, the loop runs on that
-branch's tools.
+the connection (`KEY=VALUE` lines, `#` comments, `export ` allowed):
+`HANA_HOST`, `HANA_PORT`, `HANA_USER`, `HANA_SCHEMA` become the argv flags
+the binary marks required, and `HANA_PASSWORD` becomes `VSP_HANA_PASSWORD`
+in the child's environment — the only thing the dumper reads from the
+environment, and the only secret: nothing from the env file is on the argv
+but the connection flags. The request travels as a file (`--ddic-closure`,
+schema 1: `schema`, `iteration`, `generation` — the hash the merge's
+manifest carries of the dump's own manifest —, `source`,
+`requested`/`seen` under the nine upper-case TADIR kinds, and the `gaps`),
+`seen` holds every name an earlier iteration requested so the dumper skips
+it, and the dump lands in `.local/hana-closure/dump-<NNN>/` — gitignored,
+and inside the working tree, which the dumper refuses, hence
+`--allow-in-repo`. The dumper is a foreign binary — another project's, not
+a tool of this tree and not a Node script — so it is spawned by the path
+the environment names, never through `toolCommand`/`scriptCommandIn` (which
+would dispatch it through `osd gen` or put a node interpreter in front of
+it) and never `process.execPath`. Without both variables the loop stops and
+prints the command. The request is written before any dumper round: its
+names are asked from that moment (`state.json`), the round stays pending,
+and the next run picks it up — with the dumper configured it executes the
+pending round; a hand-run dump is continued with `--dump <that directory>`,
+and names still unresolved there surface as gaps. `--dry-run` writes and
+prints the request and stops; `--max-iterations <n>` bounds the dumper
+rounds of a run (default 10) and stops after writing the pending request.
+The merges' `--from-dump` needs PR #926 (`feat/hana-ddic-from-dump`);
+until that merges, a tool without the flag is refused with a message
+saying so.
 
 Exercised with fakes, the way CI must be (`test/hana-closure.mjs`, fixtures
 `ZOSD_H5C_*`): the loop's validate step is the transpiler's own validation
 over a scratch tree, the merge is a fake host behind `OSD_SELF` (the loop
-owns the two tools' argv), and the dumper is a fixture script spawned by
-path — its argv, its `--ddic`, its directory and the env file's connection
-are all asserted. No HANA is reachable from CI; the real iteration is dell's,
+owns the two tools' argv), and the dumper is a fixture script that mimics
+the real binary's CLI contract — the required connection flags, the
+schema-1 request, the refusal of an `--out` inside a git working tree
+unless `--allow-in-repo`, the password from `VSP_HANA_PASSWORD` only —
+spawned by path, with the argv, the request file, the dump directory, the
+provenance and the child's environment all asserted (the password never on
+the argv). No HANA is reachable from CI; the real iteration is dell's,
 on the bed.
