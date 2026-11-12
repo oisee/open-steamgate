@@ -624,3 +624,132 @@ and carries the sources only.
 Exercised with fixtures (`test/hana-src-gen.mjs`, synthetic `ZOSD_H4_*`
 converter output built in a temp dir); no tenant content is reachable
 from CI.
+
+## The dump's dictionary: --from-dump
+
+`vsp hana dump --ddic` also writes the DD* tables it measured as JSONL next
+to the sources (`tables/DD02L.jsonl`, DD03L, DD04L, DD01L, DD02T, DD04T,
+DD01T, DD07L, DD40L — one row per line, the table's full measured column
+set, the keys as HANA stores them). `tools/hana-ddic-gen.mjs --from-dump
+<dir>` reads those files and feeds them through the same mapper as the live
+read — one mapping, and the dump path is its second consumer (2026-11-12,
+H5a). The keys arrive upper case and are folded and trimmed here, the way
+the hana-client folds and trims on its way out of HANA; the rows are
+filtered to the active version the live read's WHERE pins (`AS4LOCAL 'A'`,
+`AS4VERS '0000'`), so a table dumped with an inactive version does not
+yield its fields twice. A DD* file the dump does not carry is no rows, not
+an error.
+
+The live read never needed the kinds the dump carries beyond tables, so
+this path writes what H3's could not: `*.tabl.xml` for every active DD02L
+row — TABCLASS INTTAB as an include structure (no DD09L, no client),
+TABCLASS TRANSP in the transport shape with its DD09L, and any other
+TABCLASS (an APPEND, a VIEW, a POOL or CLUSTER) refused by name rather
+than written as a structure it is not (2026-11-12, fix round 1) — and
+`*.dtel.xml` and `*.doma.xml` for the DD04L and DD01L rows, in the DD04V
+shape a system's own export writes: a domain-typed element (REFKIND D)
+goes out with DOMNAME and none of the type tags the DD04L row carries as
+the domain's copy, a predefined-typed one with its type after DTELMASTER
+and the initial values dropped. The writers are the tree's first
+DD04V/DD01V writers (until now those files existed only hand-written),
+beside `tablXml` in `tools/hana-ddic-map.mjs`, in the envelope the tree's
+own files carry. The texts are the T table's row in the L row's master
+language (`MASTERLANG`/`DTELMASTER`/`DOMMASTER`, E when none is named —
+the live read's `DDLANGUAGE 'E'`, said per object instead of per query);
+the TABL header's `DDLANGUAGE` is that language too, and a table with no
+text in it goes out without the `DDTEXT`, not with an empty tag. The
+labels come from DD04T, which is where the dictionary keeps
+DDTEXT and REPTEXT and the three SCRTEXTs (DD04L carries only the lengths
+they are shown in). A domain's fixed values come from DD07L, whose rows
+carry no words (DD07T is not in --ddic), so a domain with values goes out
+without them. An `.INCLUDE` row is not a refusal here: the dump carries
+every DD02L table's DD03L, so the include's fields splice in from it, in
+the include's place, in their own POSITION order — and neither is any
+other dot row: every `.INCLU-<suffix>` and `.APPEND` names its structure
+in PRECFIELD and splices the same way, a suffixed include with the suffix
+appended to each name it brings in, the rename abaplint reads out of the
+same DD03P (`ddicFieldsWithIncludes` beside `ddicFields`, which the live
+read keeps). A structured component
+(DD03L COMPTYPE S, DATATYPE STRU) carries its own COMPTYPE and resolves
+through the structure's own tabl.xml, which the same run writes. File names
+are the abapGit ones (lower case, a /namespace/ spelled #namespace#), the
+one rule `abapGitFileName` gives both the live read and the dump read; the
+layering is the H3 one, unchanged — `gen/hana-ddic` stays listed before
+`src/`, and the later folder wins.
+
+`--check` compares an existing `--out` with what the dump would write and
+exits 1 on drift — a file missing, a content difference, a file the plan
+does not write; the live read has no plan to compare against, so `--check`
+refuses it. Not covered, and said so in the run's last line: search helps
+(SHLP — DD30L-DD33L are not in --ddic), messages (MSAG), and table types
+(DD40L rows are counted, not written). Everything is exercised with
+fixtures (`test/hana-ddic-gen.mjs`, synthetic `ZOSD_H5_*` JSONL in a temp
+dir, carrying the real files' measured column sets); no tenant content is
+reachable from CI, and the acceptance runs against a real dump, by hand.
+
+## Registration out of a tenant: gen/segw from the dump
+
+The XML path reads the registration facts out of abapGit's `*.iwsv.xml`
+and `*.iwmo.xml`. On a system the same facts are one row each in the
+Gateway backend registration tables — `/IWBEP/I_MGW_SRH` (the service:
+technical name, version, URL name, DPC class), `/IWBEP/I_MGW_SRG`
+(service → model) and `/IWBEP/I_MGW_OHD` (model → MPC class), texts in
+`/IWBEP/I_MGW_SRT` — and the dumper writes them under `tables/` like any
+other table (`tools/hana-segw-gen.mjs`):
+
+    node tools/hana-segw-gen.mjs --from-dump <dir> [--service <NAME>[:<VERSION>]]... [--check]
+
+The join is the tables' own: `SRH.TECHNICAL_NAME+VERSION` →
+`SRG.GROUP_TECH_NAME+GROUP_VERSION` → `SRG.MODEL_TECH_NAME+MODEL_VERSION`
+→ `OHD.TECHNICAL_NAME+VERSION`, the version as the tables carry it
+("0001"). The service text comes from the SRT row in E — the language the
+XML DESCRIPTION element stands for — else the first by language; the OHT
+is not read, because the XML side has no consumer for the model
+description either. A class counts as present when the dump's
+`reposrc.jsonl` names its class pool or `SEOCLASS` names it, or when
+`gen/hana-src` holds its source (the classes ride into the build through
+H4's layers). A service whose DPC or MPC class is absent is reported and
+skipped, never emitted: for the XML side that is a comment line in the
+generated class, for the dump side an entry of from-dump.json's skipped
+list — and neither becomes a register() call. `--service` selects
+technical names with an optional version and refuses a selection nothing
+matches; the default is every service row of the dump.
+
+There is one writer, not a second one. The tool writes the facts
+(`gen/hana-segw/from-dump.json` — the joined services, the skips, the XML
+overrides — and `gen/hana-segw/manifest.json`: source, dump directory,
+the dump manifest's provenance; no clock in it, because gen/hana-segw is
+hashed as an input folder and a clock would rename every generation), and
+the registry class itself comes from tools/segw-registry.mjs's
+`registryClass`, written where it always lived, gen/segw/, merged under
+the XML objects: a (service, version) the XML objects also name keeps its
+XML registration, reported as an override, the way the later folder wins
+a file. The build's own segw-registry run produces the same bytes from
+the facts, so the class on disk is stable across builds. `--check`
+compares both folders and exits 1 on drift.
+
+The facts live in a folder of their own, not in gen/segw, for two reasons
+the build dictates. gen/hana-segw is an input folder entry of
+`abap_transpile.json`, after `gen/hana-src/*` (the gen/hana-ddic rule):
+the dump lives outside the tree, so writing the facts is what renames the
+generation and makes the next build actually retranspile the registry —
+while gen/segw's class is generator output the build itself rewrites
+mid-build, and a hashed folder that the build writes trips its own
+changed-watch (the bytes the generation is named by must be the bytes it
+is built from). And gen/hana-segw is private the way gen/hana-src is: a
+prefix in the one list (tools/osd-tmp.mjs), refused by
+`generationHanaSrcProblem` through the generation's recorded folder list,
+dropped by every publisher's gen/ copy filter, named in
+Dockerfile.dockerignore beside the other two. Its `.json` files are
+excluded from the transpiler like gen/rap/bindings.json.
+
+The class under gen/segw cannot ride that prefix — the XML source writes
+the same path and must keep publishing — but during a dump-fed phase it
+carries tenant service names, and a stale one beside a clean generation
+must not ride either. So the publishers' gen/ copy filters drop gen/segw
+through `segwPrivateGen`, which checks whether the facts exist, at copy
+time, in the very tree being copied: there is no staleness window in the
+copy, and removing gen/hana-segw publishes again once the next build has
+rewritten the class from the XML alone. Exercised with fixtures
+(`test/hana-segw-gen.mjs`, synthetic `ZOSD_H5_*` dump tables built in a
+temp dir); no tenant content is reachable from CI.

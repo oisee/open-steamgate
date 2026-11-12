@@ -28,7 +28,7 @@ import {basename, dirname, join, relative, resolve} from "node:path";
 import {fileURLToPath, pathToFileURL} from "node:url";
 import {assertPublicTree, verifyTreeArtefact, writePublicArtefact} from "../tools/osd-public-tree.mjs";
 import {runsAs} from "../tools/osd-main.mjs";
-import {generationHanaSrcProblem, privateGenFolder} from "../tools/osd-tmp.mjs";
+import {generationHanaSrcProblem, privateGenFolder, segwPrivateGen} from "../tools/osd-tmp.mjs";
 
 // main(argv, {root}) is the testable entry: the command line runs it against
 // the checkout, and test/hana-src-gen.mjs runs the same body against a fake
@@ -58,7 +58,9 @@ export async function main(argv = process.argv.slice(2), {root = resolve(dirname
   const TREE = ["src", "gen", "data", "webapp", "test", "tools", "bin", "scripts", "abap_transpile.json", "package.json", "abaplint.jsonc"];
   for (const entry of TREE) {
     if (existsSync(join(root, entry))) {
-      cpSync(join(root, entry), join(out, entry), {recursive: true, dereference: true, filter: (p) => basename(p) !== "e2e" && !privateGenFolder(relative(root, p))});
+      cpSync(join(root, entry), join(out, entry), {recursive: true, dereference: true, filter: (p) => basename(p) !== "e2e" && !privateGenFolder(relative(root, p)) &&
+        // and gen/segw while its manifest names a dump (H5b, tools/osd-tmp.mjs)
+        !segwPrivateGen(relative(root, p), root)});
     }
   }
   say(`content: ${TREE.filter((e) => existsSync(join(root, e))).join(", ")}`);

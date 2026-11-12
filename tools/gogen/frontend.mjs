@@ -10,7 +10,7 @@ import {suppliedIndex, suppliedAnswer, suppliedSignature, localDiscovery, lockAn
 import {enumerateObjects, auditedBookkeeping, withRole, beginProvenanceCompile} from "./frontend-provenance.mjs";
 import {prepareArtifactDigests} from "./frontend-artifact-digests.mjs";
 import {withProvenance, withArtifact, resolvedFunctionModule} from "./frontend-provenance.mjs";
-import {isSourceIdentity, readdirEntries, readdirNames, readFileSync} from "./host-io-compat.mjs";
+import {isSourceIdentity, listListed, readdirNames, readFileSync} from "./host-io-compat.mjs";
 import {append} from "./append.ts";
 import {localInterfaceNames, currentTypeNames, amcSource} from "./frontend-source-observations.mjs";
 import {lowerFindResults, inlineFindResultTypes} from "./frontend-find-results.ts";
@@ -80,7 +80,11 @@ export const compileProgram = withProvenance(/** @param {import("./frontend-sess
   /** @param {string} fn @returns {string} */ const objName = (fn) => fn.split("/").pop().split(".")[0].toLowerCase().replace(/#/g, "/");
   /** @type {import("./frontend-cache-types.ts").CdsSource[]} */ const ddls = discoveryProbe?.cds ?? [];
   /** @param {string} dir @returns {void} */ const walk = (dir) => {
-    for (const e of readdirEntries(dir).sort((x, y) => x.name.localeCompare(y.name))) {
+    // listListed, not readdirEntries: these folders are the layer list, and a
+    // listed folder that is not on disk reads as empty -- walkListed's rule
+    // (tools/osd-inputs.mjs), one helper; this walk kept the propagation that
+    // fix round 4 gave osg-build.mjs's own, and the osgo host died on gen/hana-segw
+    for (const e of listListed(dir).sort((x, y) => x.name.localeCompare(y.name))) {
       const path = join(dir, e.name);
       if (e.isDirectory()) walk(path);
       else if (isSourceIdentity(e.name) || skip(path)) continue;
