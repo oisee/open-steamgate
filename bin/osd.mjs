@@ -149,6 +149,7 @@ const GENERATORS = {
   "cds2ddic.mjs": () => import("../tools/cds2ddic.mjs"),
   "stg-compile.mjs": () => import("../tools/stg-compile.mjs"),
   "segw-registry.mjs": () => import("../tools/segw-registry.mjs"),
+  "hana-segw-gen.mjs": () => import("../tools/hana-segw-gen.mjs"),
   "segw-shlp.mjs": () => import("../tools/segw-shlp.mjs"),
   "amdp-gen.mjs": () => import("../tools/amdp-gen.mjs"),
   "amdp-tablefunc.mjs": () => import("../tools/amdp-tablefunc.mjs"),
