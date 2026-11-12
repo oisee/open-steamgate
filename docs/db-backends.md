@@ -520,3 +520,107 @@ per table, countable in the corpus before anyone needs it; and writes into
 the tenant schema, which the grant forbids today (OSG is SELECT-only there).
 The mode stays read-only; the shadow DDL is our schema's own and is the one
 explicit exception the guard admits.
+
+## Sources out of the tenant: gen/hana-src
+
+The other half of the tenant's content is its sources. They do not arrive
+through a loader (the H4 decision, 2026-11-12: vsp already holds the decoder
+and a second one would be a new wheel) — they arrive as **input layers**,
+made by two tools that live outside this repository and read nothing but a
+dump:
+
+1. `vsp hana dump` (the a4h sibling's private binary) writes a dump
+   directory: `manifest.json`, `reposrc.jsonl`, `src/*.abap` and the raw
+   cross-reference tables under `tables/*.jsonl`. The dumper holds the
+   credentials; this repository never runs it.
+2. the dump→layers converter (`dump-to-layers.mjs`, Node builtins only)
+   reads a dump and writes `plan.json` plus `layers/<name>/{.abapgit.xml,
+   src/}` — one abapGit repository per package, `order` topological with
+   dependencies first, `cycles` the package SCCs it cannot order.
+
+`tools/hana-src-gen.mjs` copies the selected layers into
+`gen/hana-src/<NNN>-<name>/` — NNN is the plan's order, zero-padded, so the
+names sort in dependency order — and writes `gen/hana-src/manifest.json`
+with the layers' provenance: the source directory — for `--from-dump`, the
+dump directory and the `--system` prefix, not the converter's temp
+directory (a fresh mkdtemp every run would make `--from-dump --check` drift
+on the path alone, and point at a directory that no longer exists) —, the
+dump manifest's provenance and hash when plan.json carries them, the
+converter's commit when plan.json carries one. A cycle group is one folder, the members' src
+merged and the members named in the manifest, because no order between
+them is valid. `--packages <LIKE>` scopes it (the converter's own glob:
+`%` or `*` is any run of characters, `_` is one character), `--check`
+exits 1 when the existing gen/hana-src has drifted, and `--from-dump` runs
+the converter itself (`OSD_HANA_CONVERTER` names its path) on a dump
+directory, started through `tools/osd-host.mjs` like every tool a tool
+starts (`scriptCommandIn` with this process's environment: a compiled
+binary is its own `process.execPath`, so there the interpreter is
+`OSD_NODE`, else the `node` on the `PATH` — the SEA build's variable
+already, `scripts/build-sea.mjs` naming the Node that goes inside):
+
+    node <converter> <dump> --out <layers> --system <prefix>
+    node tools/hana-src-gen.mjs --layers <layers>
+    # or: node tools/hana-src-gen.mjs --from-dump --dump <dump> --system <prefix>
+
+Dumps and layer directories live outside git — they hold a real tenant's
+sources, and the tool refuses a `--layers` inside this tree unless it sits
+under `gen/` or `.local/`, both untracked, so neither the layers nor the
+manifest is ever committed; `--out` is held to the same rule. The tool
+never reads the dump's `tables/*.jsonl` at all; the provenance it records
+is what plan.json copied from the dump manifest.
+
+A generation built with a private gen/ layer in its inputs is private like
+the layers themselves — the tenant's sources (`gen/hana-src`) and their
+dictionary (`gen/hana-ddic`, the DD03L shapes the H3 generation writes)
+reached the transpile — and every publisher that bundles a build refuses
+it: the preview (scripts/build-preview.mjs:59, beside its $TMP refusals),
+the docker image (docker/image/assemble.mjs:17 guards `build/live` before
+anything is copied), the download bundle
+(scripts/make-download-bundle.mjs:40, before anything is staged) and the
+release directory (scripts/make-release.mjs:47, before the tree and the
+generation are copied — the directory docs/docker.md documents as "the
+release the image copies"). The refusal reads the generation's own record
+of what it was built from (`manifest.inputs.folders`, the expanded folder
+list tools/osd-build.mjs writes), so it is decided by what the build read,
+not by what the tree holds now; the helper is `generationHanaSrcProblem`
+in tools/osd-tmp.mjs, beside the `$TMP` one, and its one list of the two
+private prefixes is also what every publisher's gen/ copy filter drops
+(docker/image/assemble.mjs:57, scripts/make-download-bundle.mjs:79,
+scripts/make-release.mjs:57), so a stale `gen/hana-src` or `gen/hana-ddic`
+on disk never rides along with a generation whose record is clean. The
+build context is covered separately by
+docker/image/Dockerfile.dockerignore, which names both folders.
+Publishers that stage `gen/` never are safe by construction: the VSIX seed
+(scripts/build-vsix.mjs:353-354 stages src, webapp, tools, data and four
+files; the binary's seed tars the same staging), the OCI system publish
+(scripts/system-stage.mjs:12 stages src, data, webapp) and the preview
+itself (it writes bundles under web/generated and build/preview only).
+The CI artifact tar (tools/osd-ci-artifact.mjs:17, `gen output build`)
+packs a fresh CI checkout, which holds no tenant folders, and feeds the
+CI suite jobs — it publishes nothing.
+
+The layering rule is the one `gen/hana-ddic` already established, one step
+further: one entry `gen/hana-src/*` in `abap_transpile.json`, after
+`gen/hana-ddic` and before `src/`, expanded to its children wherever the
+folder list is read (`expandedFolders` in tools/osd-packs.mjs; the inputs
+report, the transpiler, the store and the capture all read the same
+expansion). The children are expanded and not listed because their names
+are the converter's `<system>-<package>` of private packages, and a
+tracked config should carry neither the churn nor the names. The later
+folder wins, so the real system's sources lose only to a hand-written
+`src/` override, on purpose — a generated copy of an object `src/` now
+holds is reported by `node tools/osd-inputs.mjs` like any override. A
+layer's `.abapgit.xml` is a repository marker, not an object, and the
+store keeps every child non-writable under `$STG_HANA_SRC`, the way gen/
+is kept.
+
+What the converter cannot source is counted, not lost: plan.json's
+`no_source` — IWSV/IWMO/IWOM/IWSG/IWPR, TABL, SHLP, SICF, WAPA, W3MI,
+DTEL, FUGR and friends — is copied into gen/hana-src/manifest.json and
+reported. Those kinds have other routes: TABL come from `gen/hana-ddic`
+(H3), the SEGW kinds from the SEGW tables (H5); gen/hana-src reports them
+and carries the sources only.
+
+Exercised with fixtures (`test/hana-src-gen.mjs`, synthetic `ZOSD_H4_*`
+converter output built in a temp dir); no tenant content is reachable
+from CI.

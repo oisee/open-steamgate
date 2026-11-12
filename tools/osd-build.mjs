@@ -157,9 +157,12 @@ function walk(dir, out = [], seen = new Set()) {
   return out;
 }
 
-// what a generation is made of, and the hash that names it
+// what a generation is made of, and the hash that names it. A listed folder
+// is an input only while it holds a file the hash would count (the
+// NOT_AN_INPUT rule folder() applies): the base leaves gen/hana-ddic empty
+// on every build, and an empty folder was never read
 export function inputsOf(root, config = loadConfig(root)) {
-  const folders = inputFoldersOf(root, config).map((f) => join(root, f)).filter(existsSync);
+  const folders = inputFoldersOf(root, config).map((f) => join(root, f)).filter((f) => existsSync(f) && walk(f).some((x) => !NOT_AN_INPUT.test(x)));
   const libs = (config.libs ?? []).map((l) => l.folder).filter((f) => f !== undefined && f !== "")
     .map((f) => (activeSystem(root) || existsSync(join(root, "libs.lock.json"))) ? libraryPath(root, basename(f)) : join(root, f));
   // BSP pages are generator inputs too. In particular, Component.js lives

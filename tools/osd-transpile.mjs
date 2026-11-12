@@ -26,7 +26,7 @@ import {createRequire} from "node:module";
 import {tmpdir} from "node:os";
 import {basename, dirname, join, relative, resolve, sep} from "node:path";
 import {hostModules} from "./osd-host.mjs";
-import {isSourceIdentity, inputFoldersOf} from "./osd-packs.mjs";
+import {expandedFolders, isSourceIdentity, inputFoldersOf} from "./osd-packs.mjs";
 import {mapStatementStarts} from "./osd-source-map-starts.mjs";
 import {lowerDerived, readRapBindings} from "./rap/lower-derived.mjs";
 import {lowerNarrowSubmit} from "./osd-narrow-submit.mjs";
@@ -193,13 +193,16 @@ export function listFiles(root, config) {
   const include = regexps(config.input_filter);
   const exclude = regexps(config.exclude_filter);
   const system = activeSystem(root) ?? null;
-  const folders = system ? inputFoldersOf(root, config) : Array.isArray(config.input_folder) ? config.input_folder : [config.input_folder];
+  const folders = system ? inputFoldersOf(root, config)
+    : expandedFolders(Array.isArray(config.input_folder) ? config.input_folder : [config.input_folder], root);
   const wanted = [];
   let skipped = 0;
   for (const folder of folders) {
     const skipDirs = new Set(folders.filter((f) => f !== folder).map((f) => resolve(root, f)));
     for (const filename of walk(resolve(root, folder), [], skipDirs)) {
-      if (isSourceIdentity(filename) || system && [".osd-layer.json", ".abapgit.xml"].includes(basename(filename))) {
+      // a repository marker is not source in either mode (H4: the converter's
+      // layers are abapGit repositories; a system's layers carry .osd-layer.json)
+      if (isSourceIdentity(filename) || [".osd-layer.json", ".abapgit.xml"].includes(basename(filename))) {
         skipped++;
       } else if (include.length > 0 && matchesSourcePath(root, filename, include, system) === false) {
         skipped++;
