@@ -1,5 +1,6 @@
 import {expect} from "chai";
 import {createRequire} from "node:module";
+import {giveBackHdb} from "./hdb-stub.mjs";
 import {HanaDatabaseClient} from "../tools/hana-client.mjs";
 
 // HANA_EXISTING_SCHEMA=1: the mode that runs OSG-JS over a HANA which
@@ -13,6 +14,10 @@ import {HanaDatabaseClient} from "../tools/hana-client.mjs";
 // nothing new on, it only leaves steps out. The fake hdb module below stands
 // in for the driver, so connect() can be driven without a HANA.
 describe("HANA_EXISTING_SCHEMA mode", () => {
+  // the stand-in is given back after every test, so the next hdb consumer in
+  // the shard's process meets the real driver (test/hdb-stub.mjs)
+  afterEach(giveBackHdb);
+
   // connect() reaches the driver through createRequire("hdb"); the same CJS
   // cache a real require would use is pointed at a stand-in first.
   const fakeHdb = () => {
