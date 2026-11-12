@@ -1,5 +1,6 @@
 import {expect} from "chai";
 import {checkReport, metrics, renderReport, checkVspSyntax, timingReference, TIMING_RULE} from "../tools/adt-lifecycle-report.mjs";
+import {CALL_TIMEOUT_S, ddlsCallTimeoutS} from "../tools/adt-lifecycle-vsp.mjs";
 import {readFileSync, mkdtempSync, writeFileSync, rmSync} from "node:fs";
 import {spawnSync} from "node:child_process";
 import {tmpdir} from "node:os";
@@ -330,5 +331,43 @@ describe("CI lifecycle timing history collection",()=>{
   expect(history.notes).to.deep.equal(["Main timing history unavailable: history API unavailable"]);
   expect(checkReport(fixture(),history).errors).to.deep.equal([]);
   expect(renderReport(fixture(),history)).to.contain("comparison pending").and.contain("history API unavailable");
+ });
+});
+
+
+describe("DDLS call timeout margin",()=>{
+ const lifecycle = readFileSync("tools/adt-lifecycle.mjs","utf8");
+ const vspClient = readFileSync("tools/adt-lifecycle-vsp.mjs","utf8");
+ it("keeps 90 s for the other families and floors the DDLS budget at 240 s under the measured-speed factor",()=>{
+  expect(CALL_TIMEOUT_S).to.equal(90);
+  // Forced factors, as a CI job that knows its runner would set them. The
+  // factors CI has measured are 1.00-1.29: the budget those runners receive
+  // is 240-310 s.
+  expect(ddlsCallTimeoutS({OSD_WARM_SPEED_FACTOR:"1"})).to.equal(240);
+  expect(ddlsCallTimeoutS({OSD_WARM_SPEED_FACTOR:"1.29"})).to.equal(310);
+  expect(ddlsCallTimeoutS({OSD_WARM_SPEED_FACTOR:"2"})).to.equal(480);
+  expect(ddlsCallTimeoutS({OSD_WARM_SPEED_FACTOR:"8"})).to.equal(480);
+  // 240 s is the floor, not the ceiling: the calibration runs idle in the
+  // harness while the activation builds under the lifecycle's own load, and
+  // across the failing runs it moved 1.00-1.29 while the DDLS cost moved
+  // 1.7-2x -- a budget derived from it must never land under 240 s. A factor
+  // below one is clamped to the floor by warm-deadline first.
+  expect(ddlsCallTimeoutS({OSD_WARM_SPEED_FACTOR:"0.5"})).to.equal(240);
+ });
+ it("gives every VSP call of the DDLS family the measured budget and keeps the others at 90 s",()=>{
+  const budget = String.raw`timeout:vspTimeout\(f\)`;
+  expect(lifecycle.match(new RegExp(budget,"g"))).to.have.length(3);
+  expect(lifecycle).to.contain("const vspTimeout = f => f.type === 'DDLS' ? ddlsCallTimeoutS() : CALL_TIMEOUT_S");
+  expect(lifecycle).not.to.match(/timeout:\s*90\b/);
+  expect(lifecycle).to.contain("import {vspClient, CALL_TIMEOUT_S, ddlsCallTimeoutS}");
+ });
+ it("never lets the client-side rpc ceiling be the binding budget",()=>{
+  expect(vspClient).to.contain("Math.max(120000, (ddlsCallTimeoutS() + 60) * 1000)");
+ });
+ it("isolates the VSP child from the workstation config and survives its death",()=>{
+  // A developer's ~/.vsp.json pins a real system; VSP reads it even from an
+  // empty cwd and refuses the OSD logon.
+  expect(vspClient).to.contain("HOME:cwd, USERPROFILE:cwd");
+  expect(vspClient).to.contain('child.stdin.on("error", fail)');
  });
 });

@@ -197,6 +197,51 @@ describe("gogen compiler host boundary", () => {
     assert.equal(host.join(), path.join());
   });
 
+  describe("a listed folder that is not on disk reads as empty", () => {
+    // The rule is tools/osd-inputs.mjs walkListed's (H3/FIX-4), and it is
+    // keyed on NOTHING: fix round 4 fixed tools/gogen/osg-build.mjs's own
+    // walk, the compileProgram walk over the same layer list kept the
+    // propagation, and gen/hana-segw -- the NEXT listed folder after
+    // gen/hana-ddic -- died the same death in the osgo-host job. So this
+    // case names a folder no reader has ever heard of: the next listed
+    // folder after this fix must not repeat it either.
+    const probe = `CLASS zcl_listed_probe DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    CLASS-METHODS run RETURNING VALUE(rv) TYPE string.
+ENDCLASS.
+CLASS zcl_listed_probe IMPLEMENTATION.
+  METHOD run.
+    rv = 'ok'.
+  ENDMETHOD.
+ENDCLASS.
+`;
+    it("compiles the same objects with the folder missing as with it present empty", async () => {
+      const root = mkdtempSync(path.join(scratch, "listed-"));
+      mkdirSync(path.join(root, "src"), {recursive: true});
+      writeFileSync(path.join(root, "src", "zcl_listed_probe.clas.abap"), probe);
+      const missing = path.join(root, "gen/hana-next");
+      const empty = path.join(root, "gen/hana-empty");
+      mkdirSync(empty, {recursive: true});
+      const {compileProgram} = await import("../tools/gogen/frontend.mjs");
+      const objects = ["zcl_listed_probe"];
+      const withMissing = compileProgram({folders: [missing, path.join(root, "src")], objects});
+      const withEmpty = compileProgram({folders: [empty, path.join(root, "src")], objects});
+      assert.deepEqual(withMissing.classes.map((c) => c.name), ["ZCL_LISTED_PROBE"]);
+      assert.deepEqual(withMissing.classes, withEmpty.classes);
+    });
+    it("walkListed's gogen twin lists a missing folder as empty and keeps the walk's own shape", async () => {
+      const root = mkdtempSync(path.join(scratch, "listed-helper-"));
+      mkdirSync(path.join(root, "in"), {recursive: true});
+      writeFileSync(path.join(root, "in", "a.clas.abap"), probe);
+      const {listListed} = await import("../tools/gogen/host-io-compat.mjs");
+      assert.deepEqual(listListed(path.join(root, "gen/hana-next")), []);
+      assert.deepEqual(listListed(path.join(root, "in")).map((e) => e.name), ["a.clas.abap"]);
+      assert.equal(listListed(path.join(root, "in"))[0].isDirectory(), false);
+      // the primitives underneath keep their error: only the listed-read helper swallows
+      assert.throws(() => compat.readdirEntries(path.join(root, "gen/hana-next")), {code: "ENOENT"});
+    });
+  });
+
   it("keeps git failure fallback and live empty/absent environment values", () => {
     assert.equal(host.gitHead("."), execFileSync("git", ["rev-parse", "HEAD"], {encoding: "utf8"}).trim());
     assert.equal(host.gitHead(path.join(scratch, "missing-cwd")), undefined);

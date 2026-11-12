@@ -2,6 +2,7 @@
   "input_folder": [
     "gen/hana-ddic",
     "gen/hana-src/*",
+    "gen/hana-segw",
     "src",
     "test",
     "gen"
@@ -171,6 +172,7 @@
     "\\.srvd\\.",
     "/gen/rap/bindings\\.json$",
     "/gen/hana-src/manifest\\.json$",
+    "/gen/hana-segw/[^/]+\\.json$",
     "\\.stg\\.yaml$",
     "\\.l2\\.yaml$",
     "\\.l3\\.yaml$",

@@ -233,7 +233,32 @@ export function generationTmpProblem(generationDir) {
 // "gen/hana-src/*" whether or not a build ever saw one of these layers; only
 // the generation's manifest -- the EXPANDED folder list the build recorded
 // (tools/osd-build.mjs) -- knows what was actually read.
-const HANA_PRIVATE_FOLDERS = ["gen/hana-src", "gen/hana-ddic"];
+//
+// gen/hana-segw (H5b, tools/hana-segw-gen.mjs) joins the list the same way:
+// the dump's registration facts -- five strings per service, but the
+// tenant's service and class names -- as a hashed input folder of their
+// own. The registry CLASS they feed lives at gen/segw, where it always has;
+// during a dump-fed phase it carries tenant names too, and it cannot ride a
+// prefix (the XML source writes the same path and must keep publishing), so
+// segwPrivateGen below drops it from the publishers' gen/ copy filters for
+// exactly as long as the facts exist -- the filter runs at copy time over
+// the tree the folder sits in, so there is no staleness window in the copy.
+const HANA_PRIVATE_FOLDERS = ["gen/hana-src", "gen/hana-ddic", "gen/hana-segw"];
+
+/** whether a path (root-relative, as the publishers' filters hand them) is
+ *  gen/segw of a tree whose registry is currently fed from a dump: the
+ *  facts folder decides, by existing. A missing or unreadable facts file is
+ *  no mark -- the XML source holds no facts and must keep publishing. */
+export function segwPrivateGen(path, root) {
+  const p = String(path).replaceAll("\\", "/");
+  if (p !== "gen/segw" && p.startsWith("gen/segw/") === false) return false;
+  try {
+    readFileSync(join(root, "gen", "hana-segw", "from-dump.json"), "utf8");
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /** the private gen/ prefix a path sits under, or undefined: the one list,
  *  shared by the check below and by every publisher's copy filter. Paths
@@ -255,7 +280,7 @@ export function generationHanaSrcProblem(generationDir) {
   }
   const carrying = folders.filter((f) => privateGenFolder(f) !== undefined);
   return carrying.length === 0 ? undefined
-    : `${generationDir} was built with private gen/ layers (${carrying.slice(0, 3).join(", ")}): the tenant's sources and DDIC (${HANA_PRIVATE_FOLDERS.join(", ")}) are private and are never published. Rebuild without them: move ${HANA_PRIVATE_FOLDERS.join(" and ")} out of the tree, then run node tools/osd-build.mjs --publish.`;
+    : `${generationDir} was built with private gen/ layers (${carrying.slice(0, 3).join(", ")}): the tenant's content (${HANA_PRIVATE_FOLDERS.join(", ")}) is private and is never published. Rebuild without it: move ${HANA_PRIVATE_FOLDERS.join(" and ")} out of the tree, then run node tools/osd-build.mjs --publish.`;
 }
 
 // ------------------------------------------------------------ names

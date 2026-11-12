@@ -144,6 +144,7 @@
   "test/hana-dialect.mjs": 1.027855959,
   "test/hana-existing-schema.mjs": 0.482,
   "test/hana-readonly.mjs": 0.492,
+  "test/hana-segw-gen.mjs": 0.54,
   "test/hana-shadow-schema.mjs": 0.504,
   "test/hana-src-gen.mjs": 8.075,
   "test/http-case.mjs": 0.872451756,
