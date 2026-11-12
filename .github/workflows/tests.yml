@@ -255,7 +255,8 @@ jobs:
   suites:
     needs: build
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Backstop only: real shards take 20-26.5 min on main and shard 4 hit this cap once (#908); the fix is refreshed weights, not a wider cap.
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
