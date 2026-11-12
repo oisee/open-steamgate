@@ -86,10 +86,12 @@ the `/IWBEP/` framework whose runtime this project reimplements.
 - **VS Code.** The OSD tree, F8 data preview, ABAP Unit in the Test Explorer,
   debugging, and a `.http` CodeLens that finds the DPC method behind a request.
 
-For warm local development (`OSD_WARM=1 STG_DEV=1 npm start`), run
-`npm run transpiler:pin` after `npm ci`. It builds the `libs.lock.json` pin in
-`$HOME/.cache/osd/transpiler-<ref>` and links transpiler, CLI, runtime and core;
-a verified build is reused. Override the persistent location with `TRANSPILER`;
+For warm local development (`OSD_WARM=1 STG_DEV=1 npm start`), the pinned
+transpiler must be linked: `npm run bootstrap` runs the pin step itself, and
+`npm run transpiler:pin` is its standalone form after `npm ci`. It builds the
+`libs.lock.json` pin in `$HOME/.cache/osd/transpiler-<ref>` and links
+transpiler, CLI, runtime and core; a verified build is reused. Override the
+persistent location with `TRANSPILER`;
 temporary directories and session scratchpads are refused. Startup and
 `osd doctor` print a prominent install hint if warm capabilities are missing.
 See [warm setup](docs/warm-compile.md#running-it).
@@ -489,7 +491,7 @@ Node 22.18+ (major 22) or Node 24. 22.18 is the first Node 22 that strips TypeSc
 ```sh
 git clone https://github.com/oisee/open-steamgate && cd open-steamgate
 npm ci
-npm run bootstrap            # pinned library clones + packs, then gen/
+npm run bootstrap            # pinned transpiler build + links, library clones + packs, then gen/
 npm start                    # http://localhost:3030/ is the launchpad
 npm run dev                  # the same, rebuilding as you edit ABAP
 npm test                     # abaplint + ABAP Unit + mocha over the wire
@@ -502,8 +504,12 @@ npm run vsix                 # the VS Code extension
 ```
 
 HANA Express: running its image accepts SAP's developer licence, see
-[`docs/amdp-in-hana.md`](docs/amdp-in-hana.md). `npm run bootstrap` reads `libs.lock.json`: it clones the pinned libraries into
-`.local/lars/`, fetches the packs and runs the first transpile.
+[`docs/amdp-in-hana.md`](docs/amdp-in-hana.md). `npm run bootstrap` reads `libs.lock.json`: it verifies or builds the pinned
+transpiler and links it (transpiler, CLI, runtime, core — the four links CI
+makes), refuses to transpile on the published packages `npm ci` left behind,
+clones the pinned libraries into `.local/lars/`, fetches the packs and runs
+the first transpile. `npm ci && npm run bootstrap` is the whole fresh-clone
+recipe; `npm run transpiler:pin` is the pin step on its own.
 
 ## Build on it
 
