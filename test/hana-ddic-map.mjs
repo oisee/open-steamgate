@@ -189,16 +189,18 @@ describe("the DD03L to abapGit TABL mapping", () => {
   // .INCLUDE row goes out as the marker a system's own export spells --
   // the transpiler expands it off PRECFIELD -- and the included fields'
   // expanded copies the dump also carries under the base table's own name
-  // are dropped: the name is the include's (measured on the real closure
-  // dump, whose base rows hold the marker and the included fields again,
-  // two positions later).
-  it("keeps an .INCLUDE row as the marker and drops the expanded copies (H5d)", () => {
+  // are dropped by the dictionary's own mark: every expanded copy carries
+  // ADMINFIELD '1', every plain row '0' (measured on the real closure
+  // dump: 16 copies against 265 plain rows, the 7 markers '0' as well,
+  // the first copy one position after its marker).
+  it("keeps an .INCLUDE row as the marker and drops the ADMINFIELD-'1' copies (H5d)", () => {
     const rows = [
-      {position: "1", fieldname: "MANDT", keyflag: "X", rollname: "MANDT", datatype: "CLNT", leng: "3", decimals: "0", inttype: "C", intlen: "000006", notnull: "X"},
-      {position: "3", fieldname: ".INCLUDE", precfield: "ZOSD_H1_STAMP"},
-      // the dump's expanded copy of the include's field, two positions on
-      {position: "4", fieldname: "ZOSD_H1_STAMP_A", keyflag: "", rollname: "", datatype: "TIMS", leng: "6", decimals: "0", inttype: "T", intlen: "000012", notnull: ""},
-      {position: "5", fieldname: "ZOSD_H1_TAIL", keyflag: "", rollname: "", datatype: "CHAR", leng: "2", decimals: "0", inttype: "C", intlen: "000004", notnull: ""},
+      {position: "1", fieldname: "MANDT", keyflag: "X", rollname: "MANDT", datatype: "CLNT", leng: "3", decimals: "0", inttype: "C", intlen: "000006", notnull: "X", adminfield: "0"},
+      {position: "3", fieldname: ".INCLUDE", precfield: "ZOSD_H1_STAMP", adminfield: "0"},
+      // the dump's expanded copy of the include's field, one position on,
+      // carrying the dictionary's mark
+      {position: "4", fieldname: "ZOSD_H1_STAMP_A", keyflag: "", rollname: "", datatype: "TIMS", leng: "6", decimals: "0", inttype: "T", intlen: "000012", notnull: "", adminfield: "1"},
+      {position: "5", fieldname: "ZOSD_H1_TAIL", keyflag: "", rollname: "", datatype: "CHAR", leng: "2", decimals: "0", inttype: "C", intlen: "000004", notnull: "", adminfield: "0"},
     ];
     const includes = new Map([["ZOSD_H1_STAMP", [
       // the include's own positions decide inside it, here 2 then 1
@@ -235,9 +237,16 @@ describe("the DD03L to abapGit TABL mapping", () => {
     const rows = [
       {position: "1", fieldname: "MANDT", keyflag: "X", rollname: "MANDT", datatype: "CLNT", leng: "3", decimals: "0", inttype: "C", intlen: "000006", notnull: "X"},
       {position: "2", fieldname: ".INCLU-01", precfield: "ZOSD_H1_STAMP"},
-      {position: "3", fieldname: ".APPEND", precfield: "ZOSD_H1_APPEND"},
-      {position: "4", fieldname: ".INCLU--AP", precfield: "ZOSD_H1_DEEP"},
-      {position: "5", fieldname: "ZOSD_H1_TAIL", keyflag: "", rollname: "", datatype: "CHAR", leng: "2", decimals: "0", inttype: "C", intlen: "000004", notnull: ""},
+      // the suffix rename the transpiler applies: a copy of a suffixed
+      // marker sits under the suffixed name, so the fallback's name set
+      // has to know it (these rows carry no ADMINFIELD column -- the name
+      // rule is what keeps the copies out when the mark is absent)
+      {position: "3", fieldname: "ZOSD_H1_STAMP_A01", keyflag: "", rollname: "", datatype: "TIMS", leng: "6", decimals: "0", inttype: "T", intlen: "000012", notnull: ""},
+      {position: "4", fieldname: ".APPEND", precfield: "ZOSD_H1_APPEND"},
+      {position: "5", fieldname: ".INCLU--AP", precfield: "ZOSD_H1_DEEP"},
+      // the append form renames nothing: the copy keeps the plain name
+      {position: "6", fieldname: "ZOSD_H1_DEEP_D", keyflag: "", rollname: "", datatype: "DATS", leng: "8", decimals: "0", inttype: "D", intlen: "000016", notnull: ""},
+      {position: "7", fieldname: "ZOSD_H1_TAIL", keyflag: "", rollname: "", datatype: "CHAR", leng: "2", decimals: "0", inttype: "C", intlen: "000004", notnull: ""},
     ];
     const includes = new Map([
       ["ZOSD_H1_STAMP", [
@@ -268,6 +277,56 @@ describe("the DD03L to abapGit TABL mapping", () => {
     expect(error?.message).to.include("ZOSD_H1_ABSENT");
   });
 
+  // CRITIC-929 MUST 1, the shape the bare name rule missed: a .INCLU-01
+  // marker and the dump's expansion rows under the suffixed names, carrying
+  // ADMINFIELD '1' as the real dump's 16 copies all do. The mark decides,
+  // not the name -- and the kept marker makes the transpiler's own suffix
+  // rename produce the A01/B01 names by itself.
+  it("drops a .INCLU-01 marker's ADMINFIELD-'1' copies whatever they are named (H5d)", () => {
+    const rows = [
+      {position: "1", fieldname: "MANDT", keyflag: "X", rollname: "MANDT", datatype: "CLNT", leng: "3", decimals: "0", inttype: "C", intlen: "000006", notnull: "X", adminfield: "0"},
+      {position: "2", fieldname: "ZOSD_H1_SFX_KEY", keyflag: "X", rollname: "", datatype: "CHAR", leng: "10", decimals: "0", inttype: "C", intlen: "000020", notnull: "X", adminfield: "0"},
+      {position: "3", fieldname: ".INCLU-01", precfield: "ZOSD_H1_SFX_INC", adminfield: "0"},
+      // the dump's expansion rows: suffixed names, the dictionary's mark
+      {position: "4", fieldname: "ZOSD_H1_SFX_A01", keyflag: "", rollname: "", datatype: "CHAR", leng: "1", decimals: "0", inttype: "C", intlen: "000002", notnull: "", adminfield: "1"},
+      {position: "5", fieldname: "ZOSD_H1_SFX_B01", keyflag: "", rollname: "", datatype: "DATS", leng: "8", decimals: "0", inttype: "D", intlen: "000016", notnull: "", adminfield: "1"},
+      {position: "6", fieldname: "ZOSD_H1_SFX_TAIL", keyflag: "", rollname: "", datatype: "CHAR", leng: "2", decimals: "0", inttype: "C", intlen: "000004", notnull: "", adminfield: "0"},
+    ];
+    const includes = new Map([["ZOSD_H1_SFX_INC", [
+      {position: "1", fieldname: "ZOSD_H1_SFX_A", keyflag: "", rollname: "", datatype: "CHAR", leng: "1", decimals: "0", inttype: "C", intlen: "000002", notnull: ""},
+      {position: "2", fieldname: "ZOSD_H1_SFX_B", keyflag: "", rollname: "", datatype: "DATS", leng: "8", decimals: "0", inttype: "D", intlen: "000016", notnull: ""},
+    ]]]);
+    const fields = ddicFieldsWithIncludes(rows, {}, includes);
+    expect(fields.map((f) => f.fieldname)).to.deep.equal(["MANDT", "ZOSD_H1_SFX_KEY", ".INCLU-01", "ZOSD_H1_SFX_TAIL"]);
+    // what the XML makes of it: the marker in, no copy name anywhere
+    const xml = tablXml({name: "ZOSD_H1_SFX_BASE", text: "", clidep: false, fields});
+    expect(xml).to.include(`<FIELDNAME>.INCLU-01</FIELDNAME>`);
+    expect(xml).to.not.include("ZOSD_H1_SFX_A01");
+    expect(xml).to.not.include("ZOSD_H1_SFX_B01");
+    expect(xml.split("ZOSD_H1_SFX_A").length - 1).to.equal(0);
+  });
+
+  // CRITIC-929 MUST 1 (b): a raw duplicate -- two plain rows of one table
+  // carrying the same FIELDNAME, no include in sight -- is refused before
+  // anything is written, naming table and field, where it used to be
+  // written twice and die in cds2ddic later. Two markers naming two
+  // appends are the dictionary's own spelling and stay legal.
+  it("refuses a field list that repeats a FIELDNAME, naming table and field (H5d)", () => {
+    let error;
+    try {
+      tablXml({name: "ZOSD_H1_DUP", text: "", clidep: false, fields: [
+        {fieldname: "ZOSD_H1_DUP_F", key: false, datatype: "CHAR", leng: "000002", intlen: "000004", inttype: "C"},
+        {fieldname: "ZOSD_H1_DUP_F", key: false, datatype: "CHAR", leng: "000002", intlen: "000004", inttype: "C"},
+      ]});
+    } catch (e) { error = e; }
+    expect(error?.message, "the table").to.include("ZOSD_H1_DUP");
+    expect(error?.message, "the field").to.include("ZOSD_H1_DUP_F");
+    expect(() => tablXml({name: "ZOSD_H1_TWO_AP", text: "", clidep: false, fields: [
+      {fieldname: ".INCLU--AP", key: false, marker: true, precfield: "ZOSD_H1_AP_ONE"},
+      {fieldname: ".INCLU--AP", key: false, marker: true, precfield: "ZOSD_H1_AP_TWO"},
+    ]}), "two appends stay legal").to.not.throw();
+  });
+
   it("a structured component carries its own COMPTYPE (H5a: DD03L COMPTYPE S)", () => {
     const fields = ddicFields([
       {position: "1", fieldname: "ZOSD_H1_ADDR", keyflag: "", rollname: "ZOSD_H1_STRUCT", comptype: "S", datatype: "STRU", leng: "000000", decimals: "000000", inttype: "", intlen: "000000", notnull: ""},
@@ -294,8 +353,9 @@ describe("the DD03L to abapGit TABL mapping", () => {
   // CRITIC-926 SHOULD 3: TABCLASS was reduced to a boolean, and a POOL
   // row went out silently as an INTTAB structure -- a type that holds no
   // rows. H5d lifted the two refusals the real closure run hit (APPEND and
-  // VIEW); POOL and CLUSTER stay refused by name, and the refusal says
-  // where a view's reads stand.
+  // VIEW); POOL and CLUSTER stay refused by name, and the refusal is about
+  // the TABCLASS alone (CRITIC-929 SHOULD 4): the view sentence lives in
+  // the dump run's summary line and the docs, not in this error.
   it("refuses a TABCLASS this path does not write, by name", () => {
     for (const tabclass of ["POOL", "CLUSTER"]) {
       let error;
@@ -330,11 +390,14 @@ describe("the DD03L to abapGit TABL mapping", () => {
     expect(view).to.not.include(`<DD09L>`);
     expect(view).to.not.include(`<CLIDEP>`);
     expect(view).to.include(`<FIELDNAME>ZOSD_H1_VTEXT</FIELDNAME>`);
-    // the POOL/CLUSTER refusal says where a view's reads stand
+    // the POOL refusal is about the TABCLASS alone (CRITIC-929 SHOULD 4):
+    // the view sentence is the summary line's and the docs', not this
+    // error's tail
     let error;
     try { tablXml({name: "ZOSD_H1_POOL", text: "", clidep: true, tabclass: "POOL", fields: []}); } catch (e) { error = e; }
-    expect(error?.message).to.include("synonym");
-    expect(error?.message).to.include("SQL time");
+    expect(error?.message).to.include("ZOSD_H1_POOL");
+    expect(error?.message).to.not.include("synonym");
+    expect(error?.message).to.not.include("SQL time");
   });
 
   // the marker's DD03P, as the fetched pack's own exports spell it: KEYFLAG

@@ -683,11 +683,18 @@ abapGit export spells it — `.INCLUDE`, `.INCLU-<suffix>` and `.INCLU--AP`
 (the dictionary's append spelling), the structure named in PRECFIELD, the
 transpiler expanding it off that — and the included fields' expanded
 copies the DD03L read also carries under the base table's own name are
-dropped, the name being the include's (the real closure dump measures it:
-a header table's rows hold the marker and the included fields again, two
-positions later; the splice H5a first wrote here put every such field
-into the XML twice). `ddicFieldsWithIncludes` keeps the markers and drops
-the copies; `ddicFields`, which the live
+dropped by the dictionary's own mark: every expanded copy carries
+`ADMINFIELD '1'`, every plain row `'0'` (measured on the real closure
+dump: 16 copies against 265 plain rows, the 7 marker rows `'0'` as
+well, and the first copy one position after its marker — the "two
+positions later" an earlier sentence here claimed is not what the dump
+measures). The name is only the fallback, for a row that carries no
+mark at all — suffixed spellings included, since a `.INCLU-<suffix>`
+marker renames its copies by the suffix (the splice H5a first wrote
+here put every such field into the XML twice; and a field list that
+still repeats a FIELDNAME is refused at generation, naming table and
+field). `ddicFieldsWithIncludes` keeps the markers and drops the
+copies; `ddicFields`, which the live
 read keeps, refuses an include row. A structured component
 (DD03L COMPTYPE S, DATATYPE STRU) carries its own COMPTYPE and resolves
 through the structure's own tabl.xml, which the same run writes. File names
@@ -722,5 +729,10 @@ structure type — its DD03L fields, TABCLASS VIEW, no DD09L: the join
 tables a `.view.xml` needs (DD26S/DD27S) are not in `--ddic`, so the CDS
 route's DDIC-view shape is out of reach here. What the view is for
 depends on the backend, and that is the shadow schema's paragraph below.
-POOL and CLUSTER stay refused by name, and the refusal says what a view
-became and where its reads stand.
+POOL and CLUSTER stay refused by name, and the refusal is about the
+TABCLASS alone: what a view became and where its reads stand is said in
+the run's summary (a view line, when the dump carries views) and in the
+shadow-schema paragraph above. The live read hands TABCLASS and SQLTAB
+to the same writer, so `--tables` on an append or a view writes the
+shapes this section describes, not TRANSP with a DD09L (2026-11-12,
+fix round 1).

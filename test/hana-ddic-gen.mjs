@@ -144,6 +144,41 @@ describe("hana-ddic-gen: DDIC from the real DD03L for the build", () => {
     }
   });
 
+  // CRITIC-929 SHOULD 1: the live read hands TABCLASS/SQLTAB to the shared
+  // writer, the dump path's equality -- --tables on an append or a view
+  // used to write TABCLASS TRANSP with a DD09L, silently.
+  it("--tables writes an APPEND and a VIEW with the TABCLASS the DD02L row carries", async () => {
+    ROWS.DD02L.push(
+      {TABNAME: "ZOSD_H3_APND", TABCLASS: "APPEND", CLIDEP: "", SQLTAB: "ZOSD_H3_HEAD"},
+      {TABNAME: "ZOSD_H3_VIEW", TABCLASS: "VIEW", CLIDEP: ""});
+    ROWS.DD03L.push(
+      {TABNAME: "ZOSD_H3_APND", POSITION: "1", FIELDNAME: "ZOSD_H3_AP_F", KEYFLAG: "", ROLLNAME: "", DATATYPE: "CHAR", LENG: "4", DECIMALS: "0", INTTYPE: "C", INTLEN: "000008", NOTNULL: ""},
+      {TABNAME: "ZOSD_H3_VIEW", POSITION: "1", FIELDNAME: "ZOSD_H3_V_KEY", KEYFLAG: "X", ROLLNAME: "", DATATYPE: "CHAR", LENG: "4", DECIMALS: "0", INTTYPE: "C", INTLEN: "000008", NOTNULL: ""},
+      {TABNAME: "ZOSD_H3_VIEW", POSITION: "2", FIELDNAME: "ZOSD_H3_V_TXT", KEYFLAG: "", ROLLNAME: "", DATATYPE: "CHAR", LENG: "30", DECIMALS: "0", INTTYPE: "C", INTLEN: "000060", NOTNULL: ""});
+    fakeHdb();
+    const out = mkdtempSync(join(tmpdir(), "hana-ddic-gen-tab-"));
+    process.env.OSD_CLIENT = "001";
+    let code;
+    try {
+      code = await run(["--tables", "ZOSD_H3_APND,ZOSD_H3_VIEW", "--out", out]);
+    } finally {
+      delete process.env.OSD_CLIENT;
+    }
+    try {
+      expect(code, "the run is clean").to.equal(0);
+      const append = readFileSync(join(out, "zosd_h3_apnd.tabl.xml"), "utf8");
+      expect(append).to.include(`<TABCLASS>APPEND</TABCLASS>`);
+      expect(append).to.include(`<SQLTAB>ZOSD_H3_HEAD</SQLTAB>`);
+      expect(append).to.not.include(`<DD09L>`);
+      const view = readFileSync(join(out, "zosd_h3_view.tabl.xml"), "utf8");
+      expect(view).to.include(`<TABCLASS>VIEW</TABCLASS>`);
+      expect(view).to.not.include(`<DD09L>`);
+      expect(view).to.not.include(`<CLIDEP>`);
+    } finally {
+      rmSync(out, {recursive: true, force: true});
+    }
+  });
+
   it("gen/hana-ddic is an input the hand-written src/ shadows, and the gen walk does not swallow it", () => {
     // the layering decision of H3 A, held as a test: gen/hana-ddic goes FIRST
     // in input_folder, so a hand-written src/**/<same>.tabl.xml -- a later
@@ -424,6 +459,29 @@ describe("hana-ddic-gen: DDIC from the dump's DD* tables", () => {
     try {
       expect(error?.message ?? "(no refusal)").to.include("ZOSD_H5_POOLX");
       expect(error?.message ?? "(no refusal)").to.include("POOL");
+    } finally {
+      rmSync(dump, {recursive: true, force: true});
+    }
+  });
+
+  // CRITIC-929 MUST 1 (b): a raw duplicate -- two of a table's own DD03L
+  // rows carrying the same FIELDNAME -- is refused at generation, naming
+  // table and field, where it used to be written twice and die in
+  // cds2ddic later.
+  it("refuses a TABL whose field list repeats a FIELDNAME, naming table and field", async () => {
+    const dump = dumpFixture();
+    writeFileSync(join(dump, "tables", "DD03L.jsonl"),
+      readFileSync(join(dump, "tables", "DD03L.jsonl"), "utf8") +
+      JSON.stringify({TABNAME: "ZOSD_H5_STRUCT", POSITION: "3", FIELDNAME: "ZOSD_H5_NAME", KEYFLAG: "", ROLLNAME: "", COMPTYPE: "E", DATATYPE: "CHAR", LENG: "30", DECIMALS: "0", INTTYPE: "C", INTLEN: "000060", NOTNULL: "", ADMINFIELD: "0", AS4LOCAL: "A", AS4VERS: "0000"}) + "\n");
+    let error;
+    try {
+      await run(["--from-dump", dump, "--out", join(dump, "out")]);
+    } catch (thrown) {
+      error = thrown;
+    }
+    try {
+      expect(error?.message ?? "(no refusal)", "the table").to.include("ZOSD_H5_STRUCT");
+      expect(error?.message ?? "(no refusal)", "the field").to.include("ZOSD_H5_NAME");
     } finally {
       rmSync(dump, {recursive: true, force: true});
     }
