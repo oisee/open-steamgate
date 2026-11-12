@@ -26,7 +26,7 @@ import {activeSystem, layerDir, logicalSystemPath, matchesSourcePath} from "./os
 // log.
 import {readFileSync, readdirSync, statSync, existsSync} from "node:fs";
 import {basename, join, resolve} from "node:path";
-import {inputFoldersOf} from "./osd-packs.mjs";
+import {expandedFolders, inputFoldersOf} from "./osd-packs.mjs";
 import {runsAs} from "./osd-main.mjs";
 
 // The tree this file lives in, resolved on FIRST USE rather than at module
@@ -77,7 +77,10 @@ export function objectOf(filename) {
 // every file of a folder that belongs to an object, the paths relative to
 // the base and written with forward slashes, the way the transpiler globs
 // them. A package file (package.devc.xml) belongs to its folder rather than
-// to a name, so it is no object here and never a duplicate.
+// to a name, so it is no object here and never a duplicate. A repository's
+// .abapgit.xml names the repository, not an object (H4: every gen/hana-src
+// layer is an abapGit repository); objectOf would read it as an object with
+// an empty name.
 // the trace sidecar of a web page (Component.js.trace.json, manifest.json.trace.json):
 // the name has three parts and reads like an object, and two generated apps in one
 // input both have one (a set's run cockpit and its Set app, DSL L3 slice 6a); a page
@@ -95,7 +98,7 @@ export function filesIn(base, folder, nested = []) {
       if (statSync(resolve(base, path)).isDirectory()) {
         if (skip.has(path)) continue;
         walk(path);
-      } else if (/\.devc\.xml$/i.test(entry) === false && WEB_SIDECAR.test(entry) === false) {
+      } else if (/\.devc\.xml$/i.test(entry) === false && /\.abapgit\.xml$/i.test(entry) === false && WEB_SIDECAR.test(entry) === false) {
         const object = objectOf(entry);
         if (object !== undefined) {
           out.push({file: path, name: entry, object});
@@ -141,7 +144,8 @@ export function layers(base, config = JSON.parse(readFileSync(resolve(base, "aba
   // The store already resolved its roots. Validate user settings, then use
   // exactly those roots without rediscovering packs, overlays or $TMP.
   if (discoveryOnly) activeSystem(base, env);
-  const folders = discoveryOnly ? [config.input_folder ?? config.input_folders ?? []].flat()
+  const folders = discoveryOnly
+    ? expandedFolders([config.input_folder ?? config.input_folders ?? []].flat(), base)
     : inputFoldersOf(base, config.input_folder === undefined ? {input_folder: config.input_folders} : config, env);
   const byFolder = folders.map((folder) => ({folder, files: filesIn(base, folder, folders.filter((f) => f !== folder))}));
   // the same file name twice inside one folder: no order decides, so nothing does

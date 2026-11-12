@@ -161,9 +161,14 @@ export function rootsOf(root, env = process.env) {
   const config = loadConfig(root), system = activeSystem(root, env);
   const packs = new Map([...packRootsOf(root, env), ...userLayersOf(root, env)].map((pack) => [pack.path, pack]));
   return inputFoldersOf(root, config, env).map((path) => packs.get(path) ?? (path === TMP_FOLDER ? tmpRoot() : {
-    path, writable: path !== "gen" && path !== "gen/hana-ddic", library: false,
+    // gen/hana-src/<layer> (H4) is generated like gen/ and is no repository
+    // of this tree: never hand-writable, one package for the subtree -- the
+    // converter's layer names carry the tenant's packages, and the fallback
+    // derivation would name them after the zero-padded folder
+    path, writable: path !== "gen" && path !== "gen/hana-ddic" && !path.startsWith("gen/hana-src/"), library: false,
     ...(path === "local" || path.startsWith("local/") ? {imported: true} : {}),
-    ...(existsSync(join(root, path, ".abapgit.xml")) ? {
+    ...(path.startsWith("gen/hana-src/") ? {package: "$STG_HANA_SRC"}
+      : existsSync(join(root, path, ".abapgit.xml")) ? {
       abapgit: repositoryConfig(join(root, path)),
       package: rootPackage(join(root, path), "$OSD_" + packageWord(basename(path))),
     } : {}),

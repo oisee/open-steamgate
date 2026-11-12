@@ -711,8 +711,8 @@
    "reason": "conditional delete moved to vsp (#320)"
   },
   "tools/osd-store.mjs": {
-   "lines": 1669,
-   "reason": "H3, 2026-11-11: eight lines. gen/hana-ddic is generated, not hand-written: ROOT_PACKAGES names its package and rootsOf keeps it non-writable like gen/, and build() hands walkStoreFiles the set of root paths to skip so a folder that is an input of its own (gen/hana-ddic inside gen) is indexed once, as its own layer -- the same nested-input rule the build's filesIn and the transpiler's listFiles got."
+   "lines": 1674,
+   "reason": "H3, 2026-11-11: eight lines. gen/hana-ddic is generated, not hand-written: ROOT_PACKAGES names its package and rootsOf keeps it non-writable like gen/, and build() hands walkStoreFiles the set of root paths to skip so a folder that is an input of its own (gen/hana-ddic inside gen) is indexed once, as its own layer -- the same nested-input rule the build's filesIn and the transpiler's listFiles got. H4, 2026-11-12: five lines. gen/hana-src/<layer> is generated like gen/ too: rootsOf keeps every child non-writable and pins one package ($STG_HANA_SRC) for the subtree -- the converter's layer names carry the tenant's packages, and the fallback derivation would name them after the zero-padded folder."
   },
   "tools/segw-gen.mjs": {
    "lines": 1845,
