@@ -122,7 +122,7 @@
   "test/hana-existing-schema.mjs": 0.482,
   "test/hana-readonly.mjs": 0.492,
   "test/hana-shadow-schema.mjs": 0.504,
-  "test/hana-src-gen.mjs": 0.235,
+  "test/hana-src-gen.mjs": 8.075,
   "test/http-case.mjs": 0.872451756,
   "test/http-codelens.mjs": 1.026075328,
   "test/ir-host-relation.mjs": 1.813493005,
