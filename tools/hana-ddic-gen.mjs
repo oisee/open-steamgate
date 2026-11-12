@@ -8,7 +8,7 @@
 //
 //   node tools/hana-ddic-gen.mjs --tables <A,B,C> [--out <dir>]
 //   node tools/hana-ddic-gen.mjs --from-build [--out <dir>]
-//   node tools/hana-ddic-gen.mjs --from-dump <dir> [--check] [--out <dir>]
+//   node tools/hana-ddic-gen.mjs --from-dump <dir> [--names A,B,C] [--check] [--out <dir>]
 //
 //   --tables A,B,C   read these tables from the configured schema
 //   --from-build     find them yourself: run the transpile's validation over
@@ -31,6 +31,11 @@
 //                    folds and trims on its way out. Search helps (DD30L-
 //                    DD33L) and messages are not in --ddic and are reported;
 //                    DD40L rows are counted, not written.
+//   --names A,B,C   with --from-dump: write only these objects (H5c round
+//                    7's per-name fill -- a name the dumps resolved that the
+//                    converter's TADIR selection skipped); a name the dump's
+//                    rows do not carry writes nothing and still exits 0.
+//                    --check refuses it: the check compares the whole plan.
 //   --check          compare an existing --out with what --from-dump would
 //                    write; exit 1 on drift (the live read has no plan to
 //                    compare against, so --check refuses it)
@@ -163,8 +168,10 @@ export function readDumpDdic(dir) {
  *  instead of per query; the TABL header's DDLANGUAGE carries that language
  *  too, TABCLASS APPEND carries the SQLTAB target its DD02L row names,
  *  POOL and CLUSTER refuse the run, and the summary line says what a VIEW
- *  became and where its reads stand (H5d). */
-export function dumpGeneration(dd) {
+ *  became and where its reads stand (H5d). options.names -- a Set of
+ *  upper-case object names -- writes only those objects, the loop's
+ *  per-name fill (H5c round 7). */
+export function dumpGeneration(dd, options = {}) {
   const elements = new Map(dd.dd04l.map((row) => [String(row.rollname ?? "").toUpperCase(), row]));
   const domains = new Map(dd.dd01l.map((row) => [String(row.domname ?? "").toUpperCase(), row]));
   const includes = new Map();
@@ -184,8 +191,10 @@ export function dumpGeneration(dd) {
     String(a[key] ?? "").localeCompare(String(b[key] ?? "")));
   const files = new Map();
   const counts = {tabl: 0, dtel: 0, doma: 0, view: 0};
+  const wanted = (name) => options.names === undefined || options.names.has(name) === true;
   for (const head of byName(dd.dd02l, "tabname")) {
     const name = String(head.tabname ?? "").toUpperCase();
+    if (wanted(name) === false) continue;
     files.set(abapGitFileName(name, "tabl"), tablXml({
       name,
       text: textOf(dd.dd02t, "tabname", name, head.masterlang),
@@ -200,6 +209,7 @@ export function dumpGeneration(dd) {
   }
   for (const row of byName(dd.dd04l, "rollname")) {
     const name = String(row.rollname ?? "").toUpperCase();
+    if (wanted(name) === false) continue;
     files.set(abapGitFileName(name, "dtel"), dtelXml({
       name, row,
       trow: trowOf(dd.dd04t, "rollname", name, row.dtelmaster),
@@ -209,6 +219,7 @@ export function dumpGeneration(dd) {
   }
   for (const row of byName(dd.dd01l, "domname")) {
     const name = String(row.domname ?? "").toUpperCase();
+    if (wanted(name) === false) continue;
     files.set(abapGitFileName(name, "doma"), domaXml({
       name, row,
       text: textOf(dd.dd01t, "domname", name, row.dommaster),
@@ -261,17 +272,26 @@ export async function run(args = process.argv.slice(2)) {
   const tables = take(args, "--tables");
   const fromBuild = has(args, "--from-build");
   const dump = take(args, "--from-dump");
+  const selectNames = take(args, "--names");
   const check = has(args, "--check");
   if (args.length > 0) throw new Error(`unknown option ${args.find((a) => a.startsWith("--")) ?? args[0]}`);
   if (dump !== undefined && (tables !== undefined || fromBuild === true)) {
     throw new Error("hana-ddic-gen: choose --from-dump or the live read (--tables/--from-build), not both");
+  }
+  if (selectNames !== undefined && dump === undefined) {
+    throw new Error("hana-ddic-gen: --names selects objects of --from-dump; the live read has no --names");
+  }
+  if (selectNames !== undefined && check === true) {
+    throw new Error("hana-ddic-gen: --check compares the whole dump plan; --names writes a subset");
   }
   if (check === true && dump === undefined) {
     throw new Error("hana-ddic-gen: --check compares what --from-dump would write; the live read has no plan to compare against");
   }
 
   if (dump !== undefined) {
-    const {files, counts, notCovered} = dumpGeneration(readDumpDdic(dump));
+    const names = selectNames === undefined ? undefined
+      : new Set(selectNames.split(",").map((n) => n.trim().toUpperCase()).filter(Boolean));
+    const {files, counts, notCovered} = dumpGeneration(readDumpDdic(dump), {names});
     if (check === true) {
       const drift = driftOf(out, files);
       if (drift.length > 0) {

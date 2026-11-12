@@ -28,6 +28,14 @@
 //   hana-ddic-gen --from-dump is skipped -- one log line says so, and the
 //   cross-check against the layers is a follow-up; without DDIC XML in the
 //   layers (older converter output) the DDIC merge runs as before.
+// - the writer of record is per NAME since round 7: a DDIC name the dumps
+//   RESOLVED (manifest.closure.resolved per kind, accumulated in the loop's
+//   state.json) without an island XML is written by hana-ddic-gen
+//   --from-dump --names, exactly those names, into gen/hana-ddic -- where
+//   the converter's file wins where it wrote one (gen/hana-src layers
+//   later, and the later folder wins). TTYP and SHLP stay unwritten (no
+//   DD40L writer exists in this tree); their hole stays visible on the
+//   iteration line's resolved-vs-written counts.
 import {copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {spawnSync} from "node:child_process";
 import {fileURLToPath} from "node:url";
@@ -36,6 +44,16 @@ import {scriptCommandIn, toolCommandIn} from "./osd-host.mjs";
 import {parseFindings} from "./hana-closure.mjs";
 
 const TOOLS = fileURLToPath(new URL(".", import.meta.url));
+
+// the island's test-code rule (H5c round 7, the same rule
+// tools/hana-src-gen.mjs stages by): a test-classes include (any object's
+// *.testclasses.abap) and a *_TEST class are not island content -- the
+// dumper's --skip-test-includes keeps the closure from pulling them, and a
+// dump that carries them anyway does not stage them. The object count
+// applies it too, so a state.json written by an iterator that staged test
+// classes does not read as a shrink on the rule's first merge.
+const TEST_CODE = (name) =>
+  /\.testclasses\.abap$/i.test(name) === true || /^[^.]*_test\.clas\./i.test(name) === true;
 
 /** the island's objects, counted: classes and interfaces off the
  *  gen/hana-src class files (one object each, though a converter layer
@@ -61,6 +79,7 @@ export function islandObjectCount(root) {
     }
   };
   walk(join(root, "gen", "hana-src"), (name) => {
+    if (TEST_CODE(name) === true) return;
     const clas = /^([^/]+)\.clas\.abap$/.exec(name);
     if (clas !== null) return void names.clas.add(clas[1]);
     const intf = /^([^/]+)\.intf\.abap$/.exec(name);
@@ -112,6 +131,38 @@ export function layersDdicCount(layersDirs) {
   };
   for (const dir of layersDirs ?? []) walk(dir);
   return count;
+}
+
+/** the DDIC objects the island carries, per TADIR kind: the stems of
+ *  gen/hana-ddic's and gen/hana-src's *.tabl/.dtel/.doma/.ttyp.xml -- the
+ *  converter's layer files included, which is where its writer-of-record
+ *  output lives. The file stem back to the object name is abapGitFileName's
+ *  one rule read backwards (the namespace escaped as #ns#). The per-name
+ *  fill's who-is-missing and the iteration line's resolved-vs-written
+ *  counts. Pure. */
+export function ddicWritten(root) {
+  const names = {TABL: new Set(), DTEL: new Set(), DOMA: new Set(), TTYP: new Set()};
+  const walk = (dir) => {
+    let entries;
+    try {
+      entries = readdirSync(dir, {withFileTypes: true});
+    } catch (error) {
+      if (error.code === "ENOENT") return;
+      throw error;
+    }
+    for (const entry of entries) {
+      if (entry.isDirectory()) walk(join(dir, entry.name));
+      else {
+        const ddic = /^([^.]+)\.(tabl|dtel|doma|ttyp)\.xml$/.exec(entry.name);
+        if (ddic !== null) {
+          names[ddic[2].toUpperCase()].add(ddic[1].replace(/^#([^#]+)#/, "/$1/").toUpperCase());
+        }
+      }
+    }
+  };
+  walk(join(root, "gen", "hana-src"));
+  walk(join(root, "gen", "hana-ddic"));
+  return names;
 }
 
 /** one dump into its layers dir: the converter's --out must be empty (it
@@ -236,8 +287,10 @@ function filteredDump(root, dump, without) {
  *  filtered copy of the dump (the refusal leaves when a dump the merge
  *  handled carries the name again -- the generator wrote it at last). A
  *  tool that does not know --from-dump (PR #926, merged) is refused by its
- *  own "unknown option", and the message says what it needs. */
-export function mergeInputs(root, dump, layersDirs, env, say) {
+ *  own "unknown option", and the message says what it needs. fill (round 7)
+ *  carries the resolved DDIC names and the dumps newest-first for the
+ *  per-name fill that runs after the steps. */
+export function mergeInputs(root, dump, layersDirs, env, say, fill = undefined) {
   const layersDdic = layersDdicCount(layersDirs);
   const steps = [
     ...(layersDdic > 0 ? [] : [["hana-ddic-gen.mjs", ["--from-dump", dump, "--out", join(root, "gen", "hana-ddic")]]]),
@@ -273,5 +326,69 @@ export function mergeInputs(root, dump, layersDirs, env, say) {
       stepDump = filteredDump(root, dump, [...refused.keys()]);
     }
   }
-  return {refused: [...refused.values()]};
+  // the per-name fill (round 7): after the steps, so a step the layers let
+  // run has written what it has and the fill writes only the rest
+  const fillRefused = fill === undefined ? [] : ddicFill({root, env, say, resolved: fill.resolved, dumps: fill.dumps});
+  return {refused: [...refused.values(), ...fillRefused]};
+}
+
+// the per-name fill (H5c round 7): the dumps RESOLVED a DDIC name -- the
+// dictionary HAS it -- but the converter's TADIR package selection did not
+// write it, and with the converter as the writer of record the loop skips
+// the dump's own DDIC merge. The writer of record is per NAME, not per run:
+// a resolved .tabl/.dtel/.doma name without an island XML is written by
+// hana-ddic-gen --from-dump --names for exactly those names, into
+// gen/hana-ddic (the converter's file wins where it wrote one: gen/hana-src
+// layers later, and the later folder wins). dumps is newest-first; a name a
+// dump's DD* rows do not carry stays for the older ones; a TABCLASS refusal
+// drops the name (it is the merge-refusal gap it already is) and the fill
+// goes on. Returns the refusals it met.
+function ddicFill({root, env, say, resolved, dumps}) {
+  const have = ddicWritten(root);
+  const left = new Map(); // name -> the kind it resolved under
+  const perKind = [];
+  for (const kind of ["TABL", "DTEL", "DOMA"]) {
+    const missing = (resolved[kind] ?? []).filter((n) => have[kind].has(n) === false);
+    if (missing.length > 0) perKind.push(`${kind} ${missing.length}`);
+    for (const name of missing) left.set(name, kind);
+  }
+  if (left.size === 0) return [];
+  say(`ddic fill: ${left.size} resolved DDIC name(s) without an island XML (${perKind.join(", ")}) -- hana-ddic-gen --from-dump --names writes exactly these; where the converter wrote one, its file wins`);
+  const refused = new Map();
+  for (const dump of dumps) {
+    if (left.size === 0) break;
+    for (let attempt = 0; attempt < 64 && left.size > 0; attempt++) {
+      const names = [...left.keys()].sort().join(",");
+      const [command, ...args] = toolCommandIn(env, join(TOOLS, "hana-ddic-gen.mjs"),
+        ["--from-dump", dump, "--names", names, "--out", join(root, "gen", "hana-ddic")]);
+      say(`ddic fill: hana-ddic-gen --from-dump ${dump} --names ${names}`);
+      const child = spawnSync(command, args, {cwd: root, env, stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64 * 1024 * 1024});
+      if (child.status === 0) {
+        const now = ddicWritten(root);
+        for (const [name, kind] of [...left]) {
+          if (now[kind].has(name) === true) left.delete(name);
+        }
+        break;
+      }
+      const tail = [child.stdout, child.stderr].filter(Boolean).join("\n").slice(-2000);
+      const fresh = [...tail.matchAll(REFUSAL)]
+        .map((m) => ({name: m[1].trim().toUpperCase(), tabclass: m[2].trim().toUpperCase(), line: m[0]}))
+        .filter((r) => refused.has(r.name) === false);
+      if (fresh.length === 0 || attempt >= 64) {
+        const hint = /unknown option/.test(tail)
+          ? `\nhana-closure: hana-ddic-gen refused --names: this hana-ddic-gen predates the per-name fill -- the tree needs updating`
+          : "";
+        throw new Error(`hana-closure: the DDIC fill exited ${child.status ?? "on a signal"} for ${dump}${tail === "" ? "" : `:\n${tail}`}${hint}`);
+      }
+      for (const r of fresh) {
+        refused.set(r.name, {name: r.name, kind: "TABL", reason: `unsupported TABCLASS ${r.tabclass}`, first_finding: r.line});
+        say(`ddic fill: hana-ddic-gen refuses ${r.name} (unsupported TABCLASS ${r.tabclass}) -- recorded as a gap, the fill continues without it`);
+        left.delete(r.name);
+      }
+    }
+  }
+  if (left.size > 0) {
+    say(`ddic fill: ${left.size} name(s) still without an XML: no dump's DD* rows carry them (TTYP and SHLP are not written by --from-dump at all)`);
+  }
+  return [...refused.values()];
 }

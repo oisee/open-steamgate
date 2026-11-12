@@ -866,6 +866,23 @@ DDIC merge runs as before. The cross-check — `hana-ddic-gen --from-dump
 --against <layers>`, comparing field lists and types, reporting
 divergences and never refusing — is a follow-up, not built.
 
+The writer of record is per **name**, not per run (2026-11-12, round 7).
+Bed run 10 made the hole visible: the dump's closure answered 86 DOMA /
+156 DTEL / 25 TABL as resolved, and the converter — writing only the
+objects of the TADIR packages its selection covers — produced 10 `dtel`
+and 7 `tabl`. So after the merge the loop reads every dump's
+`closure.resolved` per kind (accumulated in `state.json` across the walk)
+and checks each resolved `.tabl`/`.dtel`/`.doma` name against the island's
+XMLs (`gen/hana-ddic`'s and the layers' together); the names without one
+are written by `hana-ddic-gen --from-dump --names <exactly those names>`
+into `gen/hana-ddic`, newest dump first until every name has its rows.
+Where the converter did write one, its file wins: `gen/hana-src` layers
+after `gen/hana-ddic`, and the later folder wins. TTYP and SHLP are not
+written by `--from-dump` (no DD40L writer exists in this tree), so their
+resolved-without-XML names stay unwritten — and visible, on the iteration
+line's counts (below). A TABCLASS the dump path refuses during the fill is
+the merge-refusal gap it already is, and the fill continues without it.
+
 Only the **island** is classified. The service lives in `gen/hana-src/*`
 and `gen/hana-ddic/*`; findings whose file lies in `src/`, `packs/` or
 another `gen/` folder are the tree's own business and never enter a
@@ -877,6 +894,19 @@ finding but a basename set collected from the island folders
 (`gen/hana-src/**`, `gen/hana-ddic/*`); a basename both an island layer and
 `src/` carry is the island's, the later layer wins the build anyway. The
 findings outside the island are reported once per iteration, as a count.
+
+The island carries **no test code** (2026-11-12, round 7). Bed run 12
+pulled SAP's unit-test assertion class through a facade's test include and
+stubbed six of its methods, and 157 of its 362 island findings sat in
+`*.clas.testclasses.abap`. The dumper's `--skip-test-includes` (round 7,
+the dumper's own flag, off by default there) keeps CCAU test includes out
+of the closure — it rides on every dumper call, the by-hand command
+included — and `hana-src-gen` stages neither a `*.testclasses.abap`
+include nor a `*_TEST` class, so a dump that carries them anyway does not
+bring them into `gen/hana-src`; the object count applies the same rule, so
+a `state.json` written by an older iterator does not read as a shrink on
+the rule's first merge. Findings in test includes are not island
+findings.
 
 A merge tool's refusal of one object does not stop the loop either. H5a's
 TABCLASS guard makes `hana-ddic-gen` exit 2 on the first object it refuses
@@ -918,8 +948,15 @@ Two shapes arrived with bed run 5 and are classified since: a bare
 `CL_`/`CX_` prefix, INTF for `IF_`/`ZIF_`, else the kind-less dictionary
 triple (the live case: four `CX_* unknown` findings inside an
 `.intf.abap` file) — and `check_syntax, Friend class X does not exist`
-(CLAS). `Super class "X" not found or contains errors` is still
-unclassified and still reported, not lost.
+(CLAS). Bed run 10's shapes are classified since round 7:
+`Super class "X" not found or contains errors` asks the class (CLAS), and
+three cascades of an unknown type or class are skipped and counted —
+`Definition for "X" not found in scope(AttributeName)` (97 findings in
+the run), `Method parameter type not compatible` (41) and `N cannot be
+instantiated, class is defined as protected` (3): the name in them is not
+the thing that is missing. Bed run 12 added `Target type unknown, <name>`
+— the kind-less dictionary triple; it was a test include's local type,
+moot since the island stopped staging test code, and classified anyway.
 
 De-duplicated, the 1,144 name **49 objects** — one iteration's ask. The
 `contains unknown: X not found` shapes carry no dictionary kind (16 of the
@@ -946,7 +983,12 @@ names `closure.missing` reported, the merge refusals recorded as gaps, and
 the round still pending a dump),
 `closure-request.json`, `closure-gaps.json` — and they are tenant content
 like the layers: `gen/hana-closure` is on the private gen/ list. The dumps
-are not: they go to gitignored `.local/hana-closure/dump-<NNN>/`.
+are not: they go to gitignored `.local/hana-closure/dump-<NNN>/`. The
+iteration line carries the per-kind gap counts (`gaps by kind: TABL 1,
+DTEL 2`) and the resolved-vs-written DDIC counts (`DDIC resolved/written:
+TABL 25/25, DTEL 156/153`), so a writer-of-record hole — resolved names
+without an island XML — is visible on every iteration line, before
+anything asks.
 
 The dumper runs only where its credentials are, with the argv its CLI
 refuses to run without:
@@ -955,7 +997,7 @@ refuses to run without:
         --user <HANA_USER> --schema <HANA_SCHEMA> \
         --provenance "hana-closure iteration <n>: the closure request's names" \
         --ddic-closure gen/hana-closure/closure-request.json \
-        --out .local/hana-closure/dump-<NNN> --allow-in-repo
+        --out .local/hana-closure/dump-<NNN> --skip-test-includes --allow-in-repo
 
 `OSD_HANA_DUMPER` names the binary and `OSD_HANA_DUMP_ENV` an env file with
 the connection (`KEY=VALUE` lines, `#` comments, `export ` allowed):
@@ -1014,8 +1056,12 @@ schema-1 request, the refusal of an `--out` inside a git working tree
 unless `--allow-in-repo`, the password from `VSP_HANA_PASSWORD` only —
 spawned by path, with the argv, the request file, the dump directory, the
 provenance and the child's environment all asserted (the password never on
-the argv). No HANA is reachable from CI; the real iteration is dell's,
-on the bed.
+the argv). Round 7 adds `--skip-test-includes` to that argv and the
+per-name fill's `--names` argv beside it; the fill scenario stages a layer
+with one converter-written table and a dump that resolves a second, and
+the no-test-code rule is held in the fake host's own staging as well as in
+`test/hana-src-gen.mjs` against the real tool. No HANA is reachable from
+CI; the real iteration is dell's, on the bed.
 
 ## Lazy activation: stubbing what the island cannot close
 
