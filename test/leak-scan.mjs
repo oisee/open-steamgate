@@ -7,6 +7,33 @@ import {spawnSync} from "node:child_process";
 import {publicationFindings, homePaths} from '../tools/osd-leak-scan.mjs';
 
 describe("leak scanner", () => {
+  it("private-layer mode drops only the two SAP corpus categories", () => {
+    const root = mkdtempSync(join(tmpdir(), "leak-private-"));
+    try {
+      const list = join(root, "identifiers.json"), file = join(root, "content.txt");
+      writeFileSync(list, JSON.stringify({
+        "корпус SAP (A4H, только локально)": ["Z_SYNTHETIC_CORPUS_OBJECT"],
+        "SEGW-образцы SAP (только локально)": ["Z_SYNTHETIC_SEGW_OBJECT"],
+        "тема скрининга (политика 2026-10-01, только приватно)": ["synthetic-topic-value-one"],
+        "закрытый корпус и смежное (политика 2026-10-01, заполнено osg-research по поручению Alice)": ["synthetic-closed-project"],
+        host: ["local-test-host"], user: ["synthetic-logon-user"], credential: ["test-token-secret"],
+      }));
+      const run = content => {
+        writeFileSync(file, content);
+        return spawnSync(process.execPath, ["tools/osd-leak-scan.mjs", root, "--identifiers", list, "--private-layer", "--redact", "--paths", file], {encoding: "utf8"});
+      };
+      assert.equal(run("Z_SYNTHETIC_CORPUS_OBJECT").status, 0);
+      assert.equal(run("Z_SYNTHETIC_SEGW_OBJECT").status, 0);
+      for (const content of ["synthetic-topic-value-one", "synthetic-closed-project", "local-test-host", "synthetic-logon-user", "test-token-secret", [192, 168, 1, 42].join("."), ["c0", "a8", "01", "2a", "112233445566778899aabbcc"].join("")]) {
+        assert.equal(run(content).status, 1, content);
+      }
+      writeFileSync(list, JSON.stringify({host: ["local-test-host"]}));
+      const missing = run("clean");
+      assert.equal(missing.status, 2);
+      assert.match(missing.stderr, /requires a SAP corpus category/);
+      assert.throws(() => publicationFindings(root, [file], list, true), /requires a SAP corpus category/);
+    } finally { rmSync(root, {recursive: true, force: true}); }
+  });
   it('supports publicationFindings as a library with explicit or discovered identifiers', () => {
     const root = mkdtempSync(join(tmpdir(), 'leak-library-'));
     try {

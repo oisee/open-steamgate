@@ -3,6 +3,7 @@ import {basename, join, resolve} from "node:path";
 import {approvedLicenseAssumption} from "./license-assumptions.mjs";
 import {imagePacks} from "./packs.mjs";
 import {generationHanaSrcProblem, privateGenFolder, segwPrivateGen} from "../../tools/osd-tmp.mjs";
+import {writePublicArtefact} from "../../tools/osd-public-tree.mjs";
 
 const out = resolve(process.argv[2] ?? "/image");
 if (existsSync(out)) throw new Error(`Output must not exist: ${out}`);
@@ -130,3 +131,4 @@ inventory(join(out, "node_modules"));
 writeFileSync(join(out, "image-licenses.json"), JSON.stringify(report, null, 2) + "\n");
 writeFileSync(join(out, "release.json"), JSON.stringify({commit: process.env.OSD_IMAGE_REVISION ?? "local", builtAt: new Date().toISOString()}, null, 2) + "\n");
 console.log(`Image tree assembled; ${report.blockers.length} license items need review; ${report.assumptions.length} declared assumption(s).`);
+writePublicArtefact(out, process.cwd());
