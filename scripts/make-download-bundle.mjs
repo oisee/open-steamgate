@@ -7,7 +7,7 @@ import {chmodSync, cpSync, existsSync, mkdirSync, readFileSync, readlinkSync, st
 import {basename, dirname, join, relative, resolve} from "node:path";
 import {libraryFiles} from "../tools/osd-inputs.mjs";
 import {unfetched, describeUnfetched} from "../tools/osd-fetch.mjs";
-import {generationHanaSrcProblem, privateGenFolder} from "../tools/osd-tmp.mjs";
+import {generationHanaSrcProblem, privateGenFolder, segwPrivateGen} from "../tools/osd-tmp.mjs";
 import {runsAs} from "../tools/osd-main.mjs";
 
 // gen/hana-src and gen/hana-ddic (H4) are the tenant's content: the staged
@@ -77,7 +77,9 @@ export async function main(argv = process.argv.slice(2), {root = resolve(import.
   for (const item of content) {
     if (existsSync(join(root, item))) {
       cpSync(join(root, item), join(stage, item), {recursive: true, dereference: true,
-        filter: (path) => basename(path) !== "e2e" && !path.endsWith(".go") && !privateGenFolder(relative(root, path))});
+        filter: (path) => basename(path) !== "e2e" && !path.endsWith(".go") && !privateGenFolder(relative(root, path)) &&
+          // and gen/segw while its manifest names a dump (H5b, tools/osd-tmp.mjs)
+          !segwPrivateGen(relative(root, path), root)});
     }
   }
   for (const {files} of libraryFiles(root)) {
