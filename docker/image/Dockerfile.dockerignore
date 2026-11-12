@@ -21,6 +21,7 @@ packs/*/.osd-fetched.json
 # private: named explicitly so a widened allowlist cannot carry them in
 gen/hana-src
 gen/hana-ddic
+gen/hana-closure
 gen/hana-segw
 **/.git
 **/.env*

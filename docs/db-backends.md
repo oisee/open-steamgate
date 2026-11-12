@@ -598,13 +598,14 @@ release the image copies"). The refusal reads the generation's own record
 of what it was built from (`manifest.inputs.folders`, the expanded folder
 list tools/osd-build.mjs writes), so it is decided by what the build read,
 not by what the tree holds now; the helper is `generationHanaSrcProblem`
-in tools/osd-tmp.mjs, beside the `$TMP` one, and its one list of the two
+in tools/osd-tmp.mjs, beside the `$TMP` one, and its one list of the
 private prefixes is also what every publisher's gen/ copy filter drops
 (docker/image/assemble.mjs:57, scripts/make-download-bundle.mjs:79,
-scripts/make-release.mjs:57), so a stale `gen/hana-src` or `gen/hana-ddic`
-on disk never rides along with a generation whose record is clean. The
-build context is covered separately by
-docker/image/Dockerfile.dockerignore, which names both folders.
+scripts/make-release.mjs:57), so a stale `gen/hana-src`, `gen/hana-ddic`
+or `gen/hana-closure` (the closure walk's state, request and gaps files,
+which carry tenant object names) on disk never rides along with a
+generation whose record is clean. The build context is covered separately
+by docker/image/Dockerfile.dockerignore, which names them.
 Publishers that stage `gen/` never are safe by construction: the VSIX seed
 (scripts/build-vsix.mjs:353-354 stages src, webapp, tools, data and four
 files; the binary's seed tars the same staging), the OCI system publish
@@ -806,3 +807,279 @@ copy, and removing gen/hana-segw publishes again once the next build has
 rewritten the class from the XML alone. Exercised with fixtures
 (`test/hana-segw-gen.mjs`, synthetic `ZOSD_H5_*` dump tables built in a
 temp dir); no tenant content is reachable from CI.
+
+## The closure, by iteration
+
+H5a's first transpile of a real SEGW service's layer measured where the work
+is: the four classes transpile against this tree's libraries with **zero**
+`/IWBEP/` framework errors — open-abap-odata provides the contract — and the
+1,144 findings are everything else they name: the service's dependency
+closure. CLAUDE.md's Sprint-0 prediction said the closure is the long pole,
+so the closure is walked by a loop instead of measured once:
+`tools/hana-closure.mjs` iterates to a fixed point.
+
+One iteration: merge the current dump into the inputs, run the build's own
+validation over the tree — the same channel `hana-ddic-gen --from-build`
+reads, its `validationMessage` reused, not duplicated — classify every
+finding the transpiler emits, and ask the dumper for the names that are
+missing: the request file (`--ddic-closure`) carries the fresh names per
+TADIR kind, the dictionary kinds closed over transitively on the server,
+`seen` skipped. The loop repeats until a validation names nothing it has
+not already asked for — and the build itself vouches for that validation
+(the positive control, below).
+
+The merge **accumulates**. Bed run 5's finding: a `--from-dump` per dump
+REPLACED `gen/hana-src`, so from the second merge on the island held only
+the latest dump's layers — iteration 3 validated a tree without the
+service, and the fixed point was false. The island is the union of the
+seed dump and every dump so far. Each dump is converted once — the
+converter (`OSD_HANA_CONVERTER`, spawned through `scriptCommandIn` like
+every external script, its argv the converter's own contract — `<dump>
+--out <dir> --system <prefix> --allow-in-repo`, the flag because the
+layers dir sits inside the git working tree, under the untracked
+`.local/`, and the converter refuses that without it) writes
+`.local/hana-closure/layers-<NNN>/`, remembered in `state.json` — and
+`hana-src-gen` is called with ALL the
+layers dirs (`--layers`, repeatable): one folder per layer name, each
+file from the later dump that carries it (later wins per object,
+reported), folders renumbered in the flags' order. `gen/hana-ddic`
+accumulates by the tool's own write mode: `hana-ddic-gen --from-dump`
+writes per-file overlays and never clears the folder (checked on
+`feat/hana-ddic-from-dump`), so a delta dump's tables land beside the
+earlier ones. After each merge the island's object count — classes,
+interfaces, tables — is compared with the previous iteration's: the count
+rides every iteration line, and a shrink aborts the run with both counts
+instead of letting a later "fixed point" validate a tree the service has
+vanished from. Per kind since round 5: classes, interfaces and tables are
+each non-decreasing — a total that a second dump's new tables hold up
+while the classes walk away is still a lost island.
+
+The dictionary half has a writer of record since round 5: the converter
+master writes `.tabl`/`.dtel`/`.doma`/`.ttyp.xml` from the dump's DD* rows,
+and the layers carry them into the build through `hana-src-gen` alone.
+When the merged layers carry DDIC XML, the loop does **not** run
+`hana-ddic-gen --from-dump` on top of it — one log line says so — and the
+table counts read the layers' `*.tabl.xml` as much as `gen/hana-ddic`'s,
+so the shrink control does not go blind to tables with the converter as
+the writer. Without DDIC XML in the layers (older converter output) the
+DDIC merge runs as before. The cross-check — `hana-ddic-gen --from-dump
+--against <layers>`, comparing field lists and types, reporting
+divergences and never refusing — is a follow-up, not built.
+
+Only the **island** is classified. The service lives in `gen/hana-src/*`
+and `gen/hana-ddic/*`; findings whose file lies in `src/`, `packs/` or
+another `gen/` folder are the tree's own business and never enter a
+request — the first bed run asked 82 names, most of them the rap-flight
+pack's `/DMO/` views, and a closure has no business walking another
+application's tree. The validation reports **bare file names** (the
+transpiler knows the name only), so the scope is not a path prefix on the
+finding but a basename set collected from the island folders
+(`gen/hana-src/**`, `gen/hana-ddic/*`); a basename both an island layer and
+`src/` carry is the island's, the later layer wins the build anyway. The
+findings outside the island are reported once per iteration, as a count.
+
+A merge tool's refusal of one object does not stop the loop either. H5a's
+TABCLASS guard makes `hana-ddic-gen` exit 2 on the first object it refuses
+to write (`hana-ddic-map: <name>: TABCLASS APPEND is not written here` —
+an APPEND structure is real dictionary content, so it is not an error to
+meet one in a dump). The loop parses the refusal, records the object as a
+**gap** — kind TABL, reason `unsupported TABCLASS APPEND`: the dictionary
+HAS it, the generator here cannot write it, and asking cannot source it,
+so it never enters a request either — and retries the step against a
+filtered copy of the dump under `.local/hana-closure/` (`tables/DD02L.jsonl`
+minus the refused rows; the merge tools write per-file overlays, so the
+retry is safe, and the loop's own dump stays the original). The gap leaves
+when a dump the merge handled carries the name again without a refusal —
+the generator learned to write it; a delta dump that lost the name is not
+a resolution.
+
+What the transpiler's words classify as, measured on the H5a log (1,144
+findings; the names stay in the private findings log and the leak list):
+
+| shape | kind | count |
+| --- | --- | ---: |
+| `Database table or view "x" not found` | TABL | 66 |
+| `... contains unknown: X not found` (fix `lookup`) | DDIC (the kind the dumper resolves) | 249 |
+| the same, fix `lookupDataElement` | DTEL | 115 |
+| `contains unknown: X, lookupDomain` | DOMA | 27 |
+| `Contains unknown, X not found` — the error's first line | DDIC | 1 |
+| `X not found` alone, and `Loop, not a table type, X not found` | DDIC (table types) | 2 |
+| `field not part of structure x-comp` | TABL | 2 |
+| `Class x not found` | CLAS | 58 |
+| `Unknown class x` | CLAS, INTF for an `if_*` name | 55 |
+| `CATCH, unknown class CX_*` | CLAS | 46 |
+| `could not resolve top X` (fix `resolveTypeChain`) | INTF/CLAS by prefix | 139 |
+| `unable to resolve x` | INTF | 58 |
+| `parser_error ... "FUNCTION"` in a `*.fugr.*` file | FUGR — the name is read off the file | 4 |
+| cascades: `Method (or attribute) "m" not found` (101), `Not an object reference` (107), `"param" not found` with fix `findTop`/`Target` (44+8), `not a table type mt_*` (42), `not found in class or interface` (4), `methodCallChain` (8), `Component "c" not found in structure` (2), the `Type error` tails (9) | skipped — the name is not the thing that is missing | 325 |
+
+Two shapes arrived with bed run 5 and are classified since: a bare
+`unknown_types, X unknown` — the kind is the name's prefix, CLAS for a
+`CL_`/`CX_` prefix, INTF for `IF_`/`ZIF_`, else the kind-less dictionary
+triple (the live case: four `CX_* unknown` findings inside an
+`.intf.abap` file) — and `check_syntax, Friend class X does not exist`
+(CLAS). `Super class "X" not found or contains errors` is still
+unclassified and still reported, not lost.
+
+De-duplicated, the 1,144 name **49 objects** — one iteration's ask. The
+`contains unknown: X not found` shapes carry no dictionary kind (16 of the
+49), so the name is requested under TABL, DTEL **and** TTYP — SHLP too when
+the finding itself says search help — and the dumper answers what exists,
+reporting the rest in the dump manifest's `closure.missing`. That answer is
+**per kind**, so a name that exists comes back `resolved` under one kind and
+`missing` under the other two: the normal answer for a name the dictionary
+HAS, and not a gap — the gap rule is asked **and** still unresolved after
+the dump. A name the dumper answered but
+the next validation still names is a **gap** (not in the tenant, or a kind
+this route cannot source yet): `closure-gaps.json` carries the gap's kind,
+the first finding that named it and how many validation passes have named
+it (`first_finding`, `iterations_requested`), recomputed each pass, so a
+gap a later round resolves leaves the file on its own; the merge-refusal
+gaps carry a `reason` and no `iterations_requested` — they were never
+asked. An `unhandled` kind in the dump manifest's `closure` — a request
+kind the dumper's closure does not follow — gaps the name with reason
+`unhandled by the dumper's closure`, unless a kind's `missing` already
+said does-not-exist or a later round resolved the name. The loop's files sit
+under `gen/hana-closure/` — `state.json` (the iteration, the current dump,
+every name asked with its kinds, its iteration and its first finding, the
+names `closure.missing` reported, the merge refusals recorded as gaps, and
+the round still pending a dump),
+`closure-request.json`, `closure-gaps.json` — and they are tenant content
+like the layers: `gen/hana-closure` is on the private gen/ list. The dumps
+are not: they go to gitignored `.local/hana-closure/dump-<NNN>/`.
+
+The dumper runs only where its credentials are, with the argv its CLI
+refuses to run without:
+
+    $OSD_HANA_DUMPER hana dump --host <HANA_HOST> --port <HANA_PORT> \
+        --user <HANA_USER> --schema <HANA_SCHEMA> \
+        --provenance "hana-closure iteration <n>: the closure request's names" \
+        --ddic-closure gen/hana-closure/closure-request.json \
+        --out .local/hana-closure/dump-<NNN> --allow-in-repo
+
+`OSD_HANA_DUMPER` names the binary and `OSD_HANA_DUMP_ENV` an env file with
+the connection (`KEY=VALUE` lines, `#` comments, `export ` allowed):
+`HANA_HOST`, `HANA_PORT`, `HANA_USER`, `HANA_SCHEMA` become the argv flags
+the binary marks required, and `HANA_PASSWORD` becomes `VSP_HANA_PASSWORD`
+in the child's environment — the only thing the dumper reads from the
+environment, and the only secret: nothing from the env file is on the argv
+but the connection flags. The loop's own log line for the command is
+redacted — `--host <env>`, `--user <env>`, `--schema <env>`, never the
+values, because a loop log is exactly what gets pasted into a report (the
+first bed run's log carried the bed's connection); the values appear only
+in the by-hand command the loop prints when no dumper is configured, and
+in the child's environment. The request travels as a file (`--ddic-closure`,
+schema 1: `schema`, `iteration`, `generation` — the hash the merge's
+manifest carries of the dump's own manifest —, `source`,
+`requested`/`seen` under the nine upper-case TADIR kinds, and the `gaps`),
+`seen` holds every name an earlier iteration requested so the dumper skips
+it, and the dump lands in `.local/hana-closure/dump-<NNN>/` — gitignored,
+and inside the working tree, which the dumper refuses, hence
+`--allow-in-repo`. The dumper is a foreign binary — another project's, not
+a tool of this tree and not a Node script — so it is spawned by the path
+the environment names, never through `toolCommand`/`scriptCommandIn` (which
+would dispatch it through `osd gen` or put a node interpreter in front of
+it) and never `process.execPath`. Without both variables the loop stops and
+prints the command. The request is written before any dumper round: its
+names are asked from that moment (`state.json`), the round stays pending,
+and the next run picks it up — with the dumper configured it executes the
+pending round; a hand-run dump is continued with `--dump <that directory>`,
+and names still unresolved there surface as gaps, and a `--dump`
+continuation clears the pending round it supersedes (the next configured
+run must not re-execute an answered round into a directory the dumper
+refuses as non-empty). `--dry-run` writes and
+prints the request and stops; `--max-iterations <n>` bounds the dumper
+rounds of a run (default 10) and stops after writing the pending request.
+The merges' `--from-dump` is `hana-ddic-gen`'s dump mode (PR #926,
+merged); a tool without the flag is refused with a message saying so.
+
+No "fixed point" without a positive control. Bed run 4's: `npm run
+transpile` on the post-iteration tree exited 1 on a generator step with
+ZERO transpiler findings — and the loop read that as convergence. Before
+the loop declares a fixed point now, it runs the build itself
+(`tools/osd-build.mjs`, spawned like every tool) and reads its exit:
+exit 0 stands, and so does a non-zero exit whose log carries findings
+("exit 1 with findings only" — the findings are the walk's material); a
+non-zero exit with no findings aborts the run with the build's FAILED
+line.
+
+Exercised with fakes, the way CI must be (`test/hana-closure.mjs`, fixtures
+`ZOSD_H5C_*`): the loop's validate step is the transpiler's own validation
+over a scratch tree, the merge is a fake host behind `OSD_SELF` (the loop
+owns the tools' argv; the converter is a fixture script keyed by dump path,
+the positive control's build a fake-host mode), and the dumper is a
+fixture script that mimics
+the real binary's CLI contract — the required connection flags, the
+schema-1 request, the refusal of an `--out` inside a git working tree
+unless `--allow-in-repo`, the password from `VSP_HANA_PASSWORD` only —
+spawned by path, with the argv, the request file, the dump directory, the
+provenance and the child's environment all asserted (the password never on
+the argv). No HANA is reachable from CI; the real iteration is dell's,
+on the bed.
+
+## Lazy activation: stubbing what the island cannot close
+
+A class compiles as a whole or not at all. That is why the closure above
+had to close every name an island class MENTIONS: a method no request will
+ever run still keeps the whole class out of the build until its types
+exist. The iterator has a mode that stops paying that price:
+`--stub-unresolved`. After the classification and before the request, it
+takes every island class file (`gen/hana-src/**/*.clas.abap`, the locals
+includes beside them), finds the METHOD ... ENDMETHOD block each finding
+sits in — cut at abaplint's parsed positions, the way
+`tools/amdp-extract.mjs` cuts AMDP bodies, never a regex over ABAP — and
+replaces the bodies that do not resolve with one line:
+
+    RAISE EXCEPTION TYPE zcx_osd_not_activated EXPORTING missing = '<names>'.
+
+`zcx_osd_not_activated` (`src/hana/`, a `cx_no_check` subclass, so the stub
+carries no RAISING clause) answers `get_text( )` with
+`not activated here: needs <missing>` — the names, comma-joined, ~200
+characters at most. The raise is also the one signal a catch cannot
+swallow. `$batch` runs a changeset's requests inside `CATCH cx_root`
+(`zcl_stg_batch`), so a stub raise on the bed surfaces only as an error
+part — nothing on the wire says what the island still waits for. The
+constructor therefore signals the kernel itself, through a
+`WRITE '@KERNEL …'` line: a handler the host installed on
+`globalThis.osdNotActivated` receives the missing names at construction —
+before any `CATCH` can see the exception — and without a handler the
+console carries `not activated: <missing>`. Form 2 (`OSD_LAZY`, later)
+will turn the handler into a JS throw of its own. The ABAP Unit test
+beside the class proves both paths over the built module: handler
+installed (it receives the names), handler absent (the console says
+them), and a raise that is immediately `CATCH`ed (the signal already
+left — the property `$batch` cannot defeat). The stubbed source is written back into the island
+file — generated content, so rewriting in place is what the merge does
+anyway — and recorded in `gen/hana-closure/closure-stubs.json` as
+`[{file, class, method, missing, finding}]`. Findings outside any method
+body — the definition part: attributes, signatures, types, and the MPC's
+types — cannot be stubbed; their names stay in the request as today. The
+loop then builds again and stubs what the new build still cannot resolve,
+until no stubbable finding remains or `--max-stub-rounds` (default 5)
+stops the rewriting; only then is the dumper request written, for the
+names that remain. Per round the iterator says what it did per class: the
+count of stubbed methods and the generation hash.
+
+The names a stub waits for are not gaps: the service ACTIVATES without
+them, so they leave `requested` and the gaps file and travel in a new
+optional request key, `deferred: {kind: [names]}`, beside
+`requested`/`seen`. The dumper's reader reads `requested`/`seen` and
+ignores unknown keys — the file stays schema 1, and nobody asks the
+dictionary for a deferred name today. That is the point: the island grows
+only on a real miss. A request that reaches a stubbed method fails with
+`zcx_osd_not_activated`'s text — `not activated here: needs <missing>` —
+naming exactly what the method waits for. That failure is the signal to
+run the iterator again: without the flag the walk asks for everything
+(round 2's behaviour) and the dump closes the missed method's names; with
+the flag on afterwards, the method resolves, loses its stub, and the next
+build carries it for real. Without the flag at all, behaviour is round 2's,
+byte for byte.
+
+Exercised with the fixtures (`test/hana-closure.mjs`, `ZOSD_H5C_*`): one
+resolvable and one unresolvable method — only the second loses its body,
+byte-checked around the parsed block; a definition-level finding is not
+stubbed and stays in the request; `deferred` written; the loop reaches "no
+stubbable finding" and stops at the cap; mode off is round 2. The
+exception class carries its own ABAP Unit test
+(`src/hana/zcx_osd_not_activated.clas.testclasses.abap`), which asserts
+the text and the raise. No HANA is reachable from CI.
