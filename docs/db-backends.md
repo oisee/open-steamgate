@@ -648,6 +648,33 @@ TADIR kind, the dictionary kinds closed over transitively on the server,
 `seen` skipped. The loop repeats until a validation names nothing it has
 not already asked for.
 
+Only the **island** is classified. The service lives in `gen/hana-src/*`
+and `gen/hana-ddic/*`; findings whose file lies in `src/`, `packs/` or
+another `gen/` folder are the tree's own business and never enter a
+request — the first bed run asked 82 names, most of them the rap-flight
+pack's `/DMO/` views, and a closure has no business walking another
+application's tree. The validation reports **bare file names** (the
+transpiler knows the name only), so the scope is not a path prefix on the
+finding but a basename set collected from the island folders
+(`gen/hana-src/**`, `gen/hana-ddic/*`); a basename both an island layer and
+`src/` carry is the island's, the later layer wins the build anyway. The
+findings outside the island are reported once per iteration, as a count.
+
+A merge tool's refusal of one object does not stop the loop either. H5a's
+TABCLASS guard makes `hana-ddic-gen` exit 2 on the first object it refuses
+to write (`hana-ddic-map: <name>: TABCLASS APPEND is not written here` —
+an APPEND structure is real dictionary content, so it is not an error to
+meet one in a dump). The loop parses the refusal, records the object as a
+**gap** — kind TABL, reason `unsupported TABCLASS APPEND`: the dictionary
+HAS it, the generator here cannot write it, and asking cannot source it,
+so it never enters a request either — and retries the step against a
+filtered copy of the dump under `.local/hana-closure/` (`tables/DD02L.jsonl`
+minus the refused rows; the merge tools write per-file overlays, so the
+retry is safe, and the loop's own dump stays the original). The gap leaves
+when a dump the merge handled carries the name again without a refusal —
+the generator learned to write it; a delta dump that lost the name is not
+a resolution.
+
 What the transpiler's words classify as, measured on the H5a log (1,144
 findings; the names stay in the private findings log and the leak list):
 
@@ -672,16 +699,22 @@ De-duplicated, the 1,144 name **49 objects** — one iteration's ask. The
 `contains unknown: X not found` shapes carry no dictionary kind (16 of the
 49), so the name is requested under TABL, DTEL **and** TTYP — SHLP too when
 the finding itself says search help — and the dumper answers what exists,
-reporting the rest in the dump manifest's `closure.missing`, which the loop
-reads into the gaps on every continuation. A name the dumper answered but
+reporting the rest in the dump manifest's `closure.missing`. That answer is
+**per kind**, so a name that exists comes back `resolved` under one kind and
+`missing` under the other two: the normal answer for a name the dictionary
+HAS, and not a gap — the gap rule is asked **and** still unresolved after
+the dump. A name the dumper answered but
 the next validation still names is a **gap** (not in the tenant, or a kind
 this route cannot source yet): `closure-gaps.json` carries the gap's kind,
 the first finding that named it and how many validation passes have named
 it (`first_finding`, `iterations_requested`), recomputed each pass, so a
-gap a later round resolves leaves the file on its own. The loop's files sit
+gap a later round resolves leaves the file on its own; the merge-refusal
+gaps carry a `reason` and no `iterations_requested` — they were never
+asked. The loop's files sit
 under `gen/hana-closure/` — `state.json` (the iteration, the current dump,
 every name asked with its kinds, its iteration and its first finding, the
-names `closure.missing` reported, and the round still pending a dump),
+names `closure.missing` reported, the merge refusals recorded as gaps, and
+the round still pending a dump),
 `closure-request.json`, `closure-gaps.json` — and they are tenant content
 like the layers: `gen/hana-closure` is on the private gen/ list. The dumps
 are not: they go to gitignored `.local/hana-closure/dump-<NNN>/`.
@@ -701,7 +734,12 @@ the connection (`KEY=VALUE` lines, `#` comments, `export ` allowed):
 the binary marks required, and `HANA_PASSWORD` becomes `VSP_HANA_PASSWORD`
 in the child's environment — the only thing the dumper reads from the
 environment, and the only secret: nothing from the env file is on the argv
-but the connection flags. The request travels as a file (`--ddic-closure`,
+but the connection flags. The loop's own log line for the command is
+redacted — `--host <env>`, `--user <env>`, `--schema <env>`, never the
+values, because a loop log is exactly what gets pasted into a report (the
+first bed run's log carried the bed's connection); the values appear only
+in the by-hand command the loop prints when no dumper is configured, and
+in the child's environment. The request travels as a file (`--ddic-closure`,
 schema 1: `schema`, `iteration`, `generation` — the hash the merge's
 manifest carries of the dump's own manifest —, `source`,
 `requested`/`seen` under the nine upper-case TADIR kinds, and the `gaps`),

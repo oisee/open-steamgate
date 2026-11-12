@@ -45,7 +45,19 @@
 // does not know the flag is refused with a message saying so), then run the
 // build's own validation over the tree -- the same channel hana-ddic-gen
 // --from-build reads, the validationMessage exported from there, reused and
-// not duplicated -- and classify every finding the transpiler emits:
+// not duplicated -- and classify the findings OF THE ISLAND: the service
+// lives in gen/hana-src/* and gen/hana-ddic/*, and the validation reports
+// bare file names, so the island is a basename set collected from those
+// folders. A finding outside it -- src/, packs/, another gen/ folder -- is
+// the tree's own business: counted once per iteration line, never asked.
+// A merge tool's refusal of one object (the H5a TABCLASS guard:
+// `hana-ddic-map: <name>: TABCLASS APPEND is not written here`, the tool
+// exits 2) does not stop the loop either: the refusal is parsed, the object
+// is recorded as a gap (kind TABL, reason "unsupported TABCLASS APPEND" --
+// the dictionary HAS it, the generator here cannot write it, asking cannot
+// source it), and the step retries against a filtered copy of the dump in
+// .local/hana-closure/ (DD02L.jsonl minus the refused rows). Every other
+// finding the transpiler emits, of the island, is classified:
 //
 //   DDIC            `Database table or view "x" not found` (TABL);
 //                   `contains unknown: X not found` (data element or the
@@ -73,9 +85,11 @@
 // tenant, or a kind this route cannot source yet). The gaps file carries
 // each gap's TADIR kind, the first finding that named it and the number of
 // validation passes that have named it; a dump manifest's `closure.missing`
-// -- the requested names the dictionary does not have -- joins them with
-// the kind they are missing under, read on every continuation. No fresh
-// names is the fixed point. Otherwise the request goes to
+// joins them with the kind they are missing under, read on every
+// continuation -- the answer is per kind, and a name that resolved under
+// one of the kinds it was asked under is one the dictionary HAS: the other
+// kinds' `missing` is not "does not exist" and never makes it a gap. No
+// fresh names is the fixed point. Otherwise the request goes to
 // closure-request.json -- schema 1, the file the dumper's reader reads:
 // requested/seen under the nine upper-case TADIR kinds, seen = every name
 // an earlier iteration asked (so the dumper skips it), gaps = the current
@@ -87,6 +101,11 @@
 //       --provenance "hana-closure iteration <n>: the closure request's names" \
 //       --ddic-closure <out>/closure-request.json \
 //       --out <root>/.local/hana-closure/dump-<NNN> --allow-in-repo
+//
+// The loop's own log line for that command is redacted -- `--host <env>`
+// and the like, never the values: a loop log is exactly what gets pasted
+// into a report, and the values travel only in the by-hand command printed
+// when no dumper is configured (and in the child's environment).
 //
 // A name the transpiler names without a dictionary kind (the `ddic` bucket:
 // the message says only that the type is unknown) is requested under TABL,
@@ -121,7 +140,7 @@
 // --allow-in-repo, the password from VSP_HANA_PASSWORD only) --
 // test/hana-closure.mjs, fixtures ZOSD_H5C_*; the real iteration is dell's,
 // on the bed.
-import {existsSync, mkdirSync, readFileSync, writeFileSync} from "node:fs";
+import {copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
 import {spawnSync} from "node:child_process";
 import {fileURLToPath} from "node:url";
 import {join, resolve} from "node:path";
@@ -241,6 +260,37 @@ export function classifyFindings(findings) {
     }
   }
   return {names, cascades, unclassified};
+}
+
+// ------------------------------------------------------------ the island --
+
+/** the file basenames of the island -- gen/hana-src/** and gen/hana-ddic/*.
+ *  The closure is scoped to it: a finding whose file is one of these
+ *  basenames is the service's and is classified; src/, packs/ and other
+ *  gen/ findings are the tree's own and never enter a request. The
+ *  validation's file names are bare basenames (the transpiler reports the
+ *  name only), so "under gen/hana-src/*" is decided by membership in this
+ *  set, not by a path prefix on the finding -- and a basename both an island
+ *  layer and src/ carry is the island's, the later layer wins the build
+ *  anyway. Reads the tree's folders, nothing else. */
+export function islandBasenames(root) {
+  const names = new Set();
+  const walk = (dir) => {
+    let entries;
+    try {
+      entries = readdirSync(dir, {withFileTypes: true});
+    } catch (error) {
+      if (error.code === "ENOENT") return;
+      throw error;
+    }
+    for (const entry of entries) {
+      if (entry.isDirectory()) walk(join(dir, entry.name));
+      else names.add(entry.name);
+    }
+  };
+  walk(join(root, "gen", "hana-src"));
+  walk(join(root, "gen", "hana-ddic"));
+  return names;
 }
 
 // ------------------------------------------------------------- request ----
@@ -363,30 +413,90 @@ const saveState = (out, state) => {
   writeFileSync(join(out, "state.json"), JSON.stringify(state, null, 2) + "\n");
 };
 
+// a generator's refusal of one object, H5a's TABCLASS guard speaking
+// through hana-ddic-map (`hana-ddic-gen` exits 2 on it): the dictionary HAS
+// the object, the generator here cannot write it. The loop must not die on
+// the refusal -- the object is recorded as a gap and the merge continues
+// without it.
+const REFUSAL = /hana-ddic-map: (.+?): TABCLASS ([A-Za-z]+) is not written here/g;
+
+// a copy of the dump without the refused rows, for the retry: every file
+// verbatim but tables/DD02L.jsonl, which loses every row whose TABNAME a
+// refusal named (that is the table the TABCLASS refusal names). The merge
+// tools write per-file overlays, so re-running a step against the copy is
+// safe, and the loop's own dump stays the original -- the next delta dump
+// answers whether the object recurs.
+function filteredDump(root, dump, without) {
+  const skip = new Set(without.map((n) => n.toUpperCase()));
+  const dir = join(root, ".local", "hana-closure", "dump-filtered");
+  rmSync(dir, {recursive: true, force: true});
+  const copy = (from, to) => {
+    mkdirSync(to, {recursive: true});
+    for (const entry of readdirSync(from, {withFileTypes: true})) {
+      const source = join(from, entry.name);
+      const target = join(to, entry.name);
+      if (entry.isDirectory()) copy(source, target);
+      else copyFileSync(source, target);
+    }
+  };
+  copy(dump, dir);
+  const dd02l = join(dir, "tables", "DD02L.jsonl");
+  if (existsSync(dd02l) === true) {
+    const kept = readFileSync(dd02l, "utf8").split("\n").filter((line) => {
+      if (line.trim() === "") return false;
+      try {
+        return skip.has(String(JSON.parse(line).TABNAME ?? "").trim().toUpperCase()) === false;
+      } catch {
+        return true; // not this file's judge: the merge tool refuses bad lines by number
+      }
+    });
+    writeFileSync(dd02l, kept.length === 0 ? "" : kept.join("\n") + "\n");
+  }
+  return dir;
+}
+
 // the current dump into the build's inputs: gen/hana-ddic and gen/hana-src,
 // the two folders abap_transpile.json already lists before src/. Both tools
 // are tools of this tree, so they start through toolCommandIn -- in a
 // compiled binary that is `osd gen <name>`, not a path off import.meta.url
-// -- and their exits are this loop's failures. A tool that does not know
-// --from-dump yet (PR #926) is refused by its own "unknown option", and the
-// message says what it needs.
+// -- and their exits are this loop's failures -- except a refusal of one
+// object: that is parsed, the object joins the gaps, and the step retries
+// against a filtered copy of the dump (the refusal leaves when a dump the
+// merge handled carries the name again -- the generator wrote it at last).
+// A tool that does not know --from-dump yet (PR #926) is refused by its own
+// "unknown option", and the message says what it needs.
 function mergeInputs(root, dump, system, env, say) {
   const steps = [
     ["hana-ddic-gen.mjs", ["--from-dump", dump, "--out", join(root, "gen", "hana-ddic")]],
     ["hana-src-gen.mjs", ["--from-dump", "--dump", dump, "--system", system, "--out", join(root, "gen", "hana-src")]],
   ];
+  const refused = new Map();
   for (const [script, argv] of steps) {
     const [command, ...args] = toolCommandIn(env, join(TOOLS, script), argv);
-    say(`merge: ${script} --from-dump ${dump}`);
-    const child = spawnSync(command, args, {cwd: root, env, stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64 * 1024 * 1024});
-    if (child.status !== 0) {
+    let stepDump = dump;
+    for (let attempt = 0; ; attempt++) {
+      say(`merge: ${script} --from-dump ${stepDump}`);
+      const child = spawnSync(command, args.map((a) => (a === dump ? stepDump : a)), {cwd: root, env, stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64 * 1024 * 1024});
+      if (child.status === 0) break;
       const tail = [child.stdout, child.stderr].filter(Boolean).join("\n").slice(-2000);
-      const hint = /unknown option/.test(tail)
-        ? `\nhana-closure: ${script} refused --from-dump: needs PR #926 (hana-ddic-gen --from-dump)`
-        : "";
-      throw new Error(`hana-closure: ${script} exited ${child.status ?? "on a signal"} merging ${dump}${tail === "" ? "" : `:\n${tail}`}${hint}`);
+      // the refusals this exit named that no earlier exit named
+      const fresh = [...tail.matchAll(REFUSAL)]
+        .map((m) => ({name: m[1].trim().toUpperCase(), tabclass: m[2].trim().toUpperCase(), line: m[0]}))
+        .filter((r) => refused.has(r.name) === false);
+      if (fresh.length === 0 || attempt >= 64) {
+        const hint = /unknown option/.test(tail)
+          ? `\nhana-closure: ${script} refused --from-dump: needs PR #926 (hana-ddic-gen --from-dump)`
+          : "";
+        throw new Error(`hana-closure: ${script} exited ${child.status ?? "on a signal"} merging ${stepDump}${tail === "" ? "" : `:\n${tail}`}${hint}`);
+      }
+      for (const r of fresh) {
+        refused.set(r.name, {name: r.name, kind: "TABL", reason: `unsupported TABCLASS ${r.tabclass}`, first_finding: r.line});
+        say(`merge: ${script} refuses ${r.name} (unsupported TABCLASS ${r.tabclass}) -- recorded as a gap, the merge continues without it`);
+      }
+      stepDump = filteredDump(root, dump, [...refused.keys()]);
     }
   }
+  return {refused: [...refused.values()]};
 }
 
 // the identity of the inputs the findings came from, for the request's
@@ -411,6 +521,14 @@ const dumperConfigured = (env) =>
   env.OSD_HANA_DUMPER !== undefined && env.OSD_HANA_DUMPER !== "" &&
   env.OSD_HANA_DUMP_ENV !== undefined && env.OSD_HANA_DUMP_ENV !== "";
 
+// the connection flags whose VALUES never reach the loop's own log line:
+// a loop log is exactly what gets pasted into a report (the bed run's was,
+// carrying the bed's host, user and schema), so the line prints the flag
+// with <env> and keeps the value for the by-hand command only
+const REDACTED = new Set(["--host", "--port", "--user", "--schema"]);
+const redactedArgv = (argv) =>
+  argv.map((a, i) => (REDACTED.has(argv[i - 1]) === true ? "<env>" : a)).join(" ");
+
 // one dumper round, when the dumper is configured: undefined when it is
 // not (the caller prints the command instead), a throw when the round
 // fails. The binary is foreign (see the header): spawned by the path the
@@ -420,7 +538,7 @@ function dumpRound({root, env, say, requestPath, dumpDir, provenance}) {
   if (dumperConfigured(env) === false) return undefined;
   const connection = parseEnvFile(readFileSync(env.OSD_HANA_DUMP_ENV, "utf8"));
   const {argv, env: childEnv} = dumperCommand({dumper: env.OSD_HANA_DUMPER, connection, requestPath, dumpDir, provenance});
-  say(`dump: ${argv.slice(1).join(" ")}`);
+  say(`dump: ${redactedArgv(argv.slice(1))}`);
   const child = spawnSync(argv[0], argv.slice(1), {cwd: root, env: {...env, ...childEnv}, stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64 * 1024 * 1024});
   if (child.status !== 0) {
     const tail = [child.stdout, child.stderr].filter(Boolean).join("\n").slice(-2000);
@@ -430,7 +548,9 @@ function dumpRound({root, env, say, requestPath, dumpDir, provenance}) {
 
 // the command a human runs by hand when no dumper is configured here: the
 // real argv, with the env file's values when it is readable and
-// placeholders when it is not -- and no password, ever (it is env-only)
+// placeholders when it is not -- and no password, ever (it is env-only).
+// This is the one place the connection values still print: it answers the
+// human's own ask, it is not the loop's log line.
 function printedCommand(env, requestPath, dumpDir, provenance) {
   let connection;
   try {
@@ -494,6 +614,7 @@ export async function run(args = process.argv.slice(2), options = {}) {
   mkdirSync(out, {recursive: true});
   const state = loadState(out) ?? {iteration: 1, asked: {}};
   state.missing ??= {};
+  state.refused ??= {};
   if (dumpArg === undefined && state.dump === undefined) {
     throw new Error(`hana-closure: no dump known: pass --dump <dir> (the dump the build's inputs are made of)`);
   }
@@ -535,16 +656,22 @@ export async function run(args = process.argv.slice(2), options = {}) {
     // every continuation: every name in closure.missing (the requested
     // names the dictionary does not have) joins the gaps with the kind it
     // is missing under; a name a later round reports resolved leaves them.
-    // A hand-written dump without a manifest answers nothing here.
+    // The answer is PER KIND -- a kind-less name is asked under TABL, DTEL
+    // and TTYP, and a name that resolved under one of them is one the
+    // dictionary HAS: `missing` under the other two is not "does not
+    // exist", so it must not re-enter the gaps over a resolution. A
+    // hand-written dump without a manifest answers nothing here.
     try {
       const manifest = JSON.parse(readFileSync(join(dump, "manifest.json"), "utf8"));
+      const resolved = new Set();
       for (const list of Object.values(manifest.closure?.resolved ?? {})) {
-        for (const name of list) delete state.missing[String(name).trim().toUpperCase()];
+        for (const name of list) resolved.add(String(name).trim().toUpperCase());
       }
+      for (const name of resolved) delete state.missing[name];
       for (const [kind, list] of Object.entries(manifest.closure?.missing ?? {})) {
         for (const name of list) {
           const upper = String(name).trim().toUpperCase();
-          if (state.asked[upper] !== undefined) {
+          if (state.asked[upper] !== undefined && resolved.has(upper) === false) {
             state.missing[upper] = {kind, iteration: state.asked[upper].iteration};
           }
         }
@@ -554,8 +681,37 @@ export async function run(args = process.argv.slice(2), options = {}) {
       // no manifest, no closure: the findings are the only word
     }
 
-    mergeInputs(root, dump, system, env, say);
-    const {names, cascades, unclassified} = classifyFindings(parseFindings(await validationMessage(root)));
+    const {refused} = mergeInputs(root, dump, system, env, say);
+    // the merge refusals join the state's (the gap stands while the object
+    // is in no build) and leave when a dump the merge handled carries the
+    // name again without a refusal -- the generator wrote it at last; a
+    // delta dump that lost the name is not a resolution
+    for (const r of refused) state.refused[r.name] = {kind: r.kind, reason: r.reason, first_finding: r.first_finding};
+    if (refused.length > 0) {
+      saveState(out, state);
+    } else {
+      const handled = (() => {
+        try {
+          return readFileSync(join(dump, "tables", "DD02L.jsonl"), "utf8").split("\n")
+            .filter((l) => l.trim() !== "")
+            .map((l) => String(JSON.parse(l).TABNAME ?? "").trim().toUpperCase());
+        } catch {
+          return [];
+        }
+      })();
+      for (const name of handled) delete state.refused[name];
+      saveState(out, state);
+    }
+
+    // only the island's findings are the service's: the validation reports
+    // bare file names, so the scope is the island's basename set, and a
+    // finding outside it -- src/, packs/, another gen/ folder -- is the
+    // tree's own business, counted once, never asked
+    const island = islandBasenames(root);
+    const all = parseFindings(await validationMessage(root));
+    const findings = all.filter((f) => island.has(f.file));
+    const unscoped = all.length - findings.length;
+    const {names, cascades, unclassified} = classifyFindings(findings);
     const fresh = names.filter((n) => state.asked[n.name] === undefined);
     // asked and still unresolved; the dumper's missing answer names the kind
     // when it has one. iterations_requested counts the validation passes
@@ -581,15 +737,22 @@ export async function run(args = process.argv.slice(2), options = {}) {
       if (a === undefined || gapNames.has(name)) continue;
       gaps.push(gapOf(name, state.missing[name].kind, a));
     }
+    // and the merge refusals: objects the dictionary HAS but the generator
+    // here cannot write -- recorded with the refusal as their first finding
+    // and a reason, never iterations_requested (they were never asked; the
+    // request cannot source them, so they do not go into it either)
+    const refusedGaps = Object.keys(state.refused).sort()
+      .filter((name) => gapNames.has(name) === false)
+      .map((name) => ({name, kind: state.refused[name].kind, first_finding: state.refused[name].first_finding, reason: state.refused[name].reason}));
     // recomputed every pass: a gap that a later round resolves leaves the
     // file on its own
-    writeFileSync(join(out, "closure-gaps.json"), JSON.stringify({gaps}, null, 2) + "\n");
-    say(`iteration ${state.iteration}: ${fresh.length} new name(s), ${gaps.length} gap(s), ${cascades} cascade finding(s) skipped, ${unclassified.length} unclassified`);
+    writeFileSync(join(out, "closure-gaps.json"), JSON.stringify({gaps: [...gaps, ...refusedGaps]}, null, 2) + "\n");
+    say(`iteration ${state.iteration}: ${fresh.length} new name(s), ${gaps.length} gap(s), ${unscoped} outside the island (not asked), ${refusedGaps.length} merge-refusal gap(s), ${cascades} cascade finding(s) skipped, ${unclassified.length} unclassified`);
     for (const line of unclassified) say(`unclassified: ${line}`);
 
     if (fresh.length === 0) {
-      say(`fixed point: every unresolved name has been asked and nothing new is named; ${gaps.length} gap(s) -> ${join(out, "closure-gaps.json")}`);
-      return {stopped: "fixed-point", iteration: state.iteration, gaps, cascades, unclassified};
+      say(`fixed point: every unresolved name has been asked and nothing new is named; ${gaps.length + refusedGaps.length} gap(s) -> ${join(out, "closure-gaps.json")}`);
+      return {stopped: "fixed-point", iteration: state.iteration, gaps: [...gaps, ...refusedGaps], cascades, unclassified, unscoped};
     }
 
     const iteration = state.iteration + 1;
