@@ -42,18 +42,9 @@ import {fileURLToPath} from "node:url";
 import {basename, join} from "node:path";
 import {scriptCommandIn, toolCommandIn} from "./osd-host.mjs";
 import {parseFindings} from "./hana-closure.mjs";
+import {islandTestCode} from "./hana-src-gen.mjs";
 
 const TOOLS = fileURLToPath(new URL(".", import.meta.url));
-
-// the island's test-code rule (H5c round 7, the same rule
-// tools/hana-src-gen.mjs stages by): a test-classes include (any object's
-// *.testclasses.abap) and a *_TEST class are not island content -- the
-// dumper's --skip-test-includes keeps the closure from pulling them, and a
-// dump that carries them anyway does not stage them. The object count
-// applies it too, so a state.json written by an iterator that staged test
-// classes does not read as a shrink on the rule's first merge.
-const TEST_CODE = (name) =>
-  /\.testclasses\.abap$/i.test(name) === true || /^[^.]*_test\.clas\./i.test(name) === true;
 
 /** the island's objects, counted: classes and interfaces off the
  *  gen/hana-src class files (one object each, though a converter layer
@@ -79,7 +70,7 @@ export function islandObjectCount(root) {
     }
   };
   walk(join(root, "gen", "hana-src"), (name) => {
-    if (TEST_CODE(name) === true) return;
+    if (islandTestCode(name) === true) return;
     const clas = /^([^/]+)\.clas\.abap$/.exec(name);
     if (clas !== null) return void names.clas.add(clas[1]);
     const intf = /^([^/]+)\.intf\.abap$/.exec(name);
@@ -304,7 +295,12 @@ export function mergeInputs(root, dump, layersDirs, env, say, fill = undefined) 
   for (const [script, argv] of steps) {
     const [command, ...args] = toolCommandIn(env, join(TOOLS, script), argv);
     let stepDump = dump;
-    for (let attempt = 0; ; attempt++) {
+    for (;;) {
+      // the retry always makes progress: a refusal names an object, the
+      // object joins `refused`, and the next pass reads a dump copy without
+      // its row -- so no refusal can come back, and the walk ends when an
+      // exit names nothing new (S-7.4: the dead `attempt >= 64` guard is
+      // gone; the loop's own refusals bound it)
       say(`merge: ${script} ${script === "hana-src-gen.mjs" ? `--layers ${layersDirs.length} layer dir(s) (the union so far)` : `--from-dump ${stepDump}`}`);
       const child = spawnSync(command, args.map((a) => (a === dump ? stepDump : a)), {cwd: root, env, stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64 * 1024 * 1024});
       if (child.status === 0) break;
@@ -313,7 +309,7 @@ export function mergeInputs(root, dump, layersDirs, env, say, fill = undefined) 
       const fresh = [...tail.matchAll(REFUSAL)]
         .map((m) => ({name: m[1].trim().toUpperCase(), tabclass: m[2].trim().toUpperCase(), line: m[0]}))
         .filter((r) => refused.has(r.name) === false);
-      if (fresh.length === 0 || attempt >= 64) {
+      if (fresh.length === 0) {
         const hint = /unknown option/.test(tail)
           ? `\nhana-closure: ${script} refused --from-dump: this hana-ddic-gen predates --from-dump (PR #926, merged) -- the tree needs updating`
           : "";
@@ -374,7 +370,10 @@ function ddicFill({root, env, say, resolved, dumps}) {
       const fresh = [...tail.matchAll(REFUSAL)]
         .map((m) => ({name: m[1].trim().toUpperCase(), tabclass: m[2].trim().toUpperCase(), line: m[0]}))
         .filter((r) => refused.has(r.name) === false);
-      if (fresh.length === 0 || attempt >= 64) {
+      if (fresh.length === 0) {
+        // the for condition bounds this loop (attempt < 64), so the body's
+        // own attempt guard was dead (S-7.4): a fresh refusal is the only
+        // way past it, and each one drops a name from `left`
         const hint = /unknown option/.test(tail)
           ? `\nhana-closure: hana-ddic-gen refused --names: this hana-ddic-gen predates the per-name fill -- the tree needs updating`
           : "";

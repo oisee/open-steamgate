@@ -27,6 +27,7 @@ import {activeSystem, layerDir, logicalSystemPath, matchesSourcePath} from "./os
 import {readFileSync, readdirSync, statSync, existsSync} from "node:fs";
 import {basename, join, resolve} from "node:path";
 import {expandedFolders, inputFoldersOf} from "./osd-packs.mjs";
+import {definitionExclusions} from "./hana-closure-exclusions.mjs";
 import {runsAs} from "./osd-main.mjs";
 
 // The tree this file lives in, resolved on FIRST USE rather than at module
@@ -232,6 +233,12 @@ function main() {
   for (const {folder, total: count, shared} of shadows) {
     const also = shared.length === 0 ? "none of them in the build" : `${shared.length} of them also in the build`;
     console.log(`  not an input: ${folder} holds ${count} objects, ${also}. Edits there change nothing`);
+  }
+  // the closure walk's definition-level exclusions (H5x-1): said here for
+  // the same reason an override is -- a file on disk that the build is
+  // kept from must be visible, with the reason
+  for (const e of definitionExclusions(treeRoot())) {
+    console.log(`  excluded: ${e.object}: ${e.file} -- definition-level finding(s), kept from the transpiler: ${(e.findings[0] ?? "").slice(0, 140)}`);
   }
 }
 

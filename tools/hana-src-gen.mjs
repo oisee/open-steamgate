@@ -77,9 +77,12 @@ function likeToRegExp(pattern) {
 // from pulling test frameworks (the bed run pulled SAP's unit-test
 // assertion class through a facade's test include), and a dump that
 // carries them anyway does not stage them into gen/hana-src; findings in
-// them are not island findings
-const isTestCode = (name) =>
+// them are not island findings. One rule, exported from here since H5x-1
+// (S-7.2): the merge's object count and the loop test's fake host import
+// it, so the loop scenario proves the real predicate.
+export const islandTestCode = (name) =>
   /\.testclasses\.abap$/i.test(name) === true || /^[^.]*_test\.clas\./i.test(name) === true;
+const isTestCode = islandTestCode;
 
 /** the plan checks, said once: schema 1, a layers array, every layer named
  *  and ordered. */

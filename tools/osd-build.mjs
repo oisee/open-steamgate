@@ -42,6 +42,7 @@ import {basename, dirname, join, relative, resolve, sep} from "node:path";
 import {fileURLToPath, pathToFileURL} from "node:url";
 import {buildIdentity, assertToolchain, describeBuild} from "./osd-transpiler.mjs";
 import {describeDuplicates, excludePatterns, layers} from "./osd-inputs.mjs";
+import {excludedFiles} from "./hana-closure-exclusions.mjs";
 import {transpile, selectedModules, isBinaryFilename, listFiles} from "./osd-transpile.mjs";
 import {makeReadRecord, markIncomplete, readEntry, readGeneratorLog, READS, sha256, withSeedReads} from "./osd-read-record.mjs";
 import {inputFoldersOf, packReadsOf, packsOf, seedsBuilt, userFoldersOf, webappsOf} from "./osd-packs.mjs";
@@ -285,6 +286,7 @@ export function hashOf(root, inputs = inputsOf(root), options = {}) {
     hash.update(value);
     return this;
   }, digest: (...args) => hash.digest(...args)};
+  for (const entry of ((options instanceof Map ? undefined : options.exclusions) ?? []).slice().sort()) h.update("excluded\0").update(entry).update("\0");
   h.update("transpiler\0").update(String(options.transpiler ?? buildIdentity(root))).update("\0");
   h.update("layers\0later-wins\0");
   const system = activeSystem(root);
@@ -665,6 +667,11 @@ export function ownConfig(root, config, stack, outputFolder, overlay = undefined
     input_folder: [...inputFoldersOf(root, config), ...(kept?.folder === undefined ? [] : [kept.folder])],
     output_folder: relative(root, outputFolder),
     exclude_filter: [...(config.exclude_filter ?? []), ...excludePatterns(stack.hidden),
+      // the closure walk's definition-level exclusions (H5x-1): objects the
+      // walk found unresolvable at the definition level, recorded in
+      // gen/hana-closure/closure-stubs.json -- the file stays in its layer
+      // on disk, the build is kept from it here, through the same seam
+      ...excludePatterns(excludedFiles(root)),
       ...[...(kept?.exclude ?? [])].sort().map((file) => `^${file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`)],
   };
 }
@@ -703,7 +710,7 @@ export async function build(options = {}) {
   const loaded = selectedModules(root);
   const identity = assertToolchain(root, loaded);
   const named = new Map();
-  const hash = hashOf(root, inputs, {overlay: options.overlay, digests: named, transpiler: identity});
+  const hash = hashOf(root, inputs, {overlay: options.overlay, digests: named, transpiler: identity, exclusions: excludedFiles(root)});
   named.set(inputs.config, sha256(readFileSync(inputs.config)));
   // one spelling of a path for every comparison: a native one from the walk,
   // a forward-slash one from the transpiler's reads on Windows

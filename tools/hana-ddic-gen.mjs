@@ -53,6 +53,7 @@ import {HanaDatabaseClient} from "./hana-client.mjs";
 import {nameList, readTables} from "./hana-ddic-probe.mjs";
 import {abapGitFileName, ddicFields, ddicFieldsWithIncludes, domaXml, dtelXml, tablXml} from "./hana-ddic-map.mjs";
 import {excludePatterns, layers} from "./osd-inputs.mjs";
+import {definitionExclusions} from "./hana-closure-exclusions.mjs";
 import {loadFiles, loadLibs, selectedModules} from "./osd-transpile.mjs";
 import {orderRegistry} from "./osd-warm-order.mjs";
 
@@ -80,11 +81,17 @@ export function tablesFromValidation(message) {
  *  artifacts of a different file selection. Heavy: it loads the libraries,
  *  like the transpile it stands in for. */
 /** exported for tools/hana-closure.mjs (H5c), which reads the same channel
- *  and classifies more of it; this file reads the two DDIC shapes only. */
-export async function validationMessage(root) {
+ *  and classifies more of it; this file reads the two DDIC shapes only.
+ *  stubsFile -- where the closure walk's exclusion record lives when the
+ *  loop keeps it outside gen/hana-closure (--out); default: the seam's rule. */
+export async function validationMessage(root, stubsFile = undefined) {
   const config = JSON.parse(readFileSync(join(root, "abap_transpile.json"), "utf8"));
   const stack = layers(root, config);
-  const listing = {...config, exclude_filter: [...(config.exclude_filter ?? []), ...excludePatterns(stack.hidden)]};
+  // the same seam the build's ownConfig applies (H5x-1): the closure walk's
+  // definition-level exclusions are kept from this validation too, so the
+  // loop's findings and the build's agree about what is in
+  const listing = {...config, exclude_filter: [...(config.exclude_filter ?? []), ...excludePatterns(stack.hidden),
+    ...excludePatterns(definitionExclusions(root, stubsFile).map((e) => e.file))]};
   const loaded = selectedModules(root);
   const {files} = await loadFiles(root, listing, loaded.core);
   const libs = await loadLibs(root, listing);
