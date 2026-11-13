@@ -395,9 +395,14 @@ export class HanaDatabaseClient {
    *  column HANA named, marked. Truncated because a batched INSERT can be
    *  hundreds of kilobytes and the useful part is where it broke. */
   #run(sql) {
+    this.#sent(sql);
     return new Promise((resolve, reject) =>
       this.client.exec(sql, (err, result) => (err ? reject(this.#explain(err, sql)) : resolve(result))));
   }
+
+  /** every text handed to the driver, to the `sqlTrace` option (STG_SQL_TRACE,
+   *  tools/hana-serve.mjs); a tracer must never break what it traces */
+  #sent(sql) { try { this.options.sqlTrace?.(sql); } catch { /* ignored */ } }
 
   #explain(err, sql) {
     if (err === undefined || err === null) return err;
@@ -708,6 +713,7 @@ export class HanaDatabaseClient {
       let rows;
       let metadata = [];
       if (typeof this.client.prepare === "function") {
+        this.#sent(folded);
         stmt = await new Promise((resolve, reject) =>
           this.client.prepare(folded, (err, prepared) =>
             (err ? reject(this.#explain(err, folded)) : resolve(prepared))));
@@ -747,8 +753,10 @@ export class HanaDatabaseClient {
 
   async checkSelect(sql) {
     this.#guard(sql);
+    const checked = foldIdentifiers(this.rewrite(sql));
+    this.#sent(checked);
     const prepared = await new Promise((resolve, reject) =>
-      this.client.prepare(foldIdentifiers(this.rewrite(sql)), (err, stmt) => err ? reject(err) : resolve(stmt)));
+      this.client.prepare(checked, (err, stmt) => err ? reject(err) : resolve(stmt)));
     await new Promise((resolve, reject) =>
       prepared.drop((err) => err ? reject(err) : resolve()));
   }
@@ -786,6 +794,7 @@ export class HanaDatabaseClient {
   async native({sql, params = [], expect = "rows"}) {
     this.#guard(sql);
     if (this.trace) console.log("native:", sql, params.length ? JSON.stringify(params) : "");
+    this.#sent(sql);
     const stmt = await new Promise((resolve, reject) =>
       this.client.prepare(sql, (err, s) => (err ? reject(err) : resolve(s))));
     try {
@@ -826,6 +835,7 @@ export class HanaDatabaseClient {
   /** what a statement will produce, without running it: HANA works the types
    *  out at prepare time, parameters and all */
   #resultMetadata(sql) {
+    this.#sent(sql);
     return new Promise((resolve, reject) =>
       this.client.prepare(sql, (err, stmt) => {
         if (err) return reject(err);

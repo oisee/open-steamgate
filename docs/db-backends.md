@@ -1289,3 +1289,93 @@ exclusions dropped, the S-2.2 hold never released. The exception class
 carries its own ABAP Unit test
 (`src/hana/zcx_osd_not_activated.clas.testclasses.abap`), which asserts
 the text and the raise. No HANA is reachable from CI.
+
+## A host over an existing schema: tools/hana-serve.mjs
+
+Built 2026-11-13 (H5x-4 B3). The ordinary server cannot boot in
+existing-schema mode, and this is the minimal honest host for that mode,
+not the product. `test/start.mjs` writes while it boots — the ICF registry
+(ICFSERVICE/ICFHANDLER), the cross-reference seed (CROSS, WBCROSSGT,
+D010INC), the demo data, the status tables — and the read-only guard refuses
+every one of them; several of those tables carry the tenant's own names, and
+our Z tables have no home in this mode at all. Where our own tables live
+here is a decision for after the milestone. `tools/hana-serve.mjs` does only
+what reading a service needs: it boots the generation in `output/` through
+the same `test/setup.mjs` (which in this mode connects and returns before any
+DDL or seed), registers the services through the generated SEGW registry
+(`gen/segw/zcl_stg_segw_registry`, the dump's registration included when
+`gen/hana-segw` holds one), and answers OData v2 GETs through the request
+path every host uses — `ZCL_STG_HTTP_HANDLER` behind `CL_EXPRESS_ICF_SHIM`,
+one dialog step per request (`tools/osd-dialog-step.mjs`) — under
+`/sap/opu/odata/sap/<SERVICE>/` and `/sap/opu/odata/<namespace>/<SERVICE>/`.
+The second route is the address a service in a namespace has on a system
+(`ZCL_STG_URL` reads both; the service is looked up by its external name
+either way, and the answer's URLs repeat the prefix the request came in on).
+
+```
+STG_DB=hana HANA_EXISTING_SCHEMA=1 HANA_SCHEMA=<tenant> HANA_OWN_SCHEMA=<own> OSD_CLIENT=<client> \
+  HANA_HOST=… HANA_PORT=… HANA_USER=… HANA_PASSWORD=… (or OSD_HANA_PASSWORD_FILE) \
+  [OSD_SQL_TRACE=1 [OSD_SQL_TRACE_FILE=<file>]] [OSD_BIND=0.0.0.0] \
+  node tools/hana-serve.mjs [--port 3040]
+node tools/hana-serve.mjs --check-trace <trace.ndjson>
+```
+
+It refuses to start outside the mode, with `OSD_HANA_WRITE=1`, with
+`STG_DB_FRESH=1` or without `OSD_CLIENT`; it answers anything but GET with 405
+before a line of ABAP runs; it binds to loopback unless `OSD_BIND` opens it.
+Every statement on the DatabaseClient interface is counted, and a boot that
+sent a write — refused by the guard, or swallowed somewhere as subrc 4 —
+stops the host before it listens. A GET that writes is logged with the
+method and kind. The client is built through one seam in `test/setup.mjs`
+(`globalThis.__osdHanaClientFactory`), which the host sets; `--client-module
+<file>` replaces HANA with that module's `createClient(options)`, and the
+host says so on its first line.
+
+`OSD_SQL_TRACE=1` records every statement into `OSD_SQL_TRACE_FILE`
+(default `.local/hana-serve/sql-trace.ndjson`; it can carry data and stays
+local): the interface through the existing `STG_SQL_TRACE` wrapper, and for
+HANA the text the driver is handed (`op: "driver"`, the client's
+`sqlTrace` option) — `connect()`'s own `SET SCHEMA` and shadow DDL, which no
+wrapper of the eleven members sees, included. A trace is evidence only with
+its **positive control**: the boot sends one known SELECT
+(`SELECT 'OSD_TRACE_PROBE' AS probe FROM dummy`) through the connection the
+ABAP reads through, and `--check-trace` fails a trace that does not carry it
+on every channel it has, then lists every statement that is not a read
+(shadow DDL of `HANA_OWN_SCHEMA` counted apart). An earlier "zero writes" on
+this track was read off a trace that was off; an empty trace and an off
+trace look the same, and the control is what tells them apart.
+
+After each `$metadata` the host prints `bind_structure: N of M not found:
+<names>`. `bind_structure` in the model API (open-abap-odata) returns
+silently when the type is not found, and on a system the structure decides
+display formats, lengths and conversions — so a miss is a wrong `$metadata`
+with no error. `tools/osd-bind-structure-log.mjs` wraps the entity type's
+and the complex type's `bind_structure`, runs the original unchanged and
+resolves the name once more with the same `CL_ABAP_TYPEDESCR=>DESCRIBE_BY_NAME`;
+the count is cumulative over distinct names since boot. Its first run found
+one in our own demo: `ZCL_ZSTG_DEMO_MPC` binds `TS_STATUS_VH`, and the type
+is `TS_STATUSVH`.
+
+`tools/odata-metadata-diff.mjs <ours.xml> <theirs.xml> [--accept
+annotations,order]` compares two `$metadata` documents parsed
+(fast-xml-parser), not their names: **structure** (entity and complex types,
+properties with Type, Nullable, MaxLength, Precision, Scale and every other
+non-`sap:` attribute, keys, navigation properties, associations with ends and
+referential constraints, entity sets, association sets, function imports and
+their parameters, the schema namespace), **annotations** (every `sap:*`
+attribute — label, creatable/updatable/deletable, addressable, …— and
+vocabulary `<Annotations>` blocks per target), **order** (the same members in
+another order, property order included). It exits 0 only when every class
+that differs is accepted, and prints every difference either way. A
+reference into the document's own schema namespace is compared by its local
+name, and a differing namespace (or a sole container's name) is one
+structure finding — reported, never normalised away. It supersedes the
+names-only `tools/osd-metadata-diff.mjs` for oracle work.
+
+Tested without HANA: `test/hana-serve.mjs` runs the host as a child over the
+generation with a fake client (`test/fixtures/hana-serve/fake-client.mjs`:
+reads from fixtures, every write throws) and the demo service: `$metadata`
+and a GET under both prefixes, 405, the trace with its control (and a copy
+without it failing the check), the bind log; one write added to the boot
+turns it red. `test/gateway-metadata-diff.mjs` covers the diff with two
+synthetic documents.
