@@ -11,7 +11,7 @@
 //
 //   node tools/hana-closure.mjs --dump <dir> --system <prefix>
 //        [--out <dir>] [--max-iterations <n>] [--dry-run]
-//        [--stub-unresolved] [--max-stub-rounds <n>]
+//        [--stub-unresolved] [--max-stub-rounds <n>] [--defer-ddic]
 //
 //   --dump <dir>          the current dump directory (iteration 1's input;
 //                         what `vsp hana dump` wrote for the service, the
@@ -37,12 +37,13 @@
 //   --dry-run             merge, validate, classify, write and print the
 //                         request -- and stop, even when the dumper is
 //                         configured.
-//   --stub-unresolved     lazy activation (round 3): a class compiles as a
-//                         whole or not at all, so the island must close
-//                         every name a class MENTIONS -- even in methods no
-//                         request will ever run. With the flag, the body of
-//                         every method whose findings do not resolve is
-//                         replaced by the stub raise
+//   --stub-unresolved     lazy activation (round 3), with H5x-1's three
+//                         rules. A class compiles as a whole or not at all,
+//                         so the island must close every name a class
+//                         MENTIONS -- even in methods no request will ever
+//                         run. With the flag, the body of every method
+//                         whose findings do not resolve is replaced by the
+//                         stub raise
 //                           RAISE EXCEPTION TYPE zcx_osd_not_activated
 //                             EXPORTING missing = '<names>'.
 //                         The method block is cut at abaplint's parsed
@@ -51,13 +52,22 @@
 //                         stubbed source is written back into the island
 //                         file in gen/hana-src (generated content) and
 //                         recorded in closure-stubs.json
-//                         ([{file, class, method, missing, finding}]), and
-//                         the loop builds again until no stubbable finding
-//                         remains (--max-stub-rounds <n>, default 5) --
-//                         only then is the dumper request written, for the
-//                         names that remain (definition-level). The names
-//                         the stubs wait for are not gaps, they are "not
-//                         needed yet": the request carries them in an extra
+//                         ({level: "method", file, class, method, missing,
+//                         finding}), and the loop builds again until no
+//                         stubbable finding remains (--max-stub-rounds <n>,
+//                         default 5). What stays lazy is CODE and only
+//                         code: a name of a DDIC kind (TABL/DTEL/DOMA/TTYP/
+//                         SHLP, and the kind-less triple) a would-be-stubbed
+//                         method names is requested from the dumper in the
+//                         SAME iteration -- a DDIC closure is cheap and
+//                         pulls no code, and a stub over a table that
+//                         exists costs a miss-rerun cycle per method at GET
+//                         time. The method is stubbed only when the dumper
+//                         answered missing for one of its DDIC names (that
+//                         name is a gap and the stub records it) or a code
+//                         kind (CLAS/INTF/FUGR/PROG) remains, which stays
+//                         `deferred` as round 3 had it: the request carries
+//                         the lazy names in the optional
 //                         `deferred: {kind: [names]}` key beside
 //                         requested/seen -- the dumper's reader reads
 //                         requested/seen and ignores unknown keys, so the
@@ -65,8 +75,35 @@
 //                         stubbed method fails with the exception's text
 //                         ("not activated here: needs <missing>") -- that
 //                         is the signal to run the iterator again: the
-//                         island grows on the miss. Without the flag,
-//                         behaviour is round 2's.
+//                         island grows on the miss. Before anything is
+//                         requested, the island is checked by file name
+//                         (abapGit naming, `/`->`#`, lower-case; the XML
+//                         present for the DDIC kinds): a name whose object
+//                         the island already holds is never requested and
+//                         never a gap, and its finding is a CASCADE of that
+//                         object's own findings -- counted on the iteration
+//                         line as "cascade (present)". And after the dumper
+//                         answered, a class or interface whose findings sit
+//                         outside every METHOD ... ENDMETHOD body is
+//                         EXCLUDED from the build -- through osd-build's
+//                         own exclusion seam (tools/osd-build.mjs
+//                         ownConfig reads the closure-stubs.json record the
+//                         same way it reads the hidden and inactive files),
+//                         the file left in its layer on disk, never deleted
+//                         and never rewritten; the record is
+//                         {level: "definition", file, object, findings},
+//                         the request carries the object under a new
+//                         top-level `excluded: {kind: [names]}` key (NOT
+//                         under deferred), the iteration line counts
+//                         `excluded`, and the object's dependents fall out
+//                         in the next stub round. NEVER a registered
+//                         service's own class: the MPC/DPC/_EXT pairs the
+//                         gen/hana-segw facts or the island's *.iwsv.xml /
+//                         *.iwmo.xml name fail the run instead -- that is
+//                         the service itself, and a red build is the honest
+//                         answer.
+//   --defer-ddic          keeps round 3's behaviour: every name of a
+//                         stubbed method is lazy, even the dictionary's.
 //   --max-stub-rounds <n> the cap of the stub rounds above (default 5, and
 //                         only read with --stub-unresolved).
 //
@@ -212,12 +249,12 @@
 // test/hana-closure.mjs, fixtures ZOSD_H5C_*; the real iteration is dell's,
 // on the bed.
 import {copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
-import {spawnSync} from "node:child_process";
 import {join, resolve} from "node:path";
 import {runsAs} from "./osd-main.mjs";
 import {validationMessage} from "./hana-ddic-gen.mjs";
-import {islandClassPaths, stubBodies} from "./hana-closure-stubs.mjs";
+import {islandClassPaths, planStubPass, registeredServiceClasses, dropPresentNames} from "./hana-closure-stubs.mjs";
 import {buildCheck, ddicWritten, ensureLayers, islandObjectCount, islandShrinkCheck, mergeInputs} from "./hana-closure-merge.mjs";
+import {dumperConfigured, dumpRound, printedCommand} from "./hana-closure-dumper.mjs";
 
 // ------------------------------------------------------------ findings ----
 
@@ -264,7 +301,7 @@ const cascadeOf = (message) => [
 // an abapGit file name's object part to the name it stands for: the
 // namespace is escaped as #ns#, one rule for both directions
 // (tools/hana-ddic-map.mjs abapGitFileName)
-const nameFromAbapFile = (part) => part.replace(/^#([^#]+)#/, "/$1/").toUpperCase();
+export const nameFromAbapFile = (part) => part.replace(/^#([^#]+)#/, "/$1/").toUpperCase();
 // INTF or CLAS is a NAME-PREFIX heuristic (`if*` -> INTF, anything else
 // CLAS), not a TADIR lookup: on the measured log every name in these shapes
 // is IF_*, so it is correct there, but a dictionary object dragged into a
@@ -341,7 +378,14 @@ export function classifyFindings(findings) {
       ask(m[1].toUpperCase(), objectKind(m[1]), finding);
     } else if ((m = new RegExp(`could not resolve top (${NAME})$`, "i").exec(message))) {
       ask(m[1].toUpperCase(), objectKind(m[1]), finding);
-    } else if ((m = new RegExp(`unable to resolve (${NAME})$`).exec(message))) {
+    } else if ((m = /contains unknown: could not resolve top$/i.exec(message)) !== null &&
+        /^[A-Za-z][A-Za-z0-9_]*$/.test(fix ?? "") === true) {
+      // the line's comma-parse can put the name in the fix field (bed run
+      // 13's shape): `Variable "X" contains unknown: Could not resolve top
+      // Y` parses with the message cut at "top" and Y as the fix -- Y is
+      // the type, the variable X is never asked
+      ask(fix.toUpperCase(), objectKind(fix), finding);
+    } else if ((m = new RegExp(`unable to resolve (${NAME})$`).exec(message)) !== null) {
       ask(m[1].toUpperCase(), objectKind(m[1]), finding);
     } else if ((m = new RegExp(`^Super class "(${NAME})" not found or contains(?: errors)?$`).exec(message))) {
       // bed run 10's shape (round 7): an island class's superclass is not
@@ -432,10 +476,11 @@ export function tadirKinds(kind, finding) {
  *  provenance for the walk): the fresh names per kind, every name an
  *  earlier iteration asked under the kinds it was requested under (so the
  *  dumper skips it), and the current gaps. `deferred` -- the stubbed
- *  methods' names, only with --stub-unresolved -- is the one OPTIONAL key:
- *  the dumper's reader takes requested/seen and ignores unknown keys, so
- *  the file stays schema 1 with it beside them. Pure. */
-export function requestFor({iteration, generation, fresh, asked, gaps, deferred}) {
+ *  methods' code names, only with --stub-unresolved -- and `excluded` --
+ *  the definition-level exclusions' objects, never under deferred -- are
+ *  OPTIONAL keys: the dumper's reader takes requested/seen and ignores
+ *  unknown keys, so the file stays schema 1 with them beside. Pure. */
+export function requestFor({iteration, generation, fresh, asked, gaps, deferred, excluded}) {
   const perKind = () => {
     const kinds = {};
     for (const kind of TADIR) kinds[kind] = [];
@@ -472,59 +517,16 @@ export function requestFor({iteration, generation, fresh, asked, gaps, deferred}
     }
     result.deferred = list;
   }
-  return result;
-}
-
-/** the dumper's argv and child environment -- the contract the real binary
- *  refuses to run without (cobra MarkFlagRequired: host, user, schema,
- *  provenance, out): the connection flags from the env file's
- *  HANA_HOST/HANA_PORT/HANA_USER/HANA_SCHEMA, the request as a file, the
- *  dump directory inside gitignored .local/ -- inside the working tree,
- *  which the dumper refuses without --allow-in-repo -- the password
- *  ONLY in the child's environment (VSP_HANA_PASSWORD), never on the argv,
- *  and --skip-test-includes: the closure must never carry CCAU test
- *  includes (round 7). Throws when the env file cannot answer a required
- *  flag, before any connection travels. Pure. */
-export function dumperCommand({dumper, connection, requestPath, dumpDir, provenance}) {
-  for (const [key, flag] of [["HANA_HOST", "--host"], ["HANA_USER", "--user"], ["HANA_SCHEMA", "--schema"]]) {
-    if (connection[key] === undefined || connection[key] === "") {
-      throw new Error(`hana-closure: the env file carries no ${key}; the dumper refuses to run without ${flag}`);
+  if (excluded !== undefined && excluded.length > 0) {
+    const list = perKind();
+    for (const n of excluded) {
+      for (const kind of tadirKinds(n.kind, n.message ?? n.finding)) {
+        if (list[kind].includes(n.name) === false) list[kind].push(n.name);
+      }
     }
+    result.excluded = list;
   }
-  if (connection.HANA_PASSWORD === undefined || connection.HANA_PASSWORD === "") {
-    throw new Error("hana-closure: the env file carries no HANA_PASSWORD (VSP_HANA_PASSWORD); the dumper refuses to run without a password");
-  }
-  const argv = [
-    dumper, "hana", "dump",
-    "--host", connection.HANA_HOST,
-    ...(connection.HANA_PORT === undefined || connection.HANA_PORT === "" ? [] : ["--port", connection.HANA_PORT]),
-    "--user", connection.HANA_USER,
-    "--schema", connection.HANA_SCHEMA,
-    "--provenance", provenance,
-    "--ddic-closure", requestPath,
-    "--out", dumpDir,
-    // the closure must never carry CCAU test includes (round 7): the real
-    // dumper's flag, off by default there
-    "--skip-test-includes",
-    "--allow-in-repo",
-  ];
-  return {argv, env: {VSP_HANA_PASSWORD: connection.HANA_PASSWORD}};
-}
-
-/** the dumper's connection: KEY=VALUE lines, `#` comments, `export `
- *  allowed. Values are taken as written -- quoting is the dumper's dialect,
- *  not this file's. Throws on a line it cannot read, so a typo'd env file
- *  is refused before the connection travels anywhere. Pure. */
-export function parseEnvFile(text) {
-  const vars = {};
-  for (const line of String(text ?? "").split("\n")) {
-    const trimmed = line.trim();
-    if (trimmed === "" || trimmed.startsWith("#")) continue;
-    const m = /^(?:export )?([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(trimmed);
-    if (m === null) throw new Error(`hana-closure: the env file carries a line that is not KEY=VALUE: ${JSON.stringify(trimmed)}`);
-    vars[m[1]] = m[2];
-  }
-  return vars;
+  return result;
 }
 
 // ---------------------------------------------------------------- loop ----
@@ -560,64 +562,9 @@ const generationOf = (root) => {
 const provenanceFor = (iteration) =>
   `hana-closure iteration ${iteration}: the closure request's names (tools/hana-closure.mjs)`;
 
-const dumperConfigured = (env) =>
-  env.OSD_HANA_DUMPER !== undefined && env.OSD_HANA_DUMPER !== "" &&
-  env.OSD_HANA_DUMP_ENV !== undefined && env.OSD_HANA_DUMP_ENV !== "";
-
-// the connection flags whose VALUES never reach the loop's own log line:
-// a loop log is exactly what gets pasted into a report (the bed run's was,
-// carrying the bed's host, user and schema), so the line prints the flag
-// with <env> and keeps the value for the by-hand command only
-const REDACTED = new Set(["--host", "--port", "--user", "--schema"]);
-const redactedArgv = (argv) =>
-  argv.map((a, i) => (REDACTED.has(argv[i - 1]) === true ? "<env>" : a)).join(" ");
-
-// one dumper round, when the dumper is configured: undefined when it is
-// not (the caller prints the command instead), a throw when the round
-// fails. The binary is foreign (see the header): spawned by the path the
-// environment names, its connection the env file's flags on the argv and
-// the password in the child's environment only.
-function dumpRound({root, env, say, requestPath, dumpDir, provenance}) {
-  if (dumperConfigured(env) === false) return undefined;
-  const connection = parseEnvFile(readFileSync(env.OSD_HANA_DUMP_ENV, "utf8"));
-  const {argv, env: childEnv} = dumperCommand({dumper: env.OSD_HANA_DUMPER, connection, requestPath, dumpDir, provenance});
-  say(`dump: ${redactedArgv(argv.slice(1))}`);
-  const child = spawnSync(argv[0], argv.slice(1), {cwd: root, env: {...env, ...childEnv}, stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64 * 1024 * 1024});
-  if (child.status !== 0) {
-    const tail = [child.stdout, child.stderr].filter(Boolean).join("\n").slice(-2000);
-    throw new Error(`hana-closure: the dumper exited ${child.status ?? "on a signal"}${tail === "" ? "" : `:\n${tail}`}`);
-  }
-}
-
-// the command a human runs by hand when no dumper is configured here: the
-// real argv, with the env file's values when it is readable and
-// placeholders when it is not -- and no password, ever (it is env-only).
-// This is the one place the connection values still print: it answers the
-// human's own ask, it is not the loop's log line.
-function printedCommand(env, requestPath, dumpDir, provenance) {
-  let connection;
-  try {
-    connection = parseEnvFile(readFileSync(env.OSD_HANA_DUMP_ENV ?? "", "utf8"));
-  } catch {
-    connection = undefined;
-  }
-  const shown = dumperConfigured(env) === false && (env.OSD_HANA_DUMPER === undefined || env.OSD_HANA_DUMPER === "")
-    ? "$OSD_HANA_DUMPER" : env.OSD_HANA_DUMPER;
-  const value = (key, placeholder) =>
-    connection?.[key] !== undefined && connection?.[key] !== "" ? connection[key] : placeholder;
-  return [
-    shown, "hana", "dump",
-    `--host ${value("HANA_HOST", "<HANA_HOST>")}`,
-    `--port ${value("HANA_PORT", "<HANA_PORT>")}`,
-    `--user ${value("HANA_USER", "<HANA_USER>")}`,
-    `--schema ${value("HANA_SCHEMA", "<HANA_SCHEMA>")}`,
-    `--provenance ${JSON.stringify(provenance)}`,
-    `--ddic-closure ${requestPath}`,
-    `--out ${dumpDir}`,
-    "--skip-test-includes",
-    "--allow-in-repo",
-  ].join(" ");
-}
+// the dumper round and the by-hand command live in
+// tools/hana-closure-dumper.mjs since H5x-1: their own package, the size
+// budget stays honest
 
 function take(args, name) {
   const at = args.indexOf(name);
@@ -649,6 +596,7 @@ export async function run(args = process.argv.slice(2), options = {}) {
   const maxIterations = Number(take(args, "--max-iterations") ?? "10");
   const maxStubRounds = Number(take(args, "--max-stub-rounds") ?? "5");
   const stubUnresolved = has(args, "--stub-unresolved");
+  const deferDdic = has(args, "--defer-ddic");
   const dryRun = has(args, "--dry-run");
   if (args.length > 0) throw new Error(`hana-closure: unknown option ${args.find((a) => a.startsWith("--")) ?? args[0]}`);
   if (Number.isInteger(maxIterations) === false || maxIterations < 0) {
@@ -661,6 +609,12 @@ export async function run(args = process.argv.slice(2), options = {}) {
     throw new Error("hana-closure: --system <prefix> is required (the dump->layers converter names its layers <system>-<package>)");
   }
   mkdirSync(out, {recursive: true});
+  if (stubUnresolved === true) {
+    // the exclusion record is recomputed by this run (a name the dump
+    // resolves must un-exclude its object): it starts empty, so the first
+    // validation of this run reads no stale exclusion of a previous one
+    writeFileSync(join(out, "closure-stubs.json"), "[]\n");
+  }
   const state = loadState(out) ?? {iteration: 1, asked: {}};
   state.missing ??= {};
   state.refused ??= {};
@@ -711,6 +665,11 @@ export async function run(args = process.argv.slice(2), options = {}) {
     throw new Error("hana-closure: OSD_HANA_CONVERTER must name the dump->layers converter (a path to dump-to-layers.mjs): every merge converts its dump into .local/hana-closure/layers-<NNN> first");
   }
 
+  // the run's exclusions (H5x-1): run-wide, not per iteration -- an object
+  // excluded in round 2 stays excluded, for the walk and for the seam's
+  // record; method-stub records stay per iteration, as always
+  const excludedRecords = [];
+  const excludedObjects = new Set();
   // the dumper budget of this run; a resumed run has its own
   let rounds = 0;
   for (;;) {
@@ -809,26 +768,28 @@ export async function run(args = process.argv.slice(2), options = {}) {
     let all = parseFindings(await validationMessage(root));
     let findings = all.filter((f) => island.has(f.file));
 
-    // lazy activation (--stub-unresolved, round 3): the method bodies whose
-    // findings do not resolve lose their bodies -- replaced by the stub
-    // raise of zcx_osd_not_activated (src/hana/) at abaplint's parsed
-    // positions -- and the loop builds again, until no stubbable finding
-    // remains or --max-stub-rounds stops the rewriting; only then is the
-    // request written, for the names that remain (definition-level). The
-    // stubbed source is written back into the island file in gen/hana-src
-    // (generated content) and recorded in closure-stubs.json. A request
-    // that hits a stubbed method fails with the exception's text ("not
-    // activated here: needs ...") -- the signal to run the iterator again:
-    // the island grows on the miss.
+    // lazy activation (--stub-unresolved, round 3), with H5x-1's rules: a
+    // DDIC-kind name a would-be-stubbed method names is requested from the
+    // dumper in the SAME iteration -- only a code kind (CLAS/INTF/FUGR/
+    // PROG) stays deferred; a method is stubbed when the dumper answered
+    // missing for one of its DDIC names or a code-kind name remains; and
+    // after the dumper answered, a class or interface whose findings sit
+    // outside every METHOD ... ENDMETHOD body is EXCLUDED through
+    // osd-build's own exclusion seam (tools/hana-closure-stubs.mjs
+    // planStubPass decides per file; a registered service's own class
+    // fails the run instead).
     const stubRecords = [];
     const deferredPairs = new Map();
+    const eagerNames = new Map();
     let stubRounds = 0;
     if (stubUnresolved === true) {
       const classPaths = islandClassPaths(root);
+      const islandFiles = island;
+      const registered = registeredServiceClasses(root);
       for (;;) {
         const byFile = new Map();
         for (const f of findings) {
-          if (/\.(?:clas\.abap|clas\.locals_imp\.abap)$/.test(f.file) === false) continue;
+          if (/\.(?:clas\.abap|clas\.locals_imp\.abap|intf\.abap)$/.test(f.file) === false) continue;
           const list = byFile.get(f.file) ?? [];
           list.push(f);
           byFile.set(f.file, list);
@@ -842,26 +803,48 @@ export async function run(args = process.argv.slice(2), options = {}) {
           break;
         }
         const applied = [];
+        let excludedNow = 0;
         for (const [basename, list] of byFile) {
           for (const path of (classPaths.get(basename) ?? []).sort()) {
-            let result;
+            let source;
             try {
-              result = stubBodies(readFileSync(path, "utf8"), list, basename);
+              source = readFileSync(path, "utf8");
+            } catch {
+              say(`stub: ${basename} could not be read; its findings stay in the request`);
+              continue;
+            }
+            let plan;
+            try {
+              plan = planStubPass({source, findings: list, basename,
+                missingOf: (name) => state.missing[name] !== undefined,
+                asked: (name) => state.asked[name] !== undefined,
+                islandFiles, excludedObjects, registered, deferDdic});
             } catch (error) {
+              if (error.guard === true) throw error; // the service itself: the run fails
               say(`stub: ${basename} could not be read or parsed (${error.message}); its findings stay in the request`);
               continue;
             }
-            if (result.stubs.length === 0) continue;
-            writeFileSync(path, result.source);
-            for (const stub of result.stubs) {
-              applied.push(stub.className);
-              stubRecords.push({file: path.slice(root.length + 1), class: stub.className, method: stub.method, missing: stub.missing, finding: stub.finding});
-              for (const nk of stub.missingKinds ?? []) deferredPairs.set(nk.name, {name: nk.name, kind: nk.kind, finding: stub.finding});
+            if (plan.unparseable === true) {
+              say(`stub: ${basename} does not parse; its findings stay in the request`);
+              continue;
             }
+            if (plan.exclude !== undefined) {
+              excludedObjects.add(plan.exclude.object);
+              excludedRecords.push({level: "definition", file: path.slice(root.length + 1), object: plan.exclude.object, findings: plan.exclude.findings});
+              excludedNow += 1;
+              say(`excluded: ${plan.exclude.object} (${basename}): definition-level finding(s) -- the file stays in its layer on disk, the build is kept from it`);
+            }
+            if (plan.source !== source) writeFileSync(path, plan.source);
+            for (const stub of plan.stubs) {
+              applied.push(stub.className);
+              stubRecords.push({level: "method", file: path.slice(root.length + 1), class: stub.className, method: stub.method, missing: stub.missing, finding: stub.finding});
+            }
+            for (const nk of plan.deferred) deferredPairs.set(nk.name, {name: nk.name, kind: nk.kind, finding: nk.finding});
+            for (const e of plan.eager) eagerNames.set(e.name, e);
           }
         }
-        if (applied.length === 0) {
-          say(`stub: ${byFile.size} class file(s) name findings, but none could be stubbed (definition-level, or not under gen/hana-src); the names stay in the request`);
+        if (applied.length === 0 && excludedNow === 0) {
+          say(`stub: ${byFile.size} class file(s) name findings, but none could be stubbed (definition-level, or awaiting the dumper's DDIC answer); the names stay in the request`);
           break;
         }
         stubRounds += 1;
@@ -870,13 +853,31 @@ export async function run(args = process.argv.slice(2), options = {}) {
         for (const [cls, count] of perClass) {
           say(`stub round ${stubRounds}: ${cls}: ${count} method(s) stubbed (generation ${generationOf(root) || "none"})`);
         }
+        if (excludedNow > 0) {
+          // the seam reads this file (ownConfig and the validation channel):
+          // written before the revalidation, so the findings leave at once
+          writeFileSync(join(out, "closure-stubs.json"), JSON.stringify([...stubRecords, ...excludedRecords], null, 2) + "\n");
+        }
         all = parseFindings(await validationMessage(root));
         findings = all.filter((f) => island.has(f.file));
       }
-      writeFileSync(join(out, "closure-stubs.json"), JSON.stringify(stubRecords, null, 2) + "\n");
+      writeFileSync(join(out, "closure-stubs.json"), JSON.stringify([...stubRecords, ...excludedRecords], null, 2) + "\n");
     }
     const unscoped = all.length - findings.length;
-    const {names, cascades, unclassified} = classifyFindings(findings);
+    const classified = classifyFindings(findings);
+    // H5x-1: a name whose object is in the island -- by file name for
+    // CLAS/INTF, by the XML present for the DDIC kinds -- is never
+    // requested and never a gap, whatever asked for it before: the finding
+    // is a CASCADE of that object's own findings, counted below as
+    // "cascade (present)". An object excluded this run is out of the
+    // build; its name rides the request's excluded key instead.
+    const {names, present} = dropPresentNames(classified.names, island, excludedObjects);
+    const cascades = classified.cascades;
+    const unclassified = classified.unclassified;
+    // and the stubs' eager DDIC names (H5x-1): asked like any classified name
+    for (const e of eagerNames.values()) {
+      if (names.some((n) => n.name === e.name) === false) names.push(e);
+    }
 
     // the names the stubs wait for are not gaps, they are "not needed yet":
     // they leave requested and the gaps file and travel in the request's
@@ -933,7 +934,7 @@ export async function run(args = process.argv.slice(2), options = {}) {
     const writtenDdic = ddicWritten(root);
     const ddicCounts = TADIR.filter((k) => (state.resolved?.[k] ?? []).length > 0)
       .map((k) => `${k} ${state.resolved[k].length}/${writtenDdic[k]?.size ?? 0}`).join(", ");
-    say(`iteration ${state.iteration}: ${fresh.length} new name(s), ${gaps.length} gap(s), ${unscoped} outside the island (not asked), ${refusedGaps.length} merge-refusal gap(s), ${cascades} cascade finding(s) skipped, ${unclassified.length} unclassified${stubUnresolved === true ? `, ${deferredOnly.length} deferred by stubs, ${stubRecords.length} stubbed method(s)` : ""}, ${objects.total} island object(s)${gapKinds !== "" ? `, gaps by kind: ${gapKinds}` : ""}${ddicCounts !== "" ? `, DDIC resolved/written: ${ddicCounts}` : ""}`);
+    say(`iteration ${state.iteration}: ${fresh.length} new name(s), ${gaps.length} gap(s), ${unscoped} outside the island (not asked), ${refusedGaps.length} merge-refusal gap(s), ${cascades} cascade finding(s) skipped, ${unclassified.length} unclassified${stubUnresolved === true ? `, ${deferredOnly.length} deferred by stubs, ${stubRecords.length} stubbed method(s)` : ""}, ${objects.total} island object(s)${gapKinds !== "" ? `, gaps by kind: ${gapKinds}` : ""}${ddicCounts !== "" ? `, DDIC resolved/written: ${ddicCounts}` : ""}, ${present} cascade (present)${excludedRecords.length > 0 ? `, ${excludedRecords.length} excluded` : ""}`);
     for (const line of unclassified) say(`unclassified: ${line}`);
 
     if (fresh.length === 0) {
@@ -951,7 +952,8 @@ export async function run(args = process.argv.slice(2), options = {}) {
     const dumpDir = join(root, ".local", "hana-closure", `dump-${String(iteration).padStart(3, "0")}`);
     const freshCount = fresh.length;
     const request = requestFor({iteration, generation: generationOf(root), fresh, asked: state.asked, gaps,
-      ...(stubUnresolved === true ? {deferred: deferredOnly} : {})});
+      ...(stubUnresolved === true ? {deferred: deferredOnly} : {}),
+      ...(excludedRecords.length > 0 ? {excluded: excludedRecords.map((r) => ({name: r.object, kind: /\.intf\.abap$/.test(r.file) === true ? "intf" : "clas"}))} : {})});
     writeFileSync(requestPath, JSON.stringify(request, null, 2) + "\n");
     say(`request ${iteration}: ${freshCount} new name(s) -> ${requestPath}`);
 

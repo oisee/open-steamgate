@@ -1096,15 +1096,53 @@ installed (it receives the names), handler absent (the console says
 them), and a raise that is immediately `CATCH`ed (the signal already
 left — the property `$batch` cannot defeat). The stubbed source is written back into the island
 file — generated content, so rewriting in place is what the merge does
-anyway — and recorded in `gen/hana-closure/closure-stubs.json` as
-`[{file, class, method, missing, finding}]`. Findings outside any method
-body — the definition part: attributes, signatures, types, and the MPC's
-types — cannot be stubbed; their names stay in the request as today. The
-loop then builds again and stubs what the new build still cannot resolve,
-until no stubbable finding remains or `--max-stub-rounds` (default 5)
-stops the rewriting; only then is the dumper request written, for the
-names that remain. Per round the iterator says what it did per class: the
-count of stubbed methods and the generation hash.
+anyway — and recorded in `gen/hana-closure/closure-stubs.json`, the
+method stubs as `{level: "method", file, class, method, missing,
+finding}`. What stays lazy is code and only code. A name of a DDIC kind —
+TABL, DTEL, DOMA, TTYP, SHLP, and the kind-less triple — that a
+would-be-stubbed method names is requested from the dumper in the same
+iteration: a DDIC closure is cheap and pulls no code, and a stub over a
+table that exists costs a miss-rerun cycle per method at GET time. The
+method is stubbed only when the dumper answered missing for one of its
+DDIC names — that name is a gap and the stub records it — or a code kind
+(CLAS, INTF, FUGR, PROG) remains, which stays deferred as before.
+`--defer-ddic` keeps the round-3 behaviour, every name of a stubbed
+method lazy. While the dumper can still answer, the body stays: the
+finding rejoins the classification and the name travels in the request
+like any other.
+
+Before anything is requested, the island is checked by file name —
+abapGit naming, `/` to `#`, lower case; the XML present for the DDIC
+kinds — and a name whose object the island already holds is never
+requested and never a gap, whatever an earlier iteration asked: its
+finding is a cascade of that object's own findings, counted on the
+iteration line as `cascade (present)`. (The bed asked three times for an
+interface the island already carried in layer 036; the finding was that
+interface's own.)
+
+And after the dumper answered, a class or interface whose findings sit
+outside every METHOD ... ENDMETHOD body — the definition part, which no
+stub can reach — is excluded from the build: through the build's own
+exclusion seam, the one that already keeps hidden and inactive files from
+the transpiler (`ownConfig` in `tools/osd-build.mjs`, whose
+`exclude_filter` reads the closure-stubs.json record; the loop's own
+validation channel, `validationMessage`, applies the same record). The
+file stays in its layer on disk — never deleted, never rewritten — and
+`node tools/osd-inputs.mjs` prints it as excluded, with the finding. The
+record carries it as `{level: "definition", file, object, findings}`, the
+request names the object under a new optional top-level key,
+`excluded: {kind: [names]}` — not under `deferred` — the iteration line
+counts `excluded`, and the object's dependents fall out in the next stub
+round: a name this run has excluded is dead for its dependents, the way a
+`missing` answer is. One kind of object is never excluded: a registered
+service's own — the MPC/DPC/_EXT pairs the `gen/hana-segw` facts
+(`from-dump.json`) or the island's `*.iwsv.xml` / `*.iwmo.xml` name. For
+one of those the run FAILS with the object and its findings: that is the
+service itself, and a red build is the honest answer. A classification
+shape the bed's run 13 exposed is read the way it names things:
+`unknown_types, Variable "X" contains unknown: Could not resolve top Y`
+names Y, the type — including when the line's comma-parse leaves Y in the
+fix field and cuts the message at "top" — and never X.
 
 The names a stub waits for are not gaps: the service ACTIVATES without
 them, so they leave `requested` and the gaps file and travel in a new
@@ -1121,11 +1159,23 @@ the flag on afterwards, the method resolves, loses its stub, and the next
 build carries it for real. Without the flag at all, behaviour is round 2's,
 byte for byte.
 
-Exercised with the fixtures (`test/hana-closure.mjs`, `ZOSD_H5C_*`): one
-resolvable and one unresolvable method — only the second loses its body,
-byte-checked around the parsed block; a definition-level finding is not
-stubbed and stays in the request; `deferred` written; the loop reaches "no
-stubbable finding" and stops at the cap; mode off is round 2. The
-exception class carries its own ABAP Unit test
+Exercised with the fixtures (`test/hana-closure.mjs`, `ZOSD_H5C_*`): a
+method whose only miss is a table the fake dumper resolves — asked in
+that iteration, the table filled, the method never stubbed, stub count 0;
+the inverse with a table the dictionary lacks — a gap, and the stub
+recording it; a code-kind miss stays deferred with its method stubbed;
+`--defer-ddic` is round 3; the cap stops a rewrite that cannot settle;
+mode off is round 2. The definition-level class is excluded with the
+method stubbed beside it, the record carrying
+`{level: "definition", ...}`, the request carrying `excluded`, the
+iteration line counting it, and the real `ownConfig` carrying the
+pattern; a present superclass is never requested and counted as
+`cascade (present)`; the registered-service class fails the run with its
+name. The real build over a two-file fixture island goes GREEN with the
+definition-level class excluded and fails without the record — that is
+the acceptance, the island builds. One mutation per MUST, each red: the
+eager DDIC rule deferred like code, the presence filter dropped, the
+exclusion skipped, the service guard skipped. The exception class carries
+its own ABAP Unit test
 (`src/hana/zcx_osd_not_activated.clas.testclasses.abap`), which asserts
 the text and the raise. No HANA is reachable from CI.

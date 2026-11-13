@@ -4,7 +4,8 @@ import {spawnSync} from "node:child_process";
 import {tmpdir} from "node:os";
 import {basename, join} from "node:path";
 import {fileURLToPath} from "node:url";
-import {classifyFindings, dumperCommand, islandBasenames, parseEnvFile, parseFindings, requestFor, run, tadirKinds} from "../tools/hana-closure.mjs";
+import {classifyFindings, islandBasenames, parseFindings, requestFor, run, tadirKinds} from "../tools/hana-closure.mjs";
+import {dumperCommand, parseEnvFile} from "../tools/hana-closure-dumper.mjs";
 import {methodBlocks, stubBodies, stubNamesText} from "../tools/hana-closure-stubs.mjs";
 import {buildVerdict, islandObjectCount, islandShrinkCheck, layersDdicCount} from "../tools/hana-closure-merge.mjs";
 import {ddicFields, tablXml} from "../tools/hana-ddic-map.mjs";
@@ -81,6 +82,10 @@ describe("hana-closure: the dependency closure, by iteration", () => {
       `check_syntax, Definition for "zosd_h5c_attr" not found in scope(AttributeName), zcl_h5c_app.clas.abap:36`,
       `check_syntax, Method parameter type not compatible, zcl_h5c_app.clas.abap:37`,
       `check_syntax, ZCL_H5C_PROT cannot be instantiated, class is defined as protected, zcl_h5c_app.clas.abap:38`,
+      // bed run 13's shape: the line's comma-parse leaves the type in the
+      // fix field and cuts the message at "top" -- the TYPE is asked, the
+      // variable never is
+      `unknown_types, Variable "LV_H5C_TOP" contains unknown: Could not resolve top ZOSD_H5C_TOP, zcl_h5c_app.clas.abap:39`,
       // not findings at all
       `osd-build: transpile`,
       ``,
@@ -108,6 +113,7 @@ describe("hana-closure: the dependency closure, by iteration", () => {
       ["ZCL_H5C_FRIEND", "clas"],
       ["ZCL_H5C_SUPERABS", "clas"],
       ["ZOSD_H5C_TT_LOC", "ddic"],
+      ["ZOSD_H5C_TOP", "clas"],
     ];
     expect(names.map((n) => [n.name, n.kind]), "every name, classified, in first-named order").to.deep.equal(want);
     // the first finding that named it rides along -- the gaps file quotes it
@@ -293,7 +299,11 @@ describe("hana-closure: the dependency closure, by iteration", () => {
       }
       // the class's locals include and xml are the same object; dtel and prog
       // are not in the count (classes+interfaces+tables, the shrink assert's
-      // unit)
+      // unit); and the test-code rule (S-7.1): a test-classes include and a
+      // *_TEST class present in gen/hana-src are not island objects
+      for (const f of ["zcl_h5c_one.clas.testclasses.abap", "zcl_h5c_helper_test.clas.abap"]) {
+        writeFileSync(join(root, "gen", "hana-src", "001-h5c", "src", f), "x");
+      }
       expect(islandObjectCount(root)).to.deep.equal({clas: 2, intf: 1, tabl: 3, total: 6});
       expect(islandObjectCount(join(root, "nowhere"))).to.deep.equal({clas: 0, intf: 0, tabl: 0, total: 0});
     } finally {
@@ -465,6 +475,158 @@ describe("hana-closure: the dependency closure, by iteration", () => {
     expect(Object.keys(requestFor({iteration: 2, generation: "g", fresh: [], asked: {}, gaps: []})), "without stubs the key is not there").to.not.include("deferred");
   });
 
+  // --------------------------------------------------- H5x-1 units ----
+
+  it("planStubPass: a table the dumper can answer keeps its body; a dead table or a code name stubs", async () => {
+    const {planStubPass} = await import("../tools/hana-closure-stubs.mjs");
+    const base = {source: STUB_CLASS, basename: "zcl_h5c_stub.clas.abap",
+      asked: () => true, islandFiles: new Set(), excludedObjects: new Set(), registered: new Set()};
+    // the method's only miss is a live table: no stub yet, the name eager
+    const live = planStubPass({...base, findings: findingAt(12), missingOf: () => false, asked: () => false});
+    expect(live.stubs, "the dumper can still answer").to.deep.equal([]);
+    expect(live.source).to.equal(STUB_CLASS);
+    expect(live.deferred).to.deep.equal([]);
+    expect(live.eager, "the body stays, the finding stays: classification asks the name").to.deep.equal([]);
+    // the dumper answered missing: the stub records the gap, nothing deferred
+    const dead = planStubPass({...base, findings: findingAt(12), missingOf: () => true});
+    expect(dead.stubs).to.have.lengthOf(1);
+    expect(dead.stubs[0].missing).to.deep.equal(["ZOSD_H5C_HEAD"]);
+    expect(dead.deferred).to.deep.equal([]);
+    expect(dead.source).to.contain(`missing = 'ZOSD_H5C_HEAD'.`);
+    // a code-kind miss stays deferred
+    const code = planStubPass({...base, missingOf: () => true,
+      findings: parseFindings(`check_syntax, Class zcl_h5c_far not found, zcl_h5c_stub.clas.abap:12`)});
+    expect(code.stubs).to.have.lengthOf(1);
+    expect(code.deferred.map((d) => d.name)).to.deep.equal(["ZCL_H5C_FAR"]);
+    expect(code.deferred[0].kind).to.equal("clas");
+    // and a mixed stub: the code name deferred, the table asked eagerly
+    const mixed = planStubPass({...base, missingOf: () => false, asked: () => false,
+      findings: parseFindings([
+        `check_syntax, Class zcl_h5c_far not found, zcl_h5c_stub.clas.abap:12`,
+        `check_syntax, Database table or view "zosd_h5c_head" not found, zcl_h5c_stub.clas.abap:12`,
+      ].join("\n"))});
+    expect(mixed.stubs).to.have.lengthOf(1);
+    expect(mixed.deferred.map((d) => d.name)).to.deep.equal(["ZCL_H5C_FAR"]);
+    expect(mixed.eager.map((e) => e.name)).to.deep.equal(["ZOSD_H5C_HEAD"]);
+  });
+
+  it("planStubPass: --defer-ddic keeps round 3 -- every name of a stubbed method is lazy", async () => {
+    const {planStubPass} = await import("../tools/hana-closure-stubs.mjs");
+    const plan = planStubPass({source: STUB_CLASS, findings: findingAt(12), basename: "zcl_h5c_stub.clas.abap",
+      missingOf: () => false, asked: () => true, islandFiles: new Set(), excludedObjects: new Set(),
+      registered: new Set(), deferDdic: true});
+    expect(plan.stubs, "the method is stubbed at once").to.have.lengthOf(1);
+    expect(plan.deferred.map((d) => d.name)).to.deep.equal(["ZOSD_H5C_HEAD"]);
+    expect(plan.eager).to.deep.equal([]);
+  });
+
+  it("planStubPass: definition-level findings exclude when every name is dead, never while one is live", async () => {
+    const {planStubPass} = await import("../tools/hana-closure-stubs.mjs");
+    const findings = parseFindings(`unknown_types, Variable "GV_H5C" contains unknown: ZOSD_H5C_DEF not found, lookup, zcl_h5c_def.clas.abap:3`);
+    const base = {source: CLAS_DEF_SOURCE, findings, basename: "zcl_h5c_def.clas.abap",
+      asked: () => true, islandFiles: new Set(), excludedObjects: new Set(), registered: new Set()};
+    expect(planStubPass({...base, missingOf: () => false}).exclude, "a live name can still resolve").to.equal(undefined);
+    const plan = planStubPass({...base, missingOf: () => true});
+    expect(plan.exclude).to.deep.equal({object: "ZCL_H5C_DEF", findings: [findings[0].raw]});
+    expect(plan.stubs).to.deep.equal([]);
+    // a nameless cascade alone excludes nothing: it names nothing to wait for
+    const nameless = planStubPass({...base, missingOf: () => true,
+      findings: parseFindings(`check_syntax, Method parameter type not compatible, zcl_h5c_def.clas.abap:3`)});
+    expect(nameless.exclude).to.equal(undefined);
+    // an object this run excluded is dead for its dependents
+    const depFindings = parseFindings(`check_syntax, Super class "zcl_h5c_def" not found or contains, zcl_h5c_dep.clas.abap:1`);
+    const depSource = [
+      `CLASS zcl_h5c_dep DEFINITION PUBLIC FINAL CREATE PUBLIC INHERITING FROM zcl_h5c_def.`,
+      `  PUBLIC SECTION.`,
+      `    METHODS run_it.`,
+      `ENDCLASS.`,
+      `CLASS zcl_h5c_dep IMPLEMENTATION.`,
+      `  METHOD run_it.`,
+      `    RETURN.`,
+      `  ENDMETHOD.`,
+      `ENDCLASS.`,
+      ``,
+    ].join("\n");
+    const dep = planStubPass({source: depSource, findings: depFindings, basename: "zcl_h5c_dep.clas.abap",
+      missingOf: () => false, asked: () => true, islandFiles: new Set(),
+      excludedObjects: new Set(["ZCL_H5C_DEF"]), registered: new Set()});
+    expect(dep.exclude).to.deep.equal({object: "ZCL_H5C_DEP", findings: [depFindings[0].raw]});
+    // a present object is not dead: the dependent waits for it
+    const waited = planStubPass({source: depSource, findings: depFindings, basename: "zcl_h5c_dep.clas.abap",
+      missingOf: () => false, asked: () => true, islandFiles: new Set(["zcl_h5c_def.clas.abap"]),
+      excludedObjects: new Set(), registered: new Set()});
+    expect(waited.exclude).to.equal(undefined);
+    // a file abaplint cannot make method blocks of is excluded by the same
+    // rule -- its findings sit outside every body, all of them -- a parse
+    // error is not exempted
+    const broken = planStubPass({source: `CLASS zcl_h5c_brk DEFINITION PUBLIC FINAL CREATE PUBLIC.\n  NOT ABAP.\nENDCLASS.\n`,
+      findings: depFindings, basename: "zcl_h5c_brk.clas.abap",
+      missingOf: () => true, asked: () => true, islandFiles: new Set(), excludedObjects: new Set(), registered: new Set()});
+    expect(broken.exclude).to.deep.equal({object: "ZCL_H5C_BRK", findings: [depFindings[0].raw]});
+    // a registered service's own class fails the run instead of excluding
+    let thrown;
+    try {
+      planStubPass({...base, missingOf: () => true, registered: new Set(["ZCL_H5C_DEF"])});
+      expect.fail("the registered service's class was excluded");
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown.guard).to.equal(true);
+    expect(thrown.message).to.include("ZCL_H5C_DEF");
+  });
+
+  it("a name whose object is in the island is dropped and counted: cascade (present)", async () => {
+    const {dropPresentNames, abapBaseOf, objectFilePresent} = await import("../tools/hana-closure-stubs.mjs");
+    expect(abapBaseOf("/ZOSD/H5C_T_NAVI"), "the namespace escaped as #ns#").to.equal("#zosd#h5c_t_navi");
+    expect(abapBaseOf("IF_H5C_BO")).to.equal("if_h5c_bo");
+    const files = new Set(["if_h5c_present.intf.abap", "zosd_h5c_head.tabl.xml", "#zosd#h5c_t_navi.tabl.xml"]);
+    expect(objectFilePresent("IF_H5C_PRESENT", "intf", files)).to.equal(true);
+    expect(objectFilePresent("ZOSD_H5C_HEAD", "tabl", files)).to.equal(true);
+    expect(objectFilePresent("/ZOSD/H5C_T_NAVI", "tabl", files)).to.equal(true);
+    expect(objectFilePresent("ZOSD_H5C_W", "ddic", files), "no XML of the kinds the request asks under").to.equal(false);
+    const {names: kept, present} = dropPresentNames([
+      {name: "IF_H5C_PRESENT", kind: "intf"},
+      {name: "ZOSD_H5C_HEAD", kind: "tabl"},
+      {name: "IF_H5C_ABSENT", kind: "intf"},
+      {name: "ZOSD_H5C_OTHER", kind: "tabl"},
+    ], files);
+    expect(kept.map((n) => n.name)).to.deep.equal(["IF_H5C_ABSENT", "ZOSD_H5C_OTHER"]);
+    expect(present, "counted, not asked").to.equal(2);
+    // an object excluded this run is not present: its name is dead downstream
+    const gone = dropPresentNames([{name: "IF_H5C_PRESENT", kind: "intf"}], files, new Set(["IF_H5C_PRESENT"]));
+    expect(gone.names).to.deep.equal([]);
+    expect(gone.present).to.equal(0);
+  });
+
+  it("the registered service's own classes come from the gen/hana-segw facts and the island's IWSV/IWMO XML", async () => {
+    const {registeredServiceClasses} = await import("../tools/hana-closure-stubs.mjs");
+    const root = mkdtempSync(join(tmpdir(), "hana-closure-regsvc-"));
+    try {
+      expect(registeredServiceClasses(root).size, "no facts, no island registrations").to.equal(0);
+      mkdirSync(join(root, "gen", "hana-segw"), {recursive: true});
+      writeFileSync(join(root, "gen", "hana-segw", "from-dump.json"), JSON.stringify({services: [
+        {service: "h5x1", version: "0001", dpc: "ZCL_H5X1_SVC_DPC_EXT", mpc: "ZCL_H5X1_SVC_MPC_EXT"},
+      ]}) + "\n");
+      mkdirSync(join(root, "gen", "hana-src", "000-x", "src"), {recursive: true});
+      // the same fields tools/segw-registry.mjs reads, under the abapGit
+      // file names (technical name padded out to the version)
+      writeFileSync(join(root, "gen", "hana-src", "000-x", "src", "z5x1_xml_svc               0001.iwsv.xml"),
+        `<asx:abap><asx:values><DATA>` +
+        `<_-IWBEP_-I_MGW_SRH><TECHNICAL_NAME>Z5X1_XML</TECHNICAL_NAME><VERSION>0001</VERSION><CLASS_NAME>ZCL_H5X1_XML_DPC_EXT</CLASS_NAME></_-IWBEP_-I_MGW_SRH>` +
+        `</DATA></asx:values></asx:abap>\n`);
+      writeFileSync(join(root, "gen", "hana-src", "000-x", "src", "z5x1_xml_mdl               0001.iwmo.xml"),
+        `<asx:abap><asx:values><DATA>` +
+        `<_-IWBEP_-I_MGW_OHD><TECHNICAL_NAME>Z5X1_XML</TECHNICAL_NAME><VERSION>0001</VERSION><CLASS_NAME>ZCL_H5X1_XML_MPC_EXT</CLASS_NAME></_-IWBEP_-I_MGW_OHD>` +
+        `</DATA></asx:values></asx:abap>\n`);
+      expect([...registeredServiceClasses(root)].sort()).to.deep.equal([
+        "ZCL_H5X1_SVC_DPC", "ZCL_H5X1_SVC_DPC_EXT", "ZCL_H5X1_SVC_MPC", "ZCL_H5X1_SVC_MPC_EXT",
+        "ZCL_H5X1_XML_DPC", "ZCL_H5X1_XML_DPC_EXT", "ZCL_H5X1_XML_MPC", "ZCL_H5X1_XML_MPC_EXT",
+      ]);
+    } finally {
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
+
   // ------------------------------------------------------------- loop -----
 
   // the fixture class: one SELECT against a table the scratch tree does not
@@ -594,6 +756,85 @@ describe("hana-closure: the dependency closure, by iteration", () => {
     `    METHODS run_it.`,
     `ENDCLASS.`,
     `CLASS zcl_h5c_def IMPLEMENTATION.`,
+    `  METHOD run_it.`,
+    `    RETURN.`,
+    `  ENDMETHOD.`,
+    `ENDCLASS.`,
+    ``,
+  ].join("\n");
+
+  // the definition-level exclusion fixture (H5x-1): the unknown type sits
+  // in the DEFINITION part, outside every method body -- no stub can reach
+  // it, so once the dumper answered missing the class falls out of the
+  // build through osd-build's own exclusion seam
+  const CLAS_DEFEX_SOURCE = [
+    `CLASS zcl_h5c_defex DEFINITION PUBLIC FINAL CREATE PUBLIC.`,
+    `  PUBLIC SECTION.`,
+    `    DATA gv_h5c TYPE zosd_h5c_dead.`,
+    `    METHODS run_it.`,
+    `ENDCLASS.`,
+    `CLASS zcl_h5c_defex IMPLEMENTATION.`,
+    `  METHOD run_it.`,
+    `    RETURN.`,
+    `  ENDMETHOD.`,
+    `ENDCLASS.`,
+    ``,
+  ].join("\n");
+
+  // the code-kind miss (H5x-1): a static call on a class the tree does not
+  // have -- the one shape that stays lazy (deferred) under
+  // --stub-unresolved, because a class pull is code and code is what the
+  // island grows on
+  const CLAS_CODE_SOURCE = [
+    `CLASS zcl_h5c_code DEFINITION PUBLIC FINAL CREATE PUBLIC.`,
+    `  PUBLIC SECTION.`,
+    `    METHODS one.`,
+    `    METHODS two.`,
+    `ENDCLASS.`,
+    `CLASS zcl_h5c_code IMPLEMENTATION.`,
+    `  METHOD one.`,
+    `    RETURN.`,
+    `  ENDMETHOD.`,
+    `  METHOD two.`,
+    `    zcl_h5c_far=>run_it( ).`,
+    `  ENDMETHOD.`,
+    `ENDCLASS.`,
+    ``,
+  ].join("\n");
+
+  // the presence fixtures (H5x-1): a superclass the island HOLDS but that
+  // does not parse, and the dependent inheriting from it -- the dependent's
+  // finding names an object that is present, so it is a cascade of that
+  // object's own findings and is never asked (measured shape:
+  // `Super class "zcl_h5c_far" not found or contains errors`)
+  const CLAS_FAR_BROKEN_SOURCE = [
+    `CLASS zcl_h5c_far DEFINITION PUBLIC FINAL CREATE PUBLIC.`,
+    `  PUBLIC SECTION.`,
+    `    NOT ABAP AT ALL.`,
+    `ENDCLASS.`,
+    ``,
+  ].join("\n");
+  const CLAS_USER_SOURCE = [
+    `CLASS zcl_h5c_user DEFINITION PUBLIC FINAL CREATE PUBLIC INHERITING FROM zcl_h5c_far.`,
+    `  PUBLIC SECTION.`,
+    `    METHODS run_it.`,
+    `ENDCLASS.`,
+    `CLASS zcl_h5c_user IMPLEMENTATION.`,
+    `  METHOD run_it.`,
+    `    RETURN.`,
+    `  ENDMETHOD.`,
+    `ENDCLASS.`,
+    ``,
+  ].join("\n");
+
+  // the clean half of the real-build fixture (H5x-1's acceptance): the
+  // island builds when the definition-level class is excluded
+  const CLAS_CLEAN_SOURCE = [
+    `CLASS zcl_h5c_clean DEFINITION PUBLIC FINAL CREATE PUBLIC.`,
+    `  PUBLIC SECTION.`,
+    `    METHODS run_it.`,
+    `ENDCLASS.`,
+    `CLASS zcl_h5c_clean IMPLEMENTATION.`,
     `  METHOD run_it.`,
     `    RETURN.`,
     `  ENDMETHOD.`,
@@ -744,18 +985,31 @@ if (record) appendFileSync(record, JSON.stringify({
   passwordEnv: process.env.VSP_HANA_PASSWORD ?? null,
 }) + "\\n");
 // what the dictionary answered: the request's dictionary names, resolved
-// unless H5C_MISSING_KINDS says the dictionary lacks the kind
+// unless H5C_MISSING_KINDS says the dictionary lacks the kind -- or
+// H5C_MISSING_NAMES names the object itself (H5x-1: a per-name answer, so
+// one scenario can resolve one table and refuse another)
 const missingKinds = (process.env.H5C_MISSING_KINDS ?? "").split(",").filter(Boolean);
 const unhandledKinds = (process.env.H5C_UNHANDLED_KINDS ?? "").split(",").filter(Boolean);
+const missingNames = (process.env.H5C_MISSING_NAMES ?? "").split(",").filter(Boolean).map((s) => s.trim().toUpperCase());
 const resolved = {};
 const missing = {};
 const unhandled = {};
 for (const kind of Object.keys(request.requested)) {
   const list = request.requested[kind] ?? [];
   if (list.length === 0) continue;
-  (missingKinds.includes(kind) ? missing : unhandledKinds.includes(kind) ? unhandled : resolved)[kind] = [...list].sort();
+  const grouped = {resolved: [], missing: [], unhandled: []};
+  for (const name of list) {
+    const bucket = missingNames.includes(name.toUpperCase()) === true ? "missing"
+      : missingKinds.includes(kind) === true ? "missing"
+      : unhandledKinds.includes(kind) === true ? "unhandled" : "resolved";
+    grouped[bucket].push(name);
+  }
+  if (grouped.resolved.length > 0) resolved[kind] = [...grouped.resolved].sort();
+  if (grouped.missing.length > 0) missing[kind] = [...grouped.missing].sort();
+  if (grouped.unhandled.length > 0) unhandled[kind] = [...grouped.unhandled].sort();
 }
-const found = missingKinds.includes("TABL") || unhandledKinds.includes("TABL") ? [] : (request.requested.TABL ?? []);
+const found = missingKinds.includes("TABL") || unhandledKinds.includes("TABL") ? []
+  : (request.requested.TABL ?? []).filter((t) => missingNames.includes(t.toUpperCase()) === false);
 mkdirSync(join(out, "tables"), {recursive: true});
 writeFileSync(join(out, "tables", "DD02L.jsonl"), found.map((t) => JSON.stringify({TABNAME: t.toUpperCase()})).join("\\n") + (found.length === 0 ? "" : "\\n"));
 const closure = {rounds: 1, resolved, missing};
@@ -783,6 +1037,7 @@ process.exit(0);
 import {appendFileSync, copyFileSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {join} from "node:path";
 import {ddicFields, tablXml} from ${JSON.stringify(join(REPO, "tools", "hana-ddic-map.mjs"))};
+import {islandTestCode} from ${JSON.stringify(join(REPO, "tools", "hana-src-gen.mjs"))};
 const args = process.argv.slice(2);
 const tool = args[1];
 const rest = args.slice(2);
@@ -838,8 +1093,9 @@ if (tool === "hana-src-gen.mjs") {
       mkdirSync(join(target, "src"), {recursive: true});
       copyFileSync(join(dir, layer.folder, ".abapgit.xml"), join(target, ".abapgit.xml"));
       for (const file of readdirSync(join(dir, layer.folder, "src"))) {
-        // the island rule (round 7): no test code in gen/hana-src
-        if (/\.testclasses\.abap$/i.test(file) === true || /^[^.]*_test\.clas\./i.test(file) === true) continue;
+        // the island rule (round 7): no test code in gen/hana-src -- the
+        // real predicate, imported (S-7.2), so the loop scenario proves it
+        if (islandTestCode(file) === true) continue;
         copyFileSync(join(dir, layer.folder, "src", file), join(target, "src", file));
       }
     }
@@ -979,6 +1235,7 @@ process.exit(0);
       ...(opts.grow ? {H5C_GROW: "1"} : {}),
       ...(opts.noFromDump ? {H5C_NO_FROM_DUMP: "1"} : {}),
       ...(opts.missingKinds !== undefined ? {H5C_MISSING_KINDS: opts.missingKinds} : {}),
+      ...(opts.missingNames !== undefined ? {H5C_MISSING_NAMES: opts.missingNames} : {}),
       ...(opts.unhandledKinds !== undefined ? {H5C_UNHANDLED_KINDS: opts.unhandledKinds} : {}),
       ...(opts.refuse !== undefined ? {H5C_REFUSE: opts.refuse} : {}),
       ...(opts.dumper === false ? {OSD_HANA_DUMP_ENV: join(root, "dump.env")} : {
@@ -1334,55 +1591,214 @@ process.exit(0);
     }
   });
 
-  it("--stub-unresolved: the unresolvable method is stubbed, the definition-level name is requested, deferred is written", async function () {
+  it("--stub-unresolved: a method whose only miss is a table is not stubbed -- the table is asked that iteration", async function () {
     this.timeout(300000);
-    const root = scratch(CLAS_STUB_SOURCE, "zcl_h5c_stub", {island2Name: "zcl_h5c_def.clas.abap", island2Source: CLAS_DEF_SOURCE});
+    // H5x-1's eager rule: a DDIC-kind miss is requested from the dumper in
+    // the same iteration (a DDIC closure is cheap and pulls no code), and
+    // while the dumper can still answer the body stays. The fake dumper
+    // resolves the table: asked in iteration 1, filled, the method never
+    // stubbed, stub count 0.
+    const root = scratch(CLAS_STUB_SOURCE, "zcl_h5c_stub");
     fixtureDump(join(root, "dump-001"));
-    const env = writeFakes(root, envFor(root, {island: "zcl_h5c_stub.clas.abap", island2Name: "zcl_h5c_def.clas.abap"}));
+    const env = writeFakes(root, envFor(root, {island: "zcl_h5c_stub.clas.abap"}));
     const said = [];
     try {
       const result = await run(["--dump", join(root, "dump-001"), "--system", "h5c", "--stub-unresolved"], {root, env, say: (m) => said.push(m)});
       expect(result.stopped).to.equal("fixed-point");
-      expect(dumperCalls(root), "one dumper round: the stub unblocked the activation").to.have.lengthOf(1);
-
-      // the pass-1 request is still on disk (the second pass asked nothing):
-      // the definition-level name is requested, the method's name is
-      // deferred, and the stubbed method's name is in neither requested nor
-      // the gaps
+      expect(result.iteration).to.equal(2);
+      expect(dumperCalls(root), "one dumper round: the table was asked, not deferred").to.have.lengthOf(1);
       const request = JSON.parse(readFileSync(outFile(root, "closure-request.json"), "utf8"));
-      expect(request.requested.TABL).to.deep.equal(["ZOSD_H5C_DEF"]);
-      expect(request.requested.DTEL, "the kind-less definition name under every dictionary kind").to.deep.equal(["ZOSD_H5C_DEF"]);
-      expect(request.deferred.TABL).to.deep.equal(["ZOSD_H5C_HEAD"]);
-      expect(JSON.stringify(request.requested), "the stubbed method's name is not requested").to.not.include("ZOSD_H5C_HEAD");
-      const gaps = JSON.parse(readFileSync(outFile(root, "closure-gaps.json"), "utf8")).gaps;
-      expect(gaps, "the island grew, nothing is a gap").to.deep.equal([]);
+      expect(request.requested.TABL, "the method's miss is in the request").to.deep.equal(["ZOSD_H5C_HEAD"]);
+      expect(request.deferred.TABL, "a table is eager now: nothing is deferred").to.deep.equal([]);
       const state = JSON.parse(readFileSync(outFile(root, "state.json"), "utf8"));
-      expect(state.asked.ZOSD_H5C_HEAD, "the deferred name was never asked").to.equal(undefined);
+      expect(state.asked.ZOSD_H5C_HEAD.kinds, "asked, the opposite of round 3's never-asked").to.deep.equal(["TABL"]);
+      expect(JSON.parse(readFileSync(outFile(root, "closure-stubs.json"), "utf8")), "stub count 0").to.deep.equal([]);
+      const islandFile = readFileSync(join(root, "gen", "hana-src", "000-h5c-main", "src", "zcl_h5c_stub.clas.abap"), "utf8");
+      expect(islandFile, "the body stayed").to.not.include("RAISE EXCEPTION");
+      expect(said.some((l) => l.includes("iteration 1:") && l.includes("0 stubbed method(s)"))).to.equal(true);
+      expect(said.some((l) => l.includes("awaiting the dumper's DDIC answer"))).to.equal(true);
+      expect(said.some((l) => /^stub: no stubbable finding remains after 0 round/.test(l))).to.equal(true);
+    } finally {
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
 
-      // the stub is in the island file, byte-checked around the parsed block
-      const stubbedSource = readFileSync(join(root, "gen", "hana-src", "000-h5c-main", "src", "zcl_h5c_stub.clas.abap"), "utf8");
-      const before = CLAS_STUB_SOURCE.split("\n");
-      const after = stubbedSource.split("\n");
-      expect(after.slice(0, 10), "everything before the body").to.deep.equal(before.slice(0, 10));
-      expect(after[10]).to.equal(`    RAISE EXCEPTION TYPE zcx_osd_not_activated EXPORTING missing = 'ZOSD_H5C_HEAD'.`);
-      expect(after[11]).to.equal(`  ENDMETHOD.`);
-      expect(after.slice(12), "everything after the block").to.deep.equal(before.slice(12));
-
-      // the stubs file: the second pass stubbed the same method again (the
-      // deferred name is never dumped), so the record stands -- that is the
-      // design: the island grows only on a real miss
+  it("--stub-unresolved: a table the dictionary lacks is a gap, and the stub records it", async function () {
+    this.timeout(300000);
+    const root = scratch(CLAS_STUB_SOURCE, "zcl_h5c_stub");
+    fixtureDump(join(root, "dump-001"));
+    const env = writeFakes(root, envFor(root, {island: "zcl_h5c_stub.clas.abap", missingNames: "ZOSD_H5C_HEAD"}));
+    const said = [];
+    try {
+      const result = await run(["--dump", join(root, "dump-001"), "--system", "h5c", "--stub-unresolved"], {root, env, say: (m) => said.push(m)});
+      expect(result.stopped).to.equal("fixed-point");
       const record = JSON.parse(readFileSync(outFile(root, "closure-stubs.json"), "utf8"));
       expect(record).to.have.lengthOf(1);
+      expect(record[0].level, "method stubs keep their shape, gaining level").to.equal("method");
       expect(record[0].file).to.equal(join("gen", "hana-src", "000-h5c-main", "src", "zcl_h5c_stub.clas.abap"));
       expect(record[0].class).to.equal("ZCL_H5C_STUB");
       expect(record[0].method).to.equal("TWO");
-      expect(record[0].missing).to.deep.equal(["ZOSD_H5C_HEAD"]);
-      expect(record[0].finding).to.match(/Database table or view "zosd_h5c_head" not found/);
-
-      // the iterator said what it did: per class, the count and the
-      // generation hash; the walk reached "no stubbable finding"
+      expect(record[0].missing, "the stub records the gap").to.deep.equal(["ZOSD_H5C_HEAD"]);
+      const islandFile = readFileSync(join(root, "gen", "hana-src", "000-h5c-main", "src", "zcl_h5c_stub.clas.abap"), "utf8");
+      expect(islandFile).to.include(`RAISE EXCEPTION TYPE zcx_osd_not_activated EXPORTING missing = 'ZOSD_H5C_HEAD'.`);
+      const request = JSON.parse(readFileSync(outFile(root, "closure-request.json"), "utf8"));
+      expect(request.deferred.TABL, "the gap is a gap, not deferred").to.deep.equal([]);
+      const gaps = JSON.parse(readFileSync(outFile(root, "closure-gaps.json"), "utf8")).gaps;
+      expect(gaps).to.have.lengthOf(1);
+      expect(gaps[0].name).to.equal("ZOSD_H5C_HEAD");
+      expect(gaps[0].kind).to.equal("TABL");
+      expect(gaps[0].iterations_requested).to.equal(2);
       expect(said.some((l) => l === "stub round 1: ZCL_H5C_STUB: 1 method(s) stubbed (generation h5c_sha)")).to.equal(true);
-      expect(said.some((l) => /^stub: no stubbable finding remains after [0-9]+ round\(s\)$/.test(l))).to.equal(true);
+    } finally {
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
+
+  it("--stub-unresolved: a code-kind miss stays deferred and the method is stubbed", async function () {
+    this.timeout(300000);
+    const root = scratch(CLAS_CODE_SOURCE, "zcl_h5c_code", {island2Name: "zcl_h5c_def.clas.abap", island2Source: CLAS_DEF_SOURCE});
+    fixtureDump(join(root, "dump-001"));
+    const env = writeFakes(root, envFor(root, {island: "zcl_h5c_code.clas.abap", island2Name: "zcl_h5c_def.clas.abap"}));
+    try {
+      const result = await run(["--dump", join(root, "dump-001"), "--system", "h5c", "--stub-unresolved"], {root, env});
+      expect(result.stopped).to.equal("fixed-point");
+      const request = JSON.parse(readFileSync(outFile(root, "closure-request.json"), "utf8"));
+      expect(request.requested.TABL, "the definition-level name is requested").to.deep.equal(["ZOSD_H5C_DEF"]);
+      expect(request.deferred.CLAS, "the code name is deferred, lazy, grows on the miss").to.deep.equal(["ZCL_H5C_FAR"]);
+      expect(JSON.stringify(request.requested), "the deferred name is not requested").to.not.include("ZCL_H5C_FAR");
+      const gaps = JSON.parse(readFileSync(outFile(root, "closure-gaps.json"), "utf8")).gaps;
+      expect(gaps.map((g) => g.name), "a deferred name is not a gap").to.deep.equal([]);
+      const islandFile = readFileSync(join(root, "gen", "hana-src", "000-h5c-main", "src", "zcl_h5c_code.clas.abap"), "utf8");
+      expect(islandFile).to.include(`RAISE EXCEPTION TYPE zcx_osd_not_activated EXPORTING missing = 'ZCL_H5C_FAR'.`);
+    } finally {
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
+
+  it("--defer-ddic keeps round 3: every name of a stubbed method is lazy, even the dictionary's", async function () {
+    this.timeout(300000);
+    const root = scratch(CLAS_STUB_SOURCE, "zcl_h5c_stub", {island2Name: "zcl_h5c_def.clas.abap", island2Source: CLAS_DEF_SOURCE});
+    fixtureDump(join(root, "dump-001"));
+    const env = writeFakes(root, envFor(root, {island: "zcl_h5c_stub.clas.abap", island2Name: "zcl_h5c_def.clas.abap"}));
+    try {
+      const result = await run(["--dump", join(root, "dump-001"), "--system", "h5c", "--stub-unresolved", "--defer-ddic"], {root, env});
+      expect(result.stopped).to.equal("fixed-point");
+      const request = JSON.parse(readFileSync(outFile(root, "closure-request.json"), "utf8"));
+      expect(request.deferred.TABL, "the table is deferred like code").to.deep.equal(["ZOSD_H5C_HEAD"]);
+      expect(JSON.stringify(request.requested), "and not requested").to.not.include("ZOSD_H5C_HEAD");
+      const record = JSON.parse(readFileSync(outFile(root, "closure-stubs.json"), "utf8"));
+      expect(record.filter((e) => e.level === "method").length, "the method is stubbed at once").to.be.at.least(1);
+      const islandFile = readFileSync(join(root, "gen", "hana-src", "000-h5c-main", "src", "zcl_h5c_stub.clas.abap"), "utf8");
+      expect(islandFile).to.include(`RAISE EXCEPTION TYPE zcx_osd_not_activated EXPORTING missing = 'ZOSD_H5C_HEAD'.`);
+    } finally {
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
+
+  it("--stub-unresolved: definition-level findings exclude the class through the build's own seam; the method is stubbed beside it", async function () {
+    this.timeout(300000);
+    // one class unresolvable at the definition level (the dumper answered
+    // missing for its type), one method-level miss the dumper also refused,
+    // and a third class arriving with the second dump so the walk goes one
+    // more round -- that request is the one carrying the excluded object
+    const root = scratch(CLAS_DEFEX_SOURCE, "zcl_h5c_defex",
+      {island2Name: "zcl_h5c_stub.clas.abap", island2Source: CLAS_STUB_SOURCE});
+    fixtureDump(join(root, "dump-001"));
+    const env = writeFakes(root, envFor(root, {island: "zcl_h5c_defex.clas.abap", island2Name: "zcl_h5c_stub.clas.abap",
+      missingNames: "ZOSD_H5C_DEAD,ZOSD_H5C_HEAD", grow: true}));
+    const said = [];
+    try {
+      const result = await run(["--dump", join(root, "dump-001"), "--system", "h5c", "--stub-unresolved"], {root, env, say: (m) => said.push(m)});
+      expect(result.stopped).to.equal("fixed-point");
+      expect(dumperCalls(root), "one round per iteration: the exclusion never stopped the walk").to.have.lengthOf(2);
+      // the record: the definition-level exclusion (and the method stub of
+      // the round that applied it)
+      const record = JSON.parse(readFileSync(outFile(root, "closure-stubs.json"), "utf8"));
+      const excluded = record.find((e) => e.level === "definition");
+      expect(excluded.object).to.equal("ZCL_H5C_DEFEX");
+      expect(excluded.file).to.equal(join("gen", "hana-src", "000-h5c-main", "src", "zcl_h5c_defex.clas.abap"));
+      expect(excluded.findings).to.have.lengthOf(1);
+      expect(excluded.findings[0]).to.match(/contains unknown: ZOSD_H5C_DEAD not found/);
+      // the file stays in its layer on disk, never deleted and never rewritten
+      expect(readFileSync(join(root, "gen", "hana-src", "000-h5c-main", "src", "zcl_h5c_defex.clas.abap"), "utf8"))
+        .to.equal(CLAS_DEFEX_SOURCE);
+      // the request carries the object under excluded -- its own top-level
+      // key, not deferred -- beside the fresh name the walk is still chasing
+      const request = JSON.parse(readFileSync(outFile(root, "closure-request.json"), "utf8"));
+      expect(Object.keys(request).sort()).to.include("excluded");
+      expect(request.excluded.CLAS).to.deep.equal(["ZCL_H5C_DEFEX"]);
+      expect(request.requested.TABL, "the walk went on: the second dump's name").to.deep.equal(["ZOSD_H5C_MORE_2"]);
+      expect(request.deferred.TABL).to.deep.equal([]);
+      const gaps = JSON.parse(readFileSync(outFile(root, "closure-gaps.json"), "utf8")).gaps;
+      expect(gaps.map((g) => g.name).sort(), "the dead names are gaps").to.deep.equal(["ZOSD_H5C_DEAD", "ZOSD_H5C_HEAD"]);
+      // the iteration line counts the exclusion
+      expect(said.some((l) => l.includes("iteration 2:") && l.includes("1 excluded"))).to.equal(true);
+      // the stubbed method beside it, and the build's own config carrying
+      // the exclusion
+      const stubFile = readFileSync(join(root, "gen", "hana-src", "000-h5c-main", "src", "zcl_h5c_stub.clas.abap"), "utf8");
+      expect(stubFile).to.include(`RAISE EXCEPTION TYPE zcx_osd_not_activated EXPORTING missing = 'ZOSD_H5C_HEAD'.`);
+      const {ownConfig} = await import("../tools/osd-build.mjs");
+      const {layers} = await import("../tools/osd-inputs.mjs");
+      const config = JSON.parse(readFileSync(join(root, "abap_transpile.json"), "utf8"));
+      const own = ownConfig(root, config, layers(root, config), join(root, "output"));
+      expect(own.exclude_filter).to.include(`(^|/)gen/hana-src/000-h5c-main/src/zcl_h5c_defex\\.clas\\.abap$`);
+    } finally {
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
+
+  it("a registered service's own class is never excluded: the run fails with the object and its findings", async function () {
+    this.timeout(300000);
+    const root = scratch(CLAS_DEFEX_SOURCE, "zcl_h5x1_svc_dpc_ext");
+    mkdirSync(join(root, "gen", "hana-segw"), {recursive: true});
+    writeFileSync(join(root, "gen", "hana-segw", "from-dump.json"), JSON.stringify({services: [
+      {service: "h5x1", version: "0001", dpc: "ZCL_H5X1_SVC_DPC_EXT", mpc: "ZCL_H5X1_SVC_MPC_EXT"},
+    ]}) + "\n");
+    fixtureDump(join(root, "dump-001"));
+    const env = writeFakes(root, envFor(root, {island: "zcl_h5x1_svc_dpc_ext.clas.abap", missingNames: "ZOSD_H5C_DEAD"}));
+    try {
+      let message;
+      try {
+        await run(["--dump", join(root, "dump-001"), "--system", "h5c", "--stub-unresolved"], {root, env});
+        expect.fail("the service's own class was excluded");
+      } catch (error) {
+        message = error.message;
+      }
+      expect(message).to.include("ZCL_H5X1_SVC_DPC_EXT");
+      expect(message).to.match(/registered service/);
+      expect(message, "the findings travel with it").to.match(/contains unknown: ZOSD_H5C_DEAD not found/);
+      // the file is whole, and nothing excluded it
+      expect(readFileSync(join(root, "gen", "hana-src", "000-h5c-main", "src", "zcl_h5x1_svc_dpc_ext.clas.abap"), "utf8"))
+        .to.equal(CLAS_DEFEX_SOURCE);
+      expect(JSON.stringify(JSON.parse(readFileSync(outFile(root, "closure-stubs.json"), "utf8"))))
+        .to.not.include("ZCL_H5X1_SVC_DPC_EXT");
+    } finally {
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
+
+  it("a finding naming an object the island holds is a cascade (present): never requested, never a gap", async function () {
+    this.timeout(300000);
+    // the dependent's finding names a superclass the island already holds
+    // (measured shape: `Super class "zcl_h5c_far" not found or contains
+    // errors` -- the file is there, it just does not build): the name is
+    // never asked, never a gap, and counted on the iteration line
+    const root = scratch(CLAS_USER_SOURCE, "zcl_h5c_user",
+      {island2Name: "zcl_h5c_far.clas.abap", island2Source: CLAS_FAR_BROKEN_SOURCE});
+    fixtureDump(join(root, "dump-001"));
+    const env = writeFakes(root, envFor(root, {island: "zcl_h5c_user.clas.abap", island2Name: "zcl_h5c_far.clas.abap"}));
+    const said = [];
+    try {
+      const result = await run(["--dump", join(root, "dump-001"), "--system", "h5c", "--stub-unresolved"], {root, env, say: (m) => said.push(m)});
+      expect(result.stopped).to.equal("fixed-point");
+      const requestPath = outFile(root, "closure-request.json");
+      expect(existsSync(requestPath) === false || readFileSync(requestPath, "utf8").includes("ZCL_H5C_FAR") === false,
+        "the present superclass is never requested").to.equal(true);
+      expect(JSON.stringify(JSON.parse(readFileSync(outFile(root, "closure-gaps.json"), "utf8")))).to.not.include("ZCL_H5C_FAR");
+      expect(said.some((l) => l.includes("iteration 1:") && l.includes("1 cascade (present)"))).to.equal(true);
+      const state = JSON.parse(readFileSync(outFile(root, "state.json"), "utf8"));
+      expect(Object.keys(state.asked), "nothing was asked at all").to.deep.equal([]);
+      expect(existsSync(join(root, "dumper-log.jsonl")), "no dumper round: nothing to ask").to.equal(false);
     } finally {
       rmSync(root, {recursive: true, force: true});
     }
@@ -1393,23 +1809,82 @@ process.exit(0);
     // no exception class in the tree: the stub itself cannot resolve, so
     // every round would stub again -- the cap stops the rewriting and the
     // leftover names stay in the request
-    const root = scratch(CLAS_STUB_SOURCE, "zcl_h5c_stub", {noZcx: true});
+    const root = scratch(CLAS_CODE_SOURCE, "zcl_h5c_code", {noZcx: true});
     fixtureDump(join(root, "dump-001"));
-    const env = writeFakes(root, envFor(root, {island: "zcl_h5c_stub.clas.abap"}));
+    const env = writeFakes(root, envFor(root, {island: "zcl_h5c_code.clas.abap"}));
     const said = [];
     try {
       const result = await run(["--dump", join(root, "dump-001"), "--system", "h5c", "--stub-unresolved", "--max-stub-rounds", "1"], {root, env, say: (m) => said.push(m)});
       expect(result.stopped).to.equal("fixed-point");
       expect(said.filter((l) => l.startsWith("stub cap:")).length, "the cap said itself in both passes").to.be.at.least(2);
       const request = JSON.parse(readFileSync(outFile(root, "closure-request.json"), "utf8"));
-      expect(request.deferred.TABL, "the first stub's name is deferred").to.deep.equal(["ZOSD_H5C_HEAD"]);
+      expect(request.deferred.CLAS, "the first stub's code name is deferred").to.deep.equal(["ZCL_H5C_FAR"]);
       expect(JSON.stringify(request), "the stub raise's own class is still missing: the request asks for it").to.include("ZCX_OSD_NOT_ACTIVATED");
       const gaps = JSON.parse(readFileSync(outFile(root, "closure-gaps.json"), "utf8")).gaps;
       expect(gaps.map((g) => g.name)).to.include("ZCX_OSD_NOT_ACTIVATED");
-      expect(gaps.map((g) => g.name), "the stubbed name is not a gap").to.not.include("ZOSD_H5C_HEAD");
-      const stubbedSource = readFileSync(join(root, "gen", "hana-src", "000-h5c-main", "src", "zcl_h5c_stub.clas.abap"), "utf8");
-      expect(stubbedSource).to.include(`RAISE EXCEPTION TYPE zcx_osd_not_activated EXPORTING missing = 'ZOSD_H5C_HEAD'.`);
+      expect(gaps.map((g) => g.name), "the deferred code name is not a gap").to.not.include("ZCL_H5C_FAR");
+      const stubbedSource = readFileSync(join(root, "gen", "hana-src", "000-h5c-main", "src", "zcl_h5c_code.clas.abap"), "utf8");
+      expect(stubbedSource).to.include(`RAISE EXCEPTION TYPE zcx_osd_not_activated EXPORTING missing = 'ZCL_H5C_FAR'.`);
     } finally {
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
+
+  it("the real build: a two-file island with one definition-level class transpiles GREEN with that class excluded", async function () {
+    this.timeout(300000);
+    // H5x-1's acceptance, proven by the build's own path and not by a
+    // comment: the loop's record in gen/hana-closure/closure-stubs.json is
+    // the input of osd-build's own exclusion seam (ownConfig), and with it
+    // the transpile exits 0 while the excluded file stays in its layer on
+    // disk. RED control first: without the record the same build fails on
+    // the definition-level type.
+    const {build, ownConfig} = await import("../tools/osd-build.mjs");
+    const {layers} = await import("../tools/osd-inputs.mjs");
+    const {definitionExclusions} = await import("../tools/hana-closure-exclusions.mjs");
+    const root = mkdtempSync(join(tmpdir(), "hana-closure-realbuild-"));
+    const envNames = ["OSD_PACKS", "OSD_WEB_PACKS", "OSD_TMP", "OSD_LAYERS", "OSD_LAYER_PACKAGE", "OSD_IMAGE_PACKS"];
+    const saved = Object.fromEntries(envNames.map((n) => [n, process.env[n]]));
+    try {
+      symlinkSync(join(REPO, "node_modules"), join(root, "node_modules"), "dir");
+      writeFileSync(join(root, "package.json"), JSON.stringify({name: "hana-closure-realbuild", private: true}) + "\n");
+      writeFileSync(join(root, "abap_transpile.json"), JSON.stringify({
+        input_folder: ["gen/hana-src/*"],
+        output_folder: "output",
+        libs: [],
+        write_source_map: false,
+        options: {ignoreSyntaxCheck: false, addFilenames: true, addCommonJS: true, unknownTypes: "compileError"},
+      }, null, 2) + "\n");
+      const island = join(root, "gen", "hana-src", "000-h5x1", "src");
+      mkdirSync(island, {recursive: true});
+      writeFileSync(join(island, "zcl_h5c_clean.clas.abap"), CLAS_CLEAN_SOURCE);
+      writeFileSync(join(island, "zcl_h5c_defex.clas.abap"), CLAS_DEFEX_SOURCE);
+      for (const n of envNames) delete process.env[n];
+      let red;
+      try {
+        await build({root, generators: false, switch: false, log: () => {}});
+        expect.fail("the build passed with the definition-level class in it");
+      } catch (error) {
+        red = error;
+      }
+      expect(`${String(red.output ?? "")}\n${red.message ?? ""}`).to.match(/ZOSD_H5C_DEAD/);
+      // the walk's record, exactly as the loop writes it
+      mkdirSync(join(root, "gen", "hana-closure"), {recursive: true});
+      writeFileSync(join(root, "gen", "hana-closure", "closure-stubs.json"), JSON.stringify([
+        {level: "definition", file: "gen/hana-src/000-h5x1/src/zcl_h5c_defex.clas.abap", object: "ZCL_H5C_DEFEX",
+          findings: [`unknown_types, Variable "GV_H5C" contains unknown: ZOSD_H5C_DEAD not found, lookup, zcl_h5c_defex.clas.abap:3`]},
+      ], null, 2) + "\n");
+      const config = JSON.parse(readFileSync(join(root, "abap_transpile.json"), "utf8"));
+      const own = ownConfig(root, config, layers(root, config), join(root, "build", "tmp", "out"));
+      expect(own.exclude_filter).to.include(`(^|/)gen/hana-src/000-h5x1/src/zcl_h5c_defex\\.clas\\.abap$`);
+      const built = await build({root, generators: false, switch: false, log: () => {}});
+      expect(built.ok, "the transpile is GREEN with the class excluded").to.equal(true);
+      expect(definitionExclusions(root)).to.have.lengthOf(1);
+      expect(existsSync(join(island, "zcl_h5c_defex.clas.abap")), "the file stays in its layer on disk").to.equal(true);
+    } finally {
+      for (const n of envNames) {
+        if (saved[n] === undefined) delete process.env[n];
+        else process.env[n] = saved[n];
+      }
       rmSync(root, {recursive: true, force: true});
     }
   });

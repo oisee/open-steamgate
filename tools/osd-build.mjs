@@ -42,6 +42,7 @@ import {basename, dirname, join, relative, resolve, sep} from "node:path";
 import {fileURLToPath, pathToFileURL} from "node:url";
 import {buildIdentity, assertToolchain, describeBuild} from "./osd-transpiler.mjs";
 import {describeDuplicates, excludePatterns, layers} from "./osd-inputs.mjs";
+import {excludedFiles} from "./hana-closure-exclusions.mjs";
 import {transpile, selectedModules, isBinaryFilename, listFiles} from "./osd-transpile.mjs";
 import {makeReadRecord, markIncomplete, readEntry, readGeneratorLog, READS, sha256, withSeedReads} from "./osd-read-record.mjs";
 import {inputFoldersOf, packReadsOf, packsOf, seedsBuilt, userFoldersOf, webappsOf} from "./osd-packs.mjs";
@@ -665,6 +666,11 @@ export function ownConfig(root, config, stack, outputFolder, overlay = undefined
     input_folder: [...inputFoldersOf(root, config), ...(kept?.folder === undefined ? [] : [kept.folder])],
     output_folder: relative(root, outputFolder),
     exclude_filter: [...(config.exclude_filter ?? []), ...excludePatterns(stack.hidden),
+      // the closure walk's definition-level exclusions (H5x-1): objects the
+      // walk found unresolvable at the definition level, recorded in
+      // gen/hana-closure/closure-stubs.json -- the file stays in its layer
+      // on disk, the build is kept from it here, through the same seam
+      ...excludePatterns(excludedFiles(root)),
       ...[...(kept?.exclude ?? [])].sort().map((file) => `^${file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`)],
   };
 }
