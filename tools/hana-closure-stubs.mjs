@@ -535,9 +535,18 @@ export function planStubPass({source, findings, basename, refs = [], missingOf =
     stubs.push(stub);
     if (stub.missing.length === 0) collectNameless();
   }
+  // ONE rewrite pass: every stub's positions come from the same parse of
+  // `work` (the FRIENDS-stripped source), so they must all be applied over
+  // that one source. Applying the signature stubs in a second pass over the
+  // body-stubbed source computed their offsets against stale rows and ran
+  // offsetAt past the rewritten source's end on a class whose body stubs had
+  // moved its lines (bed run 17: `Cannot read properties of undefined
+  // (reading 'length')`, first iteration, right after the first build; a
+  // single signature stub never even reaches applyStubs' sort comparator,
+  // which is why the signature-cut scenario stayed green while the bed died).
+  const allStubs = [...stubs, ...sigStubs];
   let outSource = work;
-  if (stubs.length > 0) outSource = applyStubs(outSource, stubs);
-  if (sigStubs.length > 0) outSource = applyStubs(outSource, sigStubs);
+  if (allStubs.length > 0) outSource = applyStubs(outSource, allStubs);
   for (const [method, vars] of sigCut) {
     outSource = cutSignatureParams(outSource, basename, method, vars).source;
   }

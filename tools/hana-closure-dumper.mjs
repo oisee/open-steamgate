@@ -119,3 +119,10 @@ export function printedCommand(env, requestPath, dumpDir, provenance) {
     "--allow-in-repo",
   ].join(" ");
 }
+
+// the loop's provenance string for iteration n: the same words every round
+// records, the dumper side of the contract -- moved here from the loop
+// (tools/hana-closure.mjs) since FIX-1 with the rest of the dumper's
+// vocabulary
+export const provenanceFor = (iteration) =>
+  `hana-closure iteration ${iteration}: the closure request's names (tools/hana-closure.mjs)`;

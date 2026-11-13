@@ -9,8 +9,8 @@
 //
 // The record is gen/hana-closure/closure-stubs.json -- the walk's --out
 // (OSD_HANA_CLOSURE_OUT) when it ran with one -- and carries the decision's
-// six sections (H5x-2's schema):
-//     {roots, cascades, cycles, stubs, waits, excluded}
+// six sections plus the errors list (H5x-2's schema, FIX-1's `errors`):
+//     {roots, cascades, cycles, stubs, waits, errors, excluded}
 // roots -- the objects whose definition references a name answered missing
 // ({level: "definition", object, file, kind, missing, findings}); cascades
 // -- the dependents that fall with them ({level: "cascade", object, file,
@@ -19,8 +19,11 @@
 // objects kept whole ({level: "cycle", members, kept: true}); stubs -- the
 // method stubs ({object, file, class, method, missing, finding}); waits --
 // the objects whose definition names are still pending, the next request's
-// asks ({object, names}); excluded -- the out-of-build objects per kind
-// ({CLAS: [...], INTF: [...]}), the request's `excluded` key's twin.
+// asks ({object, names}); errors -- one {file, error} entry per island
+// object whose analysis or planning threw (FIX-1: the object is "red, unknown
+// cause" -- kept in the build, never excluded, the run continues);
+// excluded -- the out-of-build objects per kind ({CLAS: [...], INTF:
+// [...]}), the request's `excluded` key's twin.
 //
 // One reader here -- tools/osd-build.mjs, tools/hana-ddic-gen.mjs's
 // validationMessage (the loop's own validate channel) and
@@ -39,7 +42,7 @@ import {join} from "node:path";
 export const closureStubsFile = (root) =>
   join(process.env.OSD_HANA_CLOSURE_OUT ?? join(root, "gen", "hana-closure"), "closure-stubs.json");
 
-const EMPTY = () => ({roots: [], cascades: [], cycles: [], stubs: [], waits: [], excluded: {}});
+const EMPTY = () => ({roots: [], cascades: [], cycles: [], stubs: [], waits: [], errors: [], excluded: {}});
 
 const kindOfEntry = (e) => (/\.intf\.abap$/.test(String(e?.file ?? "")) === true ? "INTF" : "CLAS");
 
@@ -81,6 +84,7 @@ export function closureStubs(root, file = closureStubsFile(root)) {
     cycles: Array.isArray(parsed.cycles) === true ? parsed.cycles : [],
     stubs: Array.isArray(parsed.stubs) === true ? parsed.stubs : [],
     waits: Array.isArray(parsed.waits) === true ? parsed.waits : [],
+    errors: Array.isArray(parsed.errors) === true ? parsed.errors : [],
     excluded: parsed.excluded !== null && typeof parsed.excluded === "object" ? parsed.excluded : {},
   };
 }

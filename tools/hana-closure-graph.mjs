@@ -338,12 +338,24 @@ export function analyseIsland({reg, root, classPaths}) {
   }
   const objects = [];
   const byObject = new Map();
+  const errors = [];
   for (const [stem, entry] of [...byStem.entries()].sort()) {
     const main = entry.paths.map((p) => p.split("/").pop())
       .find((b) => /\.clas\.abap$|\.intf\.abap$/.test(b) === true) ?? entry.paths[0];
-    const analysis = analyseObject(reg, main);
-    if (analysis === undefined) continue;
     const mainPath = entry.paths.find((p) => p.split("/").pop() === main) ?? entry.paths[0];
+    let analysis;
+    try {
+      analysis = analyseObject(reg, main);
+    } catch (error) {
+      // one object's analysis must not stop the walk (FIX-1): the throw is
+      // recorded {file, error} for the closure-stubs.json `errors` section
+      // and the object stays out of every map below -- "red, unknown
+      // cause": kept in the build, never excluded by the decision, its
+      // findings still classified by the text fallback
+      errors.push({file: mainPath.slice(root.length + 1), error: String(error?.message ?? error)});
+      continue;
+    }
+    if (analysis === undefined) continue;
     const merged = {unknowns: [], edges: [], friends: [], signatureLines: []};
     const seen = new Set();
     for (const base of entry.files) {
@@ -366,7 +378,7 @@ export function analyseIsland({reg, root, classPaths}) {
     objects.push(record);
     byObject.set(object, record);
   }
-  return {objects, byObject};
+  return {objects, byObject, errors};
 }
 
 /** the registry the analysis runs over: the build's own file set
@@ -574,11 +586,13 @@ export function mergeNames({analysis, findings, classPaths}) {
   return {names, structuralCount: findings.length - rest.length, rest};
 }
 
-/** the record the seam reads (H5x-2's six sections), assembled from the
- *  walk's last decision and the stubs -- written before every revalidation
- *  (the build's exclude_filter must see an exclusion at once) and at the
- *  end of the walk. */
-export function writeClosureRecord(out, {stubRecords, excludedRecords, waits}) {
+/** the record the seam reads (H5x-2's six sections plus FIX-1's `errors`:
+ *  one {file, error} entry per island object whose analysis or planning
+ *  threw -- the object stays in the build, "red, unknown cause"), assembled
+ *  from the walk's last decision and the stubs -- written before every
+ *  revalidation (the build's exclude_filter must see an exclusion at once)
+ *  and at the end of the walk. */
+export function writeClosureRecord(out, {stubRecords, excludedRecords, waits, errors = []}) {
   const excluded = {};
   for (const r of excludedRecords) {
     if (r.level !== "definition" && (r.level !== "cascade" || r.excluded !== true)) continue;
@@ -591,6 +605,7 @@ export function writeClosureRecord(out, {stubRecords, excludedRecords, waits}) {
     cycles: excludedRecords.filter((r) => r.level === "cycle"),
     stubs: stubRecords,
     waits,
+    errors,
     excluded,
   }, null, 2) + "\n");
 }

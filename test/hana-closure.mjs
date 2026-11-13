@@ -649,6 +649,26 @@ describe("hana-closure: the dependency closure, by iteration", () => {
     expect(thrown.guard, "the cascade path fails the run the same way").to.equal(true);
   });
 
+  it("analyseIsland: one object's throw is recorded {file, error} and the rest are analysed -- the fixture that makes references() throw (FIX-1)", async () => {
+    const {analyseIsland, references} = await import("../tools/hana-closure-graph.mjs");
+    // the fixture: a registry whose getObject throws for one island object --
+    // exactly what makes analyseObject, and so references(), throw
+    const badReg = {getObject: (kind, name) => {
+      if (name === "ZCL_H5C_BAD") throw new Error("boom");
+      return undefined;
+    }};
+    expect(() => references(badReg, "/x/zcl_h5c_bad.clas.abap"), "references() itself propagates the throw").to.throw("boom");
+    const root = "/x";
+    const classPaths = new Map([
+      ["zcl_h5c_bad.clas.abap", ["/x/zcl_h5c_bad.clas.abap"]],
+      ["zcl_h5c_good.clas.abap", ["/x/zcl_h5c_good.clas.abap"]],
+    ]);
+    const analysis = analyseIsland({reg: badReg, root, classPaths});
+    expect(analysis.errors, "the throw is recorded {file, error}").to.deep.equal([{file: "zcl_h5c_bad.clas.abap", error: "boom"}]);
+    expect(analysis.objects.map((o) => o.object), "only the good object is analysed").to.deep.equal(["ZCL_H5C_GOOD"]);
+    expect(analysis.byObject.has("ZCL_H5C_BAD"), "the errored object is out of every map: red, unknown cause, never excluded").to.equal(false);
+  });
+
   it("references(): the carriers, per shape, on synthetic objects", async () => {
     const abaplint = await import("@abaplint/core");
     const graph = await import("../tools/hana-closure-graph.mjs");
@@ -969,8 +989,58 @@ ENDCLASS.`,
     ]);
   });
 
+  it("planStubPass: body stubs and a signature stub land in one pass over one parse (the bed-17 shape, FIX-1)", async () => {
+    const {methodBlocks, planStubPass} = await import("../tools/hana-closure-stubs.mjs");
+    // bed run 17's shape in miniature: a class whose body stubs move its
+    // lines while a signature stub still carries rows from the same parse.
+    // Applying the two stub lists in two passes computed the signature
+    // stub's offsets against the pre-rewrite source and ran offsetAt past
+    // the shrunken source's end (`Cannot read properties of undefined
+    // (reading 'length')`). The bodies sit before the signature-missed
+    // method and carry most of the file's lines -- the geometry that moved
+    // the file's end.
+    const body = (n) => Array.from({length: n}, (_, i) => `    lv_x = ${i}.`).join("\n");
+    const source = [
+      "CLASS zcl_h5c_both DEFINITION PUBLIC FINAL CREATE PUBLIC.",
+      "  PUBLIC SECTION.",
+      "    METHODS run_a.",
+      "    METHODS run_b.",
+      "    METHODS sig_z",
+      "      IMPORTING iv_dead TYPE zosd_h5c_dead.",
+      "ENDCLASS.",
+      "CLASS zcl_h5c_both IMPLEMENTATION.",
+      "  METHOD run_a.",
+      body(20),
+      "  ENDMETHOD.",
+      "  METHOD run_b.",
+      body(20),
+      "  ENDMETHOD.",
+      "  METHOD sig_z.",
+      "    RETURN.",
+      "  ENDMETHOD.",
+      "ENDCLASS.",
+    ].join("\n") + "\n";
+    const findings = parseFindings([
+      `unknown_types, Variable "LV_X" contains unknown: ZOSD_H5C_DEAD not found, lookup, zcl_h5c_both.clas.abap:15`,
+      `unknown_types, Variable "LV_X" contains unknown: ZOSD_H5C_DEAD not found, lookup, zcl_h5c_both.clas.abap:40`,
+    ].join("\n"));
+    const refs = [
+      {name: "ZOSD_H5C_DEAD", kind: "type", line: 6, level: "signature", method: "SIG_Z", via: "lookup", var: "IV_DEAD"},
+    ];
+    const plan = planStubPass({source, findings, basename: "zcl_h5c_both.clas.abap", refs,
+      missingOf: (name) => name === "ZOSD_H5C_DEAD", asked: () => true, refusedOf: () => false,
+      islandFiles: new Set(), excludedObjects: new Set(), goneOf: () => false});
+    expect(plan.stubs, "two body stubs and the signature stub").to.have.lengthOf(3);
+    expect(plan.stubs.filter((s) => s.signature === true).map((s) => s.method)).to.deep.equal(["SIG_Z"]);
+    expect((plan.source.match(/RAISE EXCEPTION TYPE zcx_osd_not_activated/g) ?? []).length,
+      "all three raises are in the rewritten source").to.equal(3);
+    expect(methodBlocks(plan.source).map((b) => b.method), "the result still parses, three blocks").to.deep.equal(["RUN_A", "RUN_B", "SIG_Z"]);
+    expect(plan.source.includes("IMPORTING iv_dead"), "the parameter's clause is cut").to.equal(false);
+    expect(/METHODS sig_z\s*\./.test(plan.source), "the METHODS statement stays").to.equal(true);
+  });
+
   it("the seam reads the six-section record from OSD_HANA_CLOSURE_OUT -- the loop's --out -- not only the fixed path (S-1)", async () => {
-    const {closureStubsFile, definitionExclusions, excludedFiles} = await import("../tools/hana-closure-exclusions.mjs");
+    const {closureStubs, closureStubsFile, definitionExclusions, excludedFiles} = await import("../tools/hana-closure-exclusions.mjs");
     const root = mkdtempSync(join(tmpdir(), "hana-closure-seam-"));
     const saved = process.env.OSD_HANA_CLOSURE_OUT;
     try {
@@ -981,6 +1051,7 @@ ENDCLASS.`,
           {level: "cascade", object: "ZCL_H5C_STRIP", kind: "CLAS", file: "gen/hana-src/000-x/src/zcl_h5c_strip.clas.abap", of: ["ZCL_H5C_DEFX"], edge: "friends", action: "strip-friends", findings: [], excluded: false},
         ],
         cycles: [], stubs: [{object: "ZCL_H5C_DEFX", method: "RUN", missing: ["ZOSD_H5C_DEAD"]}], waits: [],
+        errors: [{file: "gen/hana-src/000-x/src/zcl_h5c_badx.clas.abap", error: "boom"}],
         excluded: {CLAS: ["ZCL_H5C_DEFX", "ZCL_H5C_FALL"]},
       };
       mkdirSync(join(root, "gen", "hana-closure"), {recursive: true});
@@ -988,6 +1059,8 @@ ENDCLASS.`,
       expect(closureStubsFile(root), "without the var, the fixed path").to.equal(join(root, "gen", "hana-closure", "closure-stubs.json"));
       expect(definitionExclusions(root).map((e) => e.object), "roots and the cascades excluded with them; a FRIENDS strip is a record, not an exclusion").to.deep.equal(
         ["ZCL_H5C_DEFX", "ZCL_H5C_FALL"]);
+      expect(closureStubs(root).errors, "the errors ride the record (FIX-1), an error excludes nothing").to.deep.equal(
+        [{file: "gen/hana-src/000-x/src/zcl_h5c_badx.clas.abap", error: "boom"}]);
       expect(excludedFiles(root)).to.deep.equal(
         ["gen/hana-src/000-x/src/zcl_h5c_defx.clas.abap", "gen/hana-src/000-x/src/zcl_h5c_fall.clas.abap"]);
       const other = join(root, "closure-out");
@@ -2119,7 +2192,7 @@ process.exit(0);
       expect(request.deferred.TABL, "a table is eager now: nothing is deferred").to.deep.equal([]);
       const state = JSON.parse(readFileSync(outFile(root, "state.json"), "utf8"));
       expect(state.asked.ZOSD_H5C_HEAD.kinds, "asked, the opposite of round 3's never-asked").to.deep.equal(["TABL"]);
-      expect(JSON.parse(readFileSync(outFile(root, "closure-stubs.json"), "utf8")), "stub count 0").to.deep.equal({roots: [], cascades: [], cycles: [], stubs: [], waits: [], excluded: {}});
+      expect(JSON.parse(readFileSync(outFile(root, "closure-stubs.json"), "utf8")), "stub count 0").to.deep.equal({roots: [], cascades: [], cycles: [], stubs: [], waits: [], errors: [], excluded: {}});
       const islandFile = readFileSync(join(root, "gen", "hana-src", "000-h5c-main", "src", "zcl_h5c_stub.clas.abap"), "utf8");
       expect(islandFile, "the body stayed").to.not.include("RAISE EXCEPTION");
       expect(said.some((l) => l.includes("iteration 1:") && l.includes("0 stubbed method(s)"))).to.equal(true);
@@ -2904,7 +2977,7 @@ process.exit(0);
       expect(result.iteration).to.equal(2);
       expect(dumperCalls(root), "one round: the missing superclass was asked").to.have.lengthOf(1);
       expect(said.some((l) => /excluded:|cascade:|cycle:/.test(l)), "no exclusion decided anywhere").to.equal(false);
-      expect(JSON.parse(readFileSync(outFile(root, "closure-stubs.json"), "utf8")), "no record of any kind").to.deep.equal({roots: [], cascades: [], cycles: [], stubs: [], waits: [], excluded: {}});
+      expect(JSON.parse(readFileSync(outFile(root, "closure-stubs.json"), "utf8")), "no record of any kind").to.deep.equal({roots: [], cascades: [], cycles: [], stubs: [], waits: [], errors: [], excluded: {}});
       expect(readFileSync(join(root, "gen", "hana-src", "000-h5c-main", "src", "zcl_h5c_mid.clas.abap"), "utf8"))
         .to.equal(CLAS_MID_SOURCE);
       expect(readFileSync(join(root, "gen", "hana-src", "000-h5c-main", "src", "zcl_h5c_user.clas.abap"), "utf8"))

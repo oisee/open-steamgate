@@ -246,13 +246,13 @@
 // --allow-in-repo, the password from VSP_HANA_PASSWORD only) --
 // test/hana-closure.mjs, fixtures ZOSD_H5C_*; the real iteration is dell's,
 // on the bed.
-import {copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
+import {copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {join, resolve} from "node:path";
 import {runsAs} from "./osd-main.mjs";
 import {validationMessage} from "./hana-ddic-gen.mjs";
 import {islandClassPaths, planStubPass, registeredServiceClasses, serviceGuardBySuffixOnly, dropPresentNames, frameworkGapList, objectFilePresent} from "./hana-closure-stubs.mjs";
-import {buildCheck, ddicWritten, ensureLayers, islandObjectCount, islandShrinkCheck, mergeInputs} from "./hana-closure-merge.mjs";
-import {dumperConfigured, dumpRound, printedCommand} from "./hana-closure-dumper.mjs";
+import {buildCheck, ddicWritten, ensureLayers, generationOf, islandBasenames, islandObjectCount, islandShrinkCheck, mergeInputs} from "./hana-closure-merge.mjs";
+import {dumperConfigured, dumpRound, printedCommand, provenanceFor} from "./hana-closure-dumper.mjs";
 import {cascadeOf, classifyFindings, exclusionCandidates, nameFromAbapFile, parseFindings} from "./hana-closure-exclude.mjs";
 import {analyseIsland, graphDecide, mergeNames, requestKindOf, structuralRegistry, waitsOf, writeClosureRecord} from "./hana-closure-graph.mjs";
 
@@ -263,37 +263,10 @@ import {analyseIsland, graphDecide, mergeNames, requestKindOf, structuralRegistr
 // size budget stays honest); re-exported here so every reader -- the tests,
 // tools/hana-closure-merge.mjs, the probes -- keeps one import path.
 export {parseFindings, classifyFindings, nameFromAbapFile} from "./hana-closure-exclude.mjs";
-
-// ------------------------------------------------------------ the island --
-
-/** the file basenames of the island -- gen/hana-src/** and gen/hana-ddic/*.
- *  The closure is scoped to it: a finding whose file is one of these
- *  basenames is the service's and is classified; src/, packs/ and other
- *  gen/ findings are the tree's own and never enter a request. The
- *  validation's file names are bare basenames (the transpiler reports the
- *  name only), so "under gen/hana-src/*" is decided by membership in this
- *  set, not by a path prefix on the finding -- and a basename both an island
- *  layer and src/ carry is the island's, the later layer wins the build
- *  anyway. Reads the tree's folders, nothing else. */
-export function islandBasenames(root) {
-  const names = new Set();
-  const walk = (dir) => {
-    let entries;
-    try {
-      entries = readdirSync(dir, {withFileTypes: true});
-    } catch (error) {
-      if (error.code === "ENOENT") return;
-      throw error;
-    }
-    for (const entry of entries) {
-      if (entry.isDirectory()) walk(join(dir, entry.name));
-      else names.add(entry.name);
-    }
-  };
-  walk(join(root, "gen", "hana-src"));
-  walk(join(root, "gen", "hana-ddic"));
-  return names;
-}
+// the island's basename set lives with the merge module's other island
+// facts (islandObjectCount, ddicWritten) since FIX-1; re-exported here so
+// every reader -- the tests, the probes -- keeps one import path
+export {islandBasenames} from "./hana-closure-merge.mjs";
 
 // ------------------------------------------------------------- request ----
 
@@ -395,23 +368,10 @@ const saveState = (out, state) => {
   writeFileSync(join(out, "state.json"), JSON.stringify(state, null, 2) + "\n");
 };
 
-// the identity of the inputs the findings came from, for the request's
-// `generation`: the sha256 the dump->layers converter recorded of the
-// dump's manifest.json, copied into gen/hana-src/manifest.json by the
-// merge; empty when no merge has written one yet. (The build here is
-// validationMessage over the tree -- it writes no manifest of its own; the
-// dump's is the manifest on the path.)
-const generationOf = (root) => {
-  try {
-    const manifest = JSON.parse(readFileSync(join(root, "gen", "hana-src", "manifest.json"), "utf8"));
-    return String(manifest.dump?.manifest_sha256 ?? "");
-  } catch {
-    return "";
-  }
-};
-
-const provenanceFor = (iteration) =>
-  `hana-closure iteration ${iteration}: the closure request's names (tools/hana-closure.mjs)`;
+// the request's `generation` (the merge manifest's sha) and the dumper
+// round's provenance live with their modules since FIX-1: generationOf in
+// tools/hana-closure-merge.mjs (it reads the merge's own manifest),
+// provenanceFor in tools/hana-closure-dumper.mjs (the dumper's contract)
 
 // the dumper round and the by-hand command live in
 // tools/hana-closure-dumper.mjs since H5x-1: their own package, the size
@@ -624,6 +584,12 @@ export async function run(args = process.argv.slice(2), options = {}) {
       root, classPaths: islandClassPaths(root)});
     let all = parseFindings(await validationMessage(root, join(out, "closure-stubs.json")));
     let findings = all.filter((f) => island.has(f.file));
+    // FIX-1: this iteration's analysis errors, keyed by file ("red, unknown
+    // cause" -- kept, never excluded); without --stub-unresolved this is the
+    // record's only write, the audit trail of what the walk could not analyse
+    const errorRecords = new Map((analysis.errors ?? []).map((e) => [e.file, e]));
+    if (stubUnresolved === false && errorRecords.size > 0) writeClosureRecord(out,
+      {stubRecords, excludedRecords, waits: [], errors: [...errorRecords.values()]});
     // lazy activation (--stub-unresolved) as fix round 1 corrects it: a
     // method keeps its body only while a DDIC name of its is still pending
     // in THIS iteration's request; nameless, present-only, resolved-but-
@@ -634,6 +600,9 @@ export async function run(args = process.argv.slice(2), options = {}) {
     // service's own classes fail the run instead)
     const deferredPairs = new Map();
     const eagerNames = new Map();
+    // the objects whose planning threw this iteration (FIX-1): out of the
+    // decision's material entirely -- kept in the build, never excluded
+    const planErrored = new Set();
     let stubRounds = 0;
     let frameworkGaps = 0;
     let cycles = 0;
@@ -672,7 +641,8 @@ export async function run(args = process.argv.slice(2), options = {}) {
         else excludedRecords.push(rec);
       };
       const writeRecord = () =>
-        writeClosureRecord(out, {stubRecords, excludedRecords, waits: waitsOf(analysisObjects, pendingAtFixedPoint)});
+        writeClosureRecord(out, {stubRecords, excludedRecords, waits: waitsOf(analysisObjects, pendingAtFixedPoint),
+          errors: [...errorRecords.values()]});
       for (;;) {
         const byFile = new Map();
         for (const f of findings) {
@@ -700,12 +670,25 @@ export async function run(args = process.argv.slice(2), options = {}) {
               continue;
             }
             const object = objectOf(basename);
+            if (planErrored.has(object) === true) continue;
             const refs = byObject.get(object)?.unknowns ?? [];
-            const plan = planStubPass({source, findings: list, basename, refs,
-              missingOf: (name) => state.missing[name] !== undefined,
-              asked: (name) => state.asked[name] !== undefined,
-              refusedOf: (name) => state.refused[name] !== undefined,
-              islandFiles, excludedObjects, deferDdic, goneOf});
+            let plan;
+            try {
+              plan = planStubPass({source, findings: list, basename, refs,
+                missingOf: (name) => state.missing[name] !== undefined,
+                asked: (name) => state.asked[name] !== undefined,
+                refusedOf: (name) => state.refused[name] !== undefined,
+                islandFiles, excludedObjects, deferDdic, goneOf});
+            } catch (error) {
+              // FIX-1: one file's planning must not stop the walk -- recorded,
+              // the object leaves the decision material (kept, never excluded)
+              const message = String(error?.message ?? error);
+              const file = path.slice(root.length + 1);
+              say(`stub: ${basename} could not be planned (${message}); its findings stay in the request, the object stays in the build`);
+              errorRecords.set(file, {file, error: message});
+              planErrored.add(object);
+              continue;
+            }
             for (const n of plan.nameless) {
               const entry = gapFindings.get(n.finding) ??
                 {finding: n.finding, ...(n.member !== undefined ? {member: n.member} : {}), used_by: []};
@@ -723,7 +706,7 @@ export async function run(args = process.argv.slice(2), options = {}) {
         // references (the graph), beside this round's findings outside
         // every method body -- signature-line findings are the stub pass's
         const planByFile = new Map(planned.map((p) => [p.basename, p]));
-        const objects = analysisObjects.map((o) => {
+        const objects = analysisObjects.filter((o) => planErrored.has(o.object) === false).map((o) => {
           const sigLines = new Set(o.signatureLines ?? []);
           const entry = {object: o.object, defNames: defNamesOf(o),
             edges: (o.edges ?? []).filter((e) => e.level === "definition").map((e) => e.to),

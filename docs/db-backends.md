@@ -1111,9 +1111,13 @@ left — the property `$batch` cannot defeat). The stubbed source is written bac
 file — generated content, so rewriting in place is what the merge does
 anyway — and recorded in `gen/hana-closure/closure-stubs.json`'s `stubs`
 section, `{object, file, class, method, missing, finding, signature?}` —
-H5x-2's six-section record (`{roots, cascades, cycles, stubs, waits,
-excluded}`), the WALK's: stubs from every iteration stay in it while each
-iteration writes its own decision beside them. What stays lazy is code and only code. A name of a DDIC kind —
+H5x-2's record plus FIX-1's `errors` (`{roots, cascades, cycles, stubs,
+waits, errors, excluded}`), the WALK's: stubs from every iteration stay in
+it while each iteration writes its own decision beside them. The body
+stubs and the signature stubs land in ONE rewrite pass over one parse
+(FIX-1: two passes computed the signature stubs' offsets against the
+pre-rewrite source and crashed `offsetAt` past the shrunken source on bed
+run 17 — a class whose body stubs had moved its lines). What stays lazy is code and only code. A name of a DDIC kind —
 TABL, DTEL, DOMA, TTYP, SHLP, and the kind-less triple — that a
 would-be-stubbed method names is requested from the dumper in the same
 iteration: a DDIC closure is cheap and pulls no code, and a stub over a
@@ -1197,13 +1201,17 @@ cleared whenever the island grows and re-decided from scratch — an object
 excluded on an incomplete island comes back once its roots arrive — and
 the request's `excluded` key and the record carry the LAST decision's
 exclusions (the roots and the cascades that fall with them). The record is
-`closure-stubs.json` in H5x-2's six-section schema — `{roots, cascades,
-cycles, stubs, waits, excluded}`: the roots (`{level: "definition",
-object, file, kind, missing, findings}`), the cascades and the FRIENDS
-strips, the kept cycles, the stubs, the WAITS — the objects whose
-definition names are still pending, `{object, names}`: a blocked
-decision's waits are exactly what the request goes out with — and the
-per-kind `excluded` map. The record lands in the loop's `--out`
+`closure-stubs.json` in H5x-2's schema with FIX-1's `errors` — `{roots,
+cascades, cycles, stubs, waits, errors, excluded}`: the roots (`{level:
+"definition", object, file, kind, missing, findings}`), the cascades and
+the FRIENDS strips, the kept cycles, the stubs, the WAITS — the objects
+whose definition names are still pending, `{object, names}`: a blocked
+decision's waits are exactly what the request goes out with — the ERRORS —
+one `{file, error}` entry per island object whose analysis or planning
+threw (FIX-1): the object is "red, unknown cause" — kept in the build,
+never excluded by the decision, its findings still classified by the text
+fallback, the run continues; one object's throw never stops the walk —
+and the per-kind `excluded` map. The record lands in the loop's `--out`
 (`OSD_HANA_CLOSURE_OUT` tells every reader where), not only the fixed
 gen/hana-closure path (S-1), and the sorted exclusion list joins the
 generation hash (S-2): through the build's own exclusion seam, the one
@@ -1248,8 +1256,14 @@ rooting, a cycle with a root inside falling whole, the seed guard failing
 the run both ways; `stripFriends` and `cutSignatureParams` on the
 statement text (a subset strip, the whole clause gone, one parameter cut
 with DEFAULT and OPTIONAL, a mixed two-parameter clause keeping its
-keyword); the six-section record and the seam (`--out`, an H5x-1 array
-still reading). The loop scenarios: a method whose only miss is a table
+keyword); the record and the seam (`--out`, an H5x-1 array
+still reading). FIX-1 adds: the bed-17 shape in miniature — a class whose
+body stubs move its lines while a signature stub still carries rows from
+the same parse, both landing in one rewrite pass (the bed's `Cannot read
+properties of undefined (reading 'length')`) — and one object's analysis
+throwing: recorded `{file, error}` in the record's `errors` section, the
+object "red, unknown cause" — kept, never excluded — while the rest is
+still analysed. The loop scenarios: a method whose only miss is a table
 the fake dumper resolves — asked in that iteration, the method never
 stubbed — and the inverse with a dictionary-lacking table (a gap, the
 stub recording it); a code-kind miss deferred with its method stubbed;

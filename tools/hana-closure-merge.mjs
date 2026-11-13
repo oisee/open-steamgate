@@ -391,3 +391,52 @@ function ddicFill({root, env, say, resolved, dumps}) {
   }
   return [...refused.values()];
 }
+
+// ------------------------------------------------------------ the island --
+
+/** the file basenames of the island -- gen/hana-src/** and gen/hana-ddic/*.
+ *  The closure is scoped to it: a finding whose file is one of these
+ *  basenames is the service's and is classified; src/, packs/ and other
+ *  gen/ findings are the tree's own business, counted once, never asked. The
+ *  validation's file names are bare basenames (the transpiler reports the
+ *  name only), so "under gen/hana-src/*" is decided by membership in this
+ *  set, not by a path prefix on the finding -- and a basename both an island
+ *  layer and src/ carry is the island's, the later layer wins the build
+ *  anyway. Reads the tree's folders, nothing else. Lives here beside the
+ *  module's other island facts (islandObjectCount, ddicWritten) since FIX-1;
+ *  tools/hana-closure.mjs re-exports it. */
+export function islandBasenames(root) {
+  const names = new Set();
+  const walk = (dir) => {
+    let entries;
+    try {
+      entries = readdirSync(dir, {withFileTypes: true});
+    } catch (error) {
+      if (error.code === "ENOENT") return;
+      throw error;
+    }
+    for (const entry of entries) {
+      if (entry.isDirectory()) walk(join(dir, entry.name));
+      else names.add(entry.name);
+    }
+  };
+  walk(join(root, "gen", "hana-src"));
+  walk(join(root, "gen", "hana-ddic"));
+  return names;
+}
+
+/** the identity of the inputs the findings came from, for the request's
+ *  `generation`: the sha256 the dump->layers converter recorded of the
+ *  dump's manifest.json, copied into gen/hana-src/manifest.json by THIS
+ *  module's merge; empty when no merge has written one yet. (The loop's
+ *  build is validationMessage over the tree -- it writes no manifest of its
+ *  own; the dump's is the manifest on the path.) Lives here since FIX-1:
+ *  it reads the merge's own output. */
+export function generationOf(root) {
+  try {
+    const manifest = JSON.parse(readFileSync(join(root, "gen", "hana-src", "manifest.json"), "utf8"));
+    return String(manifest.dump?.manifest_sha256 ?? "");
+  } catch {
+    return "";
+  }
+}
