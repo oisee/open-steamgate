@@ -1,6 +1,6 @@
 # How to write hot ABAP for this runtime
 
-Current build pin: `local/osd-build-4d` at `d8525705cca6c0517e269bedd301417bbcbe96bf` (`local/osd-build-4c` plus the SELECT loop fix, ANORMALIES `select-loop-join-into-list`; upstream main `8824945a` after 2.14.19, parser 2.120.94; [transpiler-pin-4.md](transpiler-pin-4.md)).
+Current build pin: `local/osd-build-4e` at `4e9b744dc73788f13076ca0ea8bf18df34ee8516` (`local/osd-build-4c` plus the two SELECT loop commits, ANORMALIES `select-loop-join-into-list`; upstream main `8824945a` after 2.14.19, parser 2.120.94; [transpiler-pin-4.md](transpiler-pin-4.md)).
 The measurements below are historical snapshots; see [the pin move report](transpiler-pin-2.md).
 
 *Measured 2026-09-17 on one 16-core x86-64 workstation under Node 26, against

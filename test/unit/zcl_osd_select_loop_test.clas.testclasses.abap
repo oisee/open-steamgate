@@ -15,6 +15,7 @@ CLASS ltcl_select_loop DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS
     METHODS dbcnt_per_row FOR TESTING RAISING cx_static_check.
     METHODS paging_by_dbcnt FOR TESTING RAISING cx_static_check.
     METHODS where_on_both_order_by FOR TESTING RAISING cx_static_check.
+    METHODS same_named_columns FOR TESTING RAISING cx_static_check.
 
     METHODS oracle
       RETURNING VALUE(rt_rows) TYPE ty_rows.
@@ -152,6 +153,37 @@ CLASS ltcl_select_loop IMPLEMENTATION.
 
     cl_abap_unit_assert=>assert_equals( act = lt_act exp = lt_exp ).
     cl_abap_unit_assert=>assert_equals( act = sy-dbcnt exp = lines( lt_exp ) ).
+  ENDMETHOD.
+
+  METHOD same_named_columns.
+* t~status and s~status share a name; each goes to its own target, and the
+* columns after them are not shifted. The oracle is the join without the
+* second status (an INTO TABLE fills by name, so it cannot hold both).
+    DATA lt_exp TYPE ty_rows.
+    DATA ls_exp TYPE ty_row.
+    DATA lv_id TYPE zstg_demo-travel_id.
+    DATA lv_t_status TYPE zstg_demo-status.
+    DATA lv_s_status TYPE zstg_status-status.
+    DATA lv_text TYPE zstg_status-status_text.
+    DATA lv_rows TYPE i.
+
+    lt_exp = oracle( ).
+    cl_abap_unit_assert=>assert_differs( act = lines( lt_exp ) exp = 0 ).
+
+    SELECT t~travel_id t~status s~status s~status_text
+      INTO (lv_id, lv_t_status, lv_s_status, lv_text)
+      FROM ( zstg_demo AS t INNER JOIN zstg_status AS s ON t~status = s~status )
+      ORDER BY t~travel_id.
+      lv_rows = lv_rows + 1.
+      READ TABLE lt_exp INTO ls_exp INDEX lv_rows.
+      cl_abap_unit_assert=>assert_subrc( exp = 0 ).
+      cl_abap_unit_assert=>assert_equals( act = lv_id exp = ls_exp-travel_id ).
+      cl_abap_unit_assert=>assert_not_initial( lv_t_status ).
+      cl_abap_unit_assert=>assert_equals( act = lv_s_status exp = lv_t_status ).
+      cl_abap_unit_assert=>assert_equals( act = lv_text exp = ls_exp-status_text ).
+    ENDSELECT.
+
+    cl_abap_unit_assert=>assert_equals( act = lv_rows exp = lines( lt_exp ) ).
   ENDMETHOD.
 
 ENDCLASS.
