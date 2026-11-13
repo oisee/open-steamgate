@@ -84,6 +84,7 @@ CLASS zcl_stg_json DEFINITION PUBLIC CREATE PUBLIC.
       IMPORTING
         iv_code        TYPE string
         iv_message     TYPE string
+        it_messages    TYPE bapirettab OPTIONAL
       RETURNING
         VALUE(rv_json) TYPE string.
 
@@ -170,7 +171,40 @@ CLASS zcl_stg_json IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD error.
-    rv_json = |\{"error":\{"code":"{ escape( iv_code ) }","message":\{"lang":"en","value":"{ escape( iv_message ) }"\}\}\}|.
+    DATA ls_message TYPE bapiret2.
+    DATA lv_first   TYPE abap_bool.
+    DATA lv_row     TYPE string.
+    DATA lv_severity TYPE string.
+    DATA lv_id_text TYPE string.
+    DATA lv_msg_text TYPE string.
+
+    rv_json = |\{"error":\{"code":"{ escape( iv_code ) }","message":\{"lang":"en","value":"{ escape( iv_message ) }"\}|.
+    IF it_messages IS NOT INITIAL.
+* the message container's rows ride the error as innererror.errordetails,
+* one row per message, the way a Gateway answers a business exception
+      rv_json = rv_json && ',"innererror":{"errordetails":['.
+      lv_first = abap_true.
+      LOOP AT it_messages INTO ls_message.
+        IF lv_first = abap_false.
+          rv_json = rv_json && ','.
+        ENDIF.
+        lv_first = abap_false.
+        CASE ls_message-type.
+          WHEN 'E' OR 'A'.
+            lv_severity = 'error'.
+          WHEN 'W'.
+            lv_severity = 'warning'.
+          WHEN OTHERS.
+            lv_severity = 'info'.
+        ENDCASE.
+        lv_id_text  = ls_message-id.
+        lv_msg_text = ls_message-message.
+        lv_row = |\{"code":"{ escape( lv_id_text ) }{ ls_message-number }","message":\{"lang":"en","value":"{ escape( lv_msg_text ) }"\},"severity":"{ lv_severity }"\}|.
+        rv_json = rv_json && lv_row.
+      ENDLOOP.
+      rv_json = rv_json && ']}'.
+    ENDIF.
+    rv_json = rv_json && '}}'.
   ENDMETHOD.
 
   METHOD nested.

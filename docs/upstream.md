@@ -587,3 +587,55 @@ is `transpiler-rap-eml-PR.md` in the job folder. Merged as #2049
 (`62931245`); the pin carries it since `local/osd-build-4c`
 ([transpiler-pin-4.md](transpiler-pin-4.md)) and
 `src/rap_demo/zcl_rap_note_eml` is no longer excluded from the build.
+
+## open-abap-odata -- the /IWBEP/ members the SEGW sample calls (H5x-3)
+
+The pinned open-abap-odata (`bd9f1fb`) lacks six members the SEGW sample
+service calls (framework-gaps.json of bed run 18 -- private evidence; the
+stub messages in the dumped DPC_EXT name each one). The change sits in the
+`.local/lars/open-abap-odata` working tree on branch
+`feat/iwbep-members-h5x3` (from `bd9f1fb`) as three commits, one per member
+group, one small PR each, and is proven here first: the overlays under
+`src/gateway/compat/` carry the same text with the lib copies excluded from
+both pulls (abap_transpile.json, abaplint.jsonc), and this repository's
+unit and wire tests are the proof. The clone's own lint was run in the
+clone before anything is drafted. Sending is gated by the critic
+(CLAUDE.md), like every upstream PR.
+
+| PR (to send) | objects | proof here |
+| --- | --- | --- |
+| request context: navigation path + function import | `/IWBEP/IF_MGW_REQ_FUNC_IMPORT` (get_function_import_name, get_converted_parameters exporting `es_parameter_values`), `/IWBEP/IF_MGW_REQ_ENTITY` + `/IWBEP/IF_MGW_REQ_ENTITYSET` (get_navigation_path returning the technical navigation table), the new DDIC `/IWBEP/S_MGW_TECH_NAVI` + `/IWBEP/T_MGW_TECH_NAVI`, `zcl_oao_request_context`, `/IWBEP/CL_MGW_REQUEST`, `/IWBEP/CL_SB_GEN_READ_AFTR_CRT` | `src/gateway/zcl_stg_request_context.clas.testclasses.abap` (both facets' getter over a two-step path: navigation property, source and target entity type per row; name + converted parameters); the sample's call sites live in the private framework-gaps.json |
+| message container | `/IWBEP/IF_MGW_CONTEXT` (get_message_container), `/IWBEP/IF_MESSAGE_CONTAINER` (add_message: type, id, number, text, v1-v4, error category, leading flag, entity type, key table, response-header switch, message target -- all but the type optional; [SAP Help Portal, `/IWBEP/IF_MESSAGE_CONTAINER`, Method ADD_MESSAGE](https://help.sap.com/saphelp_gateway20sp12/helpdata/en/25/21aecce9db435daaea433071ff7d94/content.htm)), `zcl_oao_context`, `zcl_oao_msg_container` | `src/gateway/compat/zcl_oao_msg_container.clas.testclasses.abap`; the demo DPC's container use and the wire test in `test/mocha.mjs` (innererror.errordetails over the wire) |
+| changeset structures | `/IWBEP/IF_MGW_APPL_SRV_RUNTIME`: `content_id` / `content_id_ref` on `ty_s_changeset_request` and `ty_s_changeset_response`, `content_id_ref` on `ty_s_operation_info` | the `ltcl_changeset_types` unit test beside the request context |
+
+The changeset PR adds **types only**. Nothing in this runtime fills
+`content_id` / `content_id_ref`: `zcl_stg_batch` reads a part's
+Content-ID (the V4 facade answers with it) but does not pass it into
+`ty_s_changeset_request`, `ty_s_changeset_response` or
+`ty_s_operation_info`, and nothing calls `CHANGESET_BEGIN` with operation
+info. The PR text must say so and must not read as $batch Content-ID
+referencing through the changeset API; `ltcl_changeset_types` is a compile
+check of the fields and nothing more.
+
+Fix round 2 (critic of #935) moved two shapes to the contract and widened
+one signature; the lib branch carries them as two `fixup!` commits on top
+of the three, to be squashed into their PRs (request context, message
+container) before anything is sent:
+
+- `get_converted_parameters` exports `es_parameter_values` (the contract
+  name; the sample calls it so), not `es_parameters`;
+- `get_navigation_path` returns `/IWBEP/T_MGW_TECH_NAVI` (row
+  `/IWBEP/S_MGW_TECH_NAVI`: `nav_prop`, `key`, `key_tab` of
+  `/IWBEP/T_MGW_TECH_PAIRS`, `target_entity_type`, `multiplicity`,
+  `source_entity_type`, `is_containment_navigation`) on both facets, the
+  technical navigation path the [SAP Help Portal page of the request
+  interface](https://help.sap.com/saphelp_gateway20sp12/helpdata/en/88/1733b1d5fd42d7a732bc405d1ed67b/content.htm)
+  documents for `GET_NAVIGATION_PATH`. The field names are the contract
+  the sample reads (no public page lists the structure's fields); the
+  contract's object-reference field `key_converter` is left out -- the
+  serializer would need a reference-typed DDIC field, and no caller here
+  reads it;
+- `add_message` gains the documented optional parameters.
+
+When the PRs land and the pin moves, the overlays and both exclusions go
+(`src/gateway/compat/README.md`).

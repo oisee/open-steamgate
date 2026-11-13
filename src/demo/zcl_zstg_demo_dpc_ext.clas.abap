@@ -530,6 +530,8 @@ CLASS zcl_zstg_demo_dpc_ext IMPLEMENTATION.
     DATA lv_id     TYPE c LENGTH 8.
     DATA lv_status TYPE c LENGTH 1.
     DATA lv_count  TYPE i.
+    DATA lo_msg_ctr TYPE REF TO /iwbep/if_message_container.
+    DATA lv_msg_v1 TYPE symsgv.
 
     CASE iv_action_name.
       WHEN 'CancelTravel'.
@@ -537,6 +539,16 @@ CLASS zcl_zstg_demo_dpc_ext IMPLEMENTATION.
                            iv_name    = 'TravelId' ).
         UPDATE zstg_demo SET status = 'X' WHERE travel_id = lv_id.
         IF sy-subrc <> 0.
+* the message goes into the request's container the way the SEGW sample
+* forwards its EPM messages (get_message_container on the runtime context,
+* then add_message per message); the dispatcher reads the container into
+* the error response
+          lo_msg_ctr = mo_context->get_message_container( ).
+          lv_msg_v1 = lv_id.
+          lo_msg_ctr->add_message( iv_msg_type   = 'E'
+                                   iv_msg_id     = 'ZSTG_DEMO'
+                                   iv_msg_number = '004'
+                                   iv_msg_v1     = lv_msg_v1 ).
           RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
             EXPORTING
               message = |Travel { lv_id } does not exist|.

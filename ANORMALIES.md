@@ -4615,3 +4615,14 @@ Not an anomaly, recorded for porting: on 7.58, `FIND ... REGEX` (POSIX) raises a
   request clear it early; WAIT already commits the step's LUW, so a group
   with a WAIT in it is not atomic either way.
 - Upstream: none.
+
+## The /IWBEP/ members the SEGW sample calls are overlays over the pinned open-abap-odata (H5x-3)
+
+- Status: worked around locally; the same change sits in the lib clone's working tree (branch `feat/iwbep-members-h5x3`) as the upstream PRs to send, one per member group (`docs/upstream.md`).
+- Discovery: bed run 18 at #934 (framework-gaps.json, private evidence): six seed rows -- `get_navigation_path` (on `/IWBEP/IF_MGW_REQ_ENTITY` and `/IWBEP/IF_MGW_REQ_ENTITYSET`), `get_function_import_name` + `get_converted_parameters` (on `/IWBEP/IF_MGW_REQ_FUNC_IMPORT`), `get_message_container` (on `/IWBEP/IF_MGW_CONTEXT`), `add_message` (on `/IWBEP/IF_MESSAGE_CONTAINER`), and `content_id` / `content_id_ref` on the changeset request/response structures of `/IWBEP/IF_MGW_APPL_SRV_RUNTIME`.
+- Expected: a real Gateway's /IWBEP/ layer answers all six; the sample's DPC_EXT bodies compile against it.
+- Here: the pinned open-abap-odata (bd9f1fb) lacks every one. The extended interfaces and the implementing classes are carried under `src/gateway/compat/`, and the lib copies are excluded from both pulls (abap_transpile.json's lib exclude_filter, abaplint.jsonc's files glob). The runtime serves the getters from `zcl_stg_request_context`'s own data, `zcl_oao_context` serves the per-request container, and `zcl_stg_dispatcher` resets the container per request and reads it into the error response (`innererror.errordetails`).
+- Reproducer: `src/gateway/zcl_stg_request_context.clas.testclasses.abap`, `src/gateway/compat/zcl_oao_msg_container.clas.testclasses.abap`, the wire test in `test/mocha.mjs` (the demo DPC adds a message through the container on a business exception).
+- Smallest safe workaround: the overlays; removal is "when the pin carries the members, drop the overlays and both exclusions" (`src/gateway/compat/README.md`).
+- Upstream: open-abap-odata, one small PR per member group; the dossier with the branch and commits is in `docs/upstream.md`.
+- Regression-test location: the three reproducers above, plus the island rule's own tests in `test/hana-closure.mjs` (H5x-3).

@@ -29,6 +29,9 @@ CLASS zcl_stg_request_context DEFINITION PUBLIC CREATE PUBLIC.
     DATA ms_set           TYPE zcl_stg_model_info=>ty_entity_set.
     DATA mt_navigation_path TYPE /iwbep/t_mgw_navigation_path.
     DATA mv_source_entity_set TYPE string.
+* the entity type of the set the URL addressed before its first navigation
+* step: the source of the first row of the technical navigation path
+    DATA mv_source_entity_type TYPE string.
     DATA mv_select        TYPE string.
     DATA mv_aggregate     TYPE abap_bool.
 * R8: the Fiori Elements V4 draft list filter (IsActiveEntity eq false or
@@ -69,6 +72,10 @@ CLASS zcl_stg_request_context DEFINITION PUBLIC CREATE PUBLIC.
       RETURNING
         VALUE(rv_literal) TYPE string.
   PRIVATE SECTION.
+    METHODS tech_navigation_path
+      RETURNING
+        VALUE(rt_path) TYPE /iwbep/t_mgw_tech_navi.
+
     METHODS keys_to_structure
       EXPORTING
         es_key_values TYPE data.
@@ -404,6 +411,67 @@ CLASS zcl_stg_request_context IMPLEMENTATION.
 
   METHOD /iwbep/if_mgw_req_entity_u~get_converted_keys.
     keys_to_structure( IMPORTING es_key_values = es_key_values ).
+  ENDMETHOD.
+
+  METHOD /iwbep/if_mgw_req_entity~get_navigation_path.
+* H5x-3, the members the SEGW sample calls: the navigation path the URL
+* carried (both facets -- its RESOLVE_NAVIGATION_PATH receives the entity
+* and the entity-set context and calls the getter on each), and the
+* function import's name and its parameters converted into the provider's
+* structure (its ACTION_SO_ACTIONS). The data is what the dispatcher filled
+* from the parsed request.
+    rt_navigation_path = tech_navigation_path( ).
+  ENDMETHOD.
+
+  METHOD /iwbep/if_mgw_req_entityset~get_navigation_path.
+    rt_navigation_path = tech_navigation_path( ).
+  ENDMETHOD.
+
+  METHOD tech_navigation_path.
+* The path in technical names, one row per step: the step's navigation
+* property, its keys, the entity type it leads to, and the one it starts
+* from -- the addressed set's type for the first step, the previous step's
+* target for every later one. A caller that follows the contract branches
+* on source_entity_type / target_entity_type.
+    DATA ls_step   LIKE LINE OF mt_navigation_path.
+    DATA ls_key    LIKE LINE OF ls_step-key_tab.
+    DATA ls_row    TYPE /iwbep/s_mgw_tech_navi.
+    DATA ls_pair   TYPE /iwbep/s_mgw_tech_pair.
+    DATA lv_source TYPE string.
+
+    lv_source = mv_source_entity_type.
+    LOOP AT mt_navigation_path INTO ls_step.
+      CLEAR ls_row.
+      ls_row-nav_prop           = ls_step-nav_prop.
+      ls_row-key                = ls_step-key.
+      LOOP AT ls_step-key_tab INTO ls_key.
+        ls_pair-name  = ls_key-name.
+        ls_pair-value = ls_key-value.
+        APPEND ls_pair TO ls_row-key_tab.
+      ENDLOOP.
+      ls_row-source_entity_type = lv_source.
+      ls_row-target_entity_type = ls_step-target_type.
+      ls_row-multiplicity       = ls_step-multiplicity.
+      APPEND ls_row TO rt_path.
+      lv_source = ls_step-target_type.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD /iwbep/if_mgw_req_func_import~get_function_import_name.
+    rv_function_import_name = mv_function_import.
+  ENDMETHOD.
+
+  METHOD /iwbep/if_mgw_req_func_import~get_converted_parameters.
+    DATA ls_parameter LIKE LINE OF mt_parameter.
+    FIELD-SYMBOLS <lv_target> TYPE any.
+
+    CLEAR es_parameter_values.
+    LOOP AT mt_parameter INTO ls_parameter.
+      ASSIGN COMPONENT ls_parameter-name OF STRUCTURE es_parameter_values TO <lv_target>.
+      IF sy-subrc = 0.
+        <lv_target> = ls_parameter-value.
+      ENDIF.
+    ENDLOOP.
   ENDMETHOD.
 
 ENDCLASS.
