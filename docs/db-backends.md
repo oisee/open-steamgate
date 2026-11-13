@@ -930,6 +930,23 @@ a `state.json` written by an older iterator does not read as a shrink on
 the rule's first merge. Findings in test includes are not island
 findings.
 
+The island's own objects are test code only when their **own definition**
+is (H5x-3, fix round 1): the framework's own `CL_AUNIT_*`/`IF_AUNIT_*`
+names, a class whose own header says `FOR TESTING`, and a class that
+inherits from or implements one of them. The first round classified
+transitively — everything whose structural record or source tokens named a
+test-code object, at any depth — and bed run 19 died on the seed guard
+because of it: two EPM test classes that mention AUNIT types dragged the
+whole EPM layer in, and the registered service's own DPC followed (its
+generated header comments name its own `_EXT` subclass). A class that
+merely references test code is production code; a **dependent** of an
+excluded test class falls as a cascade of it, the #934 graph rule (the
+loop hands the roots to the decision as seeds), and a `GLOBAL FRIENDS`
+clause naming one strips — a friend that leaves costs the clause, not the
+class. `testCodeObjects` in `tools/hana-closure-graph.mjs` is the
+predicate; the guard still fails the run if the rule would ever exclude a
+registered service's own class.
+
 A merge tool's refusal of one object does not stop the loop either. H5a's
 TABCLASS guard makes `hana-ddic-gen` exit 2 on the first object it refuses
 to write (`hana-ddic-map: <name>: TABCLASS APPEND is not written here` —
