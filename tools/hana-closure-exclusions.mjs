@@ -1,17 +1,34 @@
-// The definition-level exclusion seam (H5x-1). When the closure walk
-// (tools/hana-closure.mjs) meets a class or interface whose findings sit
-// outside every METHOD ... ENDMETHOD body -- the definition part, which no
-// stub can reach -- it records the object in
-// gen/hana-closure/closure-stubs.json as
-// {level: "definition", file, object, findings} and keeps the file from the
+// The exclusion record seam (H5x-1, the schema H5x-2): when the closure
+// walk (tools/hana-closure.mjs) decides -- as a graph analysis over the
+// island's references, tools/hana-closure-graph.mjs graphDecide -- that an
+// object cannot compile in this build, it keeps the file from the
 // transpiler through this tree's own exclusion seam: the exclude_filter of
 // tools/osd-build.mjs's ownConfig, the same one that keeps hidden and
 // inactive files out. The file stays in its layer on disk; only the build
-// is kept from it. One reader here -- tools/osd-build.mjs,
-// tools/hana-ddic-gen.mjs's validationMessage (the loop's own validate
-// channel) and tools/osd-inputs.mjs all read the same record -- and no
-// dependency beyond node:fs, so the browser graph osd-inputs sits in stays
-// clean.
+// is kept from it.
+//
+// The record is gen/hana-closure/closure-stubs.json -- the walk's --out
+// (OSD_HANA_CLOSURE_OUT) when it ran with one -- and carries the decision's
+// six sections (H5x-2's schema):
+//     {roots, cascades, cycles, stubs, waits, excluded}
+// roots -- the objects whose definition references a name answered missing
+// ({level: "definition", object, file, kind, missing, findings}); cascades
+// -- the dependents that fall with them ({level: "cascade", object, file,
+// of, findings, excluded: true}) and the FRIENDS strips ({edge: "friends",
+// action: "strip-friends", excluded: false}); cycles -- the SCCs of present
+// objects kept whole ({level: "cycle", members, kept: true}); stubs -- the
+// method stubs ({object, file, class, method, missing, finding}); waits --
+// the objects whose definition names are still pending, the next request's
+// asks ({object, names}); excluded -- the out-of-build objects per kind
+// ({CLAS: [...], INTF: [...]}), the request's `excluded` key's twin.
+//
+// One reader here -- tools/osd-build.mjs, tools/hana-ddic-gen.mjs's
+// validationMessage (the loop's own validate channel) and
+// tools/osd-inputs.mjs all read the same record through definitionExclusions
+// and excludedFiles -- and no dependency beyond node:fs, so the browser
+// graph osd-inputs sits in stays clean. A file an H5x-1 iterator wrote (an
+// array of records) still reads: its definition-level entries map into
+// roots/cascades, its method stubs into stubs.
 import {existsSync, readFileSync} from "node:fs";
 import {join} from "node:path";
 
@@ -22,31 +39,65 @@ import {join} from "node:path";
 export const closureStubsFile = (root) =>
   join(process.env.OSD_HANA_CLOSURE_OUT ?? join(root, "gen", "hana-closure"), "closure-stubs.json");
 
-/** the closure-stubs.json records of one tree: [] when the walk has never
- *  run here, the records otherwise -- method stubs ({level: "method"}) and
- *  definition-level exclusions ({level: "definition"}). A file that is not
+const EMPTY = () => ({roots: [], cascades: [], cycles: [], stubs: [], waits: [], excluded: {}});
+
+const kindOfEntry = (e) => (/\.intf\.abap$/.test(String(e?.file ?? "")) === true ? "INTF" : "CLAS");
+
+/** the closure-stubs.json record of one tree: the six-section object when
+ *  the walk has written one, the empty record when it has never run here,
+ *  the H5x-1 array shape mapped into the six sections (a file that is not
  *  readable JSON reads as empty: the record is the walk's output, and a
- *  half-written one must not silently hide objects from a build. */
+ *  half-written one must not silently hide objects from a build). */
 export function closureStubs(root, file = closureStubsFile(root)) {
-  if (existsSync(file) === false) return [];
+  if (existsSync(file) === false) return EMPTY();
+  let parsed;
   try {
-    const parsed = JSON.parse(readFileSync(file, "utf8"));
-    return Array.isArray(parsed) ? parsed : [];
+    parsed = JSON.parse(readFileSync(file, "utf8"));
   } catch {
-    return [];
+    return EMPTY();
   }
+  if (Array.isArray(parsed) === true) {
+    const out = EMPTY();
+    for (const e of parsed) {
+      if (e?.level === "definition" && typeof e.file === "string") {
+        out.roots.push({...e, kind: kindOfEntry(e), missing: []});
+      } else if (e?.level === "cascade" && e.excluded === true && typeof e.file === "string") {
+        out.cascades.push({...e, kind: kindOfEntry(e)});
+      } else if (e?.level === "cycle") {
+        out.cycles.push({members: e.members ?? [], kept: true, findings: e.findings ?? {}});
+      } else if (e?.level === "method") {
+        out.stubs.push(e);
+      }
+    }
+    for (const e of [...out.roots, ...out.cascades]) {
+      out.excluded[e.kind] = [...(out.excluded[e.kind] ?? []), e.object];
+    }
+    return out;
+  }
+  if (parsed === null || typeof parsed !== "object") return EMPTY();
+  return {
+    roots: Array.isArray(parsed.roots) === true ? parsed.roots : [],
+    cascades: Array.isArray(parsed.cascades) === true ? parsed.cascades : [],
+    cycles: Array.isArray(parsed.cycles) === true ? parsed.cycles : [],
+    stubs: Array.isArray(parsed.stubs) === true ? parsed.stubs : [],
+    waits: Array.isArray(parsed.waits) === true ? parsed.waits : [],
+    excluded: parsed.excluded !== null && typeof parsed.excluded === "object" ? parsed.excluded : {},
+  };
 }
 
-/** the exclusion records that keep files from the transpiler: the
- *  definition-level exclusions ({level: "definition"}) and the cascade
- *  exclusions ({level: "cascade", excluded: true}) -- a cascade record
- *  with excluded false is a RECORD only (its file stays in the build until
- *  the next stub round re-evaluates it against the roots' exclusion, fix
- *  round 2). `file` -- the record path, for the loop's in-process reads of
- *  a non-default --out. */
+/** the exclusion records that keep files from the transpiler: the roots and
+ *  the cascades excluded with them -- a strip cascade (edge "friends") is a
+ *  RECORD only (its file stays in the build; the clause is what leaves) --
+ *  with the fields osd-inputs prints (object, file, findings). `file` --
+ *  the record path, for the loop's in-process reads of a non-default --out. */
 export function definitionExclusions(root, file = undefined) {
-  return closureStubs(root, file).filter((e) => typeof e.file === "string" &&
-    (e.level === "definition" || (e.level === "cascade" && e.excluded === true)));
+  const record = closureStubs(root, file);
+  return [
+    ...record.roots.filter((r) => typeof r.file === "string")
+      .map((r) => ({object: r.object, file: r.file, findings: r.findings ?? [], level: "definition", missing: r.missing ?? []})),
+    ...record.cascades.filter((c) => c.excluded === true && typeof c.file === "string")
+      .map((c) => ({object: c.object, file: c.file, findings: c.findings ?? [], level: "cascade", of: c.of ?? []})),
+  ];
 }
 
 /** the root-relative file paths kept from the transpiler. */

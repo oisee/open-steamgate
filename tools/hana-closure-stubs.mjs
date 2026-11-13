@@ -9,46 +9,41 @@
 // replaced by the stub raise of zcx_osd_not_activated, so the service
 // activates with what resolves and the island grows only on a real miss.
 //
-// H5x-1 adds three decisions the loop makes per file and per method, all
-// here so the loop stays the loop:
-// - a DDIC-kind name (tabl/dtel/doma, and the kind-less `ddic` triple) a
-//   would-be-stubbed method names is not deferred but eagerly requested:
-//   a DDIC closure is cheap and pulls no code, and a stub over a table
-//   that exists costs a miss-rerun cycle per method at GET time. Only a
-//   code kind (clas/intf/fugr/prog) stays lazy. A method is stubbed when
-//   the dumper answered missing for one of its DDIC names (the stub
-//   records the gap) or a code-kind name remains; while the dumper can
-//   still answer, the body stays. --defer-ddic keeps round 3's behaviour.
-// - a name whose object is already in the island -- by file name for the
-//   code kinds (.clas.abap OR .intf.abap of the base), by the XML present
-//   for the DDIC kinds -- is never asked and never deferred: its finding is
-//   a cascade of that object's own findings.
-// - a method keeps its body only while a DDIC name of that method is still
-//   pending in THIS iteration's request -- not asked yet, its object
-//   neither present nor excluded this run, the dumper's answer neither
-//   missing nor a merge refusal. Nameless cascade-only findings,
-//   present-only names, resolved-but-still-failing names and dead names all
-//   stub (fix round 1: round 0's keep-branch kept a DPC_EXT full of
-//   nameless member cascades red forever); a nameless stub's raise carries
-//   its finding's text, and its findings are the framework work list --
-//   framework-gaps.json beside the stubs.
-// - a class or interface whose findings sit outside every METHOD ...
-//   ENDMETHOD body is excluded from the build -- but the decision is the
-//   whole island's, not this file's: it lives in
-//   tools/hana-closure-exclude.mjs since fix round 2, taken only at the
-//   dumper fixed point, re-decided every iteration, following the chains
-//   of present-but-red objects to their roots, keeping true cycles whole
-//   and never excluding the seed service's classes. This file plans the
-//   stubs a file can take; the decision reads its `unmatched`.
+// H5x-2 shapes the planner with the structural pass
+// (tools/hana-closure-graph.mjs): a method's missing names come from its
+// references (level "method" and "signature", attributed by name) beside
+// the text fallback's remaining shapes, and two rewrites join the body
+// stubs:
+// - a GLOBAL FRIENDS clause naming an object that is gone (excluded, or
+//   answered missing/refused -- the caller's `goneOf`) is stripped: a
+//   friend that leaves with the test framework costs the friending class a
+//   source rewrite, never its place in the build (graph-closure/REPORT.md
+//   item 5; KNOT-15 rule: FRIENDS is soft);
+// - a signature-level miss (the method_definition scope: a parameter typed
+//   by a missing name) no longer reads as definition material: while the
+//   dumper can still answer its DDIC name the signature stays, and once the
+//   name is answered -- or is a code kind staying lazy -- the parameter is
+//   cut from the METHODS statement and the body stubbed (report item 8).
+// H5x-1's decisions all stand: a DDIC-kind name a would-be-stubbed method
+// names is eagerly requested, only code kinds stay lazy (--defer-ddic keeps
+// round 3); a name whose object is in the island is never asked, never
+// deferred; a method keeps its body only while a DDIC name of its is still
+// pending; nameless, present-only, resolved-but-still-failing and dead
+// names all stub; a nameless stub's raise carries its finding's text and
+// the nameless stubs' findings are the framework work list. A class or
+// interface whose DEFINITION references a missing name is excluded -- by
+// the graph decision (tools/hana-closure-graph.mjs graphDecide) over the
+// whole island, not by this file.
 import {readdirSync, readFileSync} from "node:fs";
 import {join} from "node:path";
 import * as abaplint from "@abaplint/core";
 import {classifyFindings, nameFromAbapFile} from "./hana-closure-exclude.mjs";
+import {requestKindOf, stripFriends, cutSignatureParams} from "./hana-closure-graph.mjs";
 
 // the island class and interface files a stub pass may rewrite or exclude:
 // gen/hana-src/**/*.clas.abap, the locals includes beside them, and the
 // *.intf.abap files (an interface is never stubbed -- it has no method
-// bodies -- but its definition-level findings are what gets excluded).
+// bodies -- but its definition-level references are what gets excluded).
 // Basename -> every match's path -- the validation reports bare basenames,
 // and a basename both an island layer and src/ carry is the island's (the
 // later layer wins the build), so the stub targets the gen/hana-src copy
@@ -112,6 +107,15 @@ export function methodBlocks(source, filename = "zcl_stub.clas.abap") {
   return blocks;
 }
 
+// the offsets of one parsed position over the source (the rewrite cuts all
+// work in character offsets)
+const offsetAt = (source, at) => {
+  const lines = source.split("\n");
+  let offset = 0;
+  for (let i = 0; i < at.row - 1; i++) offset += lines[i].length + 1;
+  return offset + at.col - 1;
+};
+
 /** the missing names of one stub, comma-joined, ~200 characters at most --
  *  the text travels in the exception and says exactly what the method
  *  waits for; a list that does not fit ends in ", ...". Pure. */
@@ -136,19 +140,44 @@ export function stubReasonText(finding) {
   return text.length > 193 ? `${text.slice(0, 190)}...` : text;
 }
 
+// a finding is structural-matched when a reference that NAMES its thing
+// sits on its line (+/-2): the name must be in the finding's message, or a
+// fallback shape on the same line (a SELECT's table beside a type lookup)
+// would lose its name to a reference it does not carry
+const refMatched = (refs, finding) => refs.some((r) =>
+  Math.abs((r.line ?? 0) - finding.line) <= 2 &&
+  String(finding.message ?? "").toUpperCase().includes(r.name) === true);
+
+// one method block's missing names: the structural references first (with
+// their TADIR-ish kinds), then the text fallback's shapes for the findings
+// no reference carries. Pure.
+const blockNames = (refs, inside) => {
+  const missing = [];
+  const missingKinds = [];
+  const push = (name, kind) => {
+    if (missing.includes(name) === true) return;
+    missing.push(name);
+    missingKinds.push({name, kind});
+  };
+  for (const r of refs) push(r.name, requestKindOf(r.name, r));
+  for (const n of classifyFindings(inside.filter((f) => refMatched(refs, f) === false)).names) push(n.name, n.kind);
+  return {missing, missingKinds};
+};
+
 /** lazy activation, the stubbing step (round 3): map the findings of ONE
  *  island class file onto the METHOD ... ENDMETHOD blocks abaplint parsed
  *  out of it, and give every method that carries a finding the stub body
  *  (`RAISE EXCEPTION TYPE zcx_osd_not_activated EXPORTING missing = ...`,
- *  indented inside the method). Findings outside any body -- the
- *  definition part: attributes, signatures, types, the MPC's types -- come
- *  back in `unmatched`: they cannot be stubbed, so their names stay in the
- *  request. A file that does not parse is left whole, all its findings
- *  unmatched. Per method: `missing` are the classified names first-named
- *  (a cascade finding adds none) and `missingKinds` carries each name with
- *  its classification kind, for the request's `deferred`. Pure: the caller
- *  writes the source back. */
-export function stubBodies(source, findings, filename = "zcl_stub.clas.abap") {
+ *  indented inside the method). `refs` -- H5x-2: the file object's
+ *  structural references (tools/hana-closure-graph.mjs); a method's names
+ *  come from its references first. Findings outside any body -- the
+ *  definition part -- come back in `unmatched`: they cannot be stubbed, so
+ *  their names stay in the request (the graph decision reads them). A file
+ *  that does not parse is left whole, all its findings unmatched. Per
+ *  method: `missing` are the names first-named (a cascade finding adds
+ *  none) and `missingKinds` carries each name with its kind, for the
+ *  request's `deferred`. Pure: the caller writes the source back. */
+export function stubBodies(source, findings, filename = "zcl_stub.clas.abap", refs = []) {
   let blocks;
   try {
     blocks = methodBlocks(source, filename);
@@ -158,44 +187,33 @@ export function stubBodies(source, findings, filename = "zcl_stub.clas.abap") {
   const stubs = [];
   const matched = new Set();
   for (const block of blocks) {
+    const methodRefs = refs.filter((r) => r.level === "method" && r.method === block.method);
     const inside = findings.filter((f) => f.line > block.headerEnd.row && f.line < block.endStart.row);
     if (inside.length === 0) continue;
-    const missing = [];
-    const missingKinds = [];
-    for (const finding of inside) {
-      for (const n of classifyFindings([finding]).names) {
-        if (missing.includes(n.name) === false) {
-          missing.push(n.name);
-          missingKinds.push({name: n.name, kind: n.kind});
-        }
-      }
-    }
+    const {missing, missingKinds} = blockNames(methodRefs, inside);
     stubs.push({...block, missing, missingKinds, finding: inside[0].raw, reason: stubReasonText(inside[0])});
     for (const finding of inside) matched.add(finding);
   }
   if (stubs.length === 0) return {source, stubs: [], unmatched: findings};
-  const lines = source.split("\n");
-  const offsetOf = (at) => {
-    let offset = 0;
-    for (let i = 0; i < at.row - 1; i++) offset += lines[i].length + 1;
-    return offset + at.col - 1;
-  };
-  let out = source;
-  for (const stub of [...stubs].sort((a, b) => offsetOf(b.headerEnd) - offsetOf(a.headerEnd))) {
-    const indent = (/^[ \t]*/.exec(lines[stub.endStart.row - 1] ?? "") ?? [""])[0];
-    // S-3 (fix round 1): a stub whose findings name nothing raises with the
-    // finding's text, so a GET never reads "needs ''"
-    const text = stub.missing.length > 0 ? stubNamesText(stub.missing) : stub.reason;
-    const body = `\n${indent}  RAISE EXCEPTION TYPE zcx_osd_not_activated EXPORTING missing = '${text}'.\n${indent}`;
-    out = out.slice(0, offsetOf(stub.headerEnd)) + body + out.slice(offsetOf(stub.endStart));
-  }
+  const out = applyStubs(source, stubs);
   return {source: out, stubs, unmatched: findings.filter((f) => matched.has(f) === false)};
 }
 
-// the definition-level exclusion decision lived here in fix round 1
-// (exclusionOf, per file); fix round 2 moved it to the whole island --
-// tools/hana-closure-exclude.mjs -- where it can follow the chains of
-// present-but-red objects and wait for the dumper's fixed point.
+// the one rewrite pass: cut every stub's body (header's closing dot to the
+// ENDMETHOD), back to front, the stub raise indented like the ENDMETHOD
+const applyStubs = (source, stubs) => {
+  const lines = source.split("\n");
+  let out = source;
+  for (const stub of [...stubs].sort((a, b) => offsetAt(source, b.headerEnd) - offsetAt(source, a.headerEnd))) {
+    const indent = (/^[ \t]*/.exec(lines[stub.endStart.row - 1] ?? "") ?? [""])[0];
+    const text = stub.missing.length > 0 ? stubNamesText(stub.missing) : stub.reason;
+    const body = `\n${indent}  RAISE EXCEPTION TYPE zcx_osd_not_activated EXPORTING missing = '${text}'.\n${indent}`;
+    const start = offsetAt(source, stub.headerEnd);
+    const end = offsetAt(source, stub.endStart);
+    out = out.slice(0, start) + body + out.slice(end);
+  }
+  return out;
+};
 
 // ------------------------------------------------------------- H5x-1 ------
 
@@ -259,8 +277,9 @@ export function dropPresentNames(names, islandFiles, excludedObjects = new Set()
  *  gen/hana-segw facts (tools/hana-segw-gen.mjs's from-dump.json) and the
  *  *.iwsv.xml / *.iwmo.xml files in the island name -- the same fields
  *  tools/segw-registry.mjs reads (SRH CLASS_NAME -> DPC, OHD CLASS_NAME ->
- *  MPC) -- each with its non-_EXT twin. A definition-level finding in one
- *  of these is the service itself: the run fails, it is never excluded. */
+ *  MPC) -- each with its non-_EXT twin. A definition-level reference to a
+ *  missing name in one of these is the service itself: the run fails, it is
+ *  never excluded. */
 export function registeredServiceClasses(root) {
   return serviceGuard(root).names;
 }
@@ -268,8 +287,8 @@ export function registeredServiceClasses(root) {
 /** whether the guard works by suffix alone: no gen/hana-segw facts with a
  *  service, and no island *.iwsv.xml / *.iwmo.xml -- on the bed run 15 the
  *  island had neither, the guard was inert, and the service's own DPC_EXT
- *  was excluded. The iteration line then says "service guard: by suffix,
- *  no registration". Pure. */
+ *  was excluded. The iteration line then says "service guard: by suffix, no
+ *  registration". Pure. */
 export function serviceGuardBySuffixOnly(root) {
   return serviceGuard(root).registered === false;
 }
@@ -355,10 +374,10 @@ export function frameworkGapList(gapFindings, isSeed = undefined) {
 // run, the dumper's answer neither missing nor refused. (A name the dumper
 // was asked for always has its answer by the time a stub round runs -- the
 // pending round is executed before the walk continues.) The stub rule, the
-// eager list and the stub/hold decisions all read this one predicate; the
-// EXCLUSION decision reads a stricter one (fix round 2:
-// tools/hana-closure-exclude.mjs -- asked with no answer recorded is
-// pending there).
+// eager list and the hold decision all read this one predicate; the
+// EXCLUSION decision reads a stricter one -- and since H5x-2 it is the
+// graph's gate (tools/hana-closure-graph.mjs graphDecide's pendingOf), the
+// loop hands it in.
 function pendingOf(name, kind, {asked, missingOf, refusedOf, presentFile, excludedObjects}) {
   return asked(name) === false && presentFile(name, kind) === false &&
     missingOf(name) === false && refusedOf(name) === false &&
@@ -374,64 +393,118 @@ const memberOf = (message) => {
   return m === null ? undefined : m[1];
 };
 
-/** one pass of the lazy-activation loop over ONE island file (H5x-1):
- *  which of the file's method stubs to apply, what their names defer and
- *  what they ask eagerly. `missingOf(name)` says the dumper answered
- *  missing for a name, `asked(name)` says it was requested at all,
- *  `refusedOf(name)` says the merge refused it (fix round 1),
- *  `islandFiles` is the island's basename set, `excludedObjects` the
- *  objects excluded this decision. Returns {source, stubs, unmatched,
- *  eager, deferred, nameless} -- `source` is the rewritten source when
- *  stubs were applied (the caller writes it back), `nameless` carries one
- *  entry per finding of a stubbed method that names nothing (the framework
- *  work list: {finding, member?, line, method}, sorted), and `unmatched`
- *  is what no stub reaches -- the exclusion decision's material
- *  (tools/hana-closure-exclude.mjs, fix round 2: a file whose unmatched
- *  findings are exclusion material is held back by the loop's candidate
- *  check, so its stubs never apply before the decision). Pure. */
-export function planStubPass({source, findings, basename, missingOf = () => false, asked = () => false, refusedOf = () => false, islandFiles = new Set(), excludedObjects = new Set(), deferDdic = false}) {
+/** one pass of the lazy-activation loop over ONE island file (H5x-1,
+ *  reshaped by H5x-2): which of the file's method stubs to apply, which
+ *  signatures to cut, which FRIENDS clauses to strip, what the names defer
+ *  and what they ask eagerly. `refs` -- the object's structural references
+ *  (tools/hana-closure-graph.mjs analyseIsland's unknowns); `goneOf(name)`
+ *  says an object is excluded, or its name answered missing/refused (the
+ *  FRIENDS strip's predicate). Returns {source, stubs, unmatched, eager,
+ *  deferred, nameless, friendsStripped} -- `source` is the rewritten
+ *  source when anything applied (the caller writes it back), `unmatched`
+ *  is what no stub reaches -- the signature-line findings included, the
+ *  decision's material beside the structural definition references. Pure. */
+export function planStubPass({source, findings, basename, refs = [], missingOf = () => false, asked = () => false,
+  refusedOf = () => false, islandFiles = new Set(), excludedObjects = new Set(), deferDdic = false, goneOf = () => false}) {
+  // FRIENDS first: the cut stays inside the CLASS DEFINITION line, so the
+  // findings' rows survive it (a friend that is gone costs a clause, not
+  // the class)
+  const friends = stripFriends(source, basename, goneOf);
+  const work = friends.source;
+  let blocks;
   try {
-    methodBlocks(source, basename);
+    blocks = methodBlocks(work, basename);
   } catch {
     // a file that does not parse is left whole: its findings stay in the
     // request, the way they always have -- a parse error is not a
-    // definition-level finding
-    return {unparseable: true, source, stubs: [], unmatched: findings, eager: [], deferred: [], nameless: []};
+    // definition-level reference
+    return {unparseable: true, source, stubs: [], unmatched: findings, eager: [], deferred: [], nameless: [], friendsStripped: []};
   }
-  const result = stubBodies(source, findings, basename);
   const presentFile = (name, kind) => objectFilePresent(name, kind, islandFiles) === true;
   const pending = (name, kind) => pendingOf(name, kind, {asked, missingOf, refusedOf, presentFile, excludedObjects});
   const present = (name, kind) => presentFile(name, kind) === true && excludedObjects.has(name) === false;
-  const kept = [];
-  const keptFindings = [];
+  const findingOf = (refs2, fallbackFinding) => {
+    const withFinding = refs2.find((r) => r.finding !== undefined);
+    return withFinding?.finding ?? fallbackFinding?.raw ?? "";
+  };
+  // the signature-level misses (report item 8): a parameter typed by a
+  // name the build does not provide. While its DDIC name is pending the
+  // signature stays; once the name is answered -- or is a code kind
+  // staying lazy -- the parameter is cut and the body stubbed
+  const sigRefs = new Map();
+  for (const r of refs) {
+    if (r.level !== "signature") continue;
+    const list = sigRefs.get(r.method) ?? [];
+    list.push(r);
+    sigRefs.set(r.method, list);
+  }
+  const sigStubs = [];
+  const sigDeferred = [];
+  const sigEager = [];
+  const sigCut = new Map();
+  const sigMethods = new Set();
+  for (const [method, list] of sigRefs) {
+    const code = [];
+    const ddic = [];
+    const pendingDdic = [];
+    for (const r of list) {
+      const nk = {name: r.name, kind: requestKindOf(r.name, r)};
+      if (isCodeKind(nk.kind) === true) {
+        if (present(nk.name, nk.kind) === false) code.push({...nk, finding: findingOf(list, undefined)});
+      } else if (pending(nk.name, nk.kind) === true) pendingDdic.push({...nk, finding: findingOf(list, undefined)});
+      else ddic.push(nk);
+    }
+    const block = blocks.find((b) => b.method === method);
+    if (pendingDdic.length > 0 || block === undefined) {
+      // the dumper can still answer, or there is no body to stub: the
+      // signature stays whole, the names go out eager
+      sigEager.push(...pendingDdic);
+      continue;
+    }
+    sigMethods.add(method);
+    if (cutVarsBy(list).length > 0) sigCut.set(method, cutVarsBy(list));
+    const missingKinds = [...code, ...ddic];
+    sigStubs.push({...block, missing: missingKinds.map((n) => n.name), missingKinds,
+      finding: findingOf(list, findings.find((f) => sigLineOf(refs, list, f) === true)),
+      reason: stubReasonText(findingOf(list, undefined) || `signature type ${list[0].name} not found`), signature: true});
+    sigDeferred.push(...code);
+  }
+  // the body stubs over the blocks whose bodies the decision keeps: the
+  // nameless stubs' findings are the framework work list
+  const stubs = [];
   const deferred = [];
   const eager = [];
   const nameless = [];
   let dropped = 0;
-  for (const stub of result.stubs) {
-    const inside = findings.filter((f) => f.line > stub.headerEnd.row && f.line < stub.endStart.row);
-    const byName = new Map(classifyFindings(inside).names.map((n) => [n.name, n]));
+  for (const block of blocks) {
+    if (sigMethods.has(block.method) === true) continue;
+    const inside = findings.filter((f) => f.line > block.headerEnd.row && f.line < block.endStart.row);
+    if (inside.length === 0) continue;
+    const methodRefs = refs.filter((r) => r.level === "method" && r.method === block.method);
+    const {missing, missingKinds} = blockNames(methodRefs, inside);
+    const stub = {...block, missing, missingKinds, finding: inside[0].raw, reason: stubReasonText(inside[0])};
+    const byName = new Map(missingKinds.map((n) => [n.name, n]));
     const forName = (nk) => ({
       name: nk.name, kind: nk.kind,
       finding: byName.get(nk.name)?.finding ?? stub.finding,
       ...(byName.get(nk.name)?.message !== undefined ? {message: byName.get(nk.name).message} : {}),
     });
+    const fallbackNames = classifyFindings(inside.filter((f) => refMatched(methodRefs, f) === false)).names;
     const collectNameless = () => {
       for (const f of inside) {
-        if (classifyFindings([f]).names.length > 0) continue;
+        if (refMatched(methodRefs, f) === true || fallbackNames.some((n) => n.finding === f.raw) === true) continue;
         const member = memberOf(f.message);
         nameless.push({finding: f.message, ...(member !== undefined ? {member} : {}), line: f.line, method: stub.method});
       }
     };
-    const code = stub.missingKinds.filter((nk) => isCodeKind(nk.kind) === true);
-    const ddic = stub.missingKinds.filter((nk) => isCodeKind(nk.kind) === false);
+    const code = missingKinds.filter((nk) => isCodeKind(nk.kind) === true);
+    const ddic = missingKinds.filter((nk) => isCodeKind(nk.kind) === false);
     if (deferDdic === true) {
       // --defer-ddic: round 3's behaviour -- every name of a stubbed
       // method is lazy, even the dictionary's
-      kept.push(stub);
-      keptFindings.push(...inside);
+      stubs.push(stub);
       if (stub.missing.length === 0) collectNameless();
-      for (const nk of stub.missingKinds) {
+      for (const nk of missingKinds) {
         if (present(nk.name, nk.kind) === false) deferred.push(forName(nk));
       }
       continue;
@@ -440,8 +513,7 @@ export function planStubPass({source, findings, basename, missingOf = () => fals
       // a code-kind name remains: the method is stubbed, the code names
       // stay deferred (lazy, grows on the miss), and its DDIC names are
       // asked from the dumper in this iteration -- eager, not deferred
-      kept.push(stub);
-      keptFindings.push(...inside);
+      stubs.push(stub);
       for (const nk of code) {
         if (present(nk.name, nk.kind) === false) deferred.push(forName(nk));
       }
@@ -460,16 +532,25 @@ export function planStubPass({source, findings, basename, missingOf = () => fals
     // resolved-but-still-failing and dead names alike -- the body goes
     // (fix round 1, M-1.1: round 0's keep-branch kept the bed's DPC_EXT
     // red forever on nameless member cascades)
-    kept.push(stub);
-    keptFindings.push(...inside);
+    stubs.push(stub);
     if (stub.missing.length === 0) collectNameless();
   }
-  let outSource = result.source;
-  if (dropped > 0) {
-    // re-run the stubbing over the kept findings only, so a method the
-    // dumper can still answer keeps its body byte for byte
-    outSource = stubBodies(source, keptFindings, basename).source;
+  let outSource = work;
+  if (stubs.length > 0) outSource = applyStubs(outSource, stubs);
+  if (sigStubs.length > 0) outSource = applyStubs(outSource, sigStubs);
+  for (const [method, vars] of sigCut) {
+    outSource = cutSignatureParams(outSource, basename, method, vars).source;
   }
   nameless.sort((a, b) => a.finding < b.finding ? -1 : a.finding > b.finding ? 1 : 0);
-  return {source: outSource, stubs: kept, unmatched: result.unmatched, eager, deferred, nameless};
+  return {source: outSource, stubs: [...stubs, ...sigStubs], unmatched: findings.filter((f) =>
+    blocks.some((b) => f.line > b.headerEnd.row && f.line < b.endStart.row) === false),
+  eager: [...eager, ...sigEager], deferred: [...deferred, ...sigDeferred], nameless,
+  friendsStripped: friends.stripped};
 }
+
+// the parameter names a signature cut removes: the reference's `var` (the
+// UnknownType's own name is the parameter)
+const cutVarsBy = (list) => [...new Set(list.map((r) => r.var).filter((v) => v !== undefined))];
+// whether a finding sits on a signature reference's line (the raise reason
+// of a signature stub prefers it)
+const sigLineOf = (refs, list, f) => list.some((r) => Math.abs((r.line ?? 0) - f.line) <= 2) && refMatched(refs, f);
