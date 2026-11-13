@@ -1,8 +1,9 @@
 // The shadow schema: the client lives in HANA, in a schema of our own (H3,
 // docs/db-backends.md, "Shadow schema: the client lives in HANA"). For every
 // table the build knows, connect() makes sure our own schema holds a view
-// `SELECT * FROM <tenant>.T WHERE MANDT = SESSION_CONTEXT('CLIENT')` when the
-// tenant's DD02L calls the table client-dependent, a synonym otherwise -- and
+// `SELECT * FROM <tenant>.T WHERE "<client column>" = SESSION_CONTEXT('CLIENT')`
+// when the tenant's DD02L calls the table client-dependent, a synonym
+// otherwise -- and
 // a DDIC view (H5d) takes the synonym whatever its client dependence says,
 // the tenant's object being a read-only database view of its own; the
 // session then does SET SCHEMA <own> and every unqualified name the runtime
@@ -14,6 +15,15 @@
 // name, the tenant's DD02L says whether it is ours to shadow, and the
 // statement retries once.
 //
+// The client column is the table's own, read off the tenant's DD03L: the
+// first key field whose DATATYPE is CLNT (clientField, tools/hana-ddic-map
+// .mjs). A real tenant names it MANDT, CLIENT, MANDANT, CLNT, RCLNT and
+// more; a view hard-coded on MANDT failed at CREATE for every other name
+// (eager: the connect died; lazy: the fallback's error was swallowed and
+// the caller got its 259). A table DD02L calls client-dependent whose key
+// has no CLNT field is refused by name: no object at all, never a synonym
+// (it would read every client's rows) and never a view on a guess.
+//
 // The DDL shapes below are the whole contract the read-only guard admits: the
 // guard (tools/hana-client.mjs) allows CREATE [OR REPLACE] VIEW / CREATE
 // SYNONYM / DROP VIEW / DROP SYNONYM only when the owning schema is our own,
@@ -21,6 +31,7 @@
 import {readFileSync} from "node:fs";
 import {join} from "node:path";
 import {layers} from "./osd-inputs.mjs";
+import {clientField} from "./hana-ddic-map.mjs";
 
 // the rule a table name must pass before it becomes SQL: the probe's
 // plain identifier shape plus the `/` of an SAP namespace (/DMO/TRAVEL).
@@ -37,16 +48,44 @@ const CHUNK = 500;
 
 const qualified = (schema, name) => `"${schema}"."${name}"`;
 
+// a DDIC field name, as DD03L spells it: the column goes into the view as a
+// quoted identifier, so this is the refusal of anything that would not be one.
+const COLUMN = /^[A-Z_/][A-Z_0-9/]*$/;
+
+const predicate = (column) => {
+  if (COLUMN.test(String(column ?? "")) === false) {
+    throw new Error(`hana-shadow-schema: client column ${JSON.stringify(column)} is not a field name this tool will send to the database`);
+  }
+  return `"${column}" = SESSION_CONTEXT('CLIENT')`;
+};
+
 /** the shadow object for a client-dependent table: the predicate is what SAP's
  *  own client handling puts in the view, so joins, FOR ALL ENTRIES and
- *  aggregates inherit it with no change in generated SQL. */
-export function viewSql(name, own, tenant) {
-  return `CREATE VIEW ${qualified(own, name)} AS SELECT * FROM ${qualified(tenant, name)} WHERE MANDT = SESSION_CONTEXT('CLIENT')`;
+ *  aggregates inherit it with no change in generated SQL. `column` is the
+ *  table's own client field (DD03L), never assumed. */
+export function viewSql(name, own, tenant, column) {
+  return `CREATE VIEW ${qualified(own, name)} AS SELECT * FROM ${qualified(tenant, name)} WHERE ${predicate(column)}`;
 }
 
 /** the recreate form: one statement, and idempotent by itself. */
-export function replaceViewSql(name, own, tenant) {
-  return `CREATE OR REPLACE VIEW ${qualified(own, name)} AS SELECT * FROM ${qualified(tenant, name)} WHERE MANDT = SESSION_CONTEXT('CLIENT')`;
+export function replaceViewSql(name, own, tenant, column) {
+  return `CREATE OR REPLACE VIEW ${qualified(own, name)} AS SELECT * FROM ${qualified(tenant, name)} WHERE ${predicate(column)}`;
+}
+
+/** the removal of a shadow object a refused table must not keep: an older
+ *  build's view or synonym over a table this one refuses would go on
+ *  serving rows the refusal exists to keep out. */
+export const dropViewSql = (name, own) => `DROP VIEW ${qualified(own, name)}`;
+export const dropSynonymSql = (name, own) => `DROP SYNONYM ${qualified(own, name)}`;
+
+/** the refusal: a table DD02L calls client-dependent with no CLNT key field
+ *  in DD03L. The code lets the lazy fallback tell it from a failed read. */
+export function noClientColumn(names) {
+  const list = [...names].join(", ");
+  const error = new Error(`hana-shadow-schema: ${list}: client-dependent in DD02L (CLIDEP) but no key field of DD03L is of type CLNT; refused -- no shadow view (there is no column to filter on) and no synonym (it would read every client's rows) (docs/db-backends.md, "Shadow schema: the client lives in HANA")`);
+  error.code = "HANA_NO_CLIENT_COLUMN";
+  error.tables = [...names];
+  return error;
 }
 
 /** the shadow object for a client-independent table: no predicate needed. */
@@ -114,6 +153,29 @@ async function clidepOf(db, tenant, names) {
   return found;
 }
 
+/** the client column of every client-dependent table among `names`, from the
+ *  tenant's DD03L, active version, key fields only, in chunks like the
+ *  DD02L read. A table that maps to nothing has no CLNT key field. The
+ *  columns read are on the list test/hana-ddic-probe.mjs pins. */
+async function clientColumnsOf(db, tenant, names) {
+  const rows = new Map();
+  for (let at = 0; at < names.length; at += CHUNK) {
+    const list = names.slice(at, at + CHUNK).map((name) => `'${name}'`).join(",");
+    for (const row of await db.query(
+      `SELECT TABNAME, POSITION, FIELDNAME, KEYFLAG, DATATYPE FROM "${tenant}"."DD03L" WHERE TABNAME IN (${list}) AND AS4LOCAL = 'A' AND AS4VERS = '0000' AND KEYFLAG = 'X'`)) {
+      const table = String(row.tabname).toUpperCase();
+      if (rows.has(table) === false) rows.set(table, []);
+      rows.get(table).push(row);
+    }
+  }
+  const found = new Map();
+  for (const [table, fields] of rows) {
+    const column = clientField(fields);
+    if (column !== undefined) found.set(table, column);
+  }
+  return found;
+}
+
 /** what our own schema already holds: view definitions (for the drift check)
  *  and synonym names. */
 async function existingObjects(db, own) {
@@ -143,73 +205,106 @@ const normalized = (sql) => String(sql).replace(/\s+/g, " ").trim().toUpperCase(
 // connect (round 1 compared the whole CREATE text; critic MUST 3 at
 // f0a248af1 -- and two hosts connecting at once would race on the replace).
 // The decision is structural now: the query, whitespace-normalised, must
-// read SELECT <columns or *> FROM "<tenant>"."<T>" WHERE MANDT =
+// read SELECT <columns or *> FROM "<tenant>"."<T>" WHERE <client column> =
 // SESSION_CONTEXT('CLIENT'), with <columns> any quoted column list. The FROM
 // target and the predicate are the contract; the projection is HANA's to
-// spell. A view whose FROM names another schema or table, or whose predicate
+// spell. The predicate's column is the table's own client field (DD03L), the
+// same one viewSql writes; it reads back quoted ("CLIENT", as sent now) or
+// bare (MANDT, as the views made before the column came from DD03L were
+// sent) -- the same column either way, so neither is drift; a view on any
+// other column is. A view whose FROM names another schema or table, or whose predicate
 // differs (a hard-coded client), is drifted and recreated. A DEFINITION
 // still carrying the full CREATE VIEW prefix (the fakes' spelling before
 // the bed run) loses exactly that prefix first, so that spelling stays
 // current too.
-const isCurrentView = (definition, tenant, table) => {
+const isCurrentView = (definition, tenant, table, column) => {
   const query = normalized(String(definition).replace(/^\s*CREATE\s+(?:OR\s+REPLACE\s+)?VIEW\s+"[^"]+"\s*\.\s*"[^"]+"\s+AS/i, ""));
   const schema = String(tenant).toUpperCase();
   const name = String(table).toUpperCase();
-  // both pass assertSchema's NAME rule (letters, digits, underscore, slash):
-  // no regex metacharacters, safe to embed.
+  const field = String(column).toUpperCase();
+  // all three pass the NAME / COLUMN rules (letters, digits, underscore,
+  // slash): no regex metacharacters, safe to embed. A bare column is the
+  // same identifier only when it is a plain one; a /-namespaced field has
+  // to be quoted to be a column at all.
+  const spelled = /^[A-Z_][A-Z_0-9]*$/.test(field) ? `(?:"${field}"|${field})` : `"${field}"`;
   return new RegExp(
-    `^SELECT (?:\\*|"[^"]+"(?:\\s*,\\s*"[^"]+")*) FROM "${schema}"\\."${name}" WHERE MANDT = SESSION_CONTEXT\\('CLIENT'\\)$`)
+    `^SELECT (?:\\*|"[^"]+"(?:\\s*,\\s*"[^"]+")*) FROM "${schema}"\\."${name}" WHERE ${spelled} = SESSION_CONTEXT\\('CLIENT'\\)$`)
     .test(query);
 };
 
+/** one table's shadow object, made or brought current -- the one rule both
+ *  halves follow, so the eager set, the 259 fallback and the drift check
+ *  read the same client column. `column` is undefined for a client-dependent
+ *  table without a CLNT key field: whatever an older build left for it is
+ *  dropped, nothing is made, and the answer is "refused". */
+async function shadowOne(db, {own, tenant, name, kind, column, there}) {
+  if (kind.view === true || kind.clidep === false) {
+    // a DDIC view (H5d) or a client-independent table: a synonym. The
+    // tenant's view is itself a read-only database view; the shadow names
+    // it, it does not wrap it -- a synonym has no definition of its own
+    // to drift, and the view the dumps carry is client-independent. A
+    // client-dependent view would read across clients through the
+    // synonym; none is in the dumps, and if one arrives the filtered
+    // shape is one branch away (docs/db-backends.md).
+    if (there.synonyms.has(name)) return "current";
+    await db.execute(synonymSql(name, own, tenant));
+    return "created";
+  }
+  if (column === undefined) {
+    if (there.views.has(name)) await db.execute(dropViewSql(name, own));
+    if (there.synonyms.has(name)) await db.execute(dropSynonymSql(name, own));
+    return "refused";
+  }
+  const current = there.views.get(name);
+  if (current === undefined) {
+    await db.execute(viewSql(name, own, tenant, column));
+    return "created";
+  }
+  if (isCurrentView(current, tenant, name, column) === false) {
+    await db.execute(replaceViewSql(name, own, tenant, column));
+    return "replaced";
+  }
+  return "current";
+}
+
+const clientDependentTables = (names, clidep) =>
+  names.filter((name) => clidep.has(name) && clidep.get(name).view === false && clidep.get(name).clidep === true);
+
 /** the eager half: every table of the generation that exists in the tenant
  *  gets its shadow object, unless it is already there and current. Idempotent
- *  by construction: the second run reads the catalog and sends nothing. */
+ *  by construction: the second run reads the catalog and sends nothing.
+ *  A client-dependent table without a CLNT key field lands in `refused`
+ *  with no object at all -- the connect goes on (stderr names them), and a statement that touches one meets the lazy
+ *  half, which refuses it by name to that statement's caller. */
 export async function ensureShadow(db, {own, tenant, tables}) {
   assertSchema("own schema", own);
   assertSchema("tenant schema", tenant);
   const names = [...new Set([...(tables ?? [])].map((table) => String(table).toUpperCase()))]
     .filter((table) => NAME.test(table)).sort();
-  const report = {created: [], replaced: [], skipped: []};
+  const report = {created: [], replaced: [], skipped: [], refused: []};
   if (names.length === 0) return report;
   const clidep = await clidepOf(db, tenant, names);
+  const columns = await clientColumnsOf(db, tenant, clientDependentTables(names, clidep));
   const there = await existingObjects(db, own);
   for (const name of names) {
     if (clidep.has(name) === false) {
       report.skipped.push(name); // one of ours, not in the tenant: no shadow
       continue;
     }
-    const kind = clidep.get(name);
-    if (kind.view === true || kind.clidep === false) {
-      // a DDIC view (H5d) or a client-independent table: a synonym. The
-      // tenant's view is itself a read-only database view; the shadow names
-      // it, it does not wrap it -- a synonym has no definition of its own
-      // to drift, and the view the dumps carry is client-independent. A
-      // client-dependent view would read across clients through the
-      // synonym; none is in the dumps, and if one arrives the filtered
-      // shape is one branch away (docs/db-backends.md).
-      if (there.synonyms.has(name) === false) {
-        await db.execute(synonymSql(name, own, tenant));
-        report.created.push(name);
-      }
-    } else {
-      const wanted = viewSql(name, own, tenant);
-      const current = there.views.get(name);
-      if (current === undefined) {
-        await db.execute(wanted);
-        report.created.push(name);
-      } else if (isCurrentView(current, tenant, name) === false) {
-        await db.execute(replaceViewSql(name, own, tenant));
-        report.replaced.push(name);
-      }
-    }
+    const done = await shadowOne(db, {own, tenant, name, kind: clidep.get(name), column: columns.get(name), there});
+    if (done !== "current") report[done].push(name);
   }
+  // said every time, not under a trace flag: these tables have no shadow
+  // object, and a statement that touches one is refused by name
+  if (report.refused.length > 0) console.error(noClientColumn(report.refused).message);
   return report;
 }
 
 /** the lazy half, one table: the 259 fallback's answer to "is this name ours
  *  to shadow?" Returns true when the shadow object now exists (made or
- *  already there) and the caller may retry. */
+ *  already there) and the caller may retry. A client-dependent table
+ *  without a CLNT key field throws HANA_NO_CLIENT_COLUMN, naming it: the
+ *  fallback hands that to the caller instead of the 259. */
 export async function ensureShadowFor(db, {own, tenant, name}) {
   assertSchema("own schema", own);
   assertSchema("tenant schema", tenant);
@@ -217,22 +312,10 @@ export async function ensureShadowFor(db, {own, tenant, name}) {
   if (NAME.test(table) === false) return false;
   const clidep = await clidepOf(db, tenant, [table]);
   if (clidep.has(table) === false) return false;
-  const kind = clidep.get(table);
+  const columns = await clientColumnsOf(db, tenant, clientDependentTables([table], clidep));
   const there = await existingObjects(db, own);
-  if (kind.view === true || kind.clidep === false) {
-    // the eager half's rule (H5d): a DDIC view is named, not wrapped
-    if (there.synonyms.has(table) === false) {
-      await db.execute(synonymSql(table, own, tenant));
-    }
-  } else {
-    const wanted = viewSql(table, own, tenant);
-    const current = there.views.get(table);
-    if (current === undefined) {
-      await db.execute(wanted);
-    } else if (isCurrentView(current, tenant, table) === false) {
-      await db.execute(replaceViewSql(table, own, tenant));
-    }
-  }
+  const done = await shadowOne(db, {own, tenant, name: table, kind: clidep.get(table), column: columns.get(table), there});
+  if (done === "refused") throw noClientColumn([table]);
   return true;
 }
 

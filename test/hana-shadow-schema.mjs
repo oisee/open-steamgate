@@ -28,6 +28,25 @@ describe("the HANA shadow schema", () => {
     // H5d: a DDIC view takes a synonym whatever its client dependence says
     {TABNAME: "ZOSD_H3_VIEWC", CLIDEP: "X", TABCLASS: "VIEW"},
     {TABNAME: "ZOSD_H3_VIEWF", CLIDEP: "", TABCLASS: "VIEW"},
+    // the client column is the table's own (DD03L): a family on the bed
+    // names it CLIENT, and some tables flagged client-dependent carry no
+    // CLNT key field at all
+    {TABNAME: "ZOSD_H3_CLIENT", CLIDEP: "X"},
+    {TABNAME: "ZOSD_H3_NOCLNT", CLIDEP: "X"},
+  ];
+  // DD03L: the key fields of the client-dependent tables. MANDT for the
+  // classic shape, CLIENT for the family the bed measured, and a table
+  // whose first key field is not a client field and no key field is CLNT.
+  // ZOSD_H3_CLIENT also carries an include marker before its client field
+  // and a second CLNT key field after it, so neither "the first row" nor
+  // "any CLNT" is what is read.
+  const mandtKey = (TABNAME) => ({TABNAME, POSITION: "0001", FIELDNAME: "MANDT", KEYFLAG: "X", DATATYPE: "CLNT"});
+  const DD03L_ROWS = [
+    mandtKey("ZOSD_H3_CLI"), mandtKey("ZOSD_H3_LAZY"), mandtKey("/ZOSD/H3_NS"), mandtKey("SCARR"), mandtKey("ZOSD_H3_VIEWC"),
+    {TABNAME: "ZOSD_H3_CLIENT", POSITION: "0003", FIELDNAME: "RCLNT", KEYFLAG: "X", DATATYPE: "CLNT"},
+    {TABNAME: "ZOSD_H3_CLIENT", POSITION: "0002", FIELDNAME: "CLIENT", KEYFLAG: "X", DATATYPE: "CLNT"},
+    {TABNAME: "ZOSD_H3_CLIENT", POSITION: "0001", FIELDNAME: ".INCLUDE", KEYFLAG: "X", DATATYPE: "CLNT"},
+    {TABNAME: "ZOSD_H3_NOCLNT", POSITION: "0001", FIELDNAME: "ZOSD_H3_ID", KEYFLAG: "X", DATATYPE: "CHAR"},
   ];
   // the fake stands in through the CJS cache a real require uses; the
   // suites runner runs a shard's files in ONE process, so the stand-in is
@@ -78,6 +97,13 @@ describe("the HANA shadow schema", () => {
             }
             if (/FROM\s+SYS\.VIEWS/i.test(sql)) return cb(undefined, views);
             if (/FROM\s+SYS\.SYNONYMS/i.test(sql)) return cb(undefined, synonyms);
+            if (/"DD03L"/i.test(sql)) {
+              // the read is pinned to key fields: the fake answers only those
+              expect(sql, "the DD03L read is the active version's key fields")
+                .to.match(/AS4LOCAL = 'A' AND AS4VERS = '0000' AND KEYFLAG = 'X'/);
+              const listed = [...(/TABNAME IN \(([^)]*)\)/.exec(sql)?.[1] ?? "").matchAll(/'([^']+)'/g)].map((m) => m[1]);
+              return cb(undefined, DD03L_ROWS.filter((row) => listed.includes(row.TABNAME)));
+            }
             if (/DD02L/i.test(sql)) {
               const pinned = /TABNAME\s*=\s*'([A-Z0-9_]+)'/.exec(sql)?.[1];
               return cb(undefined, DD02L_ROWS.filter((row) => pinned === undefined || row.TABNAME === pinned));
@@ -105,7 +131,7 @@ describe("the HANA shadow schema", () => {
     const {db, sent} = await connect({shadowTables: ["ZOSD_H3_CLI", "ZOSD_H3_FREE"]});
     try {
       expect(sent).to.include(
-        `CREATE VIEW "ZOSD_H3_OWN"."ZOSD_H3_CLI" AS SELECT * FROM "ZOSD_H3_TENANT"."ZOSD_H3_CLI" WHERE MANDT = SESSION_CONTEXT('CLIENT')`);
+        `CREATE VIEW "ZOSD_H3_OWN"."ZOSD_H3_CLI" AS SELECT * FROM "ZOSD_H3_TENANT"."ZOSD_H3_CLI" WHERE "MANDT" = SESSION_CONTEXT('CLIENT')`);
       expect(sent).to.include(
         `CREATE SYNONYM "ZOSD_H3_OWN"."ZOSD_H3_FREE" FOR "ZOSD_H3_TENANT"."ZOSD_H3_FREE"`);
     } finally {
@@ -123,7 +149,7 @@ describe("the HANA shadow schema", () => {
       expect(sent).to.include(`CREATE SYNONYM "ZOSD_H3_OWN"."ZOSD_H3_VIEWF" FOR "ZOSD_H3_TENANT"."ZOSD_H3_VIEWF"`);
       // a client-dependent TABLE beside them still gets the MANDT view
       expect(sent).to.include(
-        `CREATE VIEW "ZOSD_H3_OWN"."ZOSD_H3_CLI" AS SELECT * FROM "ZOSD_H3_TENANT"."ZOSD_H3_CLI" WHERE MANDT = SESSION_CONTEXT('CLIENT')`);
+        `CREATE VIEW "ZOSD_H3_OWN"."ZOSD_H3_CLI" AS SELECT * FROM "ZOSD_H3_TENANT"."ZOSD_H3_CLI" WHERE "MANDT" = SESSION_CONTEXT('CLIENT')`);
     } finally {
       await db.disconnect();
     }
@@ -177,7 +203,7 @@ describe("the HANA shadow schema", () => {
     // current view is never recreated -- and two hosts connecting at once
     // never race on CREATE OR REPLACE.
     const there = {
-      views: [{VIEW_NAME: "ZOSD_H3_CLI", DEFINITION: viewSql("ZOSD_H3_CLI", "ZOSD_H3_OWN", "ZOSD_H3_TENANT")}],
+      views: [{VIEW_NAME: "ZOSD_H3_CLI", DEFINITION: viewSql("ZOSD_H3_CLI", "ZOSD_H3_OWN", "ZOSD_H3_TENANT", "MANDT")}],
       synonyms: [{SYNONYM_NAME: "ZOSD_H3_FREE"}],
     };
     const {db, sent} = await connect({shadowTables: ["ZOSD_H3_CLI", "ZOSD_H3_FREE"]}, there);
@@ -217,7 +243,7 @@ describe("the HANA shadow schema", () => {
     const {db, sent} = await connect({shadowTables: ["ZOSD_H3_CLI", "ZOSD_H3_FREE"]}, drifted);
     try {
       expect(sent).to.include(
-        `CREATE OR REPLACE VIEW "ZOSD_H3_OWN"."ZOSD_H3_CLI" AS SELECT * FROM "ZOSD_H3_TENANT"."ZOSD_H3_CLI" WHERE MANDT = SESSION_CONTEXT('CLIENT')`);
+        `CREATE OR REPLACE VIEW "ZOSD_H3_OWN"."ZOSD_H3_CLI" AS SELECT * FROM "ZOSD_H3_TENANT"."ZOSD_H3_CLI" WHERE "MANDT" = SESSION_CONTEXT('CLIENT')`);
       expect(sent.some((s) => /ZOSD_H3_FREE/.test(s) && /^\s*(CREATE|DROP)/i.test(s)), "the synonym stays").to.equal(false);
     } finally {
       await db.disconnect();
@@ -236,7 +262,7 @@ describe("the HANA shadow schema", () => {
     const {db, sent} = await connect({shadowTables: ["ZOSD_H3_CLI"]}, stale);
     try {
       expect(sent).to.include(
-        `CREATE OR REPLACE VIEW "ZOSD_H3_OWN"."ZOSD_H3_CLI" AS SELECT * FROM "ZOSD_H3_TENANT"."ZOSD_H3_CLI" WHERE MANDT = SESSION_CONTEXT('CLIENT')`);
+        `CREATE OR REPLACE VIEW "ZOSD_H3_OWN"."ZOSD_H3_CLI" AS SELECT * FROM "ZOSD_H3_TENANT"."ZOSD_H3_CLI" WHERE "MANDT" = SESSION_CONTEXT('CLIENT')`);
     } finally {
       await db.disconnect();
     }
@@ -256,7 +282,7 @@ describe("the HANA shadow schema", () => {
       const {db, sent} = await connect({shadowTables: ["ZOSD_H3_CLI"]}, stale);
       try {
         expect(sent).to.include(
-          `CREATE OR REPLACE VIEW "ZOSD_H3_OWN"."ZOSD_H3_CLI" AS SELECT * FROM "ZOSD_H3_TENANT"."ZOSD_H3_CLI" WHERE MANDT = SESSION_CONTEXT('CLIENT')`);
+          `CREATE OR REPLACE VIEW "ZOSD_H3_OWN"."ZOSD_H3_CLI" AS SELECT * FROM "ZOSD_H3_TENANT"."ZOSD_H3_CLI" WHERE "MANDT" = SESSION_CONTEXT('CLIENT')`);
       } finally {
         await db.disconnect();
       }
@@ -271,7 +297,7 @@ describe("the HANA shadow schema", () => {
       const attempts = sent.filter((s) => /FROM\s+zosd_h3_lazy/i.test(s) && /^\s*SELECT/i.test(s));
       expect(attempts.length, "the failed statement and exactly one retry").to.equal(2);
       expect(sent).to.include(
-        `CREATE VIEW "ZOSD_H3_OWN"."ZOSD_H3_LAZY" AS SELECT * FROM "ZOSD_H3_TENANT"."ZOSD_H3_LAZY" WHERE MANDT = SESSION_CONTEXT('CLIENT')`);
+        `CREATE VIEW "ZOSD_H3_OWN"."ZOSD_H3_LAZY" AS SELECT * FROM "ZOSD_H3_TENANT"."ZOSD_H3_LAZY" WHERE "MANDT" = SESSION_CONTEXT('CLIENT')`);
     } finally {
       await db.disconnect();
     }
@@ -383,7 +409,7 @@ describe("the HANA shadow schema", () => {
     const {db, sent} = await connect({shadowTables: ["/ZOSD/H3_NS"]});
     try {
       expect(sent).to.include(
-        `CREATE VIEW "ZOSD_H3_OWN"."/ZOSD/H3_NS" AS SELECT * FROM "ZOSD_H3_TENANT"."/ZOSD/H3_NS" WHERE MANDT = SESSION_CONTEXT('CLIENT')`);
+        `CREATE VIEW "ZOSD_H3_OWN"."/ZOSD/H3_NS" AS SELECT * FROM "ZOSD_H3_TENANT"."/ZOSD/H3_NS" WHERE "MANDT" = SESSION_CONTEXT('CLIENT')`);
     } finally {
       await db.disconnect();
     }
@@ -397,7 +423,7 @@ describe("the HANA shadow schema", () => {
       const attempts = sent.filter((s) => /FROM\s+"\/ZOSD\/H3_NS"/i.test(s) && /^\s*SELECT/i.test(s));
       expect(attempts.length, "the failed statement and exactly one retry").to.equal(2);
       expect(sent).to.include(
-        `CREATE VIEW "ZOSD_H3_OWN"."/ZOSD/H3_NS" AS SELECT * FROM "ZOSD_H3_TENANT"."/ZOSD/H3_NS" WHERE MANDT = SESSION_CONTEXT('CLIENT')`);
+        `CREATE VIEW "ZOSD_H3_OWN"."/ZOSD/H3_NS" AS SELECT * FROM "ZOSD_H3_TENANT"."/ZOSD/H3_NS" WHERE "MANDT" = SESSION_CONTEXT('CLIENT')`);
     } finally {
       await db.disconnect();
     }
@@ -417,8 +443,8 @@ describe("the HANA shadow schema", () => {
     const {db, sent} = await connect({shadowTables: []});
     try {
       // ours: allowed, and it reaches the driver
-      await db.execute(viewSql("ZOSD_H3_OK", "ZOSD_H3_OWN", "ZOSD_H3_TENANT"));
-      expect(sent).to.include(viewSql("ZOSD_H3_OK", "ZOSD_H3_OWN", "ZOSD_H3_TENANT"));
+      await db.execute(viewSql("ZOSD_H3_OK", "ZOSD_H3_OWN", "ZOSD_H3_TENANT", "MANDT"));
+      expect(sent).to.include(viewSql("ZOSD_H3_OK", "ZOSD_H3_OWN", "ZOSD_H3_TENANT", "MANDT"));
       // the tenant's: refused before the driver, with the guard's own code
       let error;
       try {
@@ -475,7 +501,7 @@ describe("the HANA shadow schema", () => {
       shadowTables: ["ZOSD_H3_CLI"]});
     try {
       expect(sent).to.include(
-        `CREATE VIEW "ZOSD_H3_OWN"."ZOSD_H3_CLI" AS SELECT * FROM "ZOSD_H3_TENANT"."ZOSD_H3_CLI" WHERE MANDT = SESSION_CONTEXT('CLIENT')`);
+        `CREATE VIEW "ZOSD_H3_OWN"."ZOSD_H3_CLI" AS SELECT * FROM "ZOSD_H3_TENANT"."ZOSD_H3_CLI" WHERE "MANDT" = SESSION_CONTEXT('CLIENT')`);
       const views = sent.find((s) => /SYS\.VIEWS/.test(s));
       expect(views, "the catalog literal is upper").to.include(`SCHEMA_NAME = 'ZOSD_H3_OWN'`);
       const dd02l = sent.find((s) => /DD02L/.test(s));
@@ -522,6 +548,108 @@ describe("the HANA shadow schema", () => {
     }
   });
 
+  it("the client column is the table's own CLNT key field: CLIENT, not MANDT", async () => {
+    // the bed: a whole family of client-dependent tables names the client
+    // column CLIENT. MANDT hard-coded failed CREATE VIEW for every one of
+    // them (an invalid column) and killed the connect.
+    const {db, sent} = await connect({shadowTables: ["ZOSD_H3_CLIENT", "ZOSD_H3_CLI"]});
+    try {
+      expect(sent).to.include(
+        `CREATE VIEW "ZOSD_H3_OWN"."ZOSD_H3_CLIENT" AS SELECT * FROM "ZOSD_H3_TENANT"."ZOSD_H3_CLIENT" WHERE "CLIENT" = SESSION_CONTEXT('CLIENT')`);
+      // the classic table beside it keeps MANDT
+      expect(sent).to.include(
+        `CREATE VIEW "ZOSD_H3_OWN"."ZOSD_H3_CLI" AS SELECT * FROM "ZOSD_H3_TENANT"."ZOSD_H3_CLI" WHERE "MANDT" = SESSION_CONTEXT('CLIENT')`);
+      expect(sent.some((s) => /ZOSD_H3_CLIENT/.test(s) && /MANDT|RCLNT|INCLUDE/.test(s) && /^\s*CREATE/i.test(s)),
+        "neither the name MANDT, nor a marker row, nor a later CLNT key field").to.equal(false);
+    } finally {
+      await db.disconnect();
+    }
+  });
+
+  it("the lazy fallback filters a CLIENT table on CLIENT too", async () => {
+    const {db, sent} = await connect({shadowTables: []}, {failName: "ZOSD_H3_CLIENT", failTimes: 1});
+    try {
+      const rows = await db.query(`SELECT * FROM zosd_h3_client`);
+      expect(rows).to.deep.equal([]);
+      expect(sent).to.include(
+        `CREATE VIEW "ZOSD_H3_OWN"."ZOSD_H3_CLIENT" AS SELECT * FROM "ZOSD_H3_TENANT"."ZOSD_H3_CLIENT" WHERE "CLIENT" = SESSION_CONTEXT('CLIENT')`);
+    } finally {
+      await db.disconnect();
+    }
+  });
+
+  it("the drift check takes the stored expanded definition of a CLIENT view as current", async () => {
+    // the bed's stored shape (* expanded, the predicate as sent), for a
+    // table whose client column is CLIENT: current, no DDL -- eager and lazy
+    const stored = `SELECT "ZOSD_H3_ID" , "CLIENT" , "ZOSD_H3_TEXT" FROM "ZOSD_H3_TENANT"."ZOSD_H3_CLIENT" WHERE "CLIENT" = SESSION_CONTEXT('CLIENT')`;
+    const views = [{VIEW_NAME: "ZOSD_H3_CLIENT", DEFINITION: stored}];
+    const eager = await connect({shadowTables: ["ZOSD_H3_CLIENT"]}, {views});
+    try {
+      expect(eager.sent.filter((s) => /^\s*CREATE/i.test(s)), "current: nothing created").to.deep.equal([]);
+    } finally {
+      await eager.db.disconnect();
+    }
+    const lazy = await connect({shadowTables: []}, {views, failName: "ZOSD_H3_CLIENT", failTimes: 1});
+    try {
+      await lazy.db.query(`SELECT * FROM zosd_h3_client`);
+      expect(lazy.sent.filter((s) => /^\s*CREATE/i.test(s)), "current: retry only").to.deep.equal([]);
+    } finally {
+      await lazy.db.disconnect();
+    }
+    // and a view an older build made on MANDT over this table is drift
+    const old = await connect({shadowTables: ["ZOSD_H3_CLIENT"]}, {views: [{VIEW_NAME: "ZOSD_H3_CLIENT",
+      DEFINITION: `SELECT * FROM "ZOSD_H3_TENANT"."ZOSD_H3_CLIENT" WHERE MANDT = SESSION_CONTEXT('CLIENT')`}]});
+    try {
+      expect(old.sent).to.include(
+        `CREATE OR REPLACE VIEW "ZOSD_H3_OWN"."ZOSD_H3_CLIENT" AS SELECT * FROM "ZOSD_H3_TENANT"."ZOSD_H3_CLIENT" WHERE "CLIENT" = SESSION_CONTEXT('CLIENT')`);
+    } finally {
+      await old.db.disconnect();
+    }
+  });
+
+  it("a client-dependent table without a CLNT key field is refused by name: no view, no synonym", async () => {
+    // eager: nothing is made for it, the connect goes on and says so on
+    // stderr; whatever an older build left for it is dropped
+    const said = [];
+    const priorError = console.error;
+    console.error = (...args) => { said.push(args.join(" ")); };
+    let eager;
+    try {
+      eager = await connect({shadowTables: ["ZOSD_H3_NOCLNT", "ZOSD_H3_CLI"]}, {
+        views: [{VIEW_NAME: "ZOSD_H3_NOCLNT", DEFINITION: `SELECT * FROM "ZOSD_H3_TENANT"."ZOSD_H3_NOCLNT" WHERE MANDT = SESSION_CONTEXT('CLIENT')`}],
+        synonyms: [{SYNONYM_NAME: "ZOSD_H3_NOCLNT"}],
+      });
+    } finally {
+      console.error = priorError;
+    }
+    try {
+      const made = eager.sent.filter((s) => /ZOSD_H3_NOCLNT/.test(s) && /^\s*CREATE/i.test(s));
+      expect(made, "no view, no synonym").to.deep.equal([]);
+      expect(eager.sent).to.include(`DROP VIEW "ZOSD_H3_OWN"."ZOSD_H3_NOCLNT"`);
+      expect(eager.sent).to.include(`DROP SYNONYM "ZOSD_H3_OWN"."ZOSD_H3_NOCLNT"`);
+      expect(said.join("\n"), "said, with the name").to.include("ZOSD_H3_NOCLNT");
+      // the table beside it is shadowed as ever
+      expect(eager.sent.some((s) => /^CREATE VIEW "ZOSD_H3_OWN"\."ZOSD_H3_CLI"/.test(s))).to.equal(true);
+    } finally {
+      await eager.db.disconnect();
+    }
+    // lazy: the statement that touches it gets the refusal, not a 259
+    const {db, sent} = await connect({shadowTables: []}, {failName: "ZOSD_H3_NOCLNT", failTimes: 5});
+    try {
+      let error;
+      try {
+        await db.query(`SELECT * FROM zosd_h3_noclnt`);
+      } catch (e) { error = e; }
+      expect(error?.code, "refused, by its own code").to.equal("HANA_NO_CLIENT_COLUMN");
+      expect(String(error?.message)).to.include("ZOSD_H3_NOCLNT");
+      expect(sent.some((s) => /ZOSD_H3_NOCLNT/.test(s) && /^\s*CREATE/i.test(s)), "nothing made").to.equal(false);
+      const attempts = sent.filter((s) => /FROM\s+zosd_h3_noclnt/i.test(s) && /^\s*SELECT/i.test(s));
+      expect(attempts.length, "not retried").to.equal(1);
+    } finally {
+      await db.disconnect();
+    }
+  });
+
   it("the DDIC set the build knows is the layers' TABL names", () => {
     const root = mkdtempSync(join(tmpdir(), "hana-shadow-ddic-"));
     const write = (rel, body) => {
@@ -540,8 +668,13 @@ describe("the HANA shadow schema", () => {
   });
 
   it("the DDL builders are the measured shapes", () => {
-    expect(viewSql("ZOSD_H3_T", "ZOSD_H3_OWN", "ZOSD_H3_TENANT"))
-      .to.equal(`CREATE VIEW "ZOSD_H3_OWN"."ZOSD_H3_T" AS SELECT * FROM "ZOSD_H3_TENANT"."ZOSD_H3_T" WHERE MANDT = SESSION_CONTEXT('CLIENT')`);
+    expect(viewSql("ZOSD_H3_T", "ZOSD_H3_OWN", "ZOSD_H3_TENANT", "MANDT"))
+      .to.equal(`CREATE VIEW "ZOSD_H3_OWN"."ZOSD_H3_T" AS SELECT * FROM "ZOSD_H3_TENANT"."ZOSD_H3_T" WHERE "MANDT" = SESSION_CONTEXT('CLIENT')`);
+    expect(viewSql("ZOSD_H3_T", "ZOSD_H3_OWN", "ZOSD_H3_TENANT", "CLIENT"))
+      .to.equal(`CREATE VIEW "ZOSD_H3_OWN"."ZOSD_H3_T" AS SELECT * FROM "ZOSD_H3_TENANT"."ZOSD_H3_T" WHERE "CLIENT" = SESSION_CONTEXT('CLIENT')`);
+    // no column, no view: the builder never falls back to a name
+    expect(() => viewSql("ZOSD_H3_T", "ZOSD_H3_OWN", "ZOSD_H3_TENANT")).to.throw(/client column/);
+    expect(() => viewSql("ZOSD_H3_T", "ZOSD_H3_OWN", "ZOSD_H3_TENANT", `X" OR 1=1 --`)).to.throw(/client column/);
     expect(synonymSql("ZOSD_H3_T", "ZOSD_H3_OWN", "ZOSD_H3_TENANT"))
       .to.equal(`CREATE SYNONYM "ZOSD_H3_OWN"."ZOSD_H3_T" FOR "ZOSD_H3_TENANT"."ZOSD_H3_T"`);
   });
