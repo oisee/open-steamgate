@@ -90,7 +90,16 @@
 //                         excluding; and NEVER a registered service's own
 //                         class -- the MPC/DPC/_EXT pairs a registration
 //                         names, or by suffix without one: the run fails
-//                         instead. Since H5x-2 the names come from the
+//                         instead. Since H5x-3 the island's TEST CODE --
+//                         the ABAP unit-test framework surface (objects
+//                         named or naming CL_AUNIT_*/IF_AUNIT_* types,
+//                         transitively over everything that names them,
+//                         through the structural record or the source's
+//                         identifier tokens) -- leaves the build before
+//                         any of this is needed: recorded {testCode: true}
+//                         in the record's roots/cascades, never stubbed,
+//                         never asked, never a framework gap. Since
+//                         H5x-2 the names come from the
 //                         structural pass (references(), one SyntaxLogic
 //                         pass per object): a signature-level miss (a
 //                         parameter typed by a missing name) stays whole
@@ -254,7 +263,7 @@ import {islandClassPaths, planStubPass, registeredServiceClasses, serviceGuardBy
 import {buildCheck, ddicWritten, ensureLayers, generationOf, islandBasenames, islandObjectCount, islandShrinkCheck, mergeInputs} from "./hana-closure-merge.mjs";
 import {dumperConfigured, dumpRound, printedCommand, provenanceFor} from "./hana-closure-dumper.mjs";
 import {cascadeOf, classifyFindings, exclusionCandidates, nameFromAbapFile, parseFindings} from "./hana-closure-exclude.mjs";
-import {analyseIsland, graphDecide, mergeNames, requestKindOf, structuralRegistry, waitsOf, writeClosureRecord} from "./hana-closure-graph.mjs";
+import {analyseIsland, graphDecide, mergeNames, requestKindOf, structuralRegistry, testCodeObjects, waitsOf, writeClosureRecord} from "./hana-closure-graph.mjs";
 
 // ------------------------------------------------------------ findings ----
 
@@ -607,6 +616,7 @@ export async function run(args = process.argv.slice(2), options = {}) {
     let frameworkGaps = 0;
     let cycles = 0;
     let guardBySuffix = false;
+    let testExcluded = new Set();
     if (stubUnresolved === true) {
       const classPaths = islandClassPaths(root);
       const islandFiles = island;
@@ -641,8 +651,52 @@ export async function run(args = process.argv.slice(2), options = {}) {
         else excludedRecords.push(rec);
       };
       const writeRecord = () =>
-        writeClosureRecord(out, {stubRecords, excludedRecords, waits: waitsOf(analysisObjects, pendingAtFixedPoint),
+        writeClosureRecord(out, {stubRecords, excludedRecords,
+          waits: waitsOf(analysisObjects.filter((o) => testExcluded.has(o.object) === false), pendingAtFixedPoint),
           errors: [...errorRecords.values()]});
+      // H5x-3: the island's test code -- the ABAP unit-test framework
+      // surface (roots: the object is named CL_AUNIT_*/IF_AUNIT_* or its
+      // material or source names such a type) and everything that names a
+      // test-code object (cascades; a RESOLVED friend never reaches the
+      // structural record, which is what the source scan is for). It is not
+      // built and does not count: the build is kept from the files through
+      // the same seam before the stub rounds read the validation, the files
+      // are never stubbed, their findings neither asked nor framework gaps,
+      // and a registered service's own class fails the run instead.
+      const testCode = testCodeObjects(analysisObjects, (o) => {
+        try {
+          return readFileSync(join(root, o.file), "utf8");
+        } catch {
+          return undefined;
+        }
+      });
+      testExcluded = testCode.all;
+      for (const name of [...testExcluded].sort()) {
+        if (guard.has(name) === true) {
+          const how = guardBySuffix === true
+            ? "recognised by suffix (no registration in gen/hana-segw or the island's *.iwsv.xml / *.iwmo.xml)"
+            : "gen/hana-segw or the island's *.iwsv.xml / *.iwmo.xml";
+          throw new Error(`hana-closure: ${name} is a registered service's own class (${how}): the unit-test-framework rule would exclude it -- the service itself cannot be excluded from the build, the run fails`);
+        }
+        const o = byObject.get(name);
+        if (o === undefined) continue;
+        if (testCode.roots.has(name) === true) {
+          excludedRecords.push({level: "definition", object: name, file: o.file, kind: o.kind,
+            missing: [], findings: [], testCode: true});
+        } else {
+          const names = (o.unknowns ?? []).map((u) => u.name)
+            .concat((o.edges ?? []).map((e) => e.to))
+            .concat(o.friends ?? []);
+          const of = [...new Set(names.filter((n) => testCode.all.has(n) === true))].sort();
+          excludedRecords.push({level: "cascade", object: name, file: o.file, kind: o.kind,
+            of, findings: [], excluded: true, testCode: true});
+        }
+        excludedObjects.add(name);
+      }
+      if (testExcluded.size > 0) {
+        say(`test code: ${testExcluded.size} island object(s) out of the build (the ABAP unit-test framework surface and the helpers that pull it, H5x-3)`);
+        writeRecord();
+      }
       for (;;) {
         const byFile = new Map();
         for (const f of findings) {
@@ -671,6 +725,7 @@ export async function run(args = process.argv.slice(2), options = {}) {
             }
             const object = objectOf(basename);
             if (planErrored.has(object) === true) continue;
+            if (testExcluded.has(object) === true) continue;
             const refs = byObject.get(object)?.unknowns ?? [];
             let plan;
             try {
@@ -706,7 +761,7 @@ export async function run(args = process.argv.slice(2), options = {}) {
         // references (the graph), beside this round's findings outside
         // every method body -- signature-line findings are the stub pass's
         const planByFile = new Map(planned.map((p) => [p.basename, p]));
-        const objects = analysisObjects.filter((o) => planErrored.has(o.object) === false).map((o) => {
+        const objects = analysisObjects.filter((o) => planErrored.has(o.object) === false && testExcluded.has(o.object) === false).map((o) => {
           const sigLines = new Set(o.signatureLines ?? []);
           const entry = {object: o.object, defNames: defNamesOf(o),
             edges: (o.edges ?? []).filter((e) => e.level === "definition").map((e) => e.to),
@@ -839,8 +894,11 @@ export async function run(args = process.argv.slice(2), options = {}) {
     const unscoped = all.length - findings.length;
     // the names: the references first, then the text fallback for the
     // findings no reference carries (H5x-2)
+    const analysisForNames = testExcluded.size > 0
+      ? {...analysis, objects: analysis.objects.filter((o) => testExcluded.has(o.object) === false)}
+      : analysis;
     const {names: structuralNames, structuralCount, rest} = mergeNames(
-      {analysis, findings, classPaths: islandClassPaths(root)});
+      {analysis: analysisForNames, findings, classPaths: islandClassPaths(root)});
     const classified = classifyFindings(rest);
     // H5x-1: a name whose object is in the island -- by file name for
     // CLAS/INTF, by the XML present for the DDIC kinds -- is never

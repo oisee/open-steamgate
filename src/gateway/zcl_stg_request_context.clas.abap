@@ -406,4 +406,35 @@ CLASS zcl_stg_request_context IMPLEMENTATION.
     keys_to_structure( IMPORTING es_key_values = es_key_values ).
   ENDMETHOD.
 
+* H5x-3, the members the SEGW sample calls: the navigation path the URL
+* carried (both facets -- its RESOLVE_NAVIGATION_PATH receives the entity
+* and the entity-set context and calls the getter on each), and the
+* function import's name and its parameters converted into the provider's
+* structure (its ACTION_SO_ACTIONS). The data is what the dispatcher filled
+* from the parsed request.
+  METHOD /iwbep/if_mgw_req_entity~get_navigation_path.
+    rt_navigation_path = mt_navigation_path.
+  ENDMETHOD.
+
+  METHOD /iwbep/if_mgw_req_entityset~get_navigation_path.
+    rt_navigation_path = mt_navigation_path.
+  ENDMETHOD.
+
+  METHOD /iwbep/if_mgw_req_func_import~get_function_import_name.
+    rv_function_import_name = mv_function_import.
+  ENDMETHOD.
+
+  METHOD /iwbep/if_mgw_req_func_import~get_converted_parameters.
+    DATA ls_parameter LIKE LINE OF mt_parameter.
+    FIELD-SYMBOLS <lv_target> TYPE any.
+
+    CLEAR es_parameters.
+    LOOP AT mt_parameter INTO ls_parameter.
+      ASSIGN COMPONENT ls_parameter-name OF STRUCTURE es_parameters TO <lv_target>.
+      IF sy-subrc = 0.
+        <lv_target> = ls_parameter-value.
+      ENDIF.
+    ENDLOOP.
+  ENDMETHOD.
+
 ENDCLASS.

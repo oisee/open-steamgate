@@ -587,3 +587,26 @@ is `transpiler-rap-eml-PR.md` in the job folder. Merged as #2049
 (`62931245`); the pin carries it since `local/osd-build-4c`
 ([transpiler-pin-4.md](transpiler-pin-4.md)) and
 `src/rap_demo/zcl_rap_note_eml` is no longer excluded from the build.
+
+## open-abap-odata -- the /IWBEP/ members the SEGW sample calls (H5x-3)
+
+The pinned open-abap-odata (`bd9f1fb`) lacks six members the SEGW sample
+service calls (framework-gaps.json of bed run 18 -- private evidence; the
+stub messages in the dumped DPC_EXT name each one). The change sits in the
+`.local/lars/open-abap-odata` working tree on branch
+`feat/iwbep-members-h5x3` (from `bd9f1fb`) as three commits, one per member
+group, one small PR each, and is proven here first: the overlays under
+`src/gateway/compat/` carry the same text with the lib copies excluded from
+both pulls (abap_transpile.json, abaplint.jsonc), and this repository's
+unit and wire tests are the proof. The clone's own lint was run in the
+clone before anything is drafted. Sending is gated by the critic
+(CLAUDE.md), like every upstream PR.
+
+| PR (to send) | objects | proof here |
+| --- | --- | --- |
+| request context: navigation path + function import | `/IWBEP/IF_MGW_REQ_FUNC_IMPORT` (get_function_import_name, get_converted_parameters), `/IWBEP/IF_MGW_REQ_ENTITY` + `/IWBEP/IF_MGW_REQ_ENTITYSET` (get_navigation_path), `zcl_oao_request_context`, `/IWBEP/CL_MGW_REQUEST`, `/IWBEP/CL_SB_GEN_READ_AFTR_CRT` | `src/gateway/zcl_stg_request_context.clas.testclasses.abap` (both facets' getter, name + converted parameters); the sample's call sites live in the private framework-gaps.json |
+| message container | `/IWBEP/IF_MGW_CONTEXT` (get_message_container), `/IWBEP/IF_MESSAGE_CONTAINER` (add_message: type, id, number, v1-v4, response-header switch), `zcl_oao_context`, `zcl_oao_msg_container` | `src/gateway/compat/zcl_oao_msg_container.clas.testclasses.abap`; the demo DPC's container use and the wire test in `test/mocha.mjs` (innererror.errordetails over the wire) |
+| changeset structures | `/IWBEP/IF_MGW_APPL_SRV_RUNTIME`: `content_id` / `content_id_ref` on `ty_s_changeset_request` and `ty_s_changeset_response`, `content_id_ref` on `ty_s_operation_info` | the `ltcl_changeset_types` unit test beside the request context |
+
+When the PRs land and the pin moves, the overlays and both exclusions go
+(`src/gateway/compat/README.md`).

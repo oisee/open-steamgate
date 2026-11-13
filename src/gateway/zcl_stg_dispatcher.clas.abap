@@ -316,7 +316,12 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
     DATA lx_busi    TYPE REF TO /iwbep/cx_mgw_busi_exception.
     DATA lx_gateway TYPE REF TO /iwbep/cx_mgw_base_exception.
     DATA lv_message TYPE string.
+    DATA lo_msg     TYPE REF TO zcl_oao_msg_container.
+    DATA lt_msg     TYPE bapirettab.
 
+* one request, one container: what a DPC added while serving the last one
+* must not reach this one's error response (each $batch part runs dispatch)
+    /iwbep/cl_mgw_msg_container=>reset( ).
     TRY.
         rs_response = run( iv_method  = iv_method
                            iv_path    = iv_path
@@ -342,9 +347,14 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
         IF lv_message IS INITIAL.
           lv_message = 'Business exception raised by the data provider'.
         ENDIF.
+* the messages the DPC collected in the container travel with the error the
+* way a Gateway carries them: innererror.errordetails
+        lo_msg ?= /iwbep/cl_mgw_msg_container=>get_mgw_msg_container( ).
+        lt_msg  = lo_msg->get_messages( ).
         rs_response = json_response( iv_status = 400
                                      iv_body   = zcl_stg_json=>error( iv_code    = 'STG/BUSINESS'
-                                                                      iv_message = lv_message ) ).
+                                                                      iv_message = lv_message
+                                                                      it_messages = lt_msg ) ).
       CATCH /iwbep/cx_mgw_base_exception INTO lx_gateway.
         rs_response = json_response( iv_status = 500
                                      iv_body   = zcl_stg_json=>error( iv_code    = 'STG/TECHNICAL'

@@ -546,6 +546,63 @@ export function graphDecide({objects, pendingOf, statusOf, guard = new Set(), gu
   return {blocked: false, roots, cascades, cycles, strips, excluded};
 }
 
+// --------------------------------------------- the island's test code ----
+
+// the ABAP unit-test framework's kernel classes and interfaces (H5x-3)
+const AUNIT_TEST_CODE = /^(?:CL|IF)_AUNIT_[A-Z0-9_/#]+$/;
+
+const namesOf = (o) => [o.object,
+  ...(o.unknowns ?? []).map((u) => u.name),
+  ...(o.edges ?? []).map((e) => e.to),
+  ...(o.friends ?? [])];
+
+/** the island's test code (H5x-3): `roots` name the unit-test framework --
+ *  their own name, or a name their unknowns, edges or GLOBAL FRIENDS carry,
+ *  or their source text -- and `all` closes that transitively: an object
+ *  whose material or source names a test-code object is part of the test
+ *  surface with it, at any level (a body-level reference does not stub
+ *  against an absent class but leaves with it). The source scan exists
+ *  because a RESOLVED friend never reaches the structural record
+ *  (analyseObject skips friends the registry can resolve): the bed's EPM
+ *  test utilities trace to the decorator only through their GLOBAL FRIENDS
+ *  clause, and their file carries a parser finding on top. The scan is
+ *  name-shaped, never prose-shaped: a source qualifies through one of its
+ *  identifier tokens, not through a sentence. Pure. */
+export function testCodeObjects(objects, sourceOf = undefined) {
+  const tokensOf = (o) => {
+    if (sourceOf === undefined) return undefined;
+    const source = sourceOf(o);
+    if (typeof source !== "string") return undefined;
+    return String(source).toUpperCase().match(/[A-Z0-9_/#]+/g) ?? [];
+  };
+  const isAunit = (o, tokens) =>
+    namesOf(o).some((n) => AUNIT_TEST_CODE.test(String(n ?? "")) === true) ||
+    (tokens ?? []).some((t) => AUNIT_TEST_CODE.test(t) === true);
+  const mentions = (o, tokens, set) =>
+    namesOf(o).some((n) => set.has(n) === true) ||
+    (tokens ?? []).some((t) => set.has(t) === true);
+  const roots = new Set();
+  const tokensByObject = new Map();
+  for (const o of objects ?? []) {
+    const tokens = tokensOf(o);
+    if (tokens !== undefined) tokensByObject.set(o.object, tokens);
+    if (isAunit(o, tokens) === true) roots.add(o.object);
+  }
+  const all = new Set(roots);
+  let grew = true;
+  while (grew === true) {
+    grew = false;
+    for (const o of objects ?? []) {
+      if (all.has(o.object) === true) continue;
+      if (mentions(o, tokensByObject.get(o.object), all) === true) {
+        all.add(o.object);
+        grew = true;
+      }
+    }
+  }
+  return {roots, all};
+}
+
 /** the request names out of one iteration's structural pass and its
  *  findings: the references first (with their TADIR-ish kinds), then the
  *  text fallback for the findings no reference carries -- a finding whose

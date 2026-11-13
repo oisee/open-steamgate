@@ -35,6 +35,10 @@ CLASS lcl_req_entity IMPLEMENTATION.
   METHOD /iwbep/if_mgw_req_entity~get_converted_source_keys.
     RETURN.
   ENDMETHOD.
+
+  METHOD /iwbep/if_mgw_req_entity~get_navigation_path.
+    RETURN.
+  ENDMETHOD.
 ENDCLASS.
 
 CLASS ltcl_phase0 DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
