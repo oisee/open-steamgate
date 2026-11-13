@@ -204,6 +204,25 @@ export function mandtFirstKey(fields) {
   return first !== undefined && first.fieldname === "MANDT" && first.key === true;
 }
 
+/** the client column of a client-dependent table, from its DD03L rows (the
+ *  lower-case shape query() returns): the first key field, in POSITION
+ *  order, whose DATATYPE is CLNT. Not the name MANDT -- a real tenant names
+ *  it CLIENT, MANDANT, CLNT, RCLNT and more -- and not "the first column",
+ *  which some tables flagged client-dependent hold something else in.
+ *  Dot rows (.INCLUDE, .APPEND) are markers, not fields: DD03L carries
+ *  their expanded fields beside them. Undefined when no key field is CLNT;
+ *  the caller decides what that means (the shadow schema refuses). */
+export function clientField(rows) {
+  const sorted = [...(rows ?? [])].sort((a, b) => (Number(a.position) || 0) - (Number(b.position) || 0));
+  for (const row of sorted) {
+    const name = String(row.fieldname ?? "").trim().toUpperCase();
+    if (name === "" || name.startsWith(".")) continue;
+    if (String(row.keyflag ?? "").toUpperCase() !== "X") continue;
+    if (String(row.datatype ?? "").trim().toUpperCase() === "CLNT") return name;
+  }
+  return undefined;
+}
+
 /** one mapped table as the tree's abapGit TABL XML, through the shared
  *  writer. `table` is {name, text, clidep, tabclass, fields, language}:
  *  the fields as ddicFields/ddicFieldsWithIncludes returned them, the
