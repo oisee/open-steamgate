@@ -69,19 +69,20 @@
 //                         a name whose object the island holds is never
 //                         requested, never a gap -- its finding is a
 //                         cascade of that object's own, "cascade (present)"
-//                         on the line. When no stub applies any more, a
-//                         class or interface whose findings sit outside
-//                         every METHOD ... ENDMETHOD body is EXCLUDED
-//                         through osd-build's own exclusion seam (ownConfig
-//                         reads closure-stubs.json, from --out via
-//                         OSD_HANA_CLOSURE_OUT): the file stays in its
-//                         layer on disk, the record is {level:
-//                         "definition", ...}, the request carries a
-//                         top-level `excluded: {kind: [names]}`, and
-//                         dependents fall out the next stub round. NEVER a
-//                         registered service's own class (the MPC/DPC
-//                         pairs gen/hana-segw or the island's *.iwsv.xml /
-//                         *.iwmo.xml name): the run fails instead.
+//                         on the line. When no stub applies any more, the
+//                         EXCLUSION decision runs over the whole island
+//                         (tools/hana-closure-exclude.mjs, fix round 2):
+//                         only at the dumper fixed point -- no name of any
+//                         finding still pending -- re-decided every
+//                         iteration (the records carry the LAST decision),
+//                         following chains of present-but-red objects to
+//                         their roots (excluded, level "definition"; the
+//                         dependents recorded {level: "cascade", of} until
+//                         the root's exclusion re-evaluates them), keeping
+//                         true cycles whole, and NEVER a registered
+//                         service's own class -- the MPC/DPC/_EXT pairs a
+//                         registration names, or by suffix without one:
+//                         the run fails instead.
 //   --defer-ddic          keeps round 3's behaviour: every name of a
 //                         stubbed method is lazy, even the dictionary's.
 //   --max-stub-rounds <n> the cap of the stub rounds above (default 5, and
@@ -232,169 +233,18 @@ import {copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, 
 import {join, resolve} from "node:path";
 import {runsAs} from "./osd-main.mjs";
 import {validationMessage} from "./hana-ddic-gen.mjs";
-import {islandClassPaths, planStubPass, registeredServiceClasses, dropPresentNames, frameworkGapList} from "./hana-closure-stubs.mjs";
+import {islandClassPaths, planStubPass, registeredServiceClasses, serviceGuardBySuffixOnly, dropPresentNames, frameworkGapList, objectFilePresent} from "./hana-closure-stubs.mjs";
 import {buildCheck, ddicWritten, ensureLayers, islandObjectCount, islandShrinkCheck, mergeInputs} from "./hana-closure-merge.mjs";
 import {dumperConfigured, dumpRound, printedCommand} from "./hana-closure-dumper.mjs";
+import {classifyFindings, exclusionCandidates, exclusionDecisions, nameFromAbapFile, parseFindings} from "./hana-closure-exclude.mjs";
 
 // ------------------------------------------------------------ findings ----
 
-// one line of the validation's own words: `rule, message[, fix], file:line`
-// -- the fix and the message both carry commas, so the split is anchored on
-// the tail: a fix is a single word, and the file is a comma-free,
-// space-free, colon-free path followed by a line number. The build's log
-// prefix (`osd-build: FAILED: `) is tolerated, so a build log parses the
-// same way the thrown error does.
-const FINDING = /^([a-z_]+), (.*?)(?:, ([A-Za-z][A-Za-z0-9_]*))?, ([^,\s:]+):(\d+)$/;
-
-/** the findings of a validation message, in order, as
- *  {rule, message, fix, file, line, raw}. Lines that are not findings --
- *  build chatter, empty lines -- are dropped; classifying them is
- *  classifyFindings's job. Pure. */
-export function parseFindings(message) {
-  const findings = [];
-  for (const raw of String(message ?? "").split("\n")) {
-    const line = raw.replace(/^(?:osd-build|osd): FAILED: /, "");
-    const m = FINDING.exec(line);
-    if (m !== null) {
-      findings.push({rule: m[1], message: m[2], fix: m[3], file: m[4], line: Number(m[5]), raw: line});
-    }
-  }
-  return findings;
-}
-
-const NAME = "[A-Za-z0-9_/#$]+";
-const cascadeOf = (message) => [
-  [/^Method (?:or attribute )?"[^"]*" not found$/, "method"],
-  [/^Component "[^"]*" not found in structure$/, "component"],
-  [/^Not an object reference/, "reference"],
-  [/^"[^"]*" not found$/, "fugr-signature"],
-  [/not a table type [A-Za-z0-9_/#$]+$/, "local-type"],
-  [/ not found in class or interface$/, "local-type"],
-  [/contains unknown: Select, [A-Za-z]+ not found$/, "select-type"],
-  [/contains unknown: Type error,/, "type-error"],
-  // round 7 (bed run 10's shapes): cascades of an unknown type or class
-  [/^Definition for "[^"]*" not found in scope\([A-Za-z]+\)$/, "scope"],
-  [/^Method parameter type not(?: compatible)?$/, "param-type"],
-  [/^[^,]+ cannot be instantiated, class is defined as(?: protected)?$/, "protected"],
-].find(([re]) => re.test(message));
-
-// an abapGit file name's object part to the name it stands for: the
-// namespace is escaped as #ns#, one rule for both directions
-// (tools/hana-ddic-map.mjs abapGitFileName)
-export const nameFromAbapFile = (part) => part.replace(/^#([^#]+)#/, "/$1/").toUpperCase();
-// INTF or CLAS is a NAME-PREFIX heuristic (`if*` -> INTF, anything else
-// CLAS), not a TADIR lookup: on the measured log every name in these shapes
-// is IF_*, so it is correct there, but a dictionary object dragged into a
-// type chain would be asked as CLAS and come back as a wrong-kind gap (the
-// dumper answers what the TADIR kind names, and reports the rest missing).
-const objectKind = (name) => (/^if/i.test(name) ? "intf" : "clas");
-// `X unknown` (unknown_types, bed run 5's shape): the kind is the name's
-// prefix -- CLAS for a CL_/CX_ prefix, INTF for IF_/ZIF_, else the ddic
-// triple; a namespace /NS/NAME is stripped first.
-const unknownKind = (name) => {
-  const bare = name.replace(/^\/[^/]+\//, "");
-  if (/^(?:z?cl|z?cx)_/i.test(bare)) return "clas";
-  if (/^(?:z?if)_/i.test(bare)) return "intf";
-  return "ddic";
-};
-
-/** what a validation asks for: `names` carries every requestable name with
- *  its kind (tabl/dtel/doma/ddic -- the DDIC the dumper resolves --
- *  and clas/intf/fugr) and the first finding that named it, in
- *  first-named order, de-duplicated; `cascades` counts the findings whose
- *  name is not the thing that is missing; `unclassified` carries the raw
- *  lines this classifier has no shape for, so a new transpiler wording is
- *  visible instead of silently dropped. Pure. */
-export function classifyFindings(findings) {
-  const names = [];
-  const seen = new Set();
-  let cascades = 0;
-  const unclassified = [];
-  const ask = (name, kind, finding) => {
-    if (/^[A-Z0-9_/#$]+$/.test(name) === false || seen.has(name)) return;
-    seen.add(name);
-    // the message rides beside the raw line: the SHLP decision reads the
-    // message only, never the raw's file name (round 5, critic r4 S-3)
-    names.push({name, kind, finding: finding.raw, message: finding.message});
-  };
-  for (const finding of findings) {
-    const {message, fix, file} = finding;
-    let m;
-    if ((m = new RegExp(`^Database table or view "(${NAME})" not found$`).exec(message))) {
-      ask(m[1].toUpperCase(), "tabl", finding);
-    } else if ((m = new RegExp(`field not part of structure (${NAME})-`).exec(message))) {
-      ask(m[1].toUpperCase(), "tabl", finding);
-    } else if ((m = new RegExp(`^Contains unknown, (${NAME}) not found$`).exec(message))) {
-      ask(m[1].toUpperCase(), "ddic", finding);
-    } else if ((m = new RegExp(`contains unknown: (${NAME}) not found$`).exec(message))) {
-      ask(m[1].toUpperCase(), fix === "lookupDataElement" ? "dtel" : "ddic", finding);
-    } else if (fix === "lookupDomain" && (m = new RegExp(`contains unknown: (${NAME})$`).exec(message))) {
-      // the domain lookup reports no "not found": its fix field is the shape
-      ask(m[1].toUpperCase(), "doma", finding);
-    } else if ((m = new RegExp(`^(${NAME}) unknown$`).exec(message)) !== null) {
-      // bed run 5's shape: a type named bare-unknown (`X unknown`, seen in
-      // an .intf.abap file) -- the kind is the name's prefix
-      ask(m[1].toUpperCase(), unknownKind(m[1]), finding);
-    } else if ((m = new RegExp(`^Friend class (${NAME}) does not exist$`).exec(message))) {
-      // its check_syntax neighbour: a FRIENDS declaration naming a class
-      // the tree does not have
-      ask(m[1].toUpperCase(), "clas", finding);
-    } else if ((m = new RegExp(`^(${NAME}) not found$`).exec(message)) !== null) {
-      // the bare shape: a type name alone (`X not found`), the way a missing
-      // table type surfaces
-      ask(m[1].toUpperCase(), "ddic", finding);
-    } else if ((m = new RegExp(`not a table type, (${NAME}) not found$`).exec(message))) {
-      ask(m[1].toUpperCase(), "ddic", finding);
-    } else if ((m = new RegExp(`^Class (${NAME}) not found$`).exec(message))) {
-      ask(m[1].toUpperCase(), "clas", finding);
-    } else if ((m = new RegExp(`^Unknown class (${NAME})$`).exec(message))) {
-      ask(m[1].toUpperCase(), objectKind(m[1]), finding);
-    } else if ((m = new RegExp(`^CATCH, unknown class (${NAME})$`).exec(message))) {
-      ask(m[1].toUpperCase(), "clas", finding);
-    } else if ((m = new RegExp(`^RAISE, unknown class (${NAME})$`).exec(message))) {
-      // RAISE EXCEPTION TYPE x with x not in the build -- the shape a stub
-      // raise produces when the stub's own class is missing (round 3's cap
-      // path leaves it in the request)
-      ask(m[1].toUpperCase(), objectKind(m[1]), finding);
-    } else if ((m = new RegExp(`could not resolve top (${NAME})$`, "i").exec(message))) {
-      ask(m[1].toUpperCase(), objectKind(m[1]), finding);
-    } else if ((m = /contains unknown: could not resolve top$/i.exec(message)) !== null &&
-        /^[A-Za-z][A-Za-z0-9_]*$/.test(fix ?? "") === true) {
-      // the line's comma-parse can put the name in the fix field (bed run
-      // 13's shape): `Variable "X" contains unknown: Could not resolve top
-      // Y` parses with the message cut at "top" and Y as the fix -- Y is
-      // the type, the variable X is never asked
-      ask(fix.toUpperCase(), objectKind(fix), finding);
-    } else if ((m = new RegExp(`unable to resolve (${NAME})$`).exec(message)) !== null) {
-      ask(m[1].toUpperCase(), objectKind(m[1]), finding);
-    } else if ((m = new RegExp(`^Super class "(${NAME})" not found or contains(?: errors)?$`).exec(message))) {
-      // bed run 10's shape (round 7): an island class's superclass is not
-      // in the build -- the class itself is the request (the line's parse
-      // reads the last comma-word as the fix field, so `errors` may have
-      // left the message)
-      ask(m[1].toUpperCase(), "clas", finding);
-    } else if ((m = new RegExp(`^Target type unknown, (${NAME})$`).exec(message)) !== null) {
-      // bed run 12's shape (round 7): a type target the wording names no
-      // dictionary kind for -- the kind-less triple; the parse may also
-      // read the name as the line's fix field, which the next branch takes
-      ask(m[1].toUpperCase(), "ddic", finding);
-    } else if (message === "Target type unknown" && /^[A-Za-z][A-Za-z0-9_]*$/.test(fix ?? "") === true) {
-      ask(fix.toUpperCase(), "ddic", finding);
-    } else if (message.startsWith("Statement does not exist in the configured ABAP version") === true) {
-      // the function-group compile shape: the transpiler compiles a *.abap
-      // include as a program, and "FUNCTION" is not in its dialect -- the
-      // name of what to dump is the file's own
-      const fugr = /^([^.]+)\.fugr\./.exec(file);
-      if (fugr !== null) ask(nameFromAbapFile(fugr[1]), "fugr", finding);
-      else unclassified.push(finding.raw);
-    } else if (cascadeOf(message) !== undefined) {
-      cascades++;
-    } else {
-      unclassified.push(finding.raw);
-    }
-  }
-  return {names, cascades, unclassified};
-}
+// the classifier and the island-wide exclusion decision live in
+// tools/hana-closure-exclude.mjs since fix round 2 (their own package, the
+// size budget stays honest); re-exported here so every reader -- the tests,
+// tools/hana-closure-merge.mjs, the probes -- keeps one import path.
+export {parseFindings, classifyFindings, nameFromAbapFile} from "./hana-closure-exclude.mjs";
 
 // ------------------------------------------------------------ the island --
 
@@ -591,12 +441,6 @@ export async function run(args = process.argv.slice(2), options = {}) {
   mkdirSync(out, {recursive: true});
   // the seam readers follow OSD_HANA_CLOSURE_OUT when --out is not the default
   env.OSD_HANA_CLOSURE_OUT = out;
-  if (stubUnresolved === true) {
-    // the exclusion record is recomputed by this run (a name the dump
-    // resolves must un-exclude its object): it starts empty, so the first
-    // validation of this run reads no stale exclusion of a previous one
-    writeFileSync(join(out, "closure-stubs.json"), "[]\n");
-  }
   const state = loadState(out) ?? {iteration: 1, asked: {}};
   state.missing ??= {};
   state.refused ??= {};
@@ -647,10 +491,6 @@ export async function run(args = process.argv.slice(2), options = {}) {
     throw new Error("hana-closure: OSD_HANA_CONVERTER must name the dump->layers converter (a path to dump-to-layers.mjs): every merge converts its dump into .local/hana-closure/layers-<NNN> first");
   }
 
-  // this run's exclusions (H5x-1): run-wide -- an object excluded in round
-  // 2 stays excluded; method-stub records stay per iteration, as always
-  const excludedRecords = [];
-  const excludedObjects = new Set();
   // the dumper budget of this run; a resumed run has its own
   let rounds = 0;
   for (;;) {
@@ -746,6 +586,14 @@ export async function run(args = process.argv.slice(2), options = {}) {
     // finding outside gen/hana-src or gen/hana-ddic is the tree's own
     // business, counted once, never asked
     const island = islandBasenames(root);
+    // this ITERATION's exclusions (fix round 2, item 2): cleared and
+    // re-decided from scratch whenever the island grows -- an object
+    // excluded on an incomplete island comes back once its roots arrive.
+    // The wipe makes the first validation of this iteration read no stale
+    // record; the stub rounds re-decide and write the last decision.
+    const excludedRecords = [];
+    const excludedObjects = new Set();
+    if (stubUnresolved === true) writeFileSync(join(out, "closure-stubs.json"), "[]\n");
     let all = parseFindings(await validationMessage(root, join(out, "closure-stubs.json")));
     let findings = all.filter((f) => island.has(f.file));
     // lazy activation (--stub-unresolved) as fix round 1 corrects it: a
@@ -761,10 +609,26 @@ export async function run(args = process.argv.slice(2), options = {}) {
     const eagerNames = new Map();
     let stubRounds = 0;
     let frameworkGaps = 0;
+    let cycles = 0;
+    let guardBySuffix = false;
     if (stubUnresolved === true) {
       const classPaths = islandClassPaths(root);
       const islandFiles = island;
-      const registered = registeredServiceClasses(root);
+      const guard = registeredServiceClasses(root);
+      guardBySuffix = serviceGuardBySuffixOnly(root);
+      const objectOf = (basename) => nameFromAbapFile(basename.replace(/\..*$/, ""));
+      // fix round 2, item 1: the EXCLUSION's own predicate, stricter than
+      // the stub's -- a name is pending until a dump ANSWERED it: unasked,
+      // or asked with no missing/refused/resolved answer recorded. A merge
+      // refusal is answered (the filtered-dump retry settled it this
+      // iteration; a later dump carrying the name lifts it, and the
+      // per-iteration re-decision un-excludes whatever it excluded).
+      const resolvedSet = new Set(Object.values(state.resolved ?? {}).flat());
+      const pendingAtFixedPoint = (name, kind) =>
+        objectFilePresent(name, kind, islandFiles) === false &&
+        state.missing[name] === undefined && state.refused[name] === undefined &&
+        excludedObjects.has(name) === false &&
+        (state.asked[name] === undefined || resolvedSet.has(name) === false);
       // this run's framework gaps: one entry per distinct nameless finding text
       const gapFindings = new Map();
       for (;;) {
@@ -783,8 +647,7 @@ export async function run(args = process.argv.slice(2), options = {}) {
           say(`stub cap: --max-stub-rounds ${maxStubRounds} reached with ${byFile.size} class file(s) still naming findings; their names stay in the request`);
           break;
         }
-        const applied = [];
-        const waiting = [];
+        const planned = [];
         for (const [basename, list] of byFile) {
           for (const path of (classPaths.get(basename) ?? []).sort()) {
             let source;
@@ -794,51 +657,75 @@ export async function run(args = process.argv.slice(2), options = {}) {
               say(`stub: ${basename} could not be read; its findings stay in the request`);
               continue;
             }
-            let plan;
-            try {
-              plan = planStubPass({source, findings: list, basename,
-                missingOf: (name) => state.missing[name] !== undefined,
-                asked: (name) => state.asked[name] !== undefined,
-                refusedOf: (name) => state.refused[name] !== undefined,
-                islandFiles, excludedObjects, registered, deferDdic});
-            } catch (error) {
-              if (error.guard === true) throw error; // the service itself: the run fails
-              say(`stub: ${basename} could not be read or parsed (${error.message}); its findings stay in the request`);
-              continue;
-            }
-            if (plan.unparseable === true) {
-              say(`stub: ${basename} does not parse; its findings stay in the request`);
-              continue;
-            }
+            const plan = planStubPass({source, findings: list, basename,
+              missingOf: (name) => state.missing[name] !== undefined,
+              asked: (name) => state.asked[name] !== undefined,
+              refusedOf: (name) => state.refused[name] !== undefined,
+              islandFiles, excludedObjects, deferDdic});
             for (const n of plan.nameless) {
               const entry = gapFindings.get(n.finding) ??
                 {finding: n.finding, ...(n.member !== undefined ? {member: n.member} : {}), used_by: []};
               entry.used_by.push({file: basename, line: n.line, method: n.method});
               gapFindings.set(n.finding, entry);
             }
-            if (plan.exclude !== undefined) {
-              waiting.push({plan, path});
-            } else {
-              if (plan.source !== source) writeFileSync(path, plan.source);
-              for (const stub of plan.stubs) {
-                applied.push(stub.className);
-                stubRecords.push({level: "method", file: path.slice(root.length + 1), class: stub.className, method: stub.method, missing: stub.missing, finding: stub.finding});
-              }
-              for (const nk of plan.deferred) deferredPairs.set(nk.name, {name: nk.name, kind: nk.kind, finding: nk.finding});
-              for (const e of plan.eager) eagerNames.set(e.name, e);
+            if (plan.unparseable === true) {
+              say(`stub: ${basename} does not parse; its findings stay in the request`);
             }
+            planned.push({basename, object: objectOf(basename), file: path.slice(root.length + 1), path, source,
+              plan, unmatched: plan.unparseable === true ? list : plan.unmatched});
           }
         }
+        // a file whose definition findings name nothing still pending is
+        // exclusion material: its stubs are held back (applying them would
+        // rewrite a file the decision keeps whole)
+        const held = exclusionCandidates({files: planned, pendingOf: pendingAtFixedPoint});
+        const applied = [];
+        for (const entry of planned) {
+          if (entry.plan.unparseable === true || held.has(entry.object) === true) continue;
+          if (entry.plan.source !== entry.source) writeFileSync(entry.path, entry.plan.source);
+          for (const stub of entry.plan.stubs) {
+            applied.push(stub.className);
+            stubRecords.push({level: "method", file: entry.file, class: stub.className, method: stub.method, missing: stub.missing, finding: stub.finding});
+          }
+          for (const nk of entry.plan.deferred) deferredPairs.set(nk.name, {name: nk.name, kind: nk.kind, finding: nk.finding});
+          for (const e of entry.plan.eager) eagerNames.set(e.name, e);
+        }
         let excludedNow = 0;
-        if (applied.length === 0 && waiting.length > 0) {
+        if (applied.length === 0 && planned.length > 0) {
           // quiescent: no method stub applied this round -- the exclusion
           // findings are then not cascades of a body another stub removes;
-          // dependents follow next round via excludedObjects
-          for (const {plan, path} of waiting) {
-            excludedObjects.add(plan.exclude.object);
-            excludedRecords.push({level: "definition", file: path.slice(root.length + 1), object: plan.exclude.object, findings: plan.exclude.findings});
-            excludedNow += 1;
-            say(`excluded: ${plan.exclude.object} (${path.slice(root.length + 1)}): definition-level finding(s) -- the file stays in its layer on disk, the build is kept from it`);
+          // the whole island is decided at once, dependents next round
+          const decision = exclusionDecisions({files: planned,
+            pendingOf: pendingAtFixedPoint,
+            presentFile: (name, kind) => objectFilePresent(name, kind, islandFiles) === true,
+            missingOf: (name) => state.missing[name] !== undefined,
+            refusedOf: (name) => state.refused[name] !== undefined,
+            askedOf: (name) => state.asked[name] !== undefined,
+            resolvedOf: (name) => resolvedSet.has(name),
+            excludedObjects, guard,
+            guardMode: guardBySuffix === true ? "suffix" : "registration"});
+          if (decision.blocked !== true) {
+            for (const rec of decision.records) {
+              const at = excludedRecords.findIndex((r) => r.object === rec.object);
+              if (at >= 0) excludedRecords[at] = rec;
+              else excludedRecords.push(rec);
+              if (rec.level === "definition") {
+                excludedObjects.add(rec.object);
+                excludedNow += 1;
+                say(`excluded: ${rec.object} (${rec.file}): definition-level finding(s) -- the file stays in its layer on disk, the build is kept from it`);
+              } else if (rec.level === "cascade") {
+                say(rec.excluded === true
+                  ? `excluded: ${rec.object} (${rec.file}): cascade of ${rec.of.join(", ")} -- the file leaves the build with them`
+                  : `cascade: ${rec.object} (${rec.file}): recorded, falls with ${rec.of.join(", ")} (re-evaluated next round)`);
+                if (rec.excluded === true) {
+                  excludedObjects.add(rec.object);
+                  excludedNow += 1;
+                }
+              } else {
+                cycles = Math.max(cycles, rec.members.length);
+                say(`cycle: ${rec.members.join(", ")} -- kept in the build (a residual cycle is a checker limit, not a reason to exclude)`);
+              }
+            }
           }
         }
         if (applied.length === 0 && excludedNow === 0) {
@@ -851,7 +738,7 @@ export async function run(args = process.argv.slice(2), options = {}) {
         for (const [cls, count] of perClass) {
           say(`stub round ${stubRounds}: ${cls}: ${count} method(s) stubbed (generation ${generationOf(root) || "none"})`);
         }
-        if (excludedNow > 0 || gapFindings.size > 0) {
+        if (excludedNow > 0 || gapFindings.size > 0 || excludedRecords.length > 0) {
           // the seam reads closure-stubs.json: written before the
           // revalidation, so the findings leave at once
           writeFileSync(join(out, "closure-stubs.json"), JSON.stringify([...stubRecords, ...excludedRecords], null, 2) + "\n");
@@ -861,7 +748,8 @@ export async function run(args = process.argv.slice(2), options = {}) {
         findings = all.filter((f) => island.has(f.file));
       }
       writeFileSync(join(out, "closure-stubs.json"), JSON.stringify([...stubRecords, ...excludedRecords], null, 2) + "\n");
-      writeFileSync(join(out, "framework-gaps.json"), JSON.stringify(frameworkGapList(gapFindings), null, 2) + "\n");
+      writeFileSync(join(out, "framework-gaps.json"),
+        JSON.stringify(frameworkGapList(gapFindings, (file) => guard.has(objectOf(file))), null, 2) + "\n");
       frameworkGaps = gapFindings.size;
     }
     const unscoped = all.length - findings.length;
@@ -935,7 +823,7 @@ export async function run(args = process.argv.slice(2), options = {}) {
     const writtenDdic = ddicWritten(root);
     const ddicCounts = TADIR.filter((k) => (state.resolved?.[k] ?? []).length > 0)
       .map((k) => `${k} ${state.resolved[k].length}/${writtenDdic[k]?.size ?? 0}`).join(", ");
-    say(`iteration ${state.iteration}: ${fresh.length} new name(s), ${gaps.length} gap(s), ${unscoped} outside the island (not asked), ${refusedGaps.length} merge-refusal gap(s), ${cascades} cascade finding(s) skipped, ${unclassified.length} unclassified${stubUnresolved === true ? `, ${deferredOnly.length} deferred by stubs, ${stubRecords.length} stubbed method(s), framework gaps: ${frameworkGaps}` : ""}, ${objects.total} island object(s)${gapKinds !== "" ? `, gaps by kind: ${gapKinds}` : ""}${ddicCounts !== "" ? `, DDIC resolved/written: ${ddicCounts}` : ""}, ${present} cascade (present)${excludedRecords.length > 0 ? `, ${excludedRecords.length} excluded` : ""}`);
+    say(`iteration ${state.iteration}: ${fresh.length} new name(s), ${gaps.length} gap(s), ${unscoped} outside the island (not asked), ${refusedGaps.length} merge-refusal gap(s), ${cascades} cascade finding(s) skipped, ${unclassified.length} unclassified${stubUnresolved === true ? `, ${deferredOnly.length} deferred by stubs, ${stubRecords.length} stubbed method(s), framework gaps: ${frameworkGaps}${cycles > 0 ? `, ${cycles} cycle member(s) kept` : ""}` : ""}, ${objects.total} island object(s)${gapKinds !== "" ? `, gaps by kind: ${gapKinds}` : ""}${ddicCounts !== "" ? `, DDIC resolved/written: ${ddicCounts}` : ""}, ${present} cascade (present)${excludedRecords.length > 0 ? `, ${excludedRecords.length} excluded` : ""}${stubUnresolved === true && guardBySuffix === true ? ", service guard: by suffix, no registration" : ""}`);
     for (const line of unclassified) say(`unclassified: ${line}`);
 
     if (fresh.length === 0) {
@@ -954,7 +842,13 @@ export async function run(args = process.argv.slice(2), options = {}) {
     const freshCount = fresh.length;
     const request = requestFor({iteration, generation: generationOf(root), fresh, asked: state.asked, gaps,
       ...(stubUnresolved === true ? {deferred: deferredOnly} : {}),
-      ...(excludedRecords.length > 0 ? {excluded: excludedRecords.map((r) => ({name: r.object, kind: /\.intf\.abap$/.test(r.file) === true ? "intf" : "clas"}))} : {})});
+      // the request's excluded key carries the definition-level roots of
+      // the LAST decision only -- cascade members are not excluded on their
+      // own account, cycles are no exclusion at all (fix round 2, items 2+3)
+      ...(excludedRecords.some((r) => r.level === "definition") === true
+        ? {excluded: excludedRecords.filter((r) => r.level === "definition")
+          .map((r) => ({name: r.object, kind: /\.intf\.abap$/.test(r.file) === true ? "intf" : "clas"}))}
+        : {})});
     writeFileSync(requestPath, JSON.stringify(request, null, 2) + "\n");
     say(`request ${iteration}: ${freshCount} new name(s) -> ${requestPath}`);
 

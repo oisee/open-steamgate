@@ -33,17 +33,17 @@
 //   its finding's text, and its findings are the framework work list --
 //   framework-gaps.json beside the stubs.
 // - a class or interface whose findings sit outside every METHOD ...
-//   ENDMETHOD body (no stub can reach them) is excluded from the build when
-//   NONE of their names is still pending -- the decision is the definition
-//   findings' alone (a stub beside it is moot), taken in a round that
-//   applied no method stub -- unless it is a registered service's own class
-//   -- the MPC/DPC pairs the gen/hana-segw facts or the island's
-//   *.iwsv.xml / *.iwmo.xml name -- where the run fails instead: the
-//   service itself cannot be stubbed out.
+//   ENDMETHOD body is excluded from the build -- but the decision is the
+//   whole island's, not this file's: it lives in
+//   tools/hana-closure-exclude.mjs since fix round 2, taken only at the
+//   dumper fixed point, re-decided every iteration, following the chains
+//   of present-but-red objects to their roots, keeping true cycles whole
+//   and never excluding the seed service's classes. This file plans the
+//   stubs a file can take; the decision reads its `unmatched`.
 import {readdirSync, readFileSync} from "node:fs";
 import {join} from "node:path";
 import * as abaplint from "@abaplint/core";
-import {classifyFindings, nameFromAbapFile} from "./hana-closure.mjs";
+import {classifyFindings, nameFromAbapFile} from "./hana-closure-exclude.mjs";
 
 // the island class and interface files a stub pass may rewrite or exclude:
 // gen/hana-src/**/*.clas.abap, the locals includes beside them, and the
@@ -192,6 +192,11 @@ export function stubBodies(source, findings, filename = "zcl_stub.clas.abap") {
   return {source: out, stubs, unmatched: findings.filter((f) => matched.has(f) === false)};
 }
 
+// the definition-level exclusion decision lived here in fix round 1
+// (exclusionOf, per file); fix round 2 moved it to the whole island --
+// tools/hana-closure-exclude.mjs -- where it can follow the chains of
+// present-but-red objects and wait for the dumper's fixed point.
+
 // ------------------------------------------------------------- H5x-1 ------
 
 // the classification kinds that name code, and the kinds that name the
@@ -257,6 +262,25 @@ export function dropPresentNames(names, islandFiles, excludedObjects = new Set()
  *  MPC) -- each with its non-_EXT twin. A definition-level finding in one
  *  of these is the service itself: the run fails, it is never excluded. */
 export function registeredServiceClasses(root) {
+  return serviceGuard(root).names;
+}
+
+/** whether the guard works by suffix alone: no gen/hana-segw facts with a
+ *  service, and no island *.iwsv.xml / *.iwmo.xml -- on the bed run 15 the
+ *  island had neither, the guard was inert, and the service's own DPC_EXT
+ *  was excluded. The iteration line then says "service guard: by suffix,
+ *  no registration". Pure. */
+export function serviceGuardBySuffixOnly(root) {
+  return serviceGuard(root).registered === false;
+}
+
+// the guard's sources and what they said: `names` is every protected class
+// -- the registered MPC/DPC pairs, and ALWAYS (with or without a
+// registration) the island's own classes of the seed suffixes _MPC,
+// _MPC_EXT, _DPC, _DPC_EXT: the objects the walk started from, the dump's
+// selected service package, recognisable by the suffixes when no
+// registration names them; `registered` says a registration source existed.
+function serviceGuard(root) {
   const names = new Set();
   const add = (name) => {
     const upper = String(name ?? "").trim().toUpperCase();
@@ -264,11 +288,13 @@ export function registeredServiceClasses(root) {
     names.add(upper);
     if (/(?:_DPC|_MPC)_EXT$/.test(upper) === true) names.add(upper.replace(/_EXT$/, ""));
   };
+  let registered = false;
   try {
     const facts = JSON.parse(readFileSync(join(root, "gen", "hana-segw", "from-dump.json"), "utf8"));
     for (const entry of facts.services ?? []) {
       add(entry.dpc);
       add(entry.mpc);
+      registered = true;
     }
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
@@ -291,48 +317,37 @@ export function registeredServiceClasses(root) {
         const xml = readFileSync(join(dir, entry.name), "utf8");
         const head = /<_-IWBEP_-I_MGW_SRH>[\s\S]*?<\/_-IWBEP_-I_MGW_SRH>/.exec(xml)?.[0] ?? xml;
         add(tag(head, "CLASS_NAME"));
+        registered = true;
       } else if (/\.iwmo\.xml$/i.test(entry.name) === true) {
         const xml = readFileSync(join(dir, entry.name), "utf8");
         const head = /<_-IWBEP_-I_MGW_OHD>[\s\S]*?<\/_-IWBEP_-I_MGW_OHD>/.exec(xml)?.[0] ?? xml;
         add(tag(head, "CLASS_NAME"));
+        registered = true;
+      } else if (/\.clas\.abap$|\.intf\.abap$/.test(entry.name) === true) {
+        const stem = entry.name.replace(/\.(?:clas|intf)\.abap$/, "");
+        if (/_(?:mpc|dpc)(?:_ext)?$/i.test(stem) === true) add(nameFromAbapFile(stem));
       }
     }
   };
   walk(join(root, "gen", "hana-src"));
-  return names;
-}
-
-// the definition-level exclusion decision for ONE file: its unmatched
-// findings exclude the file when NONE of their names is still pending --
-// nothing this iteration's request can still bring. Present objects, merge
-// refusals (state.refused, not state.missing), resolved-but-still-failing
-// names, missing names, objects this run already excluded and nameless
-// findings are all answered: the file falls out of the build (fix round 1:
-// round 0 required every name answered MISSING, which no definition-level
-// finding on the bed ever was). A registered service's own class throws
-// instead.
-function exclusionOf(unmatched, {basename, asked, missingOf, refusedOf, presentFile, excludedObjects, registered}) {
-  const names = classifyFindings(unmatched).names;
-  const waiting = names.some((n) => pendingOf(n.name, n.kind, {asked, missingOf, refusedOf, presentFile, excludedObjects}));
-  if (waiting === true) return undefined;
-  const object = nameFromAbapFile(basename.replace(/\..*$/, ""));
-  if (registered.has(object) === true) {
-    const error = new Error(`hana-closure: ${object} is a registered service's own class (gen/hana-segw or the island's *.iwsv.xml / *.iwmo.xml): its findings are definition-level, and the service itself cannot be excluded from the build -- the run fails: ${unmatched.map((f) => f.raw).join(" | ")}`);
-    error.guard = true;
-    throw error;
-  }
-  return {object, findings: unmatched.map((f) => f.raw)};
+  return {names, registered};
 }
 
 /** the framework-gaps.json list from the loop's accumulation map: one entry
  *  per distinct nameless finding text, the quoted member beside it where
  *  the shape has one, sorted by finding text, each used_by sorted by file,
- *  line, method. Pure. */
-export function frameworkGapList(gapFindings) {
+ *  line, method. `isSeed(basename)` -- fix round 2, item 7: the nameless
+ *  stubs of the SEED classes (the walk's starting service package) are
+ *  this list's first section, flagged `seed: true` -- that list is the
+ *  next slice's brief (the members our /IWBEP/ layer lacks). Pure. */
+export function frameworkGapList(gapFindings, isSeed = undefined) {
   const byUse = (a, b) => a.file < b.file ? -1 : a.file > b.file ? 1 : a.line - b.line || (a.method < b.method ? -1 : 1);
   return [...gapFindings.values()]
     .map((entry) => ({...entry, used_by: [...entry.used_by].sort(byUse)}))
-    .sort((a, b) => a.finding < b.finding ? -1 : a.finding > b.finding ? 1 : 0);
+    .map((entry) => (isSeed !== undefined && entry.used_by.some((u) => isSeed(u.file) === true) === true
+      ? {...entry, seed: true} : entry))
+    .sort((a, b) => (b.seed === true ? 1 : 0) - (a.seed === true ? 1 : 0) ||
+      (a.finding < b.finding ? -1 : a.finding > b.finding ? 1 : 0));
 }
 
 // a name is still PENDING when this iteration's request can still bring it:
@@ -340,7 +355,10 @@ export function frameworkGapList(gapFindings) {
 // run, the dumper's answer neither missing nor refused. (A name the dumper
 // was asked for always has its answer by the time a stub round runs -- the
 // pending round is executed before the walk continues.) The stub rule, the
-// eager list and the exclusion decision all read this one predicate.
+// eager list and the stub/hold decisions all read this one predicate; the
+// EXCLUSION decision reads a stricter one (fix round 2:
+// tools/hana-closure-exclude.mjs -- asked with no answer recorded is
+// pending there).
 function pendingOf(name, kind, {asked, missingOf, refusedOf, presentFile, excludedObjects}) {
   return asked(name) === false && presentFile(name, kind) === false &&
     missingOf(name) === false && refusedOf(name) === false &&
@@ -358,39 +376,32 @@ const memberOf = (message) => {
 
 /** one pass of the lazy-activation loop over ONE island file (H5x-1):
  *  which of the file's method stubs to apply, what their names defer and
- *  what they ask eagerly, and whether the file itself is definition-level
- *  excluded. `missingOf(name)` says the dumper answered missing for a name,
- *  `asked(name)` says it was requested at all, `refusedOf(name)` says the
- *  merge refused it (fix round 1), `islandFiles` is the island's basename
- *  set, `excludedObjects` the objects excluded this run, `registered` the
- *  registered service's own classes. Returns {source, stubs, unmatched,
- *  eager, deferred, nameless, exclude} -- `source` is the rewritten source
- *  when stubs were applied (the caller writes it back), `nameless` carries
- *  one entry per finding of a stubbed method that names nothing (the
- *  framework work list: {finding, member?, line, method}, sorted), and
- *  `exclude` is {object, findings} when the file falls out of the build --
- *  then the stubs are moot and `source` is left as it stands. Pure. */
-export function planStubPass({source, findings, basename, missingOf = () => false, asked = () => false, refusedOf = () => false, islandFiles = new Set(), excludedObjects = new Set(), registered = new Set(), deferDdic = false}) {
+ *  what they ask eagerly. `missingOf(name)` says the dumper answered
+ *  missing for a name, `asked(name)` says it was requested at all,
+ *  `refusedOf(name)` says the merge refused it (fix round 1),
+ *  `islandFiles` is the island's basename set, `excludedObjects` the
+ *  objects excluded this decision. Returns {source, stubs, unmatched,
+ *  eager, deferred, nameless} -- `source` is the rewritten source when
+ *  stubs were applied (the caller writes it back), `nameless` carries one
+ *  entry per finding of a stubbed method that names nothing (the framework
+ *  work list: {finding, member?, line, method}, sorted), and `unmatched`
+ *  is what no stub reaches -- the exclusion decision's material
+ *  (tools/hana-closure-exclude.mjs, fix round 2: a file whose unmatched
+ *  findings are exclusion material is held back by the loop's candidate
+ *  check, so its stubs never apply before the decision). Pure. */
+export function planStubPass({source, findings, basename, missingOf = () => false, asked = () => false, refusedOf = () => false, islandFiles = new Set(), excludedObjects = new Set(), deferDdic = false}) {
   try {
     methodBlocks(source, basename);
   } catch {
     // a file that does not parse is left whole: its findings stay in the
     // request, the way they always have -- a parse error is not a
     // definition-level finding
-    return {unparseable: true, source, stubs: [], unmatched: findings, eager: [], deferred: [], nameless: [], exclude: undefined};
+    return {unparseable: true, source, stubs: [], unmatched: findings, eager: [], deferred: [], nameless: []};
   }
   const result = stubBodies(source, findings, basename);
   const presentFile = (name, kind) => objectFilePresent(name, kind, islandFiles) === true;
   const pending = (name, kind) => pendingOf(name, kind, {asked, missingOf, refusedOf, presentFile, excludedObjects});
   const present = (name, kind) => presentFile(name, kind) === true && excludedObjects.has(name) === false;
-  const exclude = result.unmatched.length > 0
-    ? exclusionOf(result.unmatched, {basename, asked, missingOf, refusedOf, presentFile, excludedObjects, registered})
-    : undefined;
-  if (exclude !== undefined) {
-    // the file leaves the build: the decision is the definition findings'
-    // alone (fix round 1, M-1.3), and the method stubs beside it are moot
-    return {source, stubs: [], unmatched: result.unmatched, eager: [], deferred: [], nameless: [], exclude};
-  }
   const kept = [];
   const keptFindings = [];
   const deferred = [];
@@ -460,5 +471,5 @@ export function planStubPass({source, findings, basename, missingOf = () => fals
     outSource = stubBodies(source, keptFindings, basename).source;
   }
   nameless.sort((a, b) => a.finding < b.finding ? -1 : a.finding > b.finding ? 1 : 0);
-  return {source: outSource, stubs: kept, unmatched: result.unmatched, eager, deferred, nameless, exclude};
+  return {source: outSource, stubs: kept, unmatched: result.unmatched, eager, deferred, nameless};
 }

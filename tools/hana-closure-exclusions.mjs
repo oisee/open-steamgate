@@ -37,10 +37,16 @@ export function closureStubs(root, file = closureStubsFile(root)) {
   }
 }
 
-/** the definition-level exclusion records of one tree; `file` -- the record
- *  path, for the loop's in-process reads of a non-default --out. */
+/** the exclusion records that keep files from the transpiler: the
+ *  definition-level exclusions ({level: "definition"}) and the cascade
+ *  exclusions ({level: "cascade", excluded: true}) -- a cascade record
+ *  with excluded false is a RECORD only (its file stays in the build until
+ *  the next stub round re-evaluates it against the roots' exclusion, fix
+ *  round 2). `file` -- the record path, for the loop's in-process reads of
+ *  a non-default --out. */
 export function definitionExclusions(root, file = undefined) {
-  return closureStubs(root, file).filter((e) => e.level === "definition" && typeof e.file === "string");
+  return closureStubs(root, file).filter((e) => typeof e.file === "string" &&
+    (e.level === "definition" || (e.level === "cascade" && e.excluded === true)));
 }
 
 /** the root-relative file paths kept from the transpiler. */
