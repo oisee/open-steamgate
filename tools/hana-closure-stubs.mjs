@@ -301,10 +301,15 @@ export function serviceGuardBySuffixOnly(root) {
 // registration names them; `registered` says a registration source existed.
 function serviceGuard(root) {
   const names = new Set();
+  // the names a source NAMED (a registration, an island file), apart from
+  // the bases derived off an _EXT: the summary requires the named ones in
+  // the island (H5x-4 B1), a derived base only when present
+  const named = new Set();
   const add = (name) => {
     const upper = String(name ?? "").trim().toUpperCase();
     if (upper === "") return;
     names.add(upper);
+    named.add(upper);
     if (/(?:_DPC|_MPC)_EXT$/.test(upper) === true) names.add(upper.replace(/_EXT$/, ""));
   };
   let registered = false;
@@ -349,7 +354,15 @@ function serviceGuard(root) {
     }
   };
   walk(join(root, "gen", "hana-src"));
-  return {names, registered};
+  return {names, named, registered};
+}
+
+/** the seed classes the run summary checks (H5x-4 B1): `all` the guard's
+ *  set, `named` those a registration or an island file named -- the ones
+ *  that must be island objects. */
+export function seedClasses(root) {
+  const {names, named} = serviceGuard(root);
+  return {all: names, named};
 }
 
 /** the framework-gaps.json list from the loop's accumulation map: one entry
@@ -358,11 +371,14 @@ function serviceGuard(root) {
  *  line, method. `isSeed(basename)` -- fix round 2, item 7: the nameless
  *  stubs of the SEED classes (the walk's starting service package) are
  *  this list's first section, flagged `seed: true` -- that list is the
- *  next slice's brief (the members our /IWBEP/ layer lacks). Pure. */
+ *  next slice's brief (the members our /IWBEP/ layer lacks). A use is
+ *  listed once per (file, line, method), however many stub rounds met it
+ *  (H5x-4 B1: the stub record counts unique pairs, so does this). Pure. */
 export function frameworkGapList(gapFindings, isSeed = undefined) {
   const byUse = (a, b) => a.file < b.file ? -1 : a.file > b.file ? 1 : a.line - b.line || (a.method < b.method ? -1 : 1);
+  const once = (uses) => [...new Map(uses.map((u) => [`${u.file}|${u.line}|${u.method}`, u])).values()];
   return [...gapFindings.values()]
-    .map((entry) => ({...entry, used_by: [...entry.used_by].sort(byUse)}))
+    .map((entry) => ({...entry, used_by: once(entry.used_by).sort(byUse)}))
     .map((entry) => (isSeed !== undefined && entry.used_by.some((u) => isSeed(u.file) === true) === true
       ? {...entry, seed: true} : entry))
     .sort((a, b) => (b.seed === true ? 1 : 0) - (a.seed === true ? 1 : 0) ||

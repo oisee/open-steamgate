@@ -20,6 +20,13 @@
 // - statement-level class references, which never become a variable/type or
 //   a recorded reference: `Unknown class x`, `Class x not found`,
 //   `CATCH/RAISE, unknown class CX_*`, `TYPE "x" not found`;
+// - `Interface X unknown` (an INTERFACES statement): the structural pass
+//   reads the statement since H5x-4 B1 -- in a class and inside an
+//   interface definition, where the checker records nothing -- and this
+//   branch is the fallback for a finding no reference carried. (A
+//   `Could not resolve top X` off an interface's METHODS parameter is
+//   structural since B1 as well; without a reference it stays
+//   unclassified, visible, as before);
 // - `resolveConstantValue, not found: X` (a constant default off an absent
 //   object records nothing in the scope);
 // - `Target type unknown, <name>`, which names the statement's target
@@ -156,6 +163,12 @@ export function classifyFindings(findings) {
       ask(m[1].toUpperCase(), "doma", finding);
     } else if ((m = new RegExp(`^Unknown class (${NAME})$`).exec(message))) {
       ask(m[1].toUpperCase(), objectKind(m[1]), finding);
+    } else if ((m = new RegExp(`^Interface (${NAME}) unknown$`).exec(message))) {
+      // the INTERFACES statement's wording (in a class or inside an
+      // interface definition) -- the FALLBACK: the structural pass reads
+      // the statement itself (B1); this branch asks when no reference
+      // carried the name. The wording says interface: the kind is INTF
+      ask(m[1].toUpperCase(), "intf", finding);
     } else if ((m = new RegExp(`^Class (${NAME}) not found$`).exec(message))) {
       ask(m[1].toUpperCase(), "clas", finding);
     } else if ((m = new RegExp(`^CATCH, unknown class (${NAME})$`).exec(message))) {

@@ -176,15 +176,37 @@ export function analyseObject(reg, filename) {
     return b;
   };
   if (obj === undefined) return result;
+  // the object's own local interfaces (an INTERFACE lif_x DEFINITION in a
+  // locals include): an INTERFACES naming one is no global ask
+  const localInterfaces = new Set();
+  for (const file of obj.getABAPFiles?.() ?? []) {
+    for (const st of file.getStatements()) {
+      if (st.get().constructor.name !== "Interface") continue;
+      const name = String(st.getTokens()[1]?.getStr() ?? "").toUpperCase();
+      if (name !== "" && name !== owner) localInterfaces.add(name);
+    }
+  }
   // the definition-statement references, per file: the CLASS DEFINITION
-  // statement's INHERITING FROM and GLOBAL FRIENDS names, and the METHODS
-  // statements (their rows are the signature lines)
+  // statement's INHERITING FROM and GLOBAL FRIENDS names, the INTERFACES
+  // statements, and the METHODS statements (their rows are the signature
+  // lines)
   for (const file of obj.getABAPFiles?.() ?? []) {
     const base = baseName(file.getFilename());
     const bucket = bucketOf(base);
     for (const st of file.getStatements()) {
       const sname = st.get().constructor.name;
-      if (sname === "ClassDefinition") {
+      if (sname === "InterfaceDef") {
+        // `INTERFACES x.` -- in a class AND inside an INTERFACE definition
+        // (an interface that includes another one). Measured (B1, bed run
+        // 21): inside an interface the checker stops at the first unknown
+        // include ("Interface X unknown") and its scope records nothing at
+        // all, so the statement is the only carrier there
+        const name = String(st.getTokens()[1]?.getStr() ?? "").toUpperCase();
+        if (/^[A-Z0-9_/#]+$/.test(name) === true && localInterfaces.has(name) === false) {
+          bucket.includes = bucket.includes ?? [];
+          bucket.includes.push({name, line: st.getStart().getRow(), resolved: reg.getObject("INTF", name) !== undefined});
+        }
+      } else if (sname === "ClassDefinition") {
         const toks = st.getTokens();
         const up = toks.map((t) => t.getStr().toUpperCase());
         const inh = up.indexOf("INHERITING");
@@ -232,7 +254,8 @@ export function analyseObject(reg, filename) {
   try {
     spaghetti = new abaplint.SyntaxLogic(reg, obj).run().spaghetti;
   } catch {
-    return result;
+    // no scope result: the statement carriers below still stand
+    spaghetti = undefined;
   }
   const seen = new Set();
   const methodOf = (base, line) => {
@@ -275,7 +298,34 @@ export function analyseObject(reg, filename) {
     }
     for (const c of node.getChildren()) visit(c, here);
   };
-  visit(spaghetti.getTop(), undefined);
+  if (spaghetti !== undefined) visit(spaghetti.getTop(), undefined);
+  // a global interface's METHODS parameters: their types live on the
+  // interface's definition only -- no scope var carries them (a class's
+  // parameters are vars of the METHOD scope, an interface has no method
+  // scope), so a `TYPE zif_x=>ty` parameter of an absent zif_x reached the
+  // build as `Could not resolve top` with no reference behind it (B1, bed
+  // run 21). Signature level, with the method's name.
+  if (kind === "INTF") {
+    let methods = [];
+    try {
+      methods = obj.getDefinition?.()?.getMethodDefinitions?.()?.getAll?.() ?? [];
+    } catch {
+      methods = [];
+    }
+    for (const m of methods) {
+      for (const p of m.getParameters?.()?.getAll?.() ?? []) {
+        const e = fromIdentifier(p, p.getName());
+        if (e === undefined) continue;
+        const base = baseName(p.getFilename?.() ?? "");
+        if (base === "" || base.startsWith("_") === true) continue;
+        const line = p.getStart().getRow();
+        const key = `${base}|${e.name}|${line}`;
+        if (seen.has(key) === true) continue;
+        seen.add(key);
+        bucketOf(base).unknowns.push({...e, line, level: "signature", method: String(m.getName()).toUpperCase()});
+      }
+    }
+  }
   // the statement carriers join the unknowns: a missing superclass is a
   // definition-level unknown (kind super), every friend name a soft one --
   // and a signature-level unknown takes its method's name off the METHODS
@@ -296,6 +346,21 @@ export function analyseObject(reg, filename) {
       if (seen.has(key) === false) {
         seen.add(key);
         bucket.unknowns.push({name: s.name, kind: "super", via: "super", line: s.line, level: "definition"});
+      }
+    }
+    // an INTERFACES statement: a definition-level edge when the interface is
+    // in the build, a definition-level INTF ask when it is not (the scope's
+    // own `Object (Unknown)` record, where it has one, carries the same
+    // name and line and wins the dedupe)
+    for (const i of bucket.includes ?? []) {
+      if (i.resolved === true) {
+        bucket.edges.push({to: i.name, level: "definition"});
+        continue;
+      }
+      const key = `${base}|${i.name}|${i.line}`;
+      if (seen.has(key) === false) {
+        seen.add(key);
+        bucket.unknowns.push({name: i.name, kind: "object", ooType: "INTF", via: "interfaces", line: i.line, level: "definition"});
       }
     }
     for (const f of bucket.friends) {
@@ -730,8 +795,12 @@ export function mergeNames({analysis, findings, classPaths}) {
   const unknownsOf = new Map(analysis.objects.map((o) => [o.object, o.unknowns]));
   const isStructural = (f) => {
     const us = unknownsOf.get(objectOfBase.get(f.file) ?? "");
+    // an INTERFACES include's finding sits on the INTERFACE statement's
+    // line, not the include's (`Interface X unknown`, measured): matched by
+    // the name the include carries, wherever in the file
     return us !== undefined &&
-      us.some((u) => Math.abs(u.line - f.line) <= 2 && f.message.toUpperCase().includes(u.name) === true);
+      us.some((u) => (u.via === "interfaces" || Math.abs(u.line - f.line) <= 2) &&
+        f.message.toUpperCase().includes(u.name) === true);
   };
   const names = [];
   const seen = new Set();
