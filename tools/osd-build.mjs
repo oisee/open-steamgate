@@ -286,6 +286,7 @@ export function hashOf(root, inputs = inputsOf(root), options = {}) {
     hash.update(value);
     return this;
   }, digest: (...args) => hash.digest(...args)};
+  for (const entry of ((options instanceof Map ? undefined : options.exclusions) ?? []).slice().sort()) h.update("excluded\0").update(entry).update("\0");
   h.update("transpiler\0").update(String(options.transpiler ?? buildIdentity(root))).update("\0");
   h.update("layers\0later-wins\0");
   const system = activeSystem(root);
@@ -709,7 +710,7 @@ export async function build(options = {}) {
   const loaded = selectedModules(root);
   const identity = assertToolchain(root, loaded);
   const named = new Map();
-  const hash = hashOf(root, inputs, {overlay: options.overlay, digests: named, transpiler: identity});
+  const hash = hashOf(root, inputs, {overlay: options.overlay, digests: named, transpiler: identity, exclusions: excludedFiles(root)});
   named.set(inputs.config, sha256(readFileSync(inputs.config)));
   // one spelling of a path for every comparison: a native one from the walk,
   // a forward-slash one from the transpiler's reads on Windows

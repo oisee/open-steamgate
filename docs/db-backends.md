@@ -1102,14 +1102,25 @@ finding}`. What stays lazy is code and only code. A name of a DDIC kind —
 TABL, DTEL, DOMA, TTYP, SHLP, and the kind-less triple — that a
 would-be-stubbed method names is requested from the dumper in the same
 iteration: a DDIC closure is cheap and pulls no code, and a stub over a
-table that exists costs a miss-rerun cycle per method at GET time. The
-method is stubbed only when the dumper answered missing for one of its
-DDIC names — that name is a gap and the stub records it — or a code kind
-(CLAS, INTF, FUGR, PROG) remains, which stays deferred as before.
-`--defer-ddic` keeps the round-3 behaviour, every name of a stubbed
-method lazy. While the dumper can still answer, the body stays: the
-finding rejoins the classification and the name travels in the request
-like any other.
+table that exists costs a miss-rerun cycle per method at GET time. A
+method keeps its body only while a DDIC name of that method is still
+pending in this iteration's request — not asked yet, its object neither in
+the island nor excluded this run, the dumper's answer neither missing nor a
+merge refusal (`state.refused`, not `state.missing`). Nameless
+cascade-only findings, present-only names, resolved-but-still-failing
+names and dead names all stub (fix round 1: the round-0 keep-branch held
+the bed's DPC_EXT red forever on the nameless member cascades of the
+/IWBEP/ runtime it uses). A nameless stub's raise carries its first
+finding's text — a GET never reads "needs ''" — and the nameless stubs'
+findings are the framework work list: `framework-gaps.json` beside the
+stubs, one entry per distinct finding text with the quoted member token
+beside it where the shape has one (a method, attribute or component; a
+Variable cascade's quoted token is the local variable, not the member) and
+a `used_by` of every file, line and method that hit it, sorted — "framework
+gaps: N" on the iteration line. When the dumper answered missing for a
+DDIC name, that name is a gap and the stub records it; a code kind (CLAS,
+INTF, FUGR, PROG) remains deferred as before; `--defer-ddic` keeps the
+round-3 behaviour, every name of a stubbed method lazy.
 
 Before anything is requested, the island is checked by file name —
 abapGit naming, `/` to `#`, lower case; the XML present for the DDIC
@@ -1118,11 +1129,27 @@ requested and never a gap, whatever an earlier iteration asked: its
 finding is a cascade of that object's own findings, counted on the
 iteration line as `cascade (present)`. (The bed asked three times for an
 interface the island already carried in layer 036; the finding was that
-interface's own.)
+interface's own.) A code kind is present as `.clas.abap` OR `.intf.abap`
+of the base — the classified kind of a `ZIF_` name is the prefix
+heuristic's CLAS, and presence by the one suffix asked every customer
+interface again every round (fix round 1).
 
-And after the dumper answered, a class or interface whose findings sit
+And when no stub applies any more, a class or interface whose findings sit
 outside every METHOD ... ENDMETHOD body — the definition part, which no
-stub can reach — is excluded from the build: through the build's own
+stub can reach — is excluded from the build when NONE of their names is
+still pending: present objects, merge refusals, resolved-but-still-failing
+names, missing names, objects this run already excluded and nameless
+findings are all answered (fix round 1: round 0 required every name
+answered missing, which no definition-level finding on the bed ever was).
+The decision is the definition findings' alone — a stub beside it is moot —
+and it is taken in a round that applied no method stub, so a file whose
+findings are cascades of a body another file's stub is about to remove is
+not excluded early; the dependents of an excluded object fall out in the
+next stub round. The record lands in the loop's `--out`
+(`OSD_HANA_CLOSURE_OUT` tells every reader where), not only the fixed
+gen/hana-closure path (S-1), and the sorted exclusion list joins the
+generation hash, so a cached generation cannot predate the record (S-2):
+through the build's own
 exclusion seam, the one that already keeps hidden and inactive files from
 the transpiler (`ownConfig` in `tools/osd-build.mjs`, whose
 `exclude_filter` reads the closure-stubs.json record; the loop's own
@@ -1165,7 +1192,14 @@ that iteration, the table filled, the method never stubbed, stub count 0;
 the inverse with a table the dictionary lacks — a gap, and the stub
 recording it; a code-kind miss stays deferred with its method stubbed;
 `--defer-ddic` is round 3; the cap stops a rewrite that cannot settle;
-mode off is round 2. The definition-level class is excluded with the
+mode off is round 2. Fix round 1 adds: a method whose findings name
+nothing is stubbed with its finding's text as the raise's reason and the
+gaps list beside the stubs; a definition-level finding naming a present
+object excludes the class instead of cascading forever; the seam reads
+`--out` via `OSD_HANA_CLOSURE_OUT` and the exclusion renames the
+generation; and a `ZIF_` name is found as `.intf.abap` even though the
+classifier calls it CLAS — the fixtures carry `ZIF_H5C_*` names so the
+test can fail. The definition-level class is excluded with the
 method stubbed beside it, the record carrying
 `{level: "definition", ...}`, the request carrying `excluded`, the
 iteration line counting it, and the real `ownConfig` carrying the

@@ -45,12 +45,12 @@ describe("hana-closure: the dependency closure, by iteration", () => {
       `unknown_types, Contains unknown, ZOSD_H5C_LAND not found, lookup, zcl_h5c_app.clas.abap:14`,
       `check_syntax, Class zcl_h5c_facade not found, zcl_h5c_app.clas.abap:15`,
       `check_syntax, Unknown class cl_h5c_standard, zcl_h5c_app.clas.abap:16`,
-      `check_syntax, Unknown class if_h5c_bo, zcl_h5c_app.clas.abap:17`,
+      `check_syntax, Unknown class zif_h5c_bo, zcl_h5c_app.clas.abap:17`,
       `check_syntax, CATCH, unknown class ZCX_H5C_API, zcl_h5c_app.clas.abap:18`,
-      `unknown_types, Could not resolve top IF_H5C_MSG, resolveTypeChain, zcl_h5c_app.clas.abap:19`,
-      `unknown_types, Variable "LT_BUF" could not resolve top IF_H5C_BO, resolveTypeChain, zcl_h5c_app.clas.abap:20`,
-      `check_syntax, Loop, not a table type, Could not resolve top IF_H5C_MSG, resolveTypeChain, zcl_h5c_app.clas.abap:21`,
-      `unknown_types, Variable "LR_BUF" contains unknown: REF, unable to resolve if_h5c_msg, zcl_h5c_app.clas.abap:22`,
+      `unknown_types, Could not resolve top ZIF_H5C_MSG, resolveTypeChain, zcl_h5c_app.clas.abap:19`,
+      `unknown_types, Variable "LT_BUF" could not resolve top ZIF_H5C_BO, resolveTypeChain, zcl_h5c_app.clas.abap:20`,
+      `check_syntax, Loop, not a table type, Could not resolve top ZIF_H5C_MSG, resolveTypeChain, zcl_h5c_app.clas.abap:21`,
+      `unknown_types, Variable "LR_BUF" contains unknown: REF, unable to resolve zif_h5c_msg, zcl_h5c_app.clas.abap:22`,
       `parser_error, Statement does not exist in the configured ABAP version(or a parser error), "FUNCTION", #zosd#gws_h5c_shexits.fugr.#zosd#lgws_h5c$01.abap:5`,
       `unknown_types, Variable "LR_TXT" contains unknown: Type error, field not part of structure zosd_h5c_v-ddtext, zcl_h5c_app.clas.abap:23`,
       `unknown_types, ZOSD_H5C_PARAMS_TAB not found, lookup, zcl_h5c_app.clas.abap:24`,
@@ -69,9 +69,9 @@ describe("hana-closure: the dependency closure, by iteration", () => {
       `check_syntax, RAISE, unknown class zcx_h5c_late, zcl_h5c_app.clas.abap:33`,
       // bed run 5's shapes: a bare `X unknown` type (the kind is the name's
       // prefix), and a friend class the tree does not have
-      `unknown_types, ZCX_H5C_API_EXCEPTION unknown, if_h5c_message_buffer.intf.abap:14`,
-      `unknown_types, ZIF_H5C_ENGINE unknown, if_h5c_message_buffer.intf.abap:19`,
-      `unknown_types, ZOSD_H5C_PARAMS unknown, if_h5c_message_buffer.intf.abap:27`,
+      `unknown_types, ZCX_H5C_API_EXCEPTION unknown, zif_h5c_message_buffer.intf.abap:14`,
+      `unknown_types, ZIF_H5C_ENGINE unknown, zif_h5c_message_buffer.intf.abap:19`,
+      `unknown_types, ZOSD_H5C_PARAMS unknown, zif_h5c_message_buffer.intf.abap:27`,
       `check_syntax, Friend class zcl_h5c_friend does not exist, cm_h5c_root.clas.abap:7`,
       // bed run 10's shapes (round 7): the Super class wording is a CLAS
       // request, `Target type unknown, <name>` is the kind-less dictionary
@@ -99,9 +99,9 @@ describe("hana-closure: the dependency closure, by iteration", () => {
       ["ZOSD_H5C_LAND", "ddic"],
       ["ZCL_H5C_FACADE", "clas"],
       ["CL_H5C_STANDARD", "clas"],
-      ["IF_H5C_BO", "intf"],
+      ["ZIF_H5C_BO", "clas"],
       ["ZCX_H5C_API", "clas"],
-      ["IF_H5C_MSG", "intf"],
+      ["ZIF_H5C_MSG", "clas"],
       ["/ZOSD/GWS_H5C_SHEXITS", "fugr"],
       ["ZOSD_H5C_V", "tabl"],
       ["ZOSD_H5C_PARAMS_TAB", "ddic"],
@@ -164,7 +164,7 @@ describe("hana-closure: the dependency closure, by iteration", () => {
     const gaps = [{name: "ZOSD_H5C_UUID", kind: "DOMA", first_finding: "f", iterations_requested: 3}];
     const fresh = [
       {name: "ZOSD_H5C_BPA", kind: "tabl", finding: "f"},
-      {name: "IF_H5C_BO", kind: "intf", finding: "g"},
+      {name: "ZIF_H5C_BO", kind: "intf", finding: "g"},
       {name: "ZOSD_H5C_SHLP_EXIT", kind: "ddic", finding: `"callcontrol" not found -- the search help exit's TABLES signature`},
       // the message decides the SHLP extra kind, never the raw line: the
       // raw ends in the file name, and this file is called *searchhelpexits*
@@ -187,7 +187,7 @@ describe("hana-closure: the dependency closure, by iteration", () => {
     expect(request.requested.SHLP).to.deep.equal(["ZOSD_H5C_SHLP_EXIT"]);
     expect(request.requested.TABL).to.include("ZOSD_H5C_FILEONLY");
     expect(request.requested.SHLP, "the file name alone never adds the SHLP kind").to.not.include("ZOSD_H5C_FILEONLY");
-    expect(request.requested.INTF).to.deep.equal(["IF_H5C_BO"]);
+    expect(request.requested.INTF).to.deep.equal(["ZIF_H5C_BO"]);
     expect(request.requested.CLAS).to.deep.equal([]);
     // seen is what earlier iterations requested, per kind, so the dumper skips it
     expect(request.seen.TABL).to.deep.equal(["ZOSD_H5C_ROLE"]);
@@ -286,7 +286,7 @@ describe("hana-closure: the dependency closure, by iteration", () => {
       mkdirSync(join(root, "gen", "hana-src", "001-h5c", "src"), {recursive: true});
       mkdirSync(join(root, "gen", "hana-ddic"), {recursive: true});
       for (const f of ["zcl_h5c_one.clas.abap", "zcl_h5c_one.clas.xml", "zcl_h5c_one.clas.locals_imp.abap",
-        "zcl_h5c_two.clas.abap", "if_h5c_three.intf.abap", "if_h5c_three.intf.xml", "zcl_h5c_prog.prog.abap"]) {
+        "zcl_h5c_two.clas.abap", "zif_h5c_three.intf.abap", "zif_h5c_three.intf.xml", "zcl_h5c_prog.prog.abap"]) {
         writeFileSync(join(root, "gen", "hana-src", "001-h5c", "src", f), "x");
       }
       for (const f of ["zosd_h5c_head.tabl.xml", "zosd_h5c_el.dtel.xml", "zosd_h5c_head2.tabl.xml"]) {
@@ -520,20 +520,26 @@ describe("hana-closure: the dependency closure, by iteration", () => {
     expect(plan.eager).to.deep.equal([]);
   });
 
-  it("planStubPass: definition-level findings exclude when every name is dead, never while one is live", async () => {
+  it("planStubPass: definition-level findings exclude while NO name of theirs is pending -- an unasked live name waits", async () => {
     const {planStubPass} = await import("../tools/hana-closure-stubs.mjs");
     const findings = parseFindings(`unknown_types, Variable "GV_H5C" contains unknown: ZOSD_H5C_DEF not found, lookup, zcl_h5c_def.clas.abap:3`);
     const base = {source: CLAS_DEF_SOURCE, findings, basename: "zcl_h5c_def.clas.abap",
-      asked: () => true, islandFiles: new Set(), excludedObjects: new Set(), registered: new Set()};
-    expect(planStubPass({...base, missingOf: () => false}).exclude, "a live name can still resolve").to.equal(undefined);
-    const plan = planStubPass({...base, missingOf: () => true});
-    expect(plan.exclude).to.deep.equal({object: "ZCL_H5C_DEF", findings: [findings[0].raw]});
-    expect(plan.stubs).to.deep.equal([]);
-    // a nameless cascade alone excludes nothing: it names nothing to wait for
-    const nameless = planStubPass({...base, missingOf: () => true,
-      findings: parseFindings(`check_syntax, Method parameter type not compatible, zcl_h5c_def.clas.abap:3`)});
-    expect(nameless.exclude).to.equal(undefined);
-    // an object this run excluded is dead for its dependents
+      asked: () => false, islandFiles: new Set(), excludedObjects: new Set(), registered: new Set()};
+    expect(planStubPass({...base, missingOf: () => false}).exclude, "an unasked live name can still resolve").to.equal(undefined);
+    // asked and answered -- missing, resolved-but-still-failing, or refused:
+    // nothing is left for the dumper to bring, the file falls out
+    expect(planStubPass({...base, missingOf: () => true}).exclude).to.deep.equal({object: "ZCL_H5C_DEF", findings: [findings[0].raw]});
+    expect(planStubPass({...base, asked: () => true, missingOf: () => false}).exclude,
+      "a name the dumper answered while the finding stays is answered too").to.deep.equal({object: "ZCL_H5C_DEF", findings: [findings[0].raw]});
+    expect(planStubPass({...base, refusedOf: () => true}).exclude,
+      "a merge-refused name is answered (state.refused, not state.missing)").to.deep.equal({object: "ZCL_H5C_DEF", findings: [findings[0].raw]});
+    expect(planStubPass({...base, missingOf: () => true}).stubs).to.deep.equal([]);
+    // a nameless cascade names nothing to wait for: the file is excluded
+    // (was: a nameless cascade alone excluded nothing -- inverted, fix round 1)
+    const namelessFindings = parseFindings(`check_syntax, Method parameter type not compatible, zcl_h5c_def.clas.abap:3`);
+    const nameless = planStubPass({...base, missingOf: () => true, findings: namelessFindings});
+    expect(nameless.exclude).to.deep.equal({object: "ZCL_H5C_DEF", findings: [namelessFindings[0].raw]});
+    // an object this run excluded is answered for its dependents
     const depFindings = parseFindings(`check_syntax, Super class "zcl_h5c_def" not found or contains, zcl_h5c_dep.clas.abap:1`);
     const depSource = [
       `CLASS zcl_h5c_dep DEFINITION PUBLIC FINAL CREATE PUBLIC INHERITING FROM zcl_h5c_def.`,
@@ -551,14 +557,14 @@ describe("hana-closure: the dependency closure, by iteration", () => {
       missingOf: () => false, asked: () => true, islandFiles: new Set(),
       excludedObjects: new Set(["ZCL_H5C_DEF"]), registered: new Set()});
     expect(dep.exclude).to.deep.equal({object: "ZCL_H5C_DEP", findings: [depFindings[0].raw]});
-    // a present object is not dead: the dependent waits for it
-    const waited = planStubPass({source: depSource, findings: depFindings, basename: "zcl_h5c_dep.clas.abap",
+    // a present object is ANSWERED: the dependent falls out with it
+    // (was: the dependent waited for it -- inverted, fix round 1)
+    const held = planStubPass({source: depSource, findings: depFindings, basename: "zcl_h5c_dep.clas.abap",
       missingOf: () => false, asked: () => true, islandFiles: new Set(["zcl_h5c_def.clas.abap"]),
       excludedObjects: new Set(), registered: new Set()});
-    expect(waited.exclude).to.equal(undefined);
-    // a file abaplint cannot make method blocks of is excluded by the same
-    // rule -- its findings sit outside every body, all of them -- a parse
-    // error is not exempted
+    expect(held.exclude).to.deep.equal({object: "ZCL_H5C_DEP", findings: [depFindings[0].raw]});
+    // a file whose findings all sit outside every body is excluded by the
+    // same rule -- a parse error is not exempted
     const broken = planStubPass({source: `CLASS zcl_h5c_brk DEFINITION PUBLIC FINAL CREATE PUBLIC.\n  NOT ABAP.\nENDCLASS.\n`,
       findings: depFindings, basename: "zcl_h5c_brk.clas.abap",
       missingOf: () => true, asked: () => true, islandFiles: new Set(), excludedObjects: new Set(), registered: new Set()});
@@ -575,27 +581,194 @@ describe("hana-closure: the dependency closure, by iteration", () => {
     expect(thrown.message).to.include("ZCL_H5C_DEF");
   });
 
+  it("planStubPass: a method whose findings name nothing is stubbed, the raise carrying the finding text (S-3)", async () => {
+    const {planStubPass} = await import("../tools/hana-closure-stubs.mjs");
+    // the bed's DPC_EXT shape: members the clean-room framework layer lacks
+    // name nothing the dumper could bring. Round 7 stubbed such methods;
+    // H5x-1's first cut kept their bodies forever (78 -> 52 stubs).
+    const source = [
+      `CLASS zcl_h5c_dpc DEFINITION PUBLIC FINAL CREATE PUBLIC.`,
+      `  PUBLIC SECTION.`,
+      `    METHODS get_rows.`,
+      `    METHODS fill_head.`,
+      `ENDCLASS.`,
+      `CLASS zcl_h5c_dpc IMPLEMENTATION.`,
+      `  METHOD get_rows.`,
+      `    DATA ls_h5c TYPE i.`,
+      `    ls_h5c = 1.`,
+      `  ENDMETHOD.`,
+      `  METHOD fill_head.`,
+      `    RETURN.`,
+      `  ENDMETHOD.`,
+      `ENDCLASS.`,
+      ``,
+    ].join("\n");
+    const findings = parseFindings([
+      `check_syntax, Component "zz_h5c_field" not found in structure, zcl_h5c_dpc.clas.abap:8`,
+      `check_syntax, Method "get_h5c_thing" not found, methodCallChain, zcl_h5c_dpc.clas.abap:9`,
+    ].join("\n"));
+    const base = {source, findings, basename: "zcl_h5c_dpc.clas.abap",
+      asked: () => true, islandFiles: new Set(), excludedObjects: new Set(), registered: new Set()};
+    const plan = planStubPass({...base, missingOf: () => false});
+    expect(plan.stubs, "the nameless method is stubbed again (round-7 equal)").to.have.lengthOf(1);
+    expect(plan.stubs[0].method).to.equal("GET_ROWS");
+    expect(plan.stubs[0].missing, "the cascades name nothing").to.deep.equal([]);
+    expect(plan.eager).to.deep.equal([]);
+    expect(plan.deferred).to.deep.equal([]);
+    expect(plan.source).to.contain(`missing = 'Component "zz_h5c_field" not found in structure'`);
+    expect(plan.source, "a raise never says needs ''").to.not.contain(`missing = ''`);
+    // a sibling method with a name this iteration's request can still bring
+    // keeps its body; only the nameless method is stubbed
+    const mixed = planStubPass({...base, asked: () => false, missingOf: () => false,
+      findings: parseFindings([
+        `check_syntax, Component "zz_h5c_field" not found in structure, zcl_h5c_dpc.clas.abap:8`,
+        `check_syntax, Database table or view "zosd_h5c_head" not found, zcl_h5c_dpc.clas.abap:13`,
+      ].join("\n"))});
+    expect(mixed.stubs, "only the nameless method is stubbed").to.have.lengthOf(1);
+    expect(mixed.stubs[0].method).to.equal("GET_ROWS");
+    expect(mixed.source, "the waiting method's body stays").to.contain("RETURN.");
+  });
+
+  it("planStubPass: the exclusion is decided on the definition findings alone; a stub beside it is moot", async () => {
+    const {planStubPass} = await import("../tools/hana-closure-stubs.mjs");
+    // a dead definition name AND a cascade-only method finding: round 0's
+    // stubs.length === 0 gate kept such a file in the build forever
+    const source = [
+      `CLASS zcl_h5c_mix DEFINITION PUBLIC FINAL CREATE PUBLIC.`,
+      `  PUBLIC SECTION.`,
+      `    DATA go_h5c TYPE REF TO zcl_h5c_gone.`,
+      `    METHODS run_it.`,
+      `ENDCLASS.`,
+      `CLASS zcl_h5c_mix IMPLEMENTATION.`,
+      `  METHOD run_it.`,
+      `    DATA ls_h5c TYPE i.`,
+      `    ls_h5c = 1.`,
+      `  ENDMETHOD.`,
+      `ENDCLASS.`,
+      ``,
+    ].join("\n");
+    const findings = parseFindings([
+      `unknown_types, Variable "GO_H5C" contains unknown: REF, unable to resolve zcl_h5c_gone, zcl_h5c_mix.clas.abap:3`,
+      `check_syntax, Method "do_h5c" not found, methodCallChain, zcl_h5c_mix.clas.abap:9`,
+    ].join("\n"));
+    const base = {source, findings, basename: "zcl_h5c_mix.clas.abap",
+      islandFiles: new Set(), excludedObjects: new Set(), registered: new Set()};
+    const excluded = planStubPass({...base, missingOf: () => true, asked: () => true});
+    expect(excluded.exclude).to.deep.equal({object: "ZCL_H5C_MIX", findings: [findings[0].raw]});
+    expect(excluded.stubs, "the method stub is moot beside an exclusion").to.deep.equal([]);
+    expect(excluded.source, "the file is left as it stands").to.equal(source);
+    // a LIVE definition name beside a real stub: the stub applies, the
+    // exclusion waits for its name
+    const live = planStubPass({...base, missingOf: (name) => name !== "ZCL_H5C_GONE", asked: () => false});
+    expect(live.exclude).to.equal(undefined);
+    expect(live.stubs).to.have.lengthOf(1);
+  });
+
   it("a name whose object is in the island is dropped and counted: cascade (present)", async () => {
     const {dropPresentNames, abapBaseOf, objectFilePresent} = await import("../tools/hana-closure-stubs.mjs");
     expect(abapBaseOf("/ZOSD/H5C_T_NAVI"), "the namespace escaped as #ns#").to.equal("#zosd#h5c_t_navi");
-    expect(abapBaseOf("IF_H5C_BO")).to.equal("if_h5c_bo");
-    const files = new Set(["if_h5c_present.intf.abap", "zosd_h5c_head.tabl.xml", "#zosd#h5c_t_navi.tabl.xml"]);
-    expect(objectFilePresent("IF_H5C_PRESENT", "intf", files)).to.equal(true);
+    expect(abapBaseOf("ZIF_H5C_BO")).to.equal("zif_h5c_bo");
+    const files = new Set(["zif_h5c_present.intf.abap", "zosd_h5c_head.tabl.xml", "#zosd#h5c_t_navi.tabl.xml"]);
+    expect(objectFilePresent("ZIF_H5C_PRESENT", "intf", files)).to.equal(true);
+    // the classified kind of a ZIF_ name is the prefix heuristic's `clas`
+    // (`Could not resolve top zif_h5c_present` names it CLAS) -- a code kind
+    // is present as .clas.abap OR .intf.abap, or every customer interface is
+    // asked again every round (fix round 1, M-1.4)
+    expect(objectFilePresent("ZIF_H5C_PRESENT", "clas", files), "a code kind finds either file").to.equal(true);
     expect(objectFilePresent("ZOSD_H5C_HEAD", "tabl", files)).to.equal(true);
     expect(objectFilePresent("/ZOSD/H5C_T_NAVI", "tabl", files)).to.equal(true);
     expect(objectFilePresent("ZOSD_H5C_W", "ddic", files), "no XML of the kinds the request asks under").to.equal(false);
     const {names: kept, present} = dropPresentNames([
-      {name: "IF_H5C_PRESENT", kind: "intf"},
+      {name: "ZIF_H5C_PRESENT", kind: "intf"},
       {name: "ZOSD_H5C_HEAD", kind: "tabl"},
-      {name: "IF_H5C_ABSENT", kind: "intf"},
+      {name: "ZIF_H5C_ABSENT", kind: "intf"},
       {name: "ZOSD_H5C_OTHER", kind: "tabl"},
     ], files);
-    expect(kept.map((n) => n.name)).to.deep.equal(["IF_H5C_ABSENT", "ZOSD_H5C_OTHER"]);
+    expect(kept.map((n) => n.name)).to.deep.equal(["ZIF_H5C_ABSENT", "ZOSD_H5C_OTHER"]);
     expect(present, "counted, not asked").to.equal(2);
     // an object excluded this run is not present: its name is dead downstream
-    const gone = dropPresentNames([{name: "IF_H5C_PRESENT", kind: "intf"}], files, new Set(["IF_H5C_PRESENT"]));
+    const gone = dropPresentNames([{name: "ZIF_H5C_PRESENT", kind: "intf"}], files, new Set(["ZIF_H5C_PRESENT"]));
     expect(gone.names).to.deep.equal([]);
     expect(gone.present).to.equal(0);
+  });
+
+  it("planStubPass: the nameless stubs' findings come back as framework-gap entries, the quoted member extracted", async () => {
+    const {planStubPass} = await import("../tools/hana-closure-stubs.mjs");
+    // the members the clean-room framework layer lacks: a method the runtime
+    // interface does not carry, a changeset component, a message container
+    const source = [
+      `CLASS zcl_h5c_gaps DEFINITION PUBLIC FINAL CREATE PUBLIC.`,
+      `  PUBLIC SECTION.`,
+      `    METHODS get_rows.`,
+      `    METHODS get_ctx.`,
+      `    METHODS get_main.`,
+      `ENDCLASS.`,
+      `CLASS zcl_h5c_gaps IMPLEMENTATION.`,
+      `  METHOD get_rows.`,
+      `    me->get_h5c_thing( ).`,
+      `  ENDMETHOD.`,
+      `  METHOD get_ctx.`,
+      `    DATA ls_h5c TYPE zosd_h5c_ctx.`,
+      `    ls_h5c-h5c_thing = 1.`,
+      `  ENDMETHOD.`,
+      `  METHOD get_main.`,
+      `    me->mo_h5c_ctx->run( ).`,
+      `  ENDMETHOD.`,
+      `ENDCLASS.`,
+      ``,
+    ].join("\n");
+    const findings = parseFindings([
+      `check_syntax, Method "get_h5c_thing" not found, methodCallChain, zcl_h5c_gaps.clas.abap:9`,
+      `check_syntax, Component "h5c_thing" not found in structure, zcl_h5c_gaps.clas.abap:13`,
+      `check_syntax, Attribute or constant "mo_h5c_ctx" not found in "zcl_h5c_gaps", zcl_h5c_gaps.clas.abap:16`,
+      `unknown_types, Variable "LS_H5C" contains unknown: TY_S_H5C_ROW not found in class or interface, zcl_h5c_gaps.clas.abap:12`,
+    ].join("\n"));
+    const plan = planStubPass({source, findings, basename: "zcl_h5c_gaps.clas.abap",
+      missingOf: () => false, asked: () => true, islandFiles: new Set(), excludedObjects: new Set(), registered: new Set()});
+    expect(plan.stubs, "three methods, all nameless: all stubbed").to.have.lengthOf(3);
+    expect(plan.nameless, "one entry per distinct nameless finding text, sorted").to.deep.equal([
+      {finding: `Attribute or constant "mo_h5c_ctx" not found in "zcl_h5c_gaps"`, member: "mo_h5c_ctx", line: 16, method: "GET_MAIN"},
+      {finding: `Component "h5c_thing" not found in structure`, member: "h5c_thing", line: 13, method: "GET_CTX"},
+      {finding: `Method "get_h5c_thing" not found`, member: "get_h5c_thing", line: 9, method: "GET_ROWS"},
+      {finding: `Variable "LS_H5C" contains unknown: TY_S_H5C_ROW not found in class or interface`, line: 12, method: "GET_CTX"},
+    ]);
+  });
+
+  it("the seam reads the stubs file from OSD_HANA_CLOSURE_OUT -- the loop's --out -- not only the fixed path (S-1)", async () => {
+    const {closureStubsFile, definitionExclusions, excludedFiles} = await import("../tools/hana-closure-exclusions.mjs");
+    const root = mkdtempSync(join(tmpdir(), "hana-closure-seam-"));
+    const saved = process.env.OSD_HANA_CLOSURE_OUT;
+    try {
+      const record = [{level: "definition", file: "gen/hana-src/000-x/src/zcl_h5c_defx.clas.abap", object: "ZCL_H5C_DEFX", findings: ["f"]}];
+      mkdirSync(join(root, "gen", "hana-closure"), {recursive: true});
+      writeFileSync(join(root, "gen", "hana-closure", "closure-stubs.json"), JSON.stringify(record) + "\n");
+      expect(closureStubsFile(root), "without the var, the fixed path").to.equal(join(root, "gen", "hana-closure", "closure-stubs.json"));
+      expect(definitionExclusions(root)).to.have.lengthOf(1);
+      expect(excludedFiles(root)).to.deep.equal(["gen/hana-src/000-x/src/zcl_h5c_defx.clas.abap"]);
+      const other = join(root, "closure-out");
+      mkdirSync(other, {recursive: true});
+      writeFileSync(join(other, "closure-stubs.json"), JSON.stringify([]) + "\n");
+      process.env.OSD_HANA_CLOSURE_OUT = other;
+      expect(closureStubsFile(root), "the env var moves the seam").to.equal(join(other, "closure-stubs.json"));
+      expect(definitionExclusions(root), "the loop's --out record is the one the build reads").to.deep.equal([]);
+      delete process.env.OSD_HANA_CLOSURE_OUT;
+      expect(definitionExclusions(root, join(other, "closure-stubs.json")), "the explicit file, the loop's in-process channel").to.deep.equal([]);
+      expect(definitionExclusions(root)).to.have.lengthOf(1);
+    } finally {
+      if (saved === undefined) delete process.env.OSD_HANA_CLOSURE_OUT;
+      else process.env.OSD_HANA_CLOSURE_OUT = saved;
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
+
+  it("the exclusions join the generation hash (S-2): a record renames the generation", async () => {
+    const {hashOf} = await import("../tools/osd-build.mjs");
+    const plain = hashOf(process.cwd());
+    const withGap = hashOf(process.cwd(), undefined, {exclusions: ["gen/hana-src/000-x/src/zcl_h5c_defx.clas.abap"]});
+    expect(withGap, "an exclusion is a build input in all but name").to.not.equal(plain);
+    expect(hashOf(process.cwd(), undefined, {exclusions: []}), "an empty list changes nothing").to.equal(plain);
+    expect(hashOf(process.cwd(), undefined, {exclusions: ["a"]}))
+      .to.not.equal(hashOf(process.cwd(), undefined, {exclusions: ["b"]}));
   });
 
   it("the registered service's own classes come from the gen/hana-segw facts and the island's IWSV/IWMO XML", async () => {
@@ -1777,12 +1950,14 @@ process.exit(0);
     }
   });
 
-  it("a finding naming an object the island holds is a cascade (present): never requested, never a gap", async function () {
+  it("a definition-level finding naming an object the island holds excludes the class: never requested, never a gap", async function () {
     this.timeout(300000);
-    // the dependent's finding names a superclass the island already holds
-    // (measured shape: `Super class "zcl_h5c_far" not found or contains
-    // errors` -- the file is there, it just does not build): the name is
-    // never asked, never a gap, and counted on the iteration line
+    // the dependent's definition part names a superclass the island already
+    // holds (`Super class "zcl_h5c_far" not found or contains errors` -- the
+    // file is there, it just does not build). Fix round 1: a present name is
+    // ANSWERED -- the class falls out of the build through the exclusion
+    // seam instead of waiting forever; the name is still never requested
+    // and never a gap, and no dumper round runs at all.
     const root = scratch(CLAS_USER_SOURCE, "zcl_h5c_user",
       {island2Name: "zcl_h5c_far.clas.abap", island2Source: CLAS_FAR_BROKEN_SOURCE});
     fixtureDump(join(root, "dump-001"));
@@ -1791,14 +1966,17 @@ process.exit(0);
     try {
       const result = await run(["--dump", join(root, "dump-001"), "--system", "h5c", "--stub-unresolved"], {root, env, say: (m) => said.push(m)});
       expect(result.stopped).to.equal("fixed-point");
-      const requestPath = outFile(root, "closure-request.json");
-      expect(existsSync(requestPath) === false || readFileSync(requestPath, "utf8").includes("ZCL_H5C_FAR") === false,
-        "the present superclass is never requested").to.equal(true);
-      expect(JSON.stringify(JSON.parse(readFileSync(outFile(root, "closure-gaps.json"), "utf8")))).to.not.include("ZCL_H5C_FAR");
-      expect(said.some((l) => l.includes("iteration 1:") && l.includes("1 cascade (present)"))).to.equal(true);
+      expect(result.iteration).to.equal(1);
+      expect(existsSync(join(root, "dumper-log.jsonl")), "no dumper round: nothing to ask").to.equal(false);
+      expect(readFileSync(outFile(root, "closure-gaps.json"), "utf8")).to.not.include("ZCL_H5C_FAR");
       const state = JSON.parse(readFileSync(outFile(root, "state.json"), "utf8"));
       expect(Object.keys(state.asked), "nothing was asked at all").to.deep.equal([]);
-      expect(existsSync(join(root, "dumper-log.jsonl")), "no dumper round: nothing to ask").to.equal(false);
+      const record = JSON.parse(readFileSync(outFile(root, "closure-stubs.json"), "utf8"));
+      const excluded = record.filter((e) => e.level === "definition");
+      expect(excluded.map((e) => e.object), "the dependent falls out of the build").to.include("ZCL_H5C_USER");
+      expect(excluded.find((e) => e.object === "ZCL_H5C_USER").findings[0]).to.match(/Super class "zcl_h5c_far" not found or contains/);
+      expect(readFileSync(join(root, "gen", "hana-src", "000-h5c-main", "src", "zcl_h5c_user.clas.abap"), "utf8"))
+        .to.equal(CLAS_USER_SOURCE);
     } finally {
       rmSync(root, {recursive: true, force: true});
     }
@@ -1884,6 +2062,156 @@ process.exit(0);
       for (const n of envNames) {
         if (saved[n] === undefined) delete process.env[n];
         else process.env[n] = saved[n];
+      }
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
+
+  it("--stub-unresolved: a method whose findings name nothing is stubbed with the finding as its reason, and the framework gaps are listed", async function () {
+    this.timeout(300000);
+    // the bed's DPC_EXT shape: members the clean-room framework layer lacks
+    // name nothing the dumper could bring -- a runtime method, a changeset
+    // component, a message container. The bodies go, each raise carries its
+    // finding's text (S-3: a GET never says needs ''), and the iteration
+    // writes gen/hana-closure/framework-gaps.json beside the stubs: the work
+    // list of what the island's framework layer is missing.
+    const GAPS_SOURCE = [
+      `CLASS zcl_h5c_gaps DEFINITION PUBLIC FINAL CREATE PUBLIC.`,
+      `  PUBLIC SECTION.`,
+      `    METHODS get_rows.`,
+      `    METHODS get_ctx.`,
+      `    METHODS get_main.`,
+      `ENDCLASS.`,
+      `CLASS zcl_h5c_gaps IMPLEMENTATION.`,
+      `  METHOD get_rows.`,
+      `    me->get_h5c_thing( ).`,
+      `  ENDMETHOD.`,
+      `  METHOD get_ctx.`,
+      `    DATA ls_h5c TYPE zosd_h5c_ctx.`,
+      `    ls_h5c-h5c_thing = 1.`,
+      `  ENDMETHOD.`,
+      `  METHOD get_main.`,
+      `    me->mo_h5c_ctx->run( ).`,
+      `  ENDMETHOD.`,
+      `ENDCLASS.`,
+      ``,
+    ].join("\n");
+    const root = scratch(GAPS_SOURCE, "zcl_h5c_gaps");
+    // the structure the component cascade reads is IN the island (staged by
+    // the converter's layer), so the component finding names nothing
+    writeFileSync(join(root, "island", "zosd_h5c_ctx.tabl.xml"),
+      tablXml({name: "ZOSD_H5C_CTX", text: "h5c fixture", clidep: false,
+        fields: ddicFields([{position: "1", fieldname: "ZOSD_H5C_KEY", keyflag: "X", rollname: "",
+          datatype: "CHAR", leng: "10", decimals: "0", inttype: "C", intlen: "000020", notnull: "X"}])}));
+    fixtureDump(join(root, "dump-001"));
+    const env = writeFakes(root, envFor(root, {island: "zcl_h5c_gaps.clas.abap", convAFiles: ["zosd_h5c_ctx.tabl.xml"]}));
+    const said = [];
+    try {
+      const result = await run(["--dump", join(root, "dump-001"), "--system", "h5c", "--stub-unresolved"], {root, env, say: (m) => said.push(m)});
+      expect(result.stopped).to.equal("fixed-point");
+      expect(result.iteration).to.equal(1);
+      expect(existsSync(join(root, "dumper-log.jsonl")), "nameless findings ask nothing").to.equal(false);
+      const record = JSON.parse(readFileSync(outFile(root, "closure-stubs.json"), "utf8"));
+      const stubs = record.filter((e) => e.level === "method");
+      expect(stubs, "three nameless methods stubbed").to.have.lengthOf(3);
+      for (const e of stubs) expect(e.missing).to.deep.equal([]);
+      const islandFile = readFileSync(join(root, "gen", "hana-src", "000-h5c-main", "src", "zcl_h5c_gaps.clas.abap"), "utf8");
+      expect(islandFile).to.contain(`missing = 'Method "get_h5c_thing" not found'`);
+      expect(islandFile).to.contain(`missing = 'Component "h5c_thing" not found in structure'`);
+      expect(islandFile).to.contain(`missing = 'Attribute or constant "mo_h5c_ctx" not found in "zcl_h5c_gaps"'`);
+      expect(islandFile, "a raise never says needs ''").to.not.contain(`missing = ''`);
+      const gaps = JSON.parse(readFileSync(outFile(root, "framework-gaps.json"), "utf8"));
+      expect(gaps.map((e) => e.finding)).to.deep.equal([
+        `Attribute or constant "mo_h5c_ctx" not found in "zcl_h5c_gaps"`,
+        `Component "h5c_thing" not found in structure`,
+        `Method "get_h5c_thing" not found`,
+      ]);
+      expect(gaps.map((e) => e.member)).to.deep.equal(["mo_h5c_ctx", "h5c_thing", "get_h5c_thing"]);
+      const rows = gaps.find((e) => e.finding === `Method "get_h5c_thing" not found`).used_by;
+      expect(rows).to.have.lengthOf(1);
+      expect(rows[0].file).to.equal("zcl_h5c_gaps.clas.abap");
+      expect(rows[0].method).to.equal("GET_ROWS");
+      expect(rows[0].line).to.be.a("number");
+      expect(said.some((l) => l.includes("iteration 1:") && l.includes("framework gaps: 3"))).to.equal(true);
+    } finally {
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
+
+  it("--out moves the whole seam with it: the record lands in --out and the build reads it from there (S-1)", async function () {
+    this.timeout(300000);
+    const root = scratch(CLAS_DEFEX_SOURCE, "zcl_h5c_defex");
+    fixtureDump(join(root, "dump-001"));
+    const closureOut = join(root, "closure-out");
+    const env = writeFakes(root, envFor(root, {island: "zcl_h5c_defex.clas.abap", missingNames: "ZOSD_H5C_DEAD"}));
+    const saved = process.env.OSD_HANA_CLOSURE_OUT;
+    const said = [];
+    try {
+      const result = await run(["--dump", join(root, "dump-001"), "--system", "h5c", "--stub-unresolved",
+        "--out", closureOut], {root, env, say: (m) => said.push(m)});
+      expect(result.stopped).to.equal("fixed-point");
+      expect(existsSync(join(root, "gen", "hana-closure")), "the fixed path is never created").to.equal(false);
+      const record = JSON.parse(readFileSync(join(closureOut, "closure-stubs.json"), "utf8"));
+      expect(record.some((e) => e.level === "definition" && e.object === "ZCL_H5C_DEFEX")).to.equal(true);
+      expect(JSON.parse(readFileSync(join(closureOut, "framework-gaps.json"), "utf8"))).to.deep.equal([]);
+      expect(said.some((l) => l.includes("iteration 2:") && l.includes("1 excluded"))).to.equal(true);
+      // the build's ownConfig reads the same record, through the env var the
+      // loop also hands its own spawned builds
+      const {ownConfig} = await import("../tools/osd-build.mjs");
+      const {layers} = await import("../tools/osd-inputs.mjs");
+      process.env.OSD_HANA_CLOSURE_OUT = closureOut;
+      const config = JSON.parse(readFileSync(join(root, "abap_transpile.json"), "utf8"));
+      const own = ownConfig(root, config, layers(root, config), join(root, "output"));
+      expect(own.exclude_filter).to.include(`(^|/)gen/hana-src/000-h5c-main/src/zcl_h5c_defex\\.clas\\.abap$`);
+    } finally {
+      if (saved === undefined) delete process.env.OSD_HANA_CLOSURE_OUT;
+      else process.env.OSD_HANA_CLOSURE_OUT = saved;
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
+
+  it("the loop writes the record the real build reads, and the exclusion renames the generation (S-2)", async function () {
+    this.timeout(300000);
+    // item 4's real-build unit proved the seam with a hand-written record;
+    // this one proves the trigger: the loop excludes the class itself, the
+    // real build goes green over the loop's own tree, the file stays in its
+    // layer -- and the generation is NAMED by the exclusion, so a cached
+    // generation cannot predate the record (S-2).
+    const root = scratch(CLAS_DEFEX_SOURCE, "zcl_h5c_defex");
+    fixtureDump(join(root, "dump-001"));
+    const env = writeFakes(root, envFor(root, {island: "zcl_h5c_defex.clas.abap", missingNames: "ZOSD_H5C_DEAD"}));
+    const envNames = ["OSD_PACKS", "OSD_WEB_PACKS", "OSD_TMP", "OSD_LAYERS", "OSD_LAYER_PACKAGE", "OSD_IMAGE_PACKS"];
+    const savedEnv = Object.fromEntries(envNames.map((n) => [n, process.env[n]]));
+    try {
+      const result = await run(["--dump", join(root, "dump-001"), "--system", "h5c", "--stub-unresolved"], {root, env});
+      expect(result.stopped).to.equal("fixed-point");
+      const record = JSON.parse(readFileSync(outFile(root, "closure-stubs.json"), "utf8"));
+      expect(record.some((e) => e.level === "definition" && e.object === "ZCL_H5C_DEFEX")).to.equal(true);
+      const {build, ownConfig, hashOf, inputsOf} = await import("../tools/osd-build.mjs");
+      const {layers} = await import("../tools/osd-inputs.mjs");
+      const {excludedFiles} = await import("../tools/hana-closure-exclusions.mjs");
+      // the build under test keeps the tree's own exception chain and the
+      // stub exception class (src/**), but the scratch's zcl_h5c_own
+      // fixture -- outside the island on purpose -- is not this build's
+      // business and is removed
+      rmSync(join(root, "src", "zcl_h5c_own.clas.abap"), {force: true});
+      const config = JSON.parse(readFileSync(join(root, "abap_transpile.json"), "utf8"));
+      const exclusions = excludedFiles(root);
+      expect(exclusions).to.have.lengthOf(1);
+      const inputs = inputsOf(root, config);
+      expect(hashOf(root, inputs), "without the exclusions the name is the old one")
+        .to.not.equal(hashOf(root, inputs, {exclusions}));
+      for (const n of envNames) delete process.env[n];
+      const built = await build({root, generators: false, switch: false, log: () => {}});
+      expect(built.ok, "the transpile is green with the loop's class excluded").to.equal(true);
+      expect(readFileSync(join(root, "gen", "hana-src", "000-h5c-main", "src", "zcl_h5c_defex.clas.abap"), "utf8"))
+        .to.equal(CLAS_DEFEX_SOURCE);
+      const own = ownConfig(root, config, layers(root, config), join(root, "output"));
+      expect(own.exclude_filter).to.include(`(^|/)gen/hana-src/000-h5c-main/src/zcl_h5c_defex\\.clas\\.abap$`);
+    } finally {
+      for (const n of envNames) {
+        if (savedEnv[n] === undefined) delete process.env[n];
+        else process.env[n] = savedEnv[n];
       }
       rmSync(root, {recursive: true, force: true});
     }

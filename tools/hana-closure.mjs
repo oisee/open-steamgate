@@ -37,71 +37,51 @@
 //   --dry-run             merge, validate, classify, write and print the
 //                         request -- and stop, even when the dumper is
 //                         configured.
-//   --stub-unresolved     lazy activation (round 3), with H5x-1's three
-//                         rules. A class compiles as a whole or not at all,
-//                         so the island must close every name a class
-//                         MENTIONS -- even in methods no request will ever
-//                         run. With the flag, the body of every method
-//                         whose findings do not resolve is replaced by the
-//                         stub raise
-//                           RAISE EXCEPTION TYPE zcx_osd_not_activated
-//                             EXPORTING missing = '<names>'.
-//                         The method block is cut at abaplint's parsed
-//                         positions, the way tools/amdp-extract.mjs cuts
-//                         AMDP bodies -- never a regex over ABAP. The
-//                         stubbed source is written back into the island
-//                         file in gen/hana-src (generated content) and
-//                         recorded in closure-stubs.json
-//                         ({level: "method", file, class, method, missing,
-//                         finding}), and the loop builds again until no
-//                         stubbable finding remains (--max-stub-rounds <n>,
-//                         default 5). What stays lazy is CODE and only
-//                         code: a name of a DDIC kind (TABL/DTEL/DOMA/TTYP/
-//                         SHLP, and the kind-less triple) a would-be-stubbed
-//                         method names is requested from the dumper in the
-//                         SAME iteration -- a DDIC closure is cheap and
-//                         pulls no code, and a stub over a table that
-//                         exists costs a miss-rerun cycle per method at GET
-//                         time. The method is stubbed only when the dumper
-//                         answered missing for one of its DDIC names (that
-//                         name is a gap and the stub records it) or a code
-//                         kind (CLAS/INTF/FUGR/PROG) remains, which stays
-//                         `deferred` as round 3 had it: the request carries
-//                         the lazy names in the optional
-//                         `deferred: {kind: [names]}` key beside
-//                         requested/seen -- the dumper's reader reads
-//                         requested/seen and ignores unknown keys, so the
-//                         file stays schema 1. A request that hits a
-//                         stubbed method fails with the exception's text
-//                         ("not activated here: needs <missing>") -- that
-//                         is the signal to run the iterator again: the
-//                         island grows on the miss. Before anything is
-//                         requested, the island is checked by file name
-//                         (abapGit naming, `/`->`#`, lower-case; the XML
-//                         present for the DDIC kinds): a name whose object
-//                         the island already holds is never requested and
-//                         never a gap, and its finding is a CASCADE of that
-//                         object's own findings -- counted on the iteration
-//                         line as "cascade (present)". And after the dumper
-//                         answered, a class or interface whose findings sit
-//                         outside every METHOD ... ENDMETHOD body is
-//                         EXCLUDED from the build -- through osd-build's
-//                         own exclusion seam (tools/osd-build.mjs
-//                         ownConfig reads the closure-stubs.json record the
-//                         same way it reads the hidden and inactive files),
-//                         the file left in its layer on disk, never deleted
-//                         and never rewritten; the record is
-//                         {level: "definition", file, object, findings},
-//                         the request carries the object under a new
-//                         top-level `excluded: {kind: [names]}` key (NOT
-//                         under deferred), the iteration line counts
-//                         `excluded`, and the object's dependents fall out
-//                         in the next stub round. NEVER a registered
-//                         service's own class: the MPC/DPC/_EXT pairs the
-//                         gen/hana-segw facts or the island's *.iwsv.xml /
-//                         *.iwmo.xml name fail the run instead -- that is
-//                         the service itself, and a red build is the honest
-//                         answer.
+//   --stub-unresolved     lazy activation (round 3; H5x-1 as fix round 1
+//                         corrects it -- docs/db-backends.md). A class
+//                         compiles as a whole or not at all, so the island
+//                         must close every name a class MENTIONS. With the
+//                         flag the body of every method whose findings do
+//                         not resolve is replaced by the stub raise of
+//                         zcx_osd_not_activated (`missing = '<names>'`, or
+//                         the first finding's text when the findings name
+//                         nothing, so a GET never reads "needs ''"). A
+//                         method keeps its body only while a DDIC name of
+//                         that method is still pending in THIS iteration's
+//                         request: not asked yet, its object neither in the
+//                         island nor excluded this run, the answer neither
+//                         missing nor a merge refusal; nameless, present-
+//                         only, resolved-but-still-failing and dead names
+//                         all stub. Blocks are cut at abaplint's parsed
+//                         positions, the stubbed source written back into
+//                         gen/hana-src, every stub recorded in
+//                         closure-stubs.json (--max-stub-rounds, default
+//                         5). A DDIC-kind name a would-be-stubbed method
+//                         names is asked from the dumper in the SAME
+//                         iteration; only code kinds stay `deferred`
+//                         (--defer-ddic keeps round 3). The nameless
+//                         stubs' findings are the framework work list:
+//                         framework-gaps.json beside the stubs, "framework
+//                         gaps: N" on the line. Before anything is
+//                         requested the island is checked by file name
+//                         (abapGit naming; the XML present for the DDIC
+//                         kinds; a code kind as .clas.abap OR .intf.abap):
+//                         a name whose object the island holds is never
+//                         requested, never a gap -- its finding is a
+//                         cascade of that object's own, "cascade (present)"
+//                         on the line. When no stub applies any more, a
+//                         class or interface whose findings sit outside
+//                         every METHOD ... ENDMETHOD body is EXCLUDED
+//                         through osd-build's own exclusion seam (ownConfig
+//                         reads closure-stubs.json, from --out via
+//                         OSD_HANA_CLOSURE_OUT): the file stays in its
+//                         layer on disk, the record is {level:
+//                         "definition", ...}, the request carries a
+//                         top-level `excluded: {kind: [names]}`, and
+//                         dependents fall out the next stub round. NEVER a
+//                         registered service's own class (the MPC/DPC
+//                         pairs gen/hana-segw or the island's *.iwsv.xml /
+//                         *.iwmo.xml name): the run fails instead.
 //   --defer-ddic          keeps round 3's behaviour: every name of a
 //                         stubbed method is lazy, even the dictionary's.
 //   --max-stub-rounds <n> the cap of the stub rounds above (default 5, and
@@ -252,7 +232,7 @@ import {copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, 
 import {join, resolve} from "node:path";
 import {runsAs} from "./osd-main.mjs";
 import {validationMessage} from "./hana-ddic-gen.mjs";
-import {islandClassPaths, planStubPass, registeredServiceClasses, dropPresentNames} from "./hana-closure-stubs.mjs";
+import {islandClassPaths, planStubPass, registeredServiceClasses, dropPresentNames, frameworkGapList} from "./hana-closure-stubs.mjs";
 import {buildCheck, ddicWritten, ensureLayers, islandObjectCount, islandShrinkCheck, mergeInputs} from "./hana-closure-merge.mjs";
 import {dumperConfigured, dumpRound, printedCommand} from "./hana-closure-dumper.mjs";
 
@@ -609,6 +589,8 @@ export async function run(args = process.argv.slice(2), options = {}) {
     throw new Error("hana-closure: --system <prefix> is required (the dump->layers converter names its layers <system>-<package>)");
   }
   mkdirSync(out, {recursive: true});
+  // the seam readers follow OSD_HANA_CLOSURE_OUT when --out is not the default
+  env.OSD_HANA_CLOSURE_OUT = out;
   if (stubUnresolved === true) {
     // the exclusion record is recomputed by this run (a name the dump
     // resolves must un-exclude its object): it starts empty, so the first
@@ -665,9 +647,8 @@ export async function run(args = process.argv.slice(2), options = {}) {
     throw new Error("hana-closure: OSD_HANA_CONVERTER must name the dump->layers converter (a path to dump-to-layers.mjs): every merge converts its dump into .local/hana-closure/layers-<NNN> first");
   }
 
-  // the run's exclusions (H5x-1): run-wide, not per iteration -- an object
-  // excluded in round 2 stays excluded, for the walk and for the seam's
-  // record; method-stub records stay per iteration, as always
+  // this run's exclusions (H5x-1): run-wide -- an object excluded in round
+  // 2 stays excluded; method-stub records stay per iteration, as always
   const excludedRecords = [];
   const excludedObjects = new Set();
   // the dumper budget of this run; a resumed run has its own
@@ -762,30 +743,30 @@ export async function run(args = process.argv.slice(2), options = {}) {
 
     // only the island's findings are the service's: the validation reports
     // bare file names, so the scope is the island's basename set, and a
-    // finding outside it -- src/, packs/, another gen/ folder -- is the
-    // tree's own business, counted once, never asked
+    // finding outside gen/hana-src or gen/hana-ddic is the tree's own
+    // business, counted once, never asked
     const island = islandBasenames(root);
-    let all = parseFindings(await validationMessage(root));
+    let all = parseFindings(await validationMessage(root, join(out, "closure-stubs.json")));
     let findings = all.filter((f) => island.has(f.file));
-
-    // lazy activation (--stub-unresolved, round 3), with H5x-1's rules: a
-    // DDIC-kind name a would-be-stubbed method names is requested from the
-    // dumper in the SAME iteration -- only a code kind (CLAS/INTF/FUGR/
-    // PROG) stays deferred; a method is stubbed when the dumper answered
-    // missing for one of its DDIC names or a code-kind name remains; and
-    // after the dumper answered, a class or interface whose findings sit
-    // outside every METHOD ... ENDMETHOD body is EXCLUDED through
-    // osd-build's own exclusion seam (tools/hana-closure-stubs.mjs
-    // planStubPass decides per file; a registered service's own class
-    // fails the run instead).
+    // lazy activation (--stub-unresolved) as fix round 1 corrects it: a
+    // method keeps its body only while a DDIC name of its is still pending
+    // in THIS iteration's request; nameless, present-only, resolved-but-
+    // still-failing and dead names all stub, the raise carrying the
+    // finding's text when no name exists; the nameless stubs' findings are
+    // the framework work list; a class whose definition findings name
+    // nothing still pending is EXCLUDED in a quiescent round (registered
+    // service's own classes fail the run instead)
     const stubRecords = [];
     const deferredPairs = new Map();
     const eagerNames = new Map();
     let stubRounds = 0;
+    let frameworkGaps = 0;
     if (stubUnresolved === true) {
       const classPaths = islandClassPaths(root);
       const islandFiles = island;
       const registered = registeredServiceClasses(root);
+      // this run's framework gaps: one entry per distinct nameless finding text
+      const gapFindings = new Map();
       for (;;) {
         const byFile = new Map();
         for (const f of findings) {
@@ -803,7 +784,7 @@ export async function run(args = process.argv.slice(2), options = {}) {
           break;
         }
         const applied = [];
-        let excludedNow = 0;
+        const waiting = [];
         for (const [basename, list] of byFile) {
           for (const path of (classPaths.get(basename) ?? []).sort()) {
             let source;
@@ -818,6 +799,7 @@ export async function run(args = process.argv.slice(2), options = {}) {
               plan = planStubPass({source, findings: list, basename,
                 missingOf: (name) => state.missing[name] !== undefined,
                 asked: (name) => state.asked[name] !== undefined,
+                refusedOf: (name) => state.refused[name] !== undefined,
                 islandFiles, excludedObjects, registered, deferDdic});
             } catch (error) {
               if (error.guard === true) throw error; // the service itself: the run fails
@@ -828,19 +810,35 @@ export async function run(args = process.argv.slice(2), options = {}) {
               say(`stub: ${basename} does not parse; its findings stay in the request`);
               continue;
             }
+            for (const n of plan.nameless) {
+              const entry = gapFindings.get(n.finding) ??
+                {finding: n.finding, ...(n.member !== undefined ? {member: n.member} : {}), used_by: []};
+              entry.used_by.push({file: basename, line: n.line, method: n.method});
+              gapFindings.set(n.finding, entry);
+            }
             if (plan.exclude !== undefined) {
-              excludedObjects.add(plan.exclude.object);
-              excludedRecords.push({level: "definition", file: path.slice(root.length + 1), object: plan.exclude.object, findings: plan.exclude.findings});
-              excludedNow += 1;
-              say(`excluded: ${plan.exclude.object} (${basename}): definition-level finding(s) -- the file stays in its layer on disk, the build is kept from it`);
+              waiting.push({plan, path});
+            } else {
+              if (plan.source !== source) writeFileSync(path, plan.source);
+              for (const stub of plan.stubs) {
+                applied.push(stub.className);
+                stubRecords.push({level: "method", file: path.slice(root.length + 1), class: stub.className, method: stub.method, missing: stub.missing, finding: stub.finding});
+              }
+              for (const nk of plan.deferred) deferredPairs.set(nk.name, {name: nk.name, kind: nk.kind, finding: nk.finding});
+              for (const e of plan.eager) eagerNames.set(e.name, e);
             }
-            if (plan.source !== source) writeFileSync(path, plan.source);
-            for (const stub of plan.stubs) {
-              applied.push(stub.className);
-              stubRecords.push({level: "method", file: path.slice(root.length + 1), class: stub.className, method: stub.method, missing: stub.missing, finding: stub.finding});
-            }
-            for (const nk of plan.deferred) deferredPairs.set(nk.name, {name: nk.name, kind: nk.kind, finding: nk.finding});
-            for (const e of plan.eager) eagerNames.set(e.name, e);
+          }
+        }
+        let excludedNow = 0;
+        if (applied.length === 0 && waiting.length > 0) {
+          // quiescent: no method stub applied this round -- the exclusion
+          // findings are then not cascades of a body another stub removes;
+          // dependents follow next round via excludedObjects
+          for (const {plan, path} of waiting) {
+            excludedObjects.add(plan.exclude.object);
+            excludedRecords.push({level: "definition", file: path.slice(root.length + 1), object: plan.exclude.object, findings: plan.exclude.findings});
+            excludedNow += 1;
+            say(`excluded: ${plan.exclude.object} (${path.slice(root.length + 1)}): definition-level finding(s) -- the file stays in its layer on disk, the build is kept from it`);
           }
         }
         if (applied.length === 0 && excludedNow === 0) {
@@ -853,15 +851,18 @@ export async function run(args = process.argv.slice(2), options = {}) {
         for (const [cls, count] of perClass) {
           say(`stub round ${stubRounds}: ${cls}: ${count} method(s) stubbed (generation ${generationOf(root) || "none"})`);
         }
-        if (excludedNow > 0) {
-          // the seam reads this file (ownConfig and the validation channel):
-          // written before the revalidation, so the findings leave at once
+        if (excludedNow > 0 || gapFindings.size > 0) {
+          // the seam reads closure-stubs.json: written before the
+          // revalidation, so the findings leave at once
           writeFileSync(join(out, "closure-stubs.json"), JSON.stringify([...stubRecords, ...excludedRecords], null, 2) + "\n");
+          writeFileSync(join(out, "framework-gaps.json"), JSON.stringify(frameworkGapList(gapFindings), null, 2) + "\n");
         }
-        all = parseFindings(await validationMessage(root));
+        all = parseFindings(await validationMessage(root, join(out, "closure-stubs.json")));
         findings = all.filter((f) => island.has(f.file));
       }
       writeFileSync(join(out, "closure-stubs.json"), JSON.stringify([...stubRecords, ...excludedRecords], null, 2) + "\n");
+      writeFileSync(join(out, "framework-gaps.json"), JSON.stringify(frameworkGapList(gapFindings), null, 2) + "\n");
+      frameworkGaps = gapFindings.size;
     }
     const unscoped = all.length - findings.length;
     const classified = classifyFindings(findings);
@@ -934,7 +935,7 @@ export async function run(args = process.argv.slice(2), options = {}) {
     const writtenDdic = ddicWritten(root);
     const ddicCounts = TADIR.filter((k) => (state.resolved?.[k] ?? []).length > 0)
       .map((k) => `${k} ${state.resolved[k].length}/${writtenDdic[k]?.size ?? 0}`).join(", ");
-    say(`iteration ${state.iteration}: ${fresh.length} new name(s), ${gaps.length} gap(s), ${unscoped} outside the island (not asked), ${refusedGaps.length} merge-refusal gap(s), ${cascades} cascade finding(s) skipped, ${unclassified.length} unclassified${stubUnresolved === true ? `, ${deferredOnly.length} deferred by stubs, ${stubRecords.length} stubbed method(s)` : ""}, ${objects.total} island object(s)${gapKinds !== "" ? `, gaps by kind: ${gapKinds}` : ""}${ddicCounts !== "" ? `, DDIC resolved/written: ${ddicCounts}` : ""}, ${present} cascade (present)${excludedRecords.length > 0 ? `, ${excludedRecords.length} excluded` : ""}`);
+    say(`iteration ${state.iteration}: ${fresh.length} new name(s), ${gaps.length} gap(s), ${unscoped} outside the island (not asked), ${refusedGaps.length} merge-refusal gap(s), ${cascades} cascade finding(s) skipped, ${unclassified.length} unclassified${stubUnresolved === true ? `, ${deferredOnly.length} deferred by stubs, ${stubRecords.length} stubbed method(s), framework gaps: ${frameworkGaps}` : ""}, ${objects.total} island object(s)${gapKinds !== "" ? `, gaps by kind: ${gapKinds}` : ""}${ddicCounts !== "" ? `, DDIC resolved/written: ${ddicCounts}` : ""}, ${present} cascade (present)${excludedRecords.length > 0 ? `, ${excludedRecords.length} excluded` : ""}`);
     for (const line of unclassified) say(`unclassified: ${line}`);
 
     if (fresh.length === 0) {
