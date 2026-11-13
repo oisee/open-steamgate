@@ -98,9 +98,13 @@ CLASS zcl_stg_url IMPLEMENTATION.
           message = |Not an OData path: { iv_path }|.
     ENDIF.
     rs_request-service = cl_http_utility=>unescape_url( rs_request-service ).
-    rs_request-prefix  = |/sap/opu/odata/{ lv_ns }|.
-    IF to_lower( lv_ns ) <> 'sap'.
+* "sap" in any case is the one /sap/ prefix, spelled lower case in the
+* answers; any other segment is a namespace and is repeated as given
+    IF to_lower( lv_ns ) = 'sap'.
+      rs_request-prefix = '/sap/opu/odata/sap'.
+    ELSE.
       rs_request-namespace = lv_ns.
+      rs_request-prefix    = |/sap/opu/odata/{ lv_ns }|.
     ENDIF.
     rs_request-options = it_options.
 

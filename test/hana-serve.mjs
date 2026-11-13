@@ -6,9 +6,9 @@ import {existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {fileURLToPath} from "node:url";
-import {checkTrace, countWrites, refusal, TRACE_PROBE_SQL} from "../tools/hana-serve.mjs";
+import {checkTrace, countWrites, isShadowDdl, refusal, rfcRefusal, TRACE_PROBE_SQL} from "../tools/hana-serve.mjs";
 import {installBindStructureLog} from "../tools/osd-bind-structure-log.mjs";
-import {readTrace} from "../tools/osd-sql-trace.mjs";
+import {installSqlTrace, readTrace} from "../tools/osd-sql-trace.mjs";
 
 // tools/hana-serve.mjs, the minimal read-only host over an existing HANA
 // schema, without a HANA: the host runs as a child over the generation in
@@ -41,6 +41,28 @@ describe("hana-serve: the pure parts", () => {
     expect(refusal({...ok, STG_DB: "sqlite"})).to.match(/STG_DB is sqlite/);
     expect(refusal({...ok, OSD_HANA_WRITE: "1"})).to.match(/read-only/);
     expect(refusal({...ok, STG_DB_FRESH: "1"})).to.match(/DROP SCHEMA/);
+    expect(refusal({...ok, STG_RFC_PROXY: "ZOSD_B3_DEST"})).to.match(/STG_RFC_PROXY/);
+    expect(refusal({...ok, STG_TABLE_PROXY: "ZOSD_B3_DEST"})).to.match(/STG_TABLE_PROXY/);
+  });
+
+  it("refuses an outbound RFC destination, keeps local and replay", () => {
+    expect(rfcRefusal({})).to.equal(undefined);
+    expect(rfcRefusal({ZOSD_B3_LOCAL: {kind: "local"}, ZOSD_B3_REPLAY: {kind: "replay"}})).to.equal(undefined);
+    for (const kind of ["live", "record", "fallback"]) {
+      expect(rfcRefusal({ZOSD_B3_OUT: {kind}}), kind).to.match(new RegExp(`ZOSD_B3_OUT \\(${kind}\\)`));
+    }
+  });
+
+  it("admits shadow DDL only on the own schema, and none without one (fail closed)", () => {
+    const own = `CREATE SYNONYM "OSDB3OWN"."ZOSD_B3_T" FOR "OSDB3TENANT"."ZOSD_B3_T"`;
+    const tenant = `CREATE VIEW "OSDB3TENANT"."ZOSD_B3_T_SH" AS SELECT * FROM "OSDB3TENANT"."ZOSD_B3_T"`;
+    expect(isShadowDdl(own, "OSDB3OWN")).to.equal(true);
+    expect(isShadowDdl(own, "osdb3own")).to.equal(true);
+    expect(isShadowDdl(tenant, "OSDB3OWN")).to.equal(false);
+    for (const none of [undefined, "", "  "]) {
+      expect(isShadowDdl(own, none)).to.equal(false);
+      expect(isShadowDdl(tenant, none)).to.equal(false);
+    }
   });
 
   it("counts writes on the interface, and our shadow DDL is not one", async () => {
@@ -77,6 +99,66 @@ describe("hana-serve: the pure parts", () => {
     const wrote = checkTrace([probe, {op: "insert", sql: "INSERT INTO zosd_b3_t", table: "ZOSD_B3_T"}]);
     expect(wrote.ok).to.equal(false);
     expect(wrote.writes).to.deep.equal([{channel: "api", op: "insert", kind: "INSERT", table: "ZOSD_B3_T"}]);
+    // an attempt the client refused: asked for, not sent -- listed apart,
+    // and still a failed verdict
+    const tried = checkTrace([probe, {op: "insert", sql: "INSERT INTO zosd_b3_t", table: "ZOSD_B3_T", error: "HANA_READONLY"}]);
+    expect(tried.writes).to.deep.equal([]);
+    expect(tried.refused).to.deep.equal([{channel: "api", op: "insert", kind: "INSERT", table: "ZOSD_B3_T", error: "HANA_READONLY"}]);
+    expect(tried.ok).to.equal(false);
+    expect(tried.problems.join(" ")).to.match(/1 write attempt\(s\) refused by the client \(HANA_READONLY\): asked for, not sent/);
+  });
+
+  it("records a refused call in the interface trace with its error code", async () => {
+    const entries = [];
+    const client = installSqlTrace({
+      async insert() { const e = new Error("refused"); e.code = "HANA_READONLY"; throw e; },
+      async select() { return {rows: [{probe: "OSD_TRACE_PROBE"}]}; },
+    }, (entry) => entries.push(entry));
+    await client.select({select: TRACE_PROBE_SQL});
+    await client.insert({table: "zosd_b3_t", columns: ["mandt"], values: ["'100'"]}).catch(() => undefined);
+    expect(entries.map((e) => [e.op, e.error])).to.deep.equal([["select", undefined], ["insert", "HANA_READONLY"]]);
+    const verdict = checkTrace(entries);
+    expect(verdict.writes).to.deep.equal([]);
+    expect(verdict.refused.map((r) => r.error)).to.deep.equal(["HANA_READONLY"]);
+  });
+
+  it("marks a refused write in the boot tally, and keeps one tally across clients", async () => {
+    const refusing = () => ({async insert() { const e = new Error("no"); e.code = "FAKE_READONLY"; throw e; }, async select() { return {rows: []}; }});
+    const stats = {statements: 0, writes: []};
+    const a = refusing();
+    const b = refusing();
+    countWrites(a, {stats});
+    countWrites(b, {stats});
+    await a.insert({table: "zosd_b3_t"}).catch(() => undefined);
+    await b.select({select: "SELECT 1 FROM dummy"});
+    expect(stats).to.deep.equal({statements: 2, writes: [{method: "insert", kind: "INSERT", refused: "FAKE_READONLY"}]});
+  });
+
+  it("judges a trace with tenant DDL a write, own schema given or not (the critic's reproducer, synthetic names)", async () => {
+    const fixture = join(root, "test", "fixtures", "hana-serve", "tenant-ddl-trace.ndjson");
+    const entries = readTrace(fixture);
+    for (const ownSchema of [undefined, "OSDB3OWN"]) {
+      const verdict = checkTrace(entries, {ownSchema});
+      expect(verdict.ok, String(ownSchema)).to.equal(false);
+      expect(verdict.writes.map((w) => w.kind), String(ownSchema)).to.deep.equal(["CREATE"]);
+      expect(verdict.shadowDdl).to.equal(0);
+    }
+    const bare = await traceCli(fixture, {});
+    expect(bare.code).to.equal(1);
+    expect(bare.out).to.contain("own schema: none given");
+    expect(bare.err).to.match(/no own schema given/);
+    const withEnv = await traceCli(fixture, {HANA_OWN_SCHEMA: "OSDB3OWN"});
+    expect(withEnv.code).to.equal(1);
+    expect(withEnv.out).to.contain("write: driver driver CREATE");
+  });
+
+  it("admits own-schema shadow DDL only when the own schema is given", async () => {
+    const fixture = join(root, "test", "fixtures", "hana-serve", "own-ddl-trace.ndjson");
+    expect(checkTrace(readTrace(fixture), {ownSchema: "OSDB3OWN"})).to.include({ok: true, shadowDdl: 1});
+    expect(checkTrace(readTrace(fixture), {}).ok).to.equal(false);
+    expect((await traceCli(fixture, {HANA_OWN_SCHEMA: "OSDB3OWN"})).code).to.equal(0);
+    expect((await traceCli(fixture, {}, ["--own-schema", "OSDB3OWN"])).code).to.equal(0);
+    expect((await traceCli(fixture, {})).code).to.equal(1);
   });
 });
 
@@ -111,6 +193,11 @@ describe("hana-serve: the driver channel of the HANA client", () => {
       end: () => undefined,
     })}};
     const driver = [];
+    // connect() says sy-mandt and sy-dbsys to the runtime it finds on
+    // globalThis -- in a shard that also loads the inline server
+    // (test/mocha.mjs) that is a live system, so it must not find one
+    const runtime = globalThis.abap;
+    globalThis.abap = undefined;
     const db = new HanaDatabaseClient({existingSchema: true, readOnly: true, schema: "OSDB3TENANT", ownSchema: "OSDB3OWN",
       client: "100", shadowTables: ["ZOSD_B3_T"], sqlTrace: (sql) => driver.push(sql)});
     await db.connect();
@@ -122,6 +209,7 @@ describe("hana-serve: the driver channel of the HANA client", () => {
       expect(refused?.code).to.equal("HANA_READONLY");
     } finally {
       await db.disconnect();
+      globalThis.abap = runtime;
     }
     // the trace is exactly what the driver was handed
     expect(driver).to.deep.equal(sent);
@@ -253,7 +341,24 @@ describe("hana-serve over a fake DatabaseClient", function () {
   }
 
   it("prints the bind_structure count after a $metadata", () => {
-    expect(lines.some((l) => /^bind_structure: \d+ of [1-9]\d* not found/.test(l))).to.equal(true);
+    // the demo binds four structures and every one resolves (the first run
+    // of this log found TS_STATUS_VH bound where the type is TS_STATUSVH)
+    expect(lines).to.include("bind_structure: 0 of 4 not found");
+  });
+
+  it("refuses to boot with an outbound RFC destination configured", async () => {
+    const file = join(dir, "destinations.json");
+    writeFileSync(file, JSON.stringify({ZOSD_B3_OUT: {kind: "live"}}));
+    const env = {...process.env, HANA_EXISTING_SCHEMA: "1", OSD_CLIENT: "100", OSD_OUTPUT: output, STG_RFC_DESTINATIONS: file};
+    delete env.STG_DB;
+    const answer = await new Promise((resolve) => {
+      const child = spawn(process.execPath, [tool, "--port", "0", "--client-module", "test/fixtures/hana-serve/fake-client.mjs"], {cwd: root, env});
+      let err = "";
+      child.stderr.on("data", (c) => { err += c; });
+      child.on("exit", (code) => resolve({code, err}));
+    });
+    expect(answer.code).to.equal(1);
+    expect(answer.err).to.match(/refuses outbound RFC destinations: ZOSD_B3_OUT \(live\)/);
   });
 
   it("refuses anything but GET with 405, before the ABAP", async () => {
@@ -273,7 +378,7 @@ describe("hana-serve over a fake DatabaseClient", function () {
     // and the CLI agrees, and fails the same trace without its control
     const cut = join(dir, "no-control.ndjson");
     writeFileSync(cut, readFileSync(traceFile, "utf8").split("\n").filter((l) => !l.includes("OSD_TRACE_PROBE")).join("\n"));
-    return Promise.all([traceCli(traceFile), traceCli(cut)]).then(([good, bad]) => {
+    return Promise.all([traceCli(traceFile, {HANA_OWN_SCHEMA: "OSDB3OWN"}), traceCli(cut, {HANA_OWN_SCHEMA: "OSDB3OWN"})]).then(([good, bad]) => {
       expect(good.code).to.equal(0);
       expect(bad.code).to.equal(1);
       expect(bad.err).to.match(/positive control .* missing/);
@@ -281,9 +386,11 @@ describe("hana-serve over a fake DatabaseClient", function () {
   });
 });
 
-function traceCli(file) {
+function traceCli(file, extra = {}, args = []) {
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, [tool, "--check-trace", file], {env: {...process.env, HANA_OWN_SCHEMA: "OSDB3OWN"}});
+    const env = {...process.env, ...extra};
+    if (extra.HANA_OWN_SCHEMA === undefined) delete env.HANA_OWN_SCHEMA;
+    const child = spawn(process.execPath, [tool, "--check-trace", file, ...args], {env});
     let out = "";
     let err = "";
     child.stdout.on("data", (c) => { out += c; });

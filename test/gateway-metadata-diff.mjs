@@ -147,6 +147,22 @@ describe("odata-metadata-diff: two $metadata documents, parsed and classed", () 
     expect(verdict(r, ["annotations", "order"]).ok).to.equal(false);
   });
 
+  it("compares the document versions a client branches on, as structure", () => {
+    const dsv = compare(base(), base().replace(`m:DataServiceVersion="2.0"`, `m:DataServiceVersion="3.0"`));
+    expect(dsv.differences).to.deep.equal([{class: "structure", where: "DataServices", text: `DataServiceVersion: ours "2.0", theirs "3.0"`}]);
+    const edmx = compare(base(), base().replace(`<edmx:Edmx Version="1.0"`, `<edmx:Edmx Version="4.0"`));
+    expect(edmx.differences).to.deep.equal([{class: "structure", where: "Edmx", text: `Version: ours "1.0", theirs "4.0"`}]);
+    expect(verdict(dsv, ["annotations", "order"]).ok).to.equal(false);
+  });
+
+  it("puts a function import's HTTP method and an absent Nullable into structure", () => {
+    const method = compare(base(), base().replace(`m:HttpMethod="POST"`, `m:HttpMethod="GET"`));
+    expect(classes(method)).to.deep.equal(["structure"]);
+    expect(method.differences[0].text).to.equal(`m:HttpMethod: ours "POST", theirs "GET"`);
+    const nullable = compare(base(), base({nameProp: `<Property Name="Name" Type="Edm.String" MaxLength="40" sap:label="Name" sap:creatable="false"/>`}));
+    expect(nullable.differences).to.deep.equal([{class: "structure", where: "Type Parent Property Name", text: `Nullable: ours "false", theirs (absent)`}]);
+  });
+
   it("refuses what is not EDMX, and an unknown class to accept", () => {
     expect(() => model("<a><b></a>")).to.throw(/not well-formed/);
     expect(() => model("<root/>")).to.throw(/DataServices/);

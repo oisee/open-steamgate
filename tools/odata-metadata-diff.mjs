@@ -13,6 +13,7 @@
 //                Nullable, MaxLength, Precision, Scale and every other
 //                attribute that is not sap:*), keys, navigation properties,
 //                associations with their ends and referential constraints,
+//                the document versions (edmx:Edmx Version, DataServiceVersion),
 //                entity sets, association sets, function imports with their
 //                parameters, and the schema namespace itself
 //   annotations  every sap:* attribute on any of those elements (label,
@@ -169,7 +170,14 @@ export function model(xml) {
       vocab.push({target: ref(attrs(block).Target ?? ""), content: JSON.stringify(canonical(block))});
     }
   }
-  return {namespaces, types, associations, containers, vocab};
+  // the versions a client branches on: edmx:Edmx/@Version and the
+  // DataServices' (Max)DataServiceVersion, by local name whatever the prefix
+  const versions = {"Edmx Version": attrs(edmx).Version};
+  for (const [key, value] of Object.entries(attrs(services))) {
+    const name = local(key);
+    if (name === "DataServiceVersion" || name === "MaxDataServiceVersion") versions[`DataServices ${name}`] = value;
+  }
+  return {namespaces, versions, types, associations, containers, vocab};
 }
 
 function canonical(node) {
@@ -221,6 +229,12 @@ export function compare(oursXml, theirsXml) {
   const theirs = model(theirsXml);
   const differences = [];
   const diff = (cls, where, text) => differences.push({class: cls, where: where.trim(), text});
+  for (const key of [...new Set([...Object.keys(ours.versions), ...Object.keys(theirs.versions)])].sort()) {
+    const [where, attr] = key.split(" ");
+    const x = ours.versions[key];
+    const y = theirs.versions[key];
+    if (x !== y) diff("structure", where, `${attr}: ours ${x === undefined ? "(absent)" : JSON.stringify(x)}, theirs ${y === undefined ? "(absent)" : JSON.stringify(y)}`);
+  }
   if (ours.namespaces.join(",") !== theirs.namespaces.join(",")) {
     diff("structure", "Schema", `Namespace: ours ${ours.namespaces.join(",")}, theirs ${theirs.namespaces.join(",")}`);
   }

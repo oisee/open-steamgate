@@ -4,7 +4,11 @@
 //   STG_DB=hana HANA_EXISTING_SCHEMA=1 HANA_OWN_SCHEMA=<own> OSD_CLIENT=<client> \
 //     HANA_HOST=... HANA_PORT=... HANA_USER=... HANA_PASSWORD=... HANA_SCHEMA=<tenant> \
 //     [OSD_SQL_TRACE=1] [OSD_BIND=0.0.0.0] node tools/hana-serve.mjs [--port 3040]
-//   node tools/hana-serve.mjs --check-trace <trace.ndjson>
+//   HANA_OWN_SCHEMA=<own> node tools/hana-serve.mjs --check-trace <trace.ndjson> [--own-schema <own>]
+//
+// --check-trace needs the own schema the host ran with: shadow DDL is
+// admitted only on that schema, and with none given there is no shadow DDL
+// at all -- every schema-qualified CREATE/DROP is then a write (fail closed).
 //
 // test/start.mjs cannot boot in existing-schema mode, and this is why it is
 // not used: its boot writes -- the ICF registry (ICFSERVICE/ICFHANDLER),
@@ -25,7 +29,9 @@
 //      and /sap/opu/odata/<namespace>/<SRV> (ZCL_STG_URL reads both).
 //
 // What it refuses: to start outside existing-schema mode (and with the
-// write guard lifted, OSD_HANA_WRITE=1), any method but GET (405, before a
+// write guard lifted, OSD_HANA_WRITE=1), with an outbound RFC destination
+// (live, record or fallback in the destinations file) or an RFC/table proxy
+// configured -- read-only toward every system, not only the database -- any method but GET (405, before a
 // line of ABAP runs), and a boot that wrote anything. Every statement on
 // the DatabaseClient interface is counted; a write during the boot -- which
 // would have been refused by the guard, or swallowed somewhere as subrc 4 --
@@ -64,12 +70,15 @@ export function kindOf(sql) {
   return isMultiStatement(String(sql)) ? "MULTI" : (statementKind(String(sql)) || "?");
 }
 
-/** shadow DDL of our own schema: the one DDL the mode admits */
-function isShadowDdl(sql, ownSchema) {
+/** shadow DDL of our own schema: the one DDL the mode admits. Fail closed:
+ *  without an own schema (HANA_OWN_SCHEMA unset, the H1 shape, the session in
+ *  the tenant's schema) there is no shadow DDL, so nothing is admitted. */
+export function isShadowDdl(sql, ownSchema) {
+  const own = String(ownSchema ?? "").trim().toUpperCase();
+  if (own === "") return false;
   const kind = kindOf(sql);
   if (kind !== "CREATE" && kind !== "DROP") return false;
-  const schema = shadowDdlSchema(sql);
-  return schema !== undefined && (ownSchema === undefined || ownSchema === "" || schema === String(ownSchema).toUpperCase());
+  return shadowDdlSchema(sql) === own;
 }
 
 /** Why this environment may not run the host, or undefined. */
@@ -79,7 +88,23 @@ export function refusal(env = process.env) {
   if (String(env.OSD_CLIENT ?? "") === "") return "hana-serve needs OSD_CLIENT, the logon client: without it every client-dependent table reads empty";
   if (env.OSD_HANA_WRITE === "1") return "hana-serve is read-only and refuses OSD_HANA_WRITE=1";
   if (env.STG_DB_FRESH === "1") return "hana-serve refuses STG_DB_FRESH=1: fresh means DROP SCHEMA";
+  for (const name of ["STG_RFC_PROXY", "STG_TABLE_PROXY"]) {
+    if (String(env[name] ?? "") !== "") return `hana-serve refuses ${name}: a proxy reaches another system, and this host promises to send nothing anywhere but reads`;
+  }
   return undefined;
+}
+
+/** The RFC half of the promise: CALL FUNCTION ... DESTINATION reaches
+ *  another system through a live, record or fallback destination
+ *  (tools/rfc-replay.mjs). This host refuses to start with one configured;
+ *  local and replay stay (they never leave the box). `destinations` is the
+ *  parsed destinations file. */
+export function rfcRefusal(destinations = {}) {
+  const outbound = Object.entries(destinations)
+    .filter(([, entry]) => ["live", "record", "fallback"].includes(entry?.kind))
+    .map(([name, entry]) => `${name} (${entry.kind})`);
+  if (outbound.length === 0) return undefined;
+  return `hana-serve refuses outbound RFC destinations: ${outbound.join(", ")}. The host is read-only toward every system, not only the database; point STG_RFC_DESTINATIONS at a file with local or replay entries only`;
 }
 
 /** Count the writes a client is asked for, in place (the way
@@ -87,18 +112,28 @@ export function refusal(env = process.env) {
  *  this). insert/update/delete are writes; execute and native are writes
  *  unless the statement reads -- or is the shadow DDL of our own schema,
  *  which connect() sends. */
-export function countWrites(client, {ownSchema} = {}) {
-  const stats = {statements: 0, writes: []};
+export function countWrites(client, {ownSchema, stats = {statements: 0, writes: []}} = {}) {
+  // a write is counted when it is asked for -- an attempt the client then
+  // refused is still an attempt, and is marked as refused when it throws
   const note = (method, kind) => {
     stats.statements += 1;
-    if (kind !== undefined) stats.writes.push({method, kind});
+    if (kind === undefined) return undefined;
+    const write = {method, kind};
+    stats.writes.push(write);
+    return write;
+  };
+  const marked = (write, answer) => {
+    if (write === undefined || typeof answer?.then !== "function") return answer;
+    return answer.catch((error) => {
+      write.refused = String(error?.code ?? "error");
+      throw error;
+    });
   };
   for (const method of ["insert", "update", "delete"]) {
     const original = client[method];
     if (typeof original !== "function") continue;
     client[method] = function (...args) {
-      note(method, method.toUpperCase());
-      return original.apply(this, args);
+      return marked(note(method, method.toUpperCase()), original.apply(this, args));
     };
   }
   for (const method of ["execute", "native"]) {
@@ -106,12 +141,13 @@ export function countWrites(client, {ownSchema} = {}) {
     if (typeof original !== "function") continue;
     client[method] = function (...args) {
       const texts = method === "native" ? [String(args[0]?.sql ?? "")] : (Array.isArray(args[0]) ? args[0] : [args[0]]);
+      let write;
       for (const sql of texts) {
         if (sql === "" || sql === undefined) continue;
         const kind = kindOf(sql);
-        note(method, READ_KINDS.has(kind) || isShadowDdl(sql, ownSchema) ? undefined : kind);
+        write = note(method, READ_KINDS.has(kind) || isShadowDdl(sql, ownSchema) ? undefined : kind) ?? write;
       }
-      return original.apply(this, args);
+      return marked(write, original.apply(this, args));
     };
   }
   for (const method of ["select", "openCursor"]) {
@@ -127,12 +163,22 @@ export function countWrites(client, {ownSchema} = {}) {
 
 /** Judge a trace (the entries of tools/osd-sql-trace.mjs, plus the driver
  *  lines test/setup.mjs adds for HANA): the positive control on every
- *  channel the trace has, and every statement that is not a read. */
+ *  channel the trace has, and every statement that is not a read.
+ *
+ *  The two channels record different things: the api channel records what
+ *  was ASKED of the client (an attempt the guard refused carries `error`,
+ *  and is listed under `refused`, not `writes`); the driver channel records
+ *  what was SENT. A refused attempt still fails the verdict -- the code
+ *  tried to write -- but it is never read as a statement that reached the
+ *  database. */
 export function checkTrace(entries, {ownSchema} = {}) {
   const channelOf = (entry) => (entry.op === "driver" ? "driver" : "api");
+  const own = String(ownSchema ?? "").trim();
   const channels = {};
   const writes = [];
+  const refused = [];
   let shadowDdl = 0;
+  let unownedDdl = 0;
   for (const entry of entries) {
     if (entry.sql === "" || entry.sql === undefined) continue; // LUW markers
     const channel = channelOf(entry);
@@ -141,8 +187,11 @@ export function checkTrace(entries, {ownSchema} = {}) {
     const kind = ["insert", "update", "delete"].includes(entry.op) ? entry.op.toUpperCase() : kindOf(entry.sql);
     if (kind === "SELECT" && String(entry.sql).includes(TRACE_PROBE_MARKER)) seen.probe = true;
     if (READ_KINDS.has(kind)) continue;
-    if (isShadowDdl(entry.sql, ownSchema)) { shadowDdl += 1; continue; }
-    writes.push({channel, op: entry.op, kind, table: entry.table});
+    if (isShadowDdl(entry.sql, own)) { shadowDdl += 1; continue; }
+    if (own === "" && (kind === "CREATE" || kind === "DROP") && shadowDdlSchema(entry.sql) !== undefined) unownedDdl += 1;
+    const write = {channel, op: entry.op, kind, table: entry.table};
+    if (channel === "api" && entry.error !== undefined) refused.push({...write, error: entry.error});
+    else writes.push(write);
   }
   const problems = [];
   if (Object.keys(channels).length === 0) problems.push("the trace holds no statement: it was not on");
@@ -150,14 +199,19 @@ export function checkTrace(entries, {ownSchema} = {}) {
   for (const [channel, seen] of Object.entries(channels)) {
     if (seen.probe !== true) problems.push(`the positive control (${TRACE_PROBE_MARKER}) is missing on channel ${channel}: this trace cannot show that nothing else was missed`);
   }
+  if (unownedDdl > 0) problems.push(`${unownedDdl} schema-qualified CREATE/DROP and no own schema given (HANA_OWN_SCHEMA or --own-schema): without it there is no shadow DDL, so each is counted as a write`);
   if (writes.length > 0) problems.push(`${writes.length} statement(s) that are not reads: ${writes.slice(0, 5).map((w) => `${w.kind}${w.table ? " " + w.table : ""}`).join(", ")}`);
-  return {ok: problems.length === 0, problems, channels, writes, shadowDdl};
+  if (refused.length > 0) problems.push(`${refused.length} write attempt(s) refused by the client (${[...new Set(refused.map((r) => r.error))].join(", ")}): asked for, not sent`);
+  return {ok: problems.length === 0, problems, channels, writes, refused, shadowDdl};
 }
 
 /** Boot the generation and listen. Returns {server, url, close, stats, bindLog}. */
 export async function serve({root = process.cwd(), port = 3040, clientModule, env = process.env, log = console.log} = {}) {
   const refused = refusal(env);
   if (refused !== undefined) throw new Error(refused);
+  const {loadDestinations} = await import("./rfc-replay.mjs");
+  const rfc = rfcRefusal(loadDestinations(env.STG_RFC_DESTINATIONS === undefined ? undefined : resolve(root, env.STG_RFC_DESTINATIONS)));
+  if (rfc !== undefined) throw new Error(rfc);
   env.STG_DB = "hana";
   const ownSchema = env.HANA_OWN_SCHEMA;
 
@@ -173,7 +227,10 @@ export async function serve({root = process.cwd(), port = 3040, clientModule, en
 
   // The client, built by test/setup.mjs through this seam: the real HANA
   // client, or the module's fake, and either way counted.
-  let stats;
+  // one tally for every client the seam builds (one in this mode; a
+  // second caller adds to it rather than replacing it)
+  const stats = {statements: 0, writes: []};
+  let built = 0;
   let factory;
   if (clientModule !== undefined) {
     const mod = await import(pathToFileURL(resolve(root, clientModule)).href);
@@ -185,7 +242,8 @@ export async function serve({root = process.cwd(), port = 3040, clientModule, en
   }
   globalThis.__osdHanaClientFactory = async (options) => {
     const client = await factory(options);
-    stats = countWrites(client, {ownSchema});
+    countWrites(client, {ownSchema, stats});
+    built += 1;
     return client;
   };
 
@@ -205,7 +263,7 @@ export async function serve({root = process.cwd(), port = 3040, clientModule, en
   const {dialogStep} = await import("./osd-dialog-step.mjs");
 
   await initializeABAP();
-  if (stats === undefined) throw new Error("hana-serve: test/setup.mjs did not build the client through the factory seam -- is STG_DB=hana reaching it?");
+  if (built === 0) throw new Error("hana-serve: test/setup.mjs did not build the client through the factory seam -- is STG_DB=hana reaching it?");
   await dialogStep(() => zcl_stg_segw_registry.register(), "hana-serve: the SEGW registry");
 
   // the positive control, through the ABAP's own connection
@@ -216,7 +274,7 @@ export async function serve({root = process.cwd(), port = 3040, clientModule, en
 
   // the boot wrote nothing, or the host does not start
   if (stats.writes.length > 0) {
-    throw new Error(`hana-serve: the boot sent ${stats.writes.length} write(s) to the database (${stats.writes.map((w) => `${w.method} ${w.kind}`).join(", ")}); a read-only host does not start after that`);
+    throw new Error(`hana-serve: the boot asked for ${stats.writes.length} write(s) (${stats.writes.map((w) => `${w.method} ${w.kind}${w.refused ? ` [refused: ${w.refused}]` : ""}`).join(", ")}); a read-only host does not start after that`);
   }
   log(`hana-serve: booted over client ${env.OSD_CLIENT}, ${stats.statements} statement(s), 0 writes${traceFile ? `; trace ${traceFile}` : "; trace off (OSD_SQL_TRACE=1)"}`);
 
@@ -246,7 +304,7 @@ export async function serve({root = process.cwd(), port = 3040, clientModule, en
       console.error("hana-serve: runtime error:", e);
     }
     if (stats.writes.length > before) {
-      console.error(`hana-serve: a GET of ${req.path} sent ${stats.writes.length - before} write(s): ${stats.writes.slice(before).map((w) => `${w.method} ${w.kind}`).join(", ")}`);
+      console.error(`hana-serve: a GET of ${req.path} asked for ${stats.writes.length - before} write(s): ${stats.writes.slice(before).map((w) => `${w.method} ${w.kind}${w.refused ? ` [refused: ${w.refused}]` : ""}`).join(", ")}`);
     }
     if (/\/\$metadata\/?$/.test(req.path)) log(bindLog.line());
   });
@@ -272,12 +330,16 @@ if (runsAs("hana-serve.mjs")) {
   const flag = (name) => { const i = argv.indexOf(`--${name}`); return i < 0 ? undefined : argv[i + 1]; };
   const check = flag("check-trace");
   if (check !== undefined) {
-    const verdict = checkTrace(readTrace(check), {ownSchema: process.env.HANA_OWN_SCHEMA});
+    const ownSchema = flag("own-schema") ?? process.env.HANA_OWN_SCHEMA;
+    if (String(ownSchema ?? "") === "") console.log("own schema: none given (HANA_OWN_SCHEMA / --own-schema) -- no DDL is admitted as shadow DDL");
+    else console.log(`own schema: ${ownSchema}`);
+    const verdict = checkTrace(readTrace(check), {ownSchema});
     for (const [channel, seen] of Object.entries(verdict.channels)) {
       console.log(`${channel}: ${seen.statements} statement(s), positive control ${seen.probe ? "present" : "MISSING"}`);
     }
-    console.log(`shadow DDL of our own schema: ${verdict.shadowDdl}; writes: ${verdict.writes.length}`);
+    console.log(`shadow DDL of our own schema: ${verdict.shadowDdl}; writes: ${verdict.writes.length}; refused attempts: ${verdict.refused.length}`);
     for (const w of verdict.writes) console.log(`  write: ${w.channel} ${w.op} ${w.kind}${w.table ? " " + w.table : ""}`);
+    for (const w of verdict.refused) console.log(`  refused (not sent): ${w.op} ${w.kind}${w.table ? " " + w.table : ""} [${w.error}]`);
     for (const p of verdict.problems) console.error(`FAIL: ${p}`);
     console.log(verdict.ok ? "trace OK: the control is there and nothing but reads was sent" : "trace FAILED");
     process.exit(verdict.ok ? 0 : 1);

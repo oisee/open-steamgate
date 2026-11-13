@@ -1310,18 +1310,26 @@ one dialog step per request (`tools/osd-dialog-step.mjs`) — under
 `/sap/opu/odata/sap/<SERVICE>/` and `/sap/opu/odata/<namespace>/<SERVICE>/`.
 The second route is the address a service in a namespace has on a system
 (`ZCL_STG_URL` reads both; the service is looked up by its external name
-either way, and the answer's URLs repeat the prefix the request came in on).
+either way, and the answer's URLs repeat the prefix the request came in on --
+`$batch` inner requests included. `sap` in any case is the one `/sap/`
+prefix and is answered as lower-case `sap`, so a service does not live under
+two spellings).
 
 ```
 STG_DB=hana HANA_EXISTING_SCHEMA=1 HANA_SCHEMA=<tenant> HANA_OWN_SCHEMA=<own> OSD_CLIENT=<client> \
   HANA_HOST=… HANA_PORT=… HANA_USER=… HANA_PASSWORD=… (or OSD_HANA_PASSWORD_FILE) \
   [OSD_SQL_TRACE=1 [OSD_SQL_TRACE_FILE=<file>]] [OSD_BIND=0.0.0.0] \
   node tools/hana-serve.mjs [--port 3040]
-node tools/hana-serve.mjs --check-trace <trace.ndjson>
+HANA_OWN_SCHEMA=<own> node tools/hana-serve.mjs --check-trace <trace.ndjson> [--own-schema <own>]
 ```
 
 It refuses to start outside the mode, with `OSD_HANA_WRITE=1`, with
-`STG_DB_FRESH=1` or without `OSD_CLIENT`; it answers anything but GET with 405
+`STG_DB_FRESH=1` or without `OSD_CLIENT`. The promise is read-only toward
+every system, not only the database: it also refuses to start with
+`STG_RFC_PROXY` or `STG_TABLE_PROXY` set, or with a destinations file
+(`STG_RFC_DESTINATIONS`, default `.local/rfc-destinations.json`) naming a
+`live`, `record` or `fallback` destination -- `local` and `replay` stay,
+they never leave the box; it answers anything but GET with 405
 before a line of ABAP runs; it binds to loopback unless `OSD_BIND` opens it.
 Every statement on the DatabaseClient interface is counted, and a boot that
 sent a write — refused by the guard, or swallowed somewhere as subrc 4 —
@@ -1340,8 +1348,16 @@ wrapper of the eleven members sees, included. A trace is evidence only with
 its **positive control**: the boot sends one known SELECT
 (`SELECT 'OSD_TRACE_PROBE' AS probe FROM dummy`) through the connection the
 ABAP reads through, and `--check-trace` fails a trace that does not carry it
-on every channel it has, then lists every statement that is not a read
-(shadow DDL of `HANA_OWN_SCHEMA` counted apart). An earlier "zero writes" on
+on every channel it has, then lists every statement that is not a read.
+Shadow DDL is counted apart only on the own schema the host ran with
+(`HANA_OWN_SCHEMA` or `--own-schema`); **with none given there is no shadow
+DDL at all**, every schema-qualified CREATE/DROP is a write, and the check
+says it was run without one (fail closed: from a fresh shell a tenant-schema
+`CREATE VIEW` was once judged clean). The two channels record different
+things: the api channel records what was *asked of* the client -- a call the
+client refused carries its `error` code and is listed as a refused attempt,
+not as a statement sent -- and the driver channel records what was *sent*.
+A refused attempt still fails the check: the code tried to write. An earlier "zero writes" on
 this track was read off a trace that was off; an empty trace and an off
 trace look the same, and the control is what tells them apart.
 
@@ -1353,8 +1369,9 @@ with no error. `tools/osd-bind-structure-log.mjs` wraps the entity type's
 and the complex type's `bind_structure`, runs the original unchanged and
 resolves the name once more with the same `CL_ABAP_TYPEDESCR=>DESCRIBE_BY_NAME`;
 the count is cumulative over distinct names since boot. Its first run found
-one in our own demo: `ZCL_ZSTG_DEMO_MPC` binds `TS_STATUS_VH`, and the type
-is `TS_STATUSVH`.
+one in our own demo: `ZCL_ZSTG_DEMO_MPC` bound `TS_STATUS_VH` where the type
+is `TS_STATUSVH` (fixed; the demo now reads 0 of 4, and the host test
+expects exactly that).
 
 `tools/odata-metadata-diff.mjs <ours.xml> <theirs.xml> [--accept
 annotations,order]` compares two `$metadata` documents parsed
@@ -1362,7 +1379,9 @@ annotations,order]` compares two `$metadata` documents parsed
 properties with Type, Nullable, MaxLength, Precision, Scale and every other
 non-`sap:` attribute, keys, navigation properties, associations with ends and
 referential constraints, entity sets, association sets, function imports and
-their parameters, the schema namespace), **annotations** (every `sap:*`
+their parameters with `m:HttpMethod`, the schema namespace, and the document
+versions a client branches on: `edmx:Edmx/@Version` and
+`DataServices/@DataServiceVersion`), **annotations** (every `sap:*`
 attribute — label, creatable/updatable/deletable, addressable, …— and
 vocabulary `<Annotations>` blocks per target), **order** (the same members in
 another order, property order included). It exits 0 only when every class
