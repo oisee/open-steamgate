@@ -860,6 +860,44 @@ ENDCLASS.`,
     const merged = graph.mergeNames({analysis, findings, classPaths: new Map([["zif_h5c_inc_outer.intf.abap", []]])});
     expect(merged.names.map((n) => [n.name, n.kind])).to.deep.equal([["ZIF_H5C_INC_MISSING", "intf"], ["ZIF_H5C_INC_MISSING2", "intf"]]);
     expect(merged.structuralCount, "the include's finding is structural, never unclassified").to.equal(1);
+    // one definition edge per present include (the scope walk may carry it too)
+    expect(edges.filter((e) => e.to === "ZIF_H5C_INC_PRESENT" && e.level === "definition")).to.have.lengthOf(1);
+  });
+
+  it("mergeNames matches an INTERFACES include's finding on its exact name only -- a name it merely prefixes is still asked (critic M1, #939)", async () => {
+    const abaplint = await import("@abaplint/core");
+    const graph = await import("../tools/hana-closure-graph.mjs");
+    const reg = new abaplint.Registry(new abaplint.Config(JSON.stringify({
+      global: {files: "/**/*.*"},
+      syntax: {version: abaplint.Version.OpenABAP, errorNamespace: "."},
+      rules: {},
+    })));
+    reg.addFile(new abaplint.MemoryFile("zif_h5r_long.intf.abap", [
+      "INTERFACE zif_h5r_long PUBLIC.",
+      "  INTERFACES zif_h5r_x.",
+      "  TYPES ty_h5r_1 TYPE i.",
+      "  TYPES ty_h5r_2 TYPE i.",
+      "  TYPES ty_h5r_3 TYPE i.",
+      "  TYPES ty_h5r_4 TYPE i.",
+      "  TYPES ty_h5r_5 TYPE i.",
+      "  TYPES ty_h5r_6 TYPE i.",
+      "  TYPES ty_h5r_7 TYPE i.",
+      "  METHODS m.",
+      "ENDINTERFACE.",
+    ].join("\n")));
+    reg.parse();
+    const classPaths = new Map([["zif_h5r_long.intf.abap", ["/r/gen/hana-src/000-x/src/zif_h5r_long.intf.abap"]]]);
+    const analysis = graph.analyseIsland({reg, root: "/r", classPaths});
+    const findings = parseFindings([
+      "check_syntax, Interface zif_h5r_x unknown, zif_h5r_long.intf.abap:1",
+      "check_syntax, Unknown class zif_h5r_x_lcl, zif_h5r_long.intf.abap:10",
+      "check_syntax, Interface zif_h5r_x_tt unknown, zif_h5r_long.intf.abap:10",
+    ].join("\n"));
+    const merged = graph.mergeNames({analysis, findings, classPaths});
+    expect(merged.structuralCount, "only the include's own finding is structural").to.equal(1);
+    expect(merged.rest.map((f) => f.line)).to.deep.equal([10, 10]);
+    expect(classifyFindings(merged.rest).names.map((n) => [n.name, n.kind]), "the prefixed names are asked").to.deep.equal(
+      [["ZIF_H5R_X_LCL", "clas"], ["ZIF_H5R_X_TT", "intf"]]);
   });
 
   it("the fallback asks `Interface X unknown` as INTF when no reference carried it (H5x-4 B1)", () => {

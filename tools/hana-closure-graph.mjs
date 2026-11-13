@@ -299,12 +299,9 @@ export function analyseObject(reg, filename) {
     for (const c of node.getChildren()) visit(c, here);
   };
   if (spaghetti !== undefined) visit(spaghetti.getTop(), undefined);
-  // a global interface's METHODS parameters: their types live on the
-  // interface's definition only -- no scope var carries them (a class's
-  // parameters are vars of the METHOD scope, an interface has no method
-  // scope), so a `TYPE zif_x=>ty` parameter of an absent zif_x reached the
-  // build as `Could not resolve top` with no reference behind it (B1, bed
-  // run 21). Signature level, with the method's name.
+  // a global interface's METHODS parameters live on its definition only (no
+  // method scope carries them as vars, unlike a class's): signature level,
+  // with the method's name (B1, bed run 21's `Could not resolve top`)
   if (kind === "INTF") {
     let methods = [];
     try {
@@ -348,13 +345,15 @@ export function analyseObject(reg, filename) {
         bucket.unknowns.push({name: s.name, kind: "super", via: "super", line: s.line, level: "definition"});
       }
     }
-    // an INTERFACES statement: a definition-level edge when the interface is
-    // in the build, a definition-level INTF ask when it is not (the scope's
-    // own `Object (Unknown)` record, where it has one, carries the same
-    // name and line and wins the dedupe)
+    // an INTERFACES statement: a definition edge when the interface is in
+    // the build, a definition-level INTF ask when not (a scope record of
+    // the same name and line wins the dedupe)
     for (const i of bucket.includes ?? []) {
       if (i.resolved === true) {
-        bucket.edges.push({to: i.name, level: "definition"});
+        // one definition edge per target (the scope walk may have one)
+        if (bucket.edges.some((e) => e.to === i.name && e.level === "definition") === false) {
+          bucket.edges.push({to: i.name, level: "definition"});
+        }
         continue;
       }
       const key = `${base}|${i.name}|${i.line}`;
@@ -774,6 +773,9 @@ export function testCodeObjects(objects, sourceOf = undefined) {
   return {roots, all: new Set(roots)};
 }
 
+// the checker's wording for an INTERFACES statement whose target is absent
+const INCLUDE_FINDING = /^Interface ([A-Za-z0-9_/#$]+) unknown$/i;
+
 /** the request names out of one iteration's structural pass and its
  *  findings: the references first (with their TADIR-ish kinds), then the
  *  text fallback for the findings no reference carries -- a finding whose
@@ -795,12 +797,14 @@ export function mergeNames({analysis, findings, classPaths}) {
   const unknownsOf = new Map(analysis.objects.map((o) => [o.object, o.unknowns]));
   const isStructural = (f) => {
     const us = unknownsOf.get(objectOfBase.get(f.file) ?? "");
-    // an INTERFACES include's finding sits on the INTERFACE statement's
-    // line, not the include's (`Interface X unknown`, measured): matched by
-    // the name the include carries, wherever in the file
-    return us !== undefined &&
-      us.some((u) => (u.via === "interfaces" || Math.abs(u.line - f.line) <= 2) &&
-        f.message.toUpperCase().includes(u.name) === true);
+    // an include's finding sits on the INTERFACE line, not the include's:
+    // matched anywhere in the file, but only on the checker's wording with
+    // the EXACT name -- a substring swallowed `zif_x_lcl` under `zif_x`
+    if (us === undefined) return false;
+    const included = INCLUDE_FINDING.exec(f.message)?.[1]?.toUpperCase();
+    return us.some((u) => u.via === "interfaces"
+      ? included === u.name
+      : Math.abs(u.line - f.line) <= 2 && f.message.toUpperCase().includes(u.name) === true);
   };
   const names = [];
   const seen = new Set();
