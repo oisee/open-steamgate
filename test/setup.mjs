@@ -582,8 +582,23 @@ async function setupDatabase(abap, schemas, insert) {
       const {ddicTables} = await import("../tools/hana-shadow-schema.mjs");
       shadowTables = ddicTables(process.env.OSD_ROOT ?? process.cwd());
     }
-    db = new HanaDatabaseClient({trace: process.env.STG_DB_TRACE === "1", ddicBinary,
-      ...(shadowTables === undefined ? {} : {shadowTables})});
+    // STG_SQL_TRACE: beside the interface (traced, below), what the HANA
+    // client hands the driver -- the folded text, and connect()'s own SET
+    // SCHEMA and shadow DDL, which no wrapper of the eleven members sees
+    const traceFile = process.env.STG_SQL_TRACE;
+    let driverTrace;
+    if (traceFile !== undefined && traceFile !== "") {
+      const sink = fileSink(traceFile);
+      let n = 0;
+      driverTrace = (sql) => sink({n: n++, op: "driver", sql});
+    }
+    const options = {trace: process.env.STG_DB_TRACE === "1", ddicBinary,
+      ...(shadowTables === undefined ? {} : {shadowTables}),
+      ...(driverTrace === undefined ? {} : {sqlTrace: driverTrace})};
+    // the one seam a host may take the client through: tools/hana-serve.mjs
+    // counts its writes there, and its test hands over a fake
+    const factory = globalThis.__osdHanaClientFactory;
+    db = typeof factory === "function" ? await factory(options) : new HanaDatabaseClient(options);
     abap.context.databaseConnections["DEFAULT"] = traced(db);
     await db.connect();
     // HANA_EXISTING_SCHEMA=1: a schema an SAP system already holds, read-only

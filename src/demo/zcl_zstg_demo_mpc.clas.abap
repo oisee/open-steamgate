@@ -209,7 +209,7 @@ CLASS zcl_zstg_demo_mpc IMPLEMENTATION.
         iv_key      = 'label'
         iv_value    = 'Status text' ).
 
-    lo_entity_type->bind_structure( iv_structure_name   = 'ZCL_ZSTG_DEMO_MPC=>TS_STATUS_VH'
+    lo_entity_type->bind_structure( iv_structure_name   = 'ZCL_ZSTG_DEMO_MPC=>TS_STATUSVH'
                                     iv_bind_conversions = abap_true ).
 
     lo_entity_set = lo_entity_type->create_entity_set( gc_status_vh_set ).

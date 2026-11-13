@@ -1,0 +1,10 @@
+{
+  "zstg_demo": [
+    {"mandt": "100", "travel_id": "T0101", "description": "Fixture trip one", "status": "A", "seats": 3},
+    {"mandt": "100", "travel_id": "T0102", "description": "Fixture trip two", "status": "X", "seats": 5}
+  ],
+  "zstg_status": [
+    {"mandt": "100", "status": "A", "status_text": "Accepted"},
+    {"mandt": "100", "status": "X", "status_text": "Cancelled"}
+  ]
+}

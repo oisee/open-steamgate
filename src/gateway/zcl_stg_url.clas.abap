@@ -1,8 +1,14 @@
 CLASS zcl_stg_url DEFINITION PUBLIC CREATE PUBLIC.
 * OData v2 URL: /sap/opu/odata/sap/<Service>/<EntitySet>(<keys>)/$count?$opt=...
+* A service whose technical name sits in a namespace is addressed with the
+* namespace in place of "sap": /sap/opu/odata/<NS>/<Service>/... The service
+* is looked up by its external name either way; namespace and prefix say how
+* it was addressed, so the answer's own URLs repeat that address.
   PUBLIC SECTION.
     TYPES: BEGIN OF ty_request,
              service         TYPE string,
+             namespace       TYPE string,
+             prefix          TYPE string,
              entity_set      TYPE string,
              key_string      TYPE string,
              nav_prop        TYPE string,
@@ -77,11 +83,13 @@ ENDCLASS.
 CLASS zcl_stg_url IMPLEMENTATION.
 
   METHOD parse.
+    DATA lv_ns      TYPE string.
     DATA lv_rest    TYPE string.
     DATA lv_segment TYPE string.
     DATA lv_off     TYPE i.
 
-    FIND REGEX '/sap/opu/odata/sap/([^/?]+)(.*)$' IN iv_path SUBMATCHES rs_request-service lv_rest.
+    FIND REGEX '/sap/opu/odata/([^/?]+)/([^/?]+)(.*)$' IN iv_path
+      SUBMATCHES lv_ns rs_request-service lv_rest.
     IF sy-subrc <> 0.
       RAISE EXCEPTION TYPE zcx_stg_error
         EXPORTING
@@ -90,6 +98,14 @@ CLASS zcl_stg_url IMPLEMENTATION.
           message = |Not an OData path: { iv_path }|.
     ENDIF.
     rs_request-service = cl_http_utility=>unescape_url( rs_request-service ).
+* "sap" in any case is the one /sap/ prefix, spelled lower case in the
+* answers; any other segment is a namespace and is repeated as given
+    IF to_lower( lv_ns ) = 'sap'.
+      rs_request-prefix = '/sap/opu/odata/sap'.
+    ELSE.
+      rs_request-namespace = lv_ns.
+      rs_request-prefix    = |/sap/opu/odata/{ lv_ns }|.
+    ENDIF.
     rs_request-options = it_options.
 
     IF lv_rest = '' OR lv_rest = '/'.
