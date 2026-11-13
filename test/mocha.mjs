@@ -669,6 +669,21 @@ describe("wire", () => {
     expect((await res.json()).error.code).to.equal("STG/BUSINESS");
   });
 
+  it("a business exception carries the DPC's message-container messages in innererror", async () => {
+    // the demo DPC adds the message through the container the runtime
+    // context serves (get_message_container + add_message, the /IWBEP/
+    // members the SEGW sample calls); the dispatcher resets the container
+    // per request and reads it into the error response
+    const res = await fetch(`${BASE}/CancelTravel?TravelId='ZZZZZZ9Z'`, {method: "POST", headers: {"x-csrf-token": "open-steamgate"}});
+    expect(res.status).to.equal(400);
+    const body = await res.json();
+    expect(body.error.code).to.equal("STG/BUSINESS");
+    expect(body.error.innererror.errordetails).to.be.an("array").with.lengthOf(1);
+    expect(body.error.innererror.errordetails[0].message.value).to.contain("ZZZZZZ9Z");
+    expect(body.error.innererror.errordetails[0].severity).to.equal("error");
+    expect(body.error.innererror.errordetails[0].code).to.equal("ZSTG_DEMO004");
+  });
+
   // The demo's Travel carries etag: true on Description/Status/Seats, and
   // the V2 $metadata answers ConcurrencyMode="Fixed" for them: a client that
   // trusts the metadata must get lost-update protection, as it gets it from

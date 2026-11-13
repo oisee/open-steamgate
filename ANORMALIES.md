@@ -30,6 +30,24 @@ Format adapted from `larshp/hithub` (MIT).
 
 ## Open anomalies
 
+### ANOMALY-2026-11-13-select-loop-join-into-list -- A SELECT loop over a join INTO (list) cannot run, assigns one target and pages wrong
+
+- Status: `workaround` (the pinned fork `oisee/transpiler` `local/osd-build-4e` `4e9b744d` = `local/osd-build-4c` plus two commits, `d8525705` and `4e9b744d`, also on branch `fix/select-loop-join-into-list` for the upstream PR)
+- Discovery date: `2026-11-13` (a probe class with the read shape of a code-based SEGW sample's GET_ENTITYSET, transpiled with the pin)
+- Affected versions: `@abaplint/transpiler` and `@abaplint/runtime` on the pinned fork `oisee/transpiler` `local/osd-build-4c` `a0d80fff`, and upstream main of the same date (`packages/transpiler/src/structures/select.ts` is unchanged there)
+- Affected ABAP statement, runtime API or adapter: `SELECT ... INTO (v1, v2, ...) FROM ( ta AS a INNER JOIN tb AS b ON ... ) ... ENDSELECT`, and any SELECT loop INTO a list or over an alias; `packages/transpiler/src/structures/select.ts`
+- Minimal ABAP reproducer: `SELECT t~travel_id s~status_text INTO (lv_id, lv_text) FROM ( zstg_demo AS t INNER JOIN zstg_status AS s ON t~status = s~status ) ORDER BY t~travel_id. ... ENDSELECT.`
+- Exact command used to run it: `npm run unit` (test class `ZCL_OSD_SELECT_LOOP_TEST`)
+- Expected SAP behaviour: every target of the list takes its column per row; inside the loop sy-dbcnt is the number of rows read so far (1, 2, 3 ...) and sy-subrc 0; after ENDSELECT sy-dbcnt is the number of rows read and sy-subrc is 4 when there was none.
+- Actual open-abap behaviour: the generated code builds its buffer with `abap.DDIC["ZSTG_DEMO AS T"].type()`, the text of the first FROM source, which is undefined for an alias or a join (TypeError at the first call); for a single table it assigns only the first target, from the whole row; and it sets sy-dbcnt once, to the total, before the first row, so `IF sy-dbcnt > skip` is true on every row and `$skip` is silently ignored.
+- Impact on open-steamgate: every GET_ENTITYSET of a code-based SEGW service written in this 7.02 style (the HANA bed's sample service reads all five business sets so) dumps; with the dump fixed alone, paging would return wrong rows without an error.
+- Fixed with it (critic round, `4e9b744d`): two columns of one name in the list (`t~status s~status`) came back from every database client as one key, and the first fix's fill by position then put each later column into the wrong target without an error; the loop now aliases its list by position (`AS "p0"`, ...). PACKAGE SIZE ... INTO TABLE over a join crashed with "Table, set error"; FOR ALL ENTRIES over a join turned `a~f = itab-f` into an arithmetic `'value' - f` (zero rows or an SQL error). Both run now.
+- Residual edges, known: a list that cannot be aliased (`*`, a dynamic `(lv_fields)`, a host variable or constant in the list) with two columns of one name is refused at run time ("SELECT INTO list: n columns for m targets") rather than filled; `INTO wa` and `INTO TABLE` over a join still fill by name (the transpiler treats every INTO as CORRESPONDING), so two same-named columns there leave one component initial where the system fills left to right; a SELECT loop still reads its whole result into memory before the first row (no cursor, the WAIT entry above).
+- Smallest safe workaround: rewrite the read as `SELECT ... INTO TABLE` and page over the table; not applicable to service code read from a system, hence the transpiler fix.
+- Upstream issue: none yet; the fix goes upstream as a branch inside `abaplint/transpiler` after the critic pass (CLAUDE.md, "A transpiler PR comes from a branch inside abaplint/transpiler").
+- Regression-test location: `test/unit/zcl_osd_select_loop_test.clas.testclasses.abap` (five cases, `same_named_columns` among them); in the transpiler, `test/database.ts` ("SELECT loop, join ...", "... same-named columns ...", "... refused, not misassigned")
+- Upstream version containing a fix: `unknown`
+
 ### ANOMALY-2026-11-10-wait-in-select-loop -- A WAIT inside SELECT ... ENDSELECT reads on (Node, OSGo with one connection) where a system dumps DBIF_RSQL_INVALID_CURSOR
 
 - Status: `open` (OSGo's work-process steps behave as the system; the Node host and OSGo's classic one-connection path do not)
@@ -4597,3 +4615,14 @@ Not an anomaly, recorded for porting: on 7.58, `FIND ... REGEX` (POSIX) raises a
   request clear it early; WAIT already commits the step's LUW, so a group
   with a WAIT in it is not atomic either way.
 - Upstream: none.
+
+## The /IWBEP/ members the SEGW sample calls are overlays over the pinned open-abap-odata (H5x-3)
+
+- Status: worked around locally; the same change sits in the lib clone's working tree (branch `feat/iwbep-members-h5x3`) as the upstream PRs to send, one per member group (`docs/upstream.md`).
+- Discovery: bed run 18 at #934 (framework-gaps.json, private evidence): six seed rows -- `get_navigation_path` (on `/IWBEP/IF_MGW_REQ_ENTITY` and `/IWBEP/IF_MGW_REQ_ENTITYSET`), `get_function_import_name` + `get_converted_parameters` (on `/IWBEP/IF_MGW_REQ_FUNC_IMPORT`), `get_message_container` (on `/IWBEP/IF_MGW_CONTEXT`), `add_message` (on `/IWBEP/IF_MESSAGE_CONTAINER`), and `content_id` / `content_id_ref` on the changeset request/response structures of `/IWBEP/IF_MGW_APPL_SRV_RUNTIME`.
+- Expected: a real Gateway's /IWBEP/ layer answers all six; the sample's DPC_EXT bodies compile against it.
+- Here: the pinned open-abap-odata (bd9f1fb) lacks every one. The extended interfaces and the implementing classes are carried under `src/gateway/compat/`, and the lib copies are excluded from both pulls (abap_transpile.json's lib exclude_filter, abaplint.jsonc's files glob). The runtime serves the getters from `zcl_stg_request_context`'s own data, `zcl_oao_context` serves the per-request container, and `zcl_stg_dispatcher` resets the container per request and reads it into the error response (`innererror.errordetails`).
+- Reproducer: `src/gateway/zcl_stg_request_context.clas.testclasses.abap`, `src/gateway/compat/zcl_oao_msg_container.clas.testclasses.abap`, the wire test in `test/mocha.mjs` (the demo DPC adds a message through the container on a business exception).
+- Smallest safe workaround: the overlays; removal is "when the pin carries the members, drop the overlays and both exclusions" (`src/gateway/compat/README.md`).
+- Upstream: open-abap-odata, one small PR per member group; the dossier with the branch and commits is in `docs/upstream.md`.
+- Regression-test location: the three reproducers above, plus the island rule's own tests in `test/hana-closure.mjs` (H5x-3).

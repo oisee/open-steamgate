@@ -90,7 +90,19 @@
 //                         excluding; and NEVER a registered service's own
 //                         class -- the MPC/DPC/_EXT pairs a registration
 //                         names, or by suffix without one: the run fails
-//                         instead. Since H5x-2 the names come from the
+//                         instead. Since H5x-3 (fix round 1) the island's
+//                         TEST CODE -- a class whose OWN definition is the
+//                         ABAP unit-test framework's (FOR TESTING, or
+//                         inheriting from or implementing the framework's
+//                         classes/interfaces; never a class that merely
+//                         references one) -- leaves the build before any of
+//                         this is needed: recorded {testCode: true} in the
+//                         record's roots, never stubbed, never asked, never
+//                         a framework gap; a dependent of a test-code root
+//                         falls as a CASCADE of it through the graph
+//                         decision's seeds, and a FRIENDS clause naming one
+//                         strips. Since
+//                         H5x-2 the names come from the
 //                         structural pass (references(), one SyntaxLogic
 //                         pass per object): a signature-level miss (a
 //                         parameter typed by a missing name) stays whole
@@ -254,7 +266,7 @@ import {islandClassPaths, planStubPass, registeredServiceClasses, serviceGuardBy
 import {buildCheck, ddicWritten, ensureLayers, generationOf, islandBasenames, islandObjectCount, islandShrinkCheck, mergeInputs} from "./hana-closure-merge.mjs";
 import {dumperConfigured, dumpRound, printedCommand, provenanceFor} from "./hana-closure-dumper.mjs";
 import {cascadeOf, classifyFindings, exclusionCandidates, nameFromAbapFile, parseFindings} from "./hana-closure-exclude.mjs";
-import {analyseIsland, graphDecide, mergeNames, requestKindOf, structuralRegistry, waitsOf, writeClosureRecord} from "./hana-closure-graph.mjs";
+import {analyseIsland, graphDecide, mergeNames, requestKindOf, structuralRegistry, testCodeObjects, waitsOf, writeClosureRecord} from "./hana-closure-graph.mjs";
 
 // ------------------------------------------------------------ findings ----
 
@@ -607,6 +619,7 @@ export async function run(args = process.argv.slice(2), options = {}) {
     let frameworkGaps = 0;
     let cycles = 0;
     let guardBySuffix = false;
+    let testExcluded = new Set();
     if (stubUnresolved === true) {
       const classPaths = islandClassPaths(root);
       const islandFiles = island;
@@ -641,8 +654,48 @@ export async function run(args = process.argv.slice(2), options = {}) {
         else excludedRecords.push(rec);
       };
       const writeRecord = () =>
-        writeClosureRecord(out, {stubRecords, excludedRecords, waits: waitsOf(analysisObjects, pendingAtFixedPoint),
+        writeClosureRecord(out, {stubRecords, excludedRecords,
+          waits: waitsOf(analysisObjects.filter((o) => testExcluded.has(o.object) === false), pendingAtFixedPoint),
           errors: [...errorRecords.values()]});
+      // H5x-3, fix round 1: the island's test code is a class whose OWN
+      // definition is test code (FOR TESTING, or inheriting from or
+      // implementing the ABAP unit-test framework's classes/interfaces --
+      // testCodeObjects). Nothing else: the first round closed this
+      // transitively and the bed's registered service's own DPC was dragged
+      // in by the test helpers it merely names (two AUNIT-mentioning EPM
+      // test classes pulled the whole EPM layer, and the DPC's source names
+      // its own _EXT), so the seed guard killed the run. The roots leave
+      // the build here (records; never stubbed, never asked, never a
+      // framework gap); their DEPENDENTS fall as cascades of them through
+      // the graph decision (#934), which the quiescent round makes with
+      // these roots as seeds -- never as test code -- and a FRIENDS clause
+      // naming a root strips, as for any excluded object. A registered
+      // service's own class still fails the run.
+      const testCode = testCodeObjects(analysisObjects, (o) => {
+        try {
+          return readFileSync(join(root, o.file), "utf8");
+        } catch {
+          return undefined;
+        }
+      });
+      testExcluded = testCode.all;
+      for (const name of [...testExcluded].sort()) {
+        if (guard.has(name) === true) {
+          const how = guardBySuffix === true
+            ? "recognised by suffix (no registration in gen/hana-segw or the island's *.iwsv.xml / *.iwmo.xml)"
+            : "gen/hana-segw or the island's *.iwsv.xml / *.iwmo.xml";
+          throw new Error(`hana-closure: ${name} is a registered service's own class (${how}): the unit-test-framework rule would exclude it -- the service itself cannot be excluded from the build, the run fails`);
+        }
+        const o = byObject.get(name);
+        if (o === undefined) continue;
+        excludedRecords.push({level: "definition", object: name, file: o.file, kind: o.kind,
+          missing: [], findings: [], testCode: true});
+        excludedObjects.add(name);
+      }
+      if (testExcluded.size > 0) {
+        say(`test code: ${testExcluded.size} island object(s) out of the build (a class whose own definition is the ABAP unit-test framework's, H5x-3)`);
+        writeRecord();
+      }
       for (;;) {
         const byFile = new Map();
         for (const f of findings) {
@@ -671,6 +724,7 @@ export async function run(args = process.argv.slice(2), options = {}) {
             }
             const object = objectOf(basename);
             if (planErrored.has(object) === true) continue;
+            if (testExcluded.has(object) === true) continue;
             const refs = byObject.get(object)?.unknowns ?? [];
             let plan;
             try {
@@ -706,7 +760,7 @@ export async function run(args = process.argv.slice(2), options = {}) {
         // references (the graph), beside this round's findings outside
         // every method body -- signature-line findings are the stub pass's
         const planByFile = new Map(planned.map((p) => [p.basename, p]));
-        const objects = analysisObjects.filter((o) => planErrored.has(o.object) === false).map((o) => {
+        const objects = analysisObjects.filter((o) => planErrored.has(o.object) === false && testExcluded.has(o.object) === false).map((o) => {
           const sigLines = new Set(o.signatureLines ?? []);
           const entry = {object: o.object, defNames: defNamesOf(o),
             edges: (o.edges ?? []).filter((e) => e.level === "definition").map((e) => e.to),
@@ -769,7 +823,12 @@ export async function run(args = process.argv.slice(2), options = {}) {
             statusOf: (name, kind) => excludedObjects.has(name) === true ? "excluded"
               : objectFilePresent(name, kind, islandFiles) === true ? "present" : "absent",
             guard,
-            guardMode: guardBySuffix === true ? "suffix" : "registration"});
+            guardMode: guardBySuffix === true ? "suffix" : "registration",
+            // the island's test-code roots: already excluded above; here
+            // they are graph nodes, so their dependents fall as cascades
+            // of them (H5x-3 fix round 1: the dependents are #934's
+            // cascades, never test code themselves)
+            seeds: testExcluded});
           if (decision.blocked === true) {
             // S-2.2: nothing is decided this round -- the hold limbo would
             // leave a capped run red forever; the held files' stubs and
@@ -839,8 +898,11 @@ export async function run(args = process.argv.slice(2), options = {}) {
     const unscoped = all.length - findings.length;
     // the names: the references first, then the text fallback for the
     // findings no reference carries (H5x-2)
+    const analysisForNames = testExcluded.size > 0
+      ? {...analysis, objects: analysis.objects.filter((o) => testExcluded.has(o.object) === false)}
+      : analysis;
     const {names: structuralNames, structuralCount, rest} = mergeNames(
-      {analysis, findings, classPaths: islandClassPaths(root)});
+      {analysis: analysisForNames, findings, classPaths: islandClassPaths(root)});
     const classified = classifyFindings(rest);
     // H5x-1: a name whose object is in the island -- by file name for
     // CLAS/INTF, by the XML present for the DDIC kinds -- is never

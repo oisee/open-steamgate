@@ -207,6 +207,22 @@ export function analyseObject(reg, filename) {
         bucket.methodDefs = bucket.methodDefs ?? [];
         bucket.methodDefs.push({method: String(toks[1]?.getStr() ?? "").toUpperCase(),
           start: st.getStart().getRow(), end: st.getEnd().getRow()});
+      } else {
+        // the modern standalone form (`GLOBAL FRIENDS y.` -- its own
+        // statement, apart from the CLASS DEFINITION header): without this
+        // scan the clause reaches the record only as a resolved edge and
+        // the strip never sees it. Matched by tokens, not by the
+        // statement's constructor name, so the abaplint naming cannot
+        // break it.
+        const toks = st.getTokens().map((t) => t.getStr().toUpperCase());
+        if (toks[0] === "GLOBAL" && toks[1] === "FRIENDS") {
+          for (let i = 2; i < toks.length; i++) {
+            const s = toks[i];
+            if (s === ".") break;
+            if (/^[A-Z0-9_/#]+$/.test(s) === false) continue;
+            bucket.friends.push({name: s, line: st.getStart().getRow()});
+          }
+        }
       }
     }
   }
@@ -455,20 +471,33 @@ export function stronglyConnected(adj) {
  *  {blocked, roots, cascades, cycles, strips, excluded}: roots
  *  [{object, missing, nameless}], cascades [{object, of}], cycles
  *  [{members, kept: true}], strips [{object, of}] (FRIENDS clauses naming an
- *  excluded object -- soft, stripped, never excluded). Throws on a seed
- *  class that would be excluded. Pure. */
-export function graphDecide({objects, pendingOf, statusOf, guard = new Set(), guardMode = "registration"}) {
+ *  excluded object -- soft, stripped, never excluded; the friend names drop
+ *  out of the graph, since a parsed clause arrives as a resolved edge).
+ *  Throws on a seed class that would be excluded. `seeds` -- objects already excluded
+ *  OUTSIDE this decision (the island's test-code roots, H5x-3 fix round 1):
+ *  they take no part in the material (no roots, no cascades, no strips of
+ *  their own) but are nodes of the graph, so a dependent whose definition
+ *  references one falls as a CASCADE of it -- never as test code -- and a
+ *  FRIENDS clause naming one strips. A seed that is a guarded service class
+ *  throws, like any exclusion would. Pure. */
+export function graphDecide({objects, pendingOf, statusOf, guard = new Set(), guardMode = "registration", seeds = new Set()}) {
   for (const o of objects ?? []) {
     for (const n of o.defNames ?? []) {
       if (pendingOf(n.name, n.kind) === true) return {blocked: true, roots: [], cascades: [], cycles: [], strips: [], excluded: new Set()};
     }
   }
-  const nodes = (objects ?? []).map((o) => o.object);
+  const nodes = [...new Set([...(objects ?? []).map((o) => o.object), ...(seeds ?? [])])];
   const adj = new Map(nodes.map((n) => [n, new Set()]));
   const reverse = new Map(nodes.map((n) => [n, []]));
   for (const o of objects ?? []) {
+    // a GLOBAL FRIENDS clause is a soft edge -- strip material below, never
+    // an exclusion. A parsed clause reaches the record as a RESOLVED
+    // definition-level reference, so the friend names drop out of the graph
+    // here: the friender must not cascade with the befriended object
+    // (#934's rule; the H5x-3 fix round's seeds exposed the hole).
+    const soft = new Set(o.friends ?? []);
     for (const to of o.edges ?? []) {
-      if (to === o.object || adj.has(to) === false) continue;
+      if (to === o.object || soft.has(to) === true || adj.has(to) === false) continue;
       adj.get(o.object).add(to);
       reverse.get(to).push(o.object);
     }
@@ -488,6 +517,9 @@ export function graphDecide({objects, pendingOf, statusOf, guard = new Set(), gu
     error.guard = true;
     throw error;
   };
+  for (const seed of seeds ?? []) {
+    if (guard.has(seed) === true) guardThrow(seed, "the unit-test-framework rule would exclude it");
+  }
   // roots: a definition reference to an answered-absent name (a friend name
   // never roots), or definition findings that name nothing -- except a
   // cycle member's (its references all resolve; its residual findings are
@@ -505,7 +537,7 @@ export function graphDecide({objects, pendingOf, statusOf, guard = new Set(), gu
   for (const r of roots) {
     if (guard.has(r.object) === true) guardThrow(r.object, "its definition references a missing name");
   }
-  const excluded = new Set(rootSet);
+  const excluded = new Set([...rootSet, ...seeds]);
   const queue = [...excluded];
   while (queue.length > 0) {
     const here = queue.pop();
@@ -544,6 +576,137 @@ export function graphDecide({objects, pendingOf, statusOf, guard = new Set(), gu
     .map((o) => ({object: o.object, of: [...new Set((o.friends ?? []).filter((f) => excluded.has(f) === true))].sort()}))
     .filter((s) => s.of.length > 0);
   return {blocked: false, roots, cascades, cycles, strips, excluded};
+}
+
+// --------------------------------------------- the island's test code ----
+
+// the ABAP unit-test framework's kernel classes and interfaces (H5x-3)
+const AUNIT_TEST_CODE = /^(?:CL|IF)_AUNIT_[A-Z0-9_/#]+$/;
+
+/** the own-definition shapes of one main file, read off abaplint's
+ *  statements (H5x-3, fix round 2 -- no regex over raw ABAP): the CLASS
+ *  <object> DEFINITION statement's FOR TESTING and INHERITING FROM, and the
+ *  names of every INTERFACES statement. Comments are statements of their
+ *  own and string literals are string tokens, so neither can say
+ *  INTERFACES, FOR TESTING or INHERITING here -- the failure class of bed
+ *  run 19, where a comment token decided the classification. A statement
+ *  abaplint does not know (a file that does not parse in the dialect) is
+ *  still a token list, read the same way. Undefined only when the file
+ *  cannot be lexed at all; the caller then falls back to the text with its
+ *  comment lines removed. Pure. */
+const definitionShapes = (filename, source, object) => {
+  let files;
+  try {
+    const reg = new abaplint.Registry(new abaplint.Config(JSON.stringify(CONFIG)));
+    reg.addFile(new abaplint.MemoryFile(String(filename).split("/").pop(), source));
+    reg.parse();
+    files = reg.getObjects().flatMap((o) => o.getABAPFiles?.() ?? []);
+  } catch {
+    return undefined;
+  }
+  const shapes = {header: false, forTesting: false, inherits: undefined, interfaces: []};
+  // a string literal or template and a comment are never a word of the
+  // statement
+  const words = (st) => st.getTokens()
+    .filter((t) => /String|Comment/.test(t.constructor.name) === false)
+    .map((t) => t.getStr().toUpperCase());
+  for (const file of files) {
+    for (const st of file.getStatements()) {
+      const sname = st.get().constructor.name;
+      if (sname === "Comment" || sname === "Empty") continue;
+      const up = words(st);
+      if (up[0] === "CLASS" && up[1] === object && up[2] === "DEFINITION"
+          && (sname === "ClassDefinition" || sname === "Unknown")) {
+        shapes.header = true;
+        for (let i = 3; i < up.length - 1; i++) {
+          if (up[i] === "FOR" && up[i + 1] === "TESTING") shapes.forTesting = true;
+          if (up[i] === "INHERITING" && up[i + 1] === "FROM" && up[i + 2] !== undefined) shapes.inherits = up[i + 2];
+        }
+      } else if (up[0] === "INTERFACES" && (sname === "InterfaceDef" || sname === "Unknown")) {
+        if (up[1] !== undefined && up[1] !== ".") shapes.interfaces.push(up[1]);
+      }
+    }
+  }
+  return shapes;
+};
+
+/** the fallback when a file cannot be lexed: the same three shapes off the
+ *  text, comment lines (a leading `*`) and the rest of a line after `"`
+ *  removed first. Pure. */
+const textShapes = (source, object) => {
+  const code = String(source).split(/\r?\n/)
+    .filter((l) => l.startsWith("*") === false)
+    .map((l) => l.replace(/".*$/, ""))
+    .join("\n").toUpperCase();
+  const esc = String(object).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const m = new RegExp(`CLASS\\s+${esc}\\s+DEFINITION[^.]*\\.`).exec(code);
+  const header = m === null ? undefined : m[0];
+  const inh = header === undefined ? null : /INHERITING\s+FROM\s+([A-Z0-9_/#]+)/.exec(header);
+  const interfaces = [];
+  const impl = /(?:^|\.)\s*INTERFACES\s+([A-Z0-9_/#]+)/g;
+  for (let x = impl.exec(code); x !== null; x = impl.exec(code)) interfaces.push(x[1]);
+  return {header: header !== undefined, forTesting: header !== undefined && /\bFOR\s+TESTING\b/.test(header) === true,
+    inherits: inh === null ? undefined : inh[1], interfaces};
+};
+
+/** the island's test code (H5x-3, fix round 1): a class whose OWN definition
+ *  is test code. `roots` is exactly:
+ *  - an object the framework's own vocabulary names (CL_AUNIT_* / IF_AUNIT_*),
+ *  - a class whose own CLASS DEFINITION header says FOR TESTING,
+ *  - a class whose own header inherits from such a class, or whose own main
+ *    file implements such an interface.
+ *  Nothing else is test code. The first round closed this transitively over
+ *  every name an object's structural record or source tokens carry, and the
+ *  bed's registered service's own DPC died on the seed guard because of it:
+ *  two sources mentioning AUNIT types (the EPM test decorator and logger)
+ *  dragged the whole EPM layer in, and the DPC's source names its own _EXT
+ *  subclass, which the closure had taken. A class that merely references a
+ *  test-code object -- an unknown, an edge, a GLOBAL FRIENDS clause, a
+ *  method body, a comment -- is production code (FIX-1). A dependent of an
+ *  excluded test class falls as a CASCADE of it, the graph rule of #934:
+ *  the loop hands these roots to graphDecide as seeds, whose propagation
+ *  and guard own the dependents; a FRIENDS clause naming a test class is
+ *  strip material, as for any excluded object. The own-definition shapes
+ *  are read off the object's own main file only (.clas.abap / .intf.abap --
+ *  never a locals or test-classes include, whose classes are not this
+ *  object), and FOR TESTING only inside that class's own header statement.
+ *  `all` is the roots: there is no transitive step. Pure. */
+export function testCodeObjects(objects, sourceOf = undefined) {
+  const roots = new Set();
+  for (const o of objects ?? []) {
+    if (AUNIT_TEST_CODE.test(String(o.object ?? "")) === true) {
+      roots.add(o.object);
+      continue;
+    }
+    // the own-definition shapes need the object's own main source; a
+    // locals or test-classes file is never the object's definition
+    if (/\.(?:clas|intf)\.abap$/.test(String(o.file ?? "")) !== true) continue;
+    if (sourceOf === undefined) continue;
+    let source;
+    try {
+      source = sourceOf(o);
+    } catch {
+      continue;
+    }
+    if (typeof source !== "string") continue;
+    const object = String(o.object).toUpperCase();
+    const shapes = definitionShapes(o.file, source, object) ?? textShapes(source, object);
+    const isClass = /\.clas\.abap$/.test(String(o.file)) === true;
+    if (isClass === true && shapes.header === true) {
+      if (shapes.forTesting === true) {
+        roots.add(o.object);
+        continue;
+      }
+      if (shapes.inherits !== undefined && AUNIT_TEST_CODE.test(shapes.inherits) === true) {
+        roots.add(o.object);
+        continue;
+      }
+    }
+    // INTERFACES of a framework interface: the implementer is the
+    // framework's plumbing
+    if (shapes.interfaces.some((n) => AUNIT_TEST_CODE.test(n) === true) === true) roots.add(o.object);
+  }
+  return {roots, all: new Set(roots)};
 }
 
 /** the request names out of one iteration's structural pass and its

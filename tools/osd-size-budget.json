@@ -378,6 +378,10 @@
    "lines": 1425,
    "reason": "lowered 2026-10-02: the YAML line index went to tools/dsl-yaml-lines.mjs; holds the range: of L3 slice 3a"
   },
+  "tools/hana-closure.mjs": {
+   "lines": 1050,
+   "reason": "H5x-3 (fix round 1): the loop's test-code seeding -- a class whose OWN definition is the ABAP unit-test framework's (FOR TESTING, or inheriting from or implementing its classes/interfaces; never a class that merely references one -- the transitive closure killed bed run 19 on the seed guard) leaves the build before the machinery decides, recorded in the seam the build already reads; its dependents fall as #934 cascades through the decision's seeds. The classification itself is pure and lives in tools/hana-closure-graph.mjs; this is the wiring beside the stub rounds, where the record, the hold and the seam writes already live. Carve the loop's iteration line and state handling into their own package when it next grows."
+  },
   "tools/hana-client.mjs": {
    "lines": 1133,
    "reason": "H5x-4 B3, 2026-11-13: +10 for the driver channel of the statement trace (the sqlTrace option at the five places the client hands text to hdb) -- only the client sees connect()'s own SET SCHEMA and shadow DDL, so the hook cannot live in a wrapper. Before: H3 fix round 2, 2026-11-12: the lazy fallback's reentrancy flag (its own DD02L / SYS.VIEWS / SYS.SYNONYMS reads must not re-enter it; critic MUST 1), the HANA_OWN_SCHEMA == HANA_SCHEMA refusal before a socket opens (MUST 2) and the one upper normalisation of both schema names at construction (SHOULD 5) live here, where the retry and the guard already live. NICE 9 -- moving the retry and the allow behind one call into tools/hana-shadow-schema.mjs -- stays the next slice's cut."
