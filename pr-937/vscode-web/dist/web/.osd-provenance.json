@@ -137,7 +137,7 @@
     "app/zvdb/quality/manifest.json": "5b7b8d7358558eaa93f888c452173d6a8aa020fdc8e3de80e23be66d93b85331",
     "app/zvdb/quality.json": "5800f8027da653eed074e92b5e557a58aac46ec4b26e5bb8bc5dd6bc10a0167d",
     "duckdb-mvp.wasm": "45d72a81fba8e57693d890da837c7041310e385e75619a8559839b15388dfe97",
-    "extension.js": "4cc10d6c7e54e8f7d750b28492957a81f4de5e7a53c85a845ffb3078261b2817",
+    "extension.js": "ad3f719c76638a5b96653b1bf6ef97480168b46b14e2edb105a49431af756c63",
     "media/zlsd-music.w3mi.data.m4a": "746357151e1329b4592c687887df8afa0506eddaeb13dc6019baea375c27632a",
     "media/zlsd-show.w3mi.data.gz": "15fc7d7481e35aa4d42adcd30a05771aaa291e0b0312ddcea65c1f1a457629b7",
     "media/zo4d_00_sales@252epng.w3mi.data.png": "afbe0fcc94b2eaf9bf3c13b35834c13cd001848ebc37de45aa156919fbf44925",
@@ -280,7 +280,7 @@
     "media/zzvdb_-quality_-manifest_json.w3mi.data.json": "87a97e4c2b27637354dcec20d53d583c9e193c039a0df7babfd9fabeeab1e72b",
     "media/zzvdb_-quality_json.w3mi.data.json": "5800f8027da653eed074e92b5e557a58aac46ec4b26e5bb8bc5dd6bc10a0167d"
   },
-  "generation": "77dcfba80405e4e4",
+  "generation": "5b30116d47bdf15d",
   "systemDigest": null,
   "systemPrivate": false,
   "inputs": [
