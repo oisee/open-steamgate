@@ -3595,57 +3595,103 @@ process.exit(0);
     }
   });
 
-  it("testCodeObjects: the unit-test framework surface is test code for the island rule (H5x-3)", async () => {
+  it("testCodeObjects: a class whose OWN definition is test code is a root, nothing else is (H5x-3 fix 1)", async () => {
     const {testCodeObjects} = await import("../tools/hana-closure-graph.mjs");
-    // roots name the framework themselves (their own name, an unknown, an
-    // edge, a FRIEND -- or their source, the way the decorator's INTERFACES
-    // line does); all closes transitively: an object that names a
-    // test-code object is part of the test surface with it. A RESOLVED
-    // friend never reaches the structural record (analyseObject skips
-    // friends the registry can resolve), so the helper whose only trace is
-    // its GLOBAL FRIENDS clause is caught by the source scan -- the bed's
-    // EPM test utilities, whose file carries a parser finding and whose
-    // GLOBAL FRIENDS names the decorator.
+    // the roots: the framework's own names, FOR TESTING in the class's own
+    // header, inheriting from a framework class, implementing a framework
+    // interface. NOT roots, though the first round made every one of them
+    // test code through its transitive naming closure: a GLOBAL FRIENDS
+    // clause to a decorator (the bed's EPM test utilities), an unknown
+    // naming the framework, and the bed-19 shape itself -- the service's
+    // own DPC, whose generated header COMMENTS name its own _EXT subclass,
+    // which the closure had dragged in through the EPM layer. The seed
+    // guard killed bed run 19 on that DPC (FIX-1).
     const objects = [
-      {object: "IF_AUNIT_H5C_TEST", unknowns: [], edges: [], friends: []},
-      {object: "ZCL_H5C_AUNIT_DECORATOR", unknowns: [], edges: [{to: "IF_AUNIT_H5C_TEST", level: "definition"}], friends: []},
-      {object: "ZCL_H5C_AUNIT_UTIL", unknowns: [], edges: [], friends: []},
-      {object: "ZCL_H5C_AUNIT_USER", unknowns: [], edges: [{to: "ZCL_H5C_AUNIT_UTIL", level: "definition"}], friends: []},
-      {object: "ZCL_H5C_AUNIT_NAMER", unknowns: [{name: "CL_AUNIT_H5C_ASSERT", kind: "clas", level: "method"}], edges: [], friends: []},
-      {object: "ZCL_H5C_KEEP", unknowns: [{name: "ZOSD_H5C_HEAD", kind: "tabl", level: "method"}], edges: [], friends: []},
+      {object: "IF_AUNIT_H5C_TEST", unknowns: [], edges: [], friends: [], file: "x/if_aunit_h5c_test.intf.abap"},
+      {object: "ZCL_H5C_AUNIT_DECORATOR", unknowns: [], edges: [{to: "IF_AUNIT_H5C_TEST", level: "definition"}], friends: [], file: "x/zcl_h5c_aunit_decorator.clas.abap"},
+      {object: "ZCL_H5C_AUNIT_SUB", unknowns: [], edges: [], friends: [], file: "x/zcl_h5c_aunit_sub.clas.abap"},
+      {object: "ZCL_H5C_FOR_TEST", unknowns: [], edges: [], friends: [], file: "x/zcl_h5c_for_test.clas.abap"},
+      {object: "ZCL_H5C_AUNIT_UTIL", unknowns: [], edges: [], friends: [], file: "x/zcl_h5c_aunit_util.clas.abap"},
+      {object: "ZCL_H5C_AUNIT_NAMER", unknowns: [{name: "CL_AUNIT_H5C_ASSERT", kind: "clas", level: "method"}], edges: [], friends: [], file: "x/zcl_h5c_aunit_namer.clas.abap"},
+      {object: "/H5C/CL_H5C_SVC_DPC", unknowns: [], edges: [], friends: [], file: "x/#h5c#cl_h5c_svc_dpc.clas.abap"},
+      {object: "ZCL_H5C_KEEP", unknowns: [{name: "ZOSD_H5C_HEAD", kind: "tabl", level: "method"}], edges: [], friends: [], file: "x/zcl_h5c_keep.clas.abap"},
     ];
     const sources = {
       IF_AUNIT_H5C_TEST: "INTERFACE if_aunit_h5c_test PUBLIC. ENDINTERFACE.",
       ZCL_H5C_AUNIT_DECORATOR: "CLASS zcl_h5c_aunit_decorator DEFINITION PUBLIC. INTERFACES if_aunit_h5c_test. ENDCLASS.",
+      ZCL_H5C_AUNIT_SUB: "CLASS zcl_h5c_aunit_sub DEFINITION PUBLIC INHERITING FROM cl_aunit_h5c_assert. ENDCLASS.",
+      ZCL_H5C_FOR_TEST: "CLASS zcl_h5c_for_test DEFINITION PUBLIC FINAL FOR TESTING. ENDCLASS.",
       ZCL_H5C_AUNIT_UTIL: "CLASS zcl_h5c_aunit_util DEFINITION PUBLIC. GLOBAL FRIENDS zcl_h5c_aunit_decorator. ENDCLASS.",
-      ZCL_H5C_AUNIT_USER: "CLASS zcl_h5c_aunit_user DEFINITION PUBLIC INHERITING FROM zcl_h5c_aunit_util. ENDCLASS.",
       ZCL_H5C_AUNIT_NAMER: "CLASS zcl_h5c_aunit_namer DEFINITION PUBLIC. ENDCLASS.",
+      "/H5C/CL_H5C_SVC_DPC": [
+        "CLASS /h5c/cl_h5c_svc_dpc definition public abstract create public.",
+        "* GENERATED METHODS INSIDE THE DPC PROVIDER SUBCLASS - /H5C/CL_H5C_SVC_DPC_EXT",
+        "ENDCLASS.",
+      ].join("\n"),
       ZCL_H5C_KEEP: "CLASS zcl_h5c_keep DEFINITION PUBLIC. ENDCLASS.",
     };
     const {roots, all} = testCodeObjects(objects, (o) => sources[o.object]);
     expect([...roots].sort()).to.deep.equal([
-      "IF_AUNIT_H5C_TEST", "ZCL_H5C_AUNIT_DECORATOR", "ZCL_H5C_AUNIT_NAMER"]);
+      "IF_AUNIT_H5C_TEST", "ZCL_H5C_AUNIT_DECORATOR", "ZCL_H5C_AUNIT_SUB", "ZCL_H5C_FOR_TEST"]);
     expect([...all].sort()).to.deep.equal([
-      "IF_AUNIT_H5C_TEST", "ZCL_H5C_AUNIT_DECORATOR", "ZCL_H5C_AUNIT_NAMER",
-      "ZCL_H5C_AUNIT_USER", "ZCL_H5C_AUNIT_UTIL"]);
-    // and the source scan is load-bearing: without it the helper whose
-    // friend resolves is invisible, and nothing it pulls leaves with the
-    // framework
+      "IF_AUNIT_H5C_TEST", "ZCL_H5C_AUNIT_DECORATOR", "ZCL_H5C_AUNIT_SUB", "ZCL_H5C_FOR_TEST"]);
+    // there is no transitive step to skip: all IS the roots, the same names
+    expect([...all].sort()).to.deep.equal([...roots].sort());
+    // without sources only the framework's own names root -- the
+    // own-definition shapes are not decidable without the file
     const thin = testCodeObjects(objects);
-    expect([...thin.all].sort()).to.deep.equal([
-      "IF_AUNIT_H5C_TEST", "ZCL_H5C_AUNIT_DECORATOR", "ZCL_H5C_AUNIT_NAMER"]);
+    expect([...thin.all].sort()).to.deep.equal(["IF_AUNIT_H5C_TEST"]);
+  });
+
+  it("graphDecide: a dependent of a test-code seed is a cascade, a FRIENDS clause strips, the seed guard holds (H5x-3 fix 1)", async () => {
+    const {graphDecide} = await import("../tools/hana-closure-graph.mjs");
+    // the island's test-code roots are excluded OUTSIDE this decision; here
+    // they arrive as seeds. They are graph nodes: a dependent whose
+    // definition references one falls as a CASCADE of it (#934's rule --
+    // never as test code), a FRIENDS clause naming one strips (soft), and
+    // a seed that is a guarded service class throws. An object that only
+    // names a seed in a method body is not in the graph at all and stays.
+    const objects = [
+      {object: "ZCL_H5C_SVC_DPC", defNames: [], edges: [], friends: [], nameless: [], findings: []},
+      {object: "ZCL_H5C_TEST_DEP", defNames: [], edges: ["IF_AUNIT_H5C_TEST"], friends: [], nameless: [], findings: []},
+      // the parsed-clause shape: the FRIENDS clause reaches the record as a
+      // resolved definition-level edge as well -- the edge must be soft
+      {object: "ZCL_H5C_FRIENDING", defNames: [], edges: ["ZCL_H5C_AUNIT_BASE"], friends: ["ZCL_H5C_AUNIT_BASE"], nameless: [], findings: []},
+    ];
+    const d = graphDecide({objects, pendingOf: () => false, statusOf: () => "present",
+      guard: new Set(["ZCL_H5C_SVC_DPC"]), guardMode: "registration",
+      seeds: new Set(["IF_AUNIT_H5C_TEST", "ZCL_H5C_AUNIT_BASE"])});
+    expect(d.blocked).to.equal(false);
+    expect(d.cascades).to.deep.equal([{object: "ZCL_H5C_TEST_DEP", of: ["IF_AUNIT_H5C_TEST"]}]);
+    expect(d.strips).to.deep.equal([{object: "ZCL_H5C_FRIENDING", of: ["ZCL_H5C_AUNIT_BASE"]}]);
+    expect([...d.excluded].sort()).to.deep.equal(["IF_AUNIT_H5C_TEST", "ZCL_H5C_AUNIT_BASE", "ZCL_H5C_TEST_DEP"]);
+    expect(d.roots).to.deep.equal([]);
+    // the seed itself must never be a guarded service class
+    let thrown;
+    try {
+      graphDecide({objects, pendingOf: () => false, statusOf: () => "present",
+        guard: new Set(["ZCL_H5C_SVC_DPC"]), guardMode: "registration",
+        seeds: new Set(["ZCL_H5C_SVC_DPC"])});
+      expect.fail("the seed service class was excluded");
+    } catch (error) { thrown = error; }
+    expect(thrown.guard).to.equal(true);
+    expect(thrown.message).to.include("ZCL_H5C_SVC_DPC");
   });
 
   it("test code for the island rule: the unit-test framework surface is neither built nor counted (H5x-3)", async function () {
     this.timeout(300000);
-    // the bed's shape at fixture scale: the aunit kernel interface, a
-    // decorator carrying a member cascade, a helper whose GLOBAL FRIENDS
-    // names the decorator, a dependent inheriting from the helper, a
-    // body-level user -- and a kept class whose deferred code name is
-    // answered by nobody, so the graph decision blocks forever (the bed's
-    // gate). The rule takes the surface out of the build before any
-    // decision would be needed: not stubbed, not asked, not a framework
-    // gap.
+    // the bed-19 shape at fixture scale: the aunit kernel interface, a
+    // decorator implementing it (own definition test code), a helper whose
+    // GLOBAL FRIENDS names the decorator (a strip, not test code), the
+    // decorator's definition-level dependent (a #934 cascade of it), a
+    // body-level user of the helper (stays, resolves), the registered
+    // service's own DPC whose generated comment names its own _EXT (the
+    // shape that killed bed run 19's run through the first round's
+    // transitive closure; the seed guard must never fire), and a kept
+    // class whose deferred code name is answered by nobody. The roots
+    // leave the build before any decision would be needed: not stubbed,
+    // not asked, not a framework gap; the dependents fall through the
+    // graph decision's seeds.
     const INTF_AUNIT_SOURCE = [
       `INTERFACE if_aunit_h5c_test PUBLIC.`,
       `  METHODS get_test_methods RETURNING VALUE(rt_h5c) TYPE string_table.`,
@@ -3669,9 +3715,8 @@ process.exit(0);
       ``,
     ].join("\n");
     const UTIL_SOURCE = [
-      `CLASS zcl_h5c_aunit_util DEFINITION PUBLIC CREATE PUBLIC.`,
+      `CLASS zcl_h5c_aunit_util DEFINITION PUBLIC CREATE PUBLIC FRIENDS zcl_h5c_aunit_decorator.`,
       `  PUBLIC SECTION.`,
-      `    GLOBAL FRIENDS zcl_h5c_aunit_decorator.`,
       `    METHODS run_it.`,
       `ENDCLASS.`,
       `CLASS zcl_h5c_aunit_util IMPLEMENTATION.`,
@@ -3684,10 +3729,10 @@ process.exit(0);
     const USER_SOURCE = [
       `CLASS zcl_h5c_aunit_user DEFINITION PUBLIC FINAL CREATE PUBLIC INHERITING FROM zcl_h5c_aunit_util.`,
       `  PUBLIC SECTION.`,
-      `    METHODS run_it.`,
+      `    METHODS user_it.`,
       `ENDCLASS.`,
       `CLASS zcl_h5c_aunit_user IMPLEMENTATION.`,
-      `  METHOD run_it.`,
+      `  METHOD user_it.`,
       `    RETURN.`,
       `  ENDMETHOD.`,
       `ENDCLASS.`,
@@ -3722,16 +3767,74 @@ process.exit(0);
       `ENDCLASS.`,
       ``,
     ].join("\n");
+    // the dependent of the excluded decorator: a subclass cannot compile
+    // without its superclass, so once the decorator leaves it falls as a
+    // cascade of it (#934's rule) -- never as test code, though its own
+    // definition is not test code in any shape
+    const DEP_SOURCE = [
+      `CLASS zcl_h5c_test_dep DEFINITION PUBLIC FINAL CREATE PUBLIC INHERITING FROM zcl_h5c_aunit_decorator.`,
+      `  PUBLIC SECTION.`,
+      `    METHODS run_it.`,
+      `ENDCLASS.`,
+      `CLASS zcl_h5c_test_dep IMPLEMENTATION.`,
+      `  METHOD run_it.`,
+      `    RETURN.`,
+      `  ENDMETHOD.`,
+      `ENDCLASS.`,
+      ``,
+    ].join("\n");
+    // the bed-19 shape at fixture scale: the registered service's own DPC
+    // whose generated header comment names its own _EXT subclass, and the
+    // _EXT itself, which uses the helper chain at METHOD level (the real
+    // DPC_EXT's five stubbed methods). Under the first round's transitive
+    // rule both were dragged into the test surface through the helper
+    // chain and the seed guard killed the run; now the guard never fires
+    // and the DPC is business as usual -- stubbed like any island class.
+    const SVC_SOURCE = [
+      `CLASS zcl_h5c_svc_dpc DEFINITION PUBLIC FINAL CREATE PUBLIC.`,
+      `  PUBLIC SECTION.`,
+      `    METHODS run_it.`,
+      `ENDCLASS.`,
+      `CLASS zcl_h5c_svc_dpc IMPLEMENTATION.`,
+      `* GENERATED METHODS INSIDE THE DPC PROVIDER SUBCLASS - ZCL_H5C_SVC_DPC_EXT`,
+      `  METHOD run_it.`,
+      `    zcl_h5c_nowhere=>run_it( ).`,
+      `  ENDMETHOD.`,
+      `ENDCLASS.`,
+      ``,
+    ].join("\n");
+    const SVC_EXT_SOURCE = [
+      `CLASS zcl_h5c_svc_dpc_ext DEFINITION PUBLIC FINAL CREATE PUBLIC.`,
+      `  PUBLIC SECTION.`,
+      `    METHODS run_it.`,
+      `ENDCLASS.`,
+      `CLASS zcl_h5c_svc_dpc_ext IMPLEMENTATION.`,
+      `  METHOD run_it.`,
+      `    DATA lo_h5c TYPE REF TO zcl_h5c_aunit_util.`,
+      `    CREATE OBJECT lo_h5c.`,
+      `  ENDMETHOD.`,
+      `ENDCLASS.`,
+      ``,
+    ].join("\n");
     const extra = [
       ["zcl_h5c_aunit_util.clas.abap", UTIL_SOURCE],
       ["zcl_h5c_aunit_user.clas.abap", USER_SOURCE],
       ["zcl_h5c_aunit_body.clas.abap", BODY_SOURCE],
+      ["zcl_h5c_test_dep.clas.abap", DEP_SOURCE],
+      ["zcl_h5c_svc_dpc.clas.abap", SVC_SOURCE],
+      ["zcl_h5c_svc_dpc_ext.clas.abap", SVC_EXT_SOURCE],
       ["zcl_h5c_keep.clas.abap", KEEP_SOURCE],
     ];
     const root = scratch(INTF_AUNIT_SOURCE, "if_aunit_h5c_test", {islandExt: "intf",
       island2Name: "zcl_h5c_aunit_decorator.clas.abap", island2Source: DECORATOR_SOURCE});
     for (const [name, source] of extra) writeFileSync(join(root, "island", name), source);
     fixtureDump(join(root, "dump-001"));
+    // the registration that makes ZCL_H5C_SVC_DPC (and its derived _EXT)
+    // the seeded guard's classes
+    mkdirSync(join(root, "gen", "hana-segw"), {recursive: true});
+    writeFileSync(join(root, "gen", "hana-segw", "from-dump.json"), JSON.stringify({services: [
+      {service: "h5c", version: "0001", dpc: "ZCL_H5C_SVC_DPC", mpc: "ZCL_H5C_SVC_MPC"},
+    ]}) + "\n");
     const env = writeFakes(root, envFor(root, {island: "if_aunit_h5c_test.intf.abap",
       island2Name: "zcl_h5c_aunit_decorator.clas.abap",
       convAFiles: extra.map(([name]) => name)}));
@@ -3739,21 +3842,39 @@ process.exit(0);
     try {
       const result = await run(["--dump", join(root, "dump-001"), "--system", "h5c", "--stub-unresolved"], {root, env, say: (m) => said.push(m)});
       expect(result.stopped).to.equal("fixed-point");
-      expect(said.some((l) => l.includes("test code: 5 island object(s) out of the build")),
-        "the surface is named on the log").to.equal(true);
+      expect(said.some((l) => l.includes("test code: 2 island object(s) out of the build")),
+        "only the own-definition test code is named on the log").to.equal(true);
+      expect(said.some((l) => l.includes("registered service's own class")),
+        "the seed guard never fires for the service's own DPC").to.equal(false);
       expect(existsSync(join(root, "dumper-log.jsonl")), "the surface asks nothing").to.equal(false);
       const record = JSON.parse(readFileSync(outFile(root, "closure-stubs.json"), "utf8"));
       expect(record.roots.filter((r) => r.testCode === true).map((r) => r.object).sort()).to.deep.equal(
         ["IF_AUNIT_H5C_TEST", "ZCL_H5C_AUNIT_DECORATOR"]);
-      expect(record.cascades.filter((r) => r.testCode === true).map((r) => r.object).sort()).to.deep.equal(
-        ["ZCL_H5C_AUNIT_BODY", "ZCL_H5C_AUNIT_USER", "ZCL_H5C_AUNIT_UTIL"]);
+      expect(record.cascades.filter((r) => r.testCode === true), "no dependent is test code any more").to.deep.equal([]);
+      // the decorator's dependent falls as a #934 cascade of it (a
+      // subclass cannot compile without its superclass); the helper's
+      // FRIENDS clause to the excluded decorator strips and the helper
+      // stays in the build
+      const depCascade = record.cascades.find((r) => r.object === "ZCL_H5C_TEST_DEP");
+      expect(depCascade?.excluded, "the decorator's dependent is excluded").to.equal(true);
+      expect(depCascade?.of).to.deep.equal(["ZCL_H5C_AUNIT_DECORATOR"]);
+      expect(depCascade?.testCode, "the cascade is not test code").to.equal(undefined);
+      const strip = record.cascades.find((r) => r.edge === "friends");
+      expect(strip?.object).to.equal("ZCL_H5C_AUNIT_UTIL");
+      expect(strip?.excluded).to.equal(false);
       const seam = await import("../tools/hana-closure-exclusions.mjs");
-      expect(seam.excludedFiles(root), "the build is kept from all five").to.have.lengthOf(5);
+      expect(seam.excludedFiles(root), "the build is kept from the roots and the dependent").to.have.lengthOf(3);
       const gaps = JSON.parse(readFileSync(outFile(root, "framework-gaps.json"), "utf8"));
       expect(gaps, "the surface's findings are no framework gaps").to.deep.equal([]);
       const decorator = readFileSync(join(root, "gen", "hana-src", "000-h5c-main", "src", "zcl_h5c_aunit_decorator.clas.abap"), "utf8");
       expect(decorator, "test code is not stubbed -- it leaves whole").to.not.include("RAISE EXCEPTION");
       expect(decorator).to.include("get_absolute_class_name");
+      const util = readFileSync(join(root, "gen", "hana-src", "000-h5c-main", "src", "zcl_h5c_aunit_util.clas.abap"), "utf8");
+      expect(util, "the helper stays and loses only its FRIENDS clause").to.not.include("FRIENDS zcl_h5c_aunit_decorator");
+      expect(util).to.include("METHOD run_it");
+      const svc = readFileSync(join(root, "gen", "hana-src", "000-h5c-main", "src", "zcl_h5c_svc_dpc.clas.abap"), "utf8");
+      expect(svc, "the service's own DPC keeps its generated comment").to.include("GENERATED METHODS INSIDE THE DPC PROVIDER SUBCLASS");
+      expect(svc, "the service's own DPC is stubbed like any island class").to.include("RAISE EXCEPTION TYPE zcx_osd_not_activated");
       // the kept class is business as usual: its method stubbed, its
       // deferred name pending forever, the fixed point honest
       const keep = readFileSync(join(root, "gen", "hana-src", "000-h5c-main", "src", "zcl_h5c_keep.clas.abap"), "utf8");

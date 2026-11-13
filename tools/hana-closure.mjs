@@ -90,15 +90,18 @@
 //                         excluding; and NEVER a registered service's own
 //                         class -- the MPC/DPC/_EXT pairs a registration
 //                         names, or by suffix without one: the run fails
-//                         instead. Since H5x-3 the island's TEST CODE --
-//                         the ABAP unit-test framework surface (objects
-//                         named or naming CL_AUNIT_*/IF_AUNIT_* types,
-//                         transitively over everything that names them,
-//                         through the structural record or the source's
-//                         identifier tokens) -- leaves the build before
-//                         any of this is needed: recorded {testCode: true}
-//                         in the record's roots/cascades, never stubbed,
-//                         never asked, never a framework gap. Since
+//                         instead. Since H5x-3 (fix round 1) the island's
+//                         TEST CODE -- a class whose OWN definition is the
+//                         ABAP unit-test framework's (FOR TESTING, or
+//                         inheriting from or implementing the framework's
+//                         classes/interfaces; never a class that merely
+//                         references one) -- leaves the build before any of
+//                         this is needed: recorded {testCode: true} in the
+//                         record's roots, never stubbed, never asked, never
+//                         a framework gap; a dependent of a test-code root
+//                         falls as a CASCADE of it through the graph
+//                         decision's seeds, and a FRIENDS clause naming one
+//                         strips. Since
 //                         H5x-2 the names come from the
 //                         structural pass (references(), one SyntaxLogic
 //                         pass per object): a signature-level miss (a
@@ -654,15 +657,20 @@ export async function run(args = process.argv.slice(2), options = {}) {
         writeClosureRecord(out, {stubRecords, excludedRecords,
           waits: waitsOf(analysisObjects.filter((o) => testExcluded.has(o.object) === false), pendingAtFixedPoint),
           errors: [...errorRecords.values()]});
-      // H5x-3: the island's test code -- the ABAP unit-test framework
-      // surface (roots: the object is named CL_AUNIT_*/IF_AUNIT_* or its
-      // material or source names such a type) and everything that names a
-      // test-code object (cascades; a RESOLVED friend never reaches the
-      // structural record, which is what the source scan is for). It is not
-      // built and does not count: the build is kept from the files through
-      // the same seam before the stub rounds read the validation, the files
-      // are never stubbed, their findings neither asked nor framework gaps,
-      // and a registered service's own class fails the run instead.
+      // H5x-3, fix round 1: the island's test code is a class whose OWN
+      // definition is test code (FOR TESTING, or inheriting from or
+      // implementing the ABAP unit-test framework's classes/interfaces --
+      // testCodeObjects). Nothing else: the first round closed this
+      // transitively and the bed's registered service's own DPC was dragged
+      // in by the test helpers it merely names (two AUNIT-mentioning EPM
+      // test classes pulled the whole EPM layer, and the DPC's source names
+      // its own _EXT), so the seed guard killed the run. The roots leave
+      // the build here (records; never stubbed, never asked, never a
+      // framework gap); their DEPENDENTS fall as cascades of them through
+      // the graph decision (#934), which the quiescent round makes with
+      // these roots as seeds -- never as test code -- and a FRIENDS clause
+      // naming a root strips, as for any excluded object. A registered
+      // service's own class still fails the run.
       const testCode = testCodeObjects(analysisObjects, (o) => {
         try {
           return readFileSync(join(root, o.file), "utf8");
@@ -680,21 +688,12 @@ export async function run(args = process.argv.slice(2), options = {}) {
         }
         const o = byObject.get(name);
         if (o === undefined) continue;
-        if (testCode.roots.has(name) === true) {
-          excludedRecords.push({level: "definition", object: name, file: o.file, kind: o.kind,
-            missing: [], findings: [], testCode: true});
-        } else {
-          const names = (o.unknowns ?? []).map((u) => u.name)
-            .concat((o.edges ?? []).map((e) => e.to))
-            .concat(o.friends ?? []);
-          const of = [...new Set(names.filter((n) => testCode.all.has(n) === true))].sort();
-          excludedRecords.push({level: "cascade", object: name, file: o.file, kind: o.kind,
-            of, findings: [], excluded: true, testCode: true});
-        }
+        excludedRecords.push({level: "definition", object: name, file: o.file, kind: o.kind,
+          missing: [], findings: [], testCode: true});
         excludedObjects.add(name);
       }
       if (testExcluded.size > 0) {
-        say(`test code: ${testExcluded.size} island object(s) out of the build (the ABAP unit-test framework surface and the helpers that pull it, H5x-3)`);
+        say(`test code: ${testExcluded.size} island object(s) out of the build (a class whose own definition is the ABAP unit-test framework's, H5x-3)`);
         writeRecord();
       }
       for (;;) {
@@ -824,7 +823,12 @@ export async function run(args = process.argv.slice(2), options = {}) {
             statusOf: (name, kind) => excludedObjects.has(name) === true ? "excluded"
               : objectFilePresent(name, kind, islandFiles) === true ? "present" : "absent",
             guard,
-            guardMode: guardBySuffix === true ? "suffix" : "registration"});
+            guardMode: guardBySuffix === true ? "suffix" : "registration",
+            // the island's test-code roots: already excluded above; here
+            // they are graph nodes, so their dependents fall as cascades
+            // of them (H5x-3 fix round 1: the dependents are #934's
+            // cascades, never test code themselves)
+            seeds: testExcluded});
           if (decision.blocked === true) {
             // S-2.2: nothing is decided this round -- the hold limbo would
             // leave a capped run red forever; the held files' stubs and
