@@ -52,11 +52,17 @@ CLASS zcl_oao_msg_container IMPLEMENTATION.
     ls_message-message_v2 = iv_msg_v2.
     ls_message-message_v3 = iv_msg_v3.
     ls_message-message_v4 = iv_msg_v4.
-* the text a system builds from the message class, built here from the
-* variables: this runtime keeps no message classes
-    CONCATENATE iv_msg_v1 iv_msg_v2 iv_msg_v3 iv_msg_v4
-      INTO ls_message-message SEPARATED BY space.
-    CONDENSE ls_message-message.
+* a text the caller gives is the message; otherwise the text a system builds
+* from the message class, built here from the variables: this runtime keeps
+* no message classes. The category, leading flag, entity type, keys and
+* target are accepted and not kept: the error response carries none of them.
+    IF iv_msg_text IS NOT INITIAL.
+      ls_message-message = iv_msg_text.
+    ELSE.
+      CONCATENATE iv_msg_v1 iv_msg_v2 iv_msg_v3 iv_msg_v4
+        INTO ls_message-message SEPARATED BY space.
+      CONDENSE ls_message-message.
+    ENDIF.
     APPEND ls_message TO mt_messages.
   ENDMETHOD.
 

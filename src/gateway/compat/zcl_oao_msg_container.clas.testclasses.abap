@@ -16,6 +16,7 @@ CLASS ltcl_message_container IMPLEMENTATION.
     DATA lo_impl      TYPE REF TO zcl_oao_msg_container.
     DATA lt_messages  TYPE bapirettab.
     DATA ls_message   LIKE LINE OF lt_messages.
+    DATA lt_keys      TYPE /iwbep/t_mgw_name_value_pair.
 
     /iwbep/cl_mgw_msg_container=>reset( ).
     lo_container = /iwbep/cl_mgw_msg_container=>get_mgw_msg_container( ).
@@ -49,6 +50,20 @@ CLASS ltcl_message_container IMPLEMENTATION.
                                         exp = 2 ).
     cl_abap_unit_assert=>assert_equals( act = lo_impl->has_errors( )
                                         exp = abap_true ).
+
+* the documented optional parameters compile, and a given text is the message
+    lo_container->add_message( iv_msg_type            = 'I'
+                               iv_msg_text            = 'given text'
+                               iv_msg_v1              = 'ignored'
+                               iv_error_category      = 'PROCESSING'
+                               iv_is_leading_message  = abap_true
+                               iv_entity_type         = 'Travel'
+                               it_key_tab             = lt_keys
+                               iv_message_target      = 'TravelId' ).
+    lt_messages = lo_impl->get_messages( ).
+    READ TABLE lt_messages INTO ls_message INDEX 3.
+    cl_abap_unit_assert=>assert_equals( act = ls_message-message
+                                        exp = 'given text' ).
 
 * the next request starts from an empty container
     /iwbep/cl_mgw_msg_container=>reset( ).

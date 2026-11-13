@@ -48,8 +48,9 @@ INTERFACE /iwbep/if_mgw_req_entityset PUBLIC.
 
 * Overlay (H5x-3): the navigation path the URL carried, the member the SEGW
 * sample calls on this facet and on the single-entity facet (framework-gaps
-* .json of bed run 18 -- private evidence).
+* .json of bed run 18 -- private evidence). Technical names, one row per
+* step with source and target entity type: see /iwbep/if_mgw_req_entity.
   METHODS get_navigation_path
     RETURNING
-      VALUE(rt_navigation_path) TYPE /iwbep/t_mgw_navigation_path.
+      VALUE(rt_navigation_path) TYPE /iwbep/t_mgw_tech_navi.
 ENDINTERFACE.

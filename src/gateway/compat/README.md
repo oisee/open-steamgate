@@ -13,18 +13,22 @@ group -- docs/upstream.md has the dossier:
   get_converted_parameters (the interface the sample's ACTION_SO_ACTIONS
   receives);
 - `#iwbep#if_mgw_req_entity.intf`, `#iwbep#if_mgw_req_entityset.intf` --
-  get_navigation_path on both facets, with the implementing classes
+  get_navigation_path on both facets, returning the technical navigation
+  table (`#iwbep#t_mgw_tech_navi.ttyp`, row `#iwbep#s_mgw_tech_navi.tabl`,
+  new here -- the pin has neither, so no lib copy is excluded for them),
+  with the implementing classes
   (`zcl_oao_request_context`, `/iwbep/cl_mgw_request`,
   `/iwbep/cl_sb_gen_read_aftr_crt`);
 - `#iwbep#if_mgw_context.intf` -- get_message_container (the runtime
   context the DPC's mo_context is typed by), served by
   `zcl_oao_context`;
 - `#iwbep#if_message_container.intf` -- add_message (type, id, number,
-  v1-v4, response-header switch), implemented by
+  text, v1-v4, the documented optional parameters, response-header
+  switch), implemented by
   `zcl_oao_msg_container`;
 - `#iwbep#if_mgw_appl_srv_runtime.intf` -- the changeset request/response
-  structures with content_id / content_id_ref ($batch Content-ID
-  referencing), and content_id_ref on the operation info.
+  structures with content_id / content_id_ref, and content_id_ref on the
+  operation info -- types only: nothing fills them yet.
 
 The local implementations are this repository's own (MIT), clean-room: the
 request context (`zcl_stg_request_context`) serves the getters from the

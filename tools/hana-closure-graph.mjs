@@ -583,13 +583,70 @@ export function graphDecide({objects, pendingOf, statusOf, guard = new Set(), gu
 // the ABAP unit-test framework's kernel classes and interfaces (H5x-3)
 const AUNIT_TEST_CODE = /^(?:CL|IF)_AUNIT_[A-Z0-9_/#]+$/;
 
-/** a class definition header's statement: CLASS <object> DEFINITION up to
- *  the statement's closing dot (the header spans lines; names carry no
- *  dot). Undefined when the source does not define this class. Pure. */
-const headerOf = (upperSource, object) => {
+/** the own-definition shapes of one main file, read off abaplint's
+ *  statements (H5x-3, fix round 2 -- no regex over raw ABAP): the CLASS
+ *  <object> DEFINITION statement's FOR TESTING and INHERITING FROM, and the
+ *  names of every INTERFACES statement. Comments are statements of their
+ *  own and string literals are string tokens, so neither can say
+ *  INTERFACES, FOR TESTING or INHERITING here -- the failure class of bed
+ *  run 19, where a comment token decided the classification. A statement
+ *  abaplint does not know (a file that does not parse in the dialect) is
+ *  still a token list, read the same way. Undefined only when the file
+ *  cannot be lexed at all; the caller then falls back to the text with its
+ *  comment lines removed. Pure. */
+const definitionShapes = (filename, source, object) => {
+  let files;
+  try {
+    const reg = new abaplint.Registry(new abaplint.Config(JSON.stringify(CONFIG)));
+    reg.addFile(new abaplint.MemoryFile(String(filename).split("/").pop(), source));
+    reg.parse();
+    files = reg.getObjects().flatMap((o) => o.getABAPFiles?.() ?? []);
+  } catch {
+    return undefined;
+  }
+  const shapes = {header: false, forTesting: false, inherits: undefined, interfaces: []};
+  // a string literal or template and a comment are never a word of the
+  // statement
+  const words = (st) => st.getTokens()
+    .filter((t) => /String|Comment/.test(t.constructor.name) === false)
+    .map((t) => t.getStr().toUpperCase());
+  for (const file of files) {
+    for (const st of file.getStatements()) {
+      const sname = st.get().constructor.name;
+      if (sname === "Comment" || sname === "Empty") continue;
+      const up = words(st);
+      if (up[0] === "CLASS" && up[1] === object && up[2] === "DEFINITION"
+          && (sname === "ClassDefinition" || sname === "Unknown")) {
+        shapes.header = true;
+        for (let i = 3; i < up.length - 1; i++) {
+          if (up[i] === "FOR" && up[i + 1] === "TESTING") shapes.forTesting = true;
+          if (up[i] === "INHERITING" && up[i + 1] === "FROM" && up[i + 2] !== undefined) shapes.inherits = up[i + 2];
+        }
+      } else if (up[0] === "INTERFACES" && (sname === "InterfaceDef" || sname === "Unknown")) {
+        if (up[1] !== undefined && up[1] !== ".") shapes.interfaces.push(up[1]);
+      }
+    }
+  }
+  return shapes;
+};
+
+/** the fallback when a file cannot be lexed: the same three shapes off the
+ *  text, comment lines (a leading `*`) and the rest of a line after `"`
+ *  removed first. Pure. */
+const textShapes = (source, object) => {
+  const code = String(source).split(/\r?\n/)
+    .filter((l) => l.startsWith("*") === false)
+    .map((l) => l.replace(/".*$/, ""))
+    .join("\n").toUpperCase();
   const esc = String(object).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const m = new RegExp(`CLASS\\s+${esc}\\s+DEFINITION[^.]*\\.`, "i").exec(upperSource);
-  return m === null ? undefined : m[0];
+  const m = new RegExp(`CLASS\\s+${esc}\\s+DEFINITION[^.]*\\.`).exec(code);
+  const header = m === null ? undefined : m[0];
+  const inh = header === undefined ? null : /INHERITING\s+FROM\s+([A-Z0-9_/#]+)/.exec(header);
+  const interfaces = [];
+  const impl = /(?:^|\.)\s*INTERFACES\s+([A-Z0-9_/#]+)/g;
+  for (let x = impl.exec(code); x !== null; x = impl.exec(code)) interfaces.push(x[1]);
+  return {header: header !== undefined, forTesting: header !== undefined && /\bFOR\s+TESTING\b/.test(header) === true,
+    inherits: inh === null ? undefined : inh[1], interfaces};
 };
 
 /** the island's test code (H5x-3, fix round 1): a class whose OWN definition
@@ -632,30 +689,22 @@ export function testCodeObjects(objects, sourceOf = undefined) {
       continue;
     }
     if (typeof source !== "string") continue;
-    const up = source.toUpperCase();
-    const header = /\.clas\.abap$/.test(String(o.file)) === true
-      ? headerOf(up, String(o.object).toUpperCase())
-      : undefined;
-    if (header !== undefined) {
-      if (/\bFOR\s+TESTING\b/.test(header) === true) {
+    const object = String(o.object).toUpperCase();
+    const shapes = definitionShapes(o.file, source, object) ?? textShapes(source, object);
+    const isClass = /\.clas\.abap$/.test(String(o.file)) === true;
+    if (isClass === true && shapes.header === true) {
+      if (shapes.forTesting === true) {
         roots.add(o.object);
         continue;
       }
-      const inh = /INHERITING\s+FROM\s+([A-Z0-9_/#]+)/.exec(header);
-      if (inh !== null && AUNIT_TEST_CODE.test(inh[1]) === true) {
+      if (shapes.inherits !== undefined && AUNIT_TEST_CODE.test(shapes.inherits) === true) {
         roots.add(o.object);
         continue;
       }
     }
     // INTERFACES of a framework interface: the implementer is the
     // framework's plumbing
-    const impl = /INTERFACES\s+([A-Z0-9_/#]+)/g;
-    for (let m = impl.exec(up); m !== null; m = impl.exec(up)) {
-      if (AUNIT_TEST_CODE.test(m[1]) === true) {
-        roots.add(o.object);
-        break;
-      }
-    }
+    if (shapes.interfaces.some((n) => AUNIT_TEST_CODE.test(n) === true) === true) roots.add(o.object);
   }
   return {roots, all: new Set(roots)};
 }

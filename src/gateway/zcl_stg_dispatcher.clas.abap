@@ -106,6 +106,15 @@ CLASS zcl_stg_dispatcher DEFINITION PUBLIC CREATE PUBLIC.
         zcx_stg_error
         /iwbep/cx_mgw_base_exception.
 
+* the entity type of the set a navigation started from (empty without one)
+    CLASS-METHODS source_entity_type
+      IMPORTING
+        is_service     TYPE zcl_stg_model_info=>ty_service
+        iv_source_set  TYPE string
+      RETURNING
+        VALUE(rv_type) TYPE string
+      RAISING
+        zcx_stg_error.
     CLASS-METHODS navigation_path
       IMPORTING
         is_service     TYPE zcl_stg_model_info=>ty_service
@@ -649,6 +658,7 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
       ls_source = zcl_stg_model_info=>find_set( is_service    = is_service
                                                 iv_entity_set = iv_source_set ).
       lv_source_name = ls_source-entity_type.
+      lo_context->mv_source_entity_type = ls_source-entity_type.
     ENDIF.
 
 * what the model says the set allows: a refusal here is the Gateway's, before
@@ -1208,8 +1218,8 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
     lt_nav_path = it_navigation_path.
     lo_context->mt_navigation_path   = it_navigation_path.
     lo_context->mv_source_entity_set = iv_source_set.
-    lo_context->mt_navigation_path   = it_navigation_path.
-    lo_context->mv_source_entity_set = iv_source_set.
+    lo_context->mv_source_entity_type = source_entity_type( is_service    = is_service
+                                                            iv_source_set = iv_source_set ).
     IF is_request-is_count = abap_false.
       ls_paging = lo_context->get_paging( ).
     ENDIF.
@@ -1327,6 +1337,8 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
     lt_nav_path = it_navigation_path.
     lo_context->mt_navigation_path   = it_navigation_path.
     lo_context->mv_source_entity_set = iv_source_set.
+    lo_context->mv_source_entity_type = source_entity_type( is_service    = is_service
+                                                            iv_source_set = iv_source_set ).
 
     lt_expand = expand_list( is_request ).
     IF lt_expand IS INITIAL.
@@ -1552,6 +1564,7 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
       lo_context->mt_key_tab           = lt_keys.
       lo_context->mt_navigation_path   = lt_path.
       lo_context->mv_source_entity_set = is_set-name.
+      lo_context->mv_source_entity_type = is_set-entity_type.
 
       CLEAR ls_nav_json.
       ls_nav_json-name = ls_nav-name.
@@ -1625,6 +1638,17 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
       ENDIF.
       APPEND ls_nav_json TO rt_nav_json.
     ENDLOOP.
+  ENDMETHOD.
+
+  METHOD source_entity_type.
+    DATA ls_source TYPE zcl_stg_model_info=>ty_entity_set.
+
+    IF iv_source_set IS INITIAL.
+      RETURN.
+    ENDIF.
+    ls_source = zcl_stg_model_info=>find_set( is_service    = is_service
+                                              iv_entity_set = iv_source_set ).
+    rv_type = ls_source-entity_type.
   ENDMETHOD.
 
   METHOD navigation_path.

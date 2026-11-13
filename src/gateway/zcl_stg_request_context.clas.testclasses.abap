@@ -17,9 +17,16 @@ ENDCLASS.
 CLASS ltcl_tech_request IMPLEMENTATION.
 
   METHOD navigation_path_entity.
+* Two steps, Travel -> to_Bookings -> to_Carrier: every row carries the
+* navigation property, the entity type it starts from (the addressed set's
+* type for the first step, the previous step's target afterwards) and the
+* one it leads to -- the two fields a contract caller branches on.
     DATA lo_context TYPE REF TO zcl_stg_request_context.
-    DATA lt_path    TYPE /iwbep/t_mgw_navigation_path.
-    DATA ls_step    LIKE LINE OF lt_path.
+    DATA lt_path    TYPE /iwbep/t_mgw_tech_navi.
+    DATA ls_row     TYPE /iwbep/s_mgw_tech_navi.
+    DATA ls_pair    TYPE /iwbep/s_mgw_tech_pair.
+    DATA ls_step    LIKE LINE OF lo_context->mt_navigation_path.
+    DATA ls_key     LIKE LINE OF ls_step-key_tab.
 
     CREATE OBJECT lo_context.
 * no navigation in the URL: the path is empty
@@ -27,39 +34,81 @@ CLASS ltcl_tech_request IMPLEMENTATION.
     cl_abap_unit_assert=>assert_initial( lt_path ).
 
 * the path the dispatcher parsed out of the URL comes back in order
-    ls_step-nav_prop = 'to_Bookings'.
-    ls_step-key      = `'1'`.
+    lo_context->mv_source_entity_type = 'Travel'.
+    ls_step-nav_prop     = 'to_Bookings'.
+    ls_step-key          = `'1'`.
+    ls_step-target_type  = 'Booking'.
+    ls_step-multiplicity = '*'.
+    ls_key-name  = 'TravelId'.
+    ls_key-value = '1'.
+    APPEND ls_key TO ls_step-key_tab.
     APPEND ls_step TO lo_context->mt_navigation_path.
-    ls_step-nav_prop = 'to_Cancel'.
-    CLEAR ls_step-key.
+    CLEAR ls_step.
+    ls_step-nav_prop     = 'to_Carrier'.
+    ls_step-target_type  = 'Carrier'.
+    ls_step-multiplicity = '1'.
     APPEND ls_step TO lo_context->mt_navigation_path.
 
     lt_path = lo_context->/iwbep/if_mgw_req_entity~get_navigation_path( ).
     cl_abap_unit_assert=>assert_equals( act = lines( lt_path )
                                         exp = 2 ).
-    READ TABLE lt_path INTO ls_step INDEX 1.
-    cl_abap_unit_assert=>assert_equals( act = ls_step-nav_prop
+    READ TABLE lt_path INTO ls_row INDEX 1.
+    cl_abap_unit_assert=>assert_equals( act = ls_row-nav_prop
                                         exp = 'to_Bookings' ).
-    READ TABLE lt_path INTO ls_step INDEX 2.
-    cl_abap_unit_assert=>assert_equals( act = ls_step-nav_prop
-                                        exp = 'to_Cancel' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_row-source_entity_type
+                                        exp = 'Travel' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_row-target_entity_type
+                                        exp = 'Booking' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_row-multiplicity
+                                        exp = '*' ).
+    cl_abap_unit_assert=>assert_equals( act = lines( ls_row-key_tab )
+                                        exp = 1 ).
+    READ TABLE ls_row-key_tab INTO ls_pair INDEX 1.
+    cl_abap_unit_assert=>assert_equals( act = ls_pair-name
+                                        exp = 'TravelId' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_pair-value
+                                        exp = '1' ).
+    READ TABLE lt_path INTO ls_row INDEX 2.
+    cl_abap_unit_assert=>assert_equals( act = ls_row-nav_prop
+                                        exp = 'to_Carrier' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_row-source_entity_type
+                                        exp = 'Booking' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_row-target_entity_type
+                                        exp = 'Carrier' ).
   ENDMETHOD.
 
   METHOD navigation_path_entityset.
+* the entity-set facet answers the same rows
     DATA lo_context TYPE REF TO zcl_stg_request_context.
-    DATA lt_path    TYPE /iwbep/t_mgw_navigation_path.
-    DATA ls_step    LIKE LINE OF lt_path.
+    DATA lt_path    TYPE /iwbep/t_mgw_tech_navi.
+    DATA ls_row     TYPE /iwbep/s_mgw_tech_navi.
+    DATA ls_step    LIKE LINE OF lo_context->mt_navigation_path.
 
     CREATE OBJECT lo_context.
-    ls_step-nav_prop = 'to_Item'.
+    lo_context->mv_source_entity_type = 'Order'.
+    ls_step-nav_prop    = 'to_Item'.
+    ls_step-target_type = 'Item'.
+    APPEND ls_step TO lo_context->mt_navigation_path.
+    CLEAR ls_step.
+    ls_step-nav_prop    = 'to_Product'.
+    ls_step-target_type = 'Product'.
     APPEND ls_step TO lo_context->mt_navigation_path.
 
     lt_path = lo_context->/iwbep/if_mgw_req_entityset~get_navigation_path( ).
     cl_abap_unit_assert=>assert_equals( act = lines( lt_path )
-                                        exp = 1 ).
-    READ TABLE lt_path INTO ls_step INDEX 1.
-    cl_abap_unit_assert=>assert_equals( act = ls_step-nav_prop
+                                        exp = 2 ).
+    READ TABLE lt_path INTO ls_row INDEX 1.
+    cl_abap_unit_assert=>assert_equals( act = ls_row-nav_prop
                                         exp = 'to_Item' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_row-source_entity_type
+                                        exp = 'Order' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_row-target_entity_type
+                                        exp = 'Item' ).
+    READ TABLE lt_path INTO ls_row INDEX 2.
+    cl_abap_unit_assert=>assert_equals( act = ls_row-source_entity_type
+                                        exp = 'Item' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_row-target_entity_type
+                                        exp = 'Product' ).
   ENDMETHOD.
 
   METHOD function_import_name.
@@ -96,7 +145,7 @@ CLASS ltcl_tech_request IMPLEMENTATION.
 * the parameters converted into the structure the provider declared: one
 * component per parameter, by parameter name, values as text
     lo_context->/iwbep/if_mgw_req_func_import~get_converted_parameters(
-        IMPORTING es_parameters = ls_params ).
+        IMPORTING es_parameter_values = ls_params ).
     cl_abap_unit_assert=>assert_equals( act = ls_params-travelid
                                         exp = 'T0009' ).
     cl_abap_unit_assert=>assert_equals( act = ls_params-status
@@ -109,10 +158,13 @@ ENDCLASS.
 
 CLASS ltcl_changeset_types DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
 * The changeset request/response structures carry the Content-ID of the
-* operation and the Content-ID it references ($batch Content-ID
-* referencing): the member the sample's CHANGESET_BEGIN reads off the
-* operation info and CHANGESet_PROCESS off the request and response rows
-* (framework-gaps.json, bed run 18, private evidence).
+* operation and the Content-ID it references: the member the sample's
+* CHANGESET_BEGIN reads off the operation info and CHANGESet_PROCESS off
+* the request and response rows (framework-gaps.json, bed run 18, private
+* evidence). A compile check only: the fields are types, nothing in the
+* runtime fills them ($batch does not pass Content-IDs into them and does
+* not call CHANGESET_BEGIN with operation info), so this writes and reads
+* the fields back and proves that they exist, nothing more.
   PRIVATE SECTION.
     METHODS content_id_members FOR TESTING RAISING cx_static_check.
 ENDCLASS.

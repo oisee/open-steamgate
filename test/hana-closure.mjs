@@ -3615,6 +3615,11 @@ process.exit(0);
       {object: "ZCL_H5C_AUNIT_NAMER", unknowns: [{name: "CL_AUNIT_H5C_ASSERT", kind: "clas", level: "method"}], edges: [], friends: [], file: "x/zcl_h5c_aunit_namer.clas.abap"},
       {object: "/H5C/CL_H5C_SVC_DPC", unknowns: [], edges: [], friends: [], file: "x/#h5c#cl_h5c_svc_dpc.clas.abap"},
       {object: "ZCL_H5C_KEEP", unknowns: [{name: "ZOSD_H5C_HEAD", kind: "tabl", level: "method"}], edges: [], friends: [], file: "x/zcl_h5c_keep.clas.abap"},
+      // fix round 2 (S-1): production classes that only SAY the words -- in a
+      // comment, a trailing comment and string literals -- are not test
+      // code; the classifier reads abaplint statements, not the raw text
+      {object: "ZCL_H5C_SAYS_IN_COMMENT", unknowns: [], edges: [], friends: [], file: "x/zcl_h5c_says_in_comment.clas.abap"},
+      {object: "ZCL_H5C_SAYS_IN_STRING", unknowns: [], edges: [], friends: [], file: "x/zcl_h5c_says_in_string.clas.abap"},
     ];
     const sources = {
       IF_AUNIT_H5C_TEST: "INTERFACE if_aunit_h5c_test PUBLIC. ENDINTERFACE.",
@@ -3629,6 +3634,28 @@ process.exit(0);
         "ENDCLASS.",
       ].join("\n"),
       ZCL_H5C_KEEP: "CLASS zcl_h5c_keep DEFINITION PUBLIC. ENDCLASS.",
+      ZCL_H5C_SAYS_IN_COMMENT: [
+        "CLASS zcl_h5c_says_in_comment DEFINITION PUBLIC.",
+        "* we used to say INTERFACES if_aunit_h5c_test here, and FOR TESTING",
+        "  PUBLIC SECTION. \" INTERFACES if_aunit_h5c_test",
+        "ENDCLASS.",
+        "CLASS zcl_h5c_says_in_comment IMPLEMENTATION.",
+        "ENDCLASS.",
+      ].join("\n"),
+      ZCL_H5C_SAYS_IN_STRING: [
+        "CLASS zcl_h5c_says_in_string DEFINITION PUBLIC.",
+        "  PUBLIC SECTION.",
+        "    METHODS run_it.",
+        "ENDCLASS.",
+        "CLASS zcl_h5c_says_in_string IMPLEMENTATION.",
+        "  METHOD run_it.",
+        "    DATA lv_text TYPE string.",
+        "    lv_text = `INTERFACES IF_AUNIT_H5C_TEST`.",
+        "    lv_text = 'INTERFACES if_aunit_h5c_test.'.",
+        "    lv_text = |CLASS zcl_h5c_says_in_string DEFINITION FOR TESTING.|.",
+        "  ENDMETHOD.",
+        "ENDCLASS.",
+      ].join("\n"),
     };
     const {roots, all} = testCodeObjects(objects, (o) => sources[o.object]);
     expect([...roots].sort()).to.deep.equal([

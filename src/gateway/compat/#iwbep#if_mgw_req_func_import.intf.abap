@@ -15,5 +15,5 @@ INTERFACE /iwbep/if_mgw_req_func_import PUBLIC.
 
   METHODS get_converted_parameters
     EXPORTING
-      es_parameters TYPE data.
+      es_parameter_values TYPE data.
 ENDINTERFACE.

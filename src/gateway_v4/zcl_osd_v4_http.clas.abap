@@ -353,6 +353,7 @@ CLASS zcl_osd_v4_http IMPLEMENTATION.
     IF lo_source IS BOUND.
       lo_context->mt_key_tab = lo_source->mo_context->mt_key_tab.
       lo_context->mv_source_entity_set = ls_source-name.
+      lo_context->mv_source_entity_type = ls_source-entity_type.
       ls_path-nav_prop = ls_nav-name.
       ls_path-key_tab = lo_context->mt_key_tab.
       ls_path-target_type = ls_nav-target_type.
@@ -568,6 +569,7 @@ CLASS zcl_osd_v4_http IMPLEMENTATION.
       lo_context = lo_sub->mo_context.
       lo_context->mt_key_tab = lt_keys.
       lo_context->mv_source_entity_set = is_set-name.
+      lo_context->mv_source_entity_type = is_set-entity_type.
       CLEAR ls_path.
       ls_path-nav_prop = ls_nav-name.
       ls_path-key_tab = lt_keys.
