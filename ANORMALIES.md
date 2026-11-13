@@ -30,6 +30,22 @@ Format adapted from `larshp/hithub` (MIT).
 
 ## Open anomalies
 
+### ANOMALY-2026-11-13-select-loop-join-into-list -- A SELECT loop over a join INTO (list) cannot run, assigns one target and pages wrong
+
+- Status: `workaround` (the pinned fork `oisee/transpiler` `local/osd-build-4d` `d8525705` = `local/osd-build-4c` plus this one commit, also on branch `fix/select-loop-join-into-list` for the upstream PR)
+- Discovery date: `2026-11-13` (a probe class with the read shape of a code-based SEGW sample's GET_ENTITYSET, transpiled with the pin)
+- Affected versions: `@abaplint/transpiler` and `@abaplint/runtime` on the pinned fork `oisee/transpiler` `local/osd-build-4c` `a0d80fff`, and upstream main of the same date (`packages/transpiler/src/structures/select.ts` is unchanged there)
+- Affected ABAP statement, runtime API or adapter: `SELECT ... INTO (v1, v2, ...) FROM ( ta AS a INNER JOIN tb AS b ON ... ) ... ENDSELECT`, and any SELECT loop INTO a list or over an alias; `packages/transpiler/src/structures/select.ts`
+- Minimal ABAP reproducer: `SELECT t~travel_id s~status_text INTO (lv_id, lv_text) FROM ( zstg_demo AS t INNER JOIN zstg_status AS s ON t~status = s~status ) ORDER BY t~travel_id. ... ENDSELECT.`
+- Exact command used to run it: `npm run unit` (test class `ZCL_OSD_SELECT_LOOP_TEST`)
+- Expected SAP behaviour: every target of the list takes its column per row; inside the loop sy-dbcnt is the number of rows read so far (1, 2, 3 ...) and sy-subrc 0; after ENDSELECT sy-dbcnt is the number of rows read and sy-subrc is 4 when there was none.
+- Actual open-abap behaviour: the generated code builds its buffer with `abap.DDIC["ZSTG_DEMO AS T"].type()`, the text of the first FROM source, which is undefined for an alias or a join (TypeError at the first call); for a single table it assigns only the first target, from the whole row; and it sets sy-dbcnt once, to the total, before the first row, so `IF sy-dbcnt > skip` is true on every row and `$skip` is silently ignored.
+- Impact on open-steamgate: every GET_ENTITYSET of a code-based SEGW service written in this 7.02 style (the HANA bed's sample service reads all five business sets so) dumps; with the dump fixed alone, paging would return wrong rows without an error.
+- Smallest safe workaround: rewrite the read as `SELECT ... INTO TABLE` and page over the table; not applicable to service code read from a system, hence the transpiler fix.
+- Upstream issue: none yet; the fix goes upstream as a branch inside `abaplint/transpiler` after the critic pass (CLAUDE.md, "A transpiler PR comes from a branch inside abaplint/transpiler").
+- Regression-test location: `test/unit/zcl_osd_select_loop_test.clas.testclasses.abap`; in the transpiler, `test/database.ts` ("SELECT loop, join ...")
+- Upstream version containing a fix: `unknown`
+
 ### ANOMALY-2026-11-10-wait-in-select-loop -- A WAIT inside SELECT ... ENDSELECT reads on (Node, OSGo with one connection) where a system dumps DBIF_RSQL_INVALID_CURSOR
 
 - Status: `open` (OSGo's work-process steps behave as the system; the Node host and OSGo's classic one-connection path do not)
