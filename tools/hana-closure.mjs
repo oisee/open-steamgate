@@ -70,19 +70,36 @@
 //                         requested, never a gap -- its finding is a
 //                         cascade of that object's own, "cascade (present)"
 //                         on the line. When no stub applies any more, the
-//                         EXCLUSION decision runs over the whole island
-//                         (tools/hana-closure-exclude.mjs, fix round 2):
-//                         only at the dumper fixed point -- no name of any
-//                         finding still pending -- re-decided every
-//                         iteration (the records carry the LAST decision),
-//                         following chains of present-but-red objects to
-//                         their roots (excluded, level "definition"; the
-//                         dependents recorded {level: "cascade", of} until
-//                         the root's exclusion re-evaluates them), keeping
-//                         true cycles whole, and NEVER a registered
-//                         service's own class -- the MPC/DPC/_EXT pairs a
-//                         registration names, or by suffix without one:
-//                         the run fails instead.
+//                         EXCLUSION decision runs over the whole island as
+//                         a GRAPH analysis (tools/hana-closure-graph.mjs
+//                         graphDecide, over references() edges; #933's
+//                         text machinery is deleted): decided only when no
+//                         definition-level name is pending, re-decided
+//                         every iteration (the record carries the LAST
+//                         decision); roots -- objects whose definition
+//                         references a name answered missing, or whose
+//                         definition findings name nothing -- are excluded
+//                         together with the dependents that cannot compile
+//                         without them ({level: "cascade", of: [roots]};
+//                         definition-level references only: a dependent
+//                         that references a root only in a body is
+//                         stubbed, not excluded); cycles of present
+//                         objects that name only each other are kept
+//                         ({level: "cycle", members}); a FRIENDS clause
+//                         naming an excluded object is stripped, never
+//                         excluding; and NEVER a registered service's own
+//                         class -- the MPC/DPC/_EXT pairs a registration
+//                         names, or by suffix without one: the run fails
+//                         instead. Since H5x-2 the names come from the
+//                         structural pass (references(), one SyntaxLogic
+//                         pass per object): a signature-level miss (a
+//                         parameter typed by a missing name) stays whole
+//                         while its DDIC name is pending and is otherwise
+//                         cut from the METHODS statement with the body
+//                         stubbed, and a GLOBAL FRIENDS clause naming a
+//                         gone object (excluded, or answered missing/
+//                         refused) is stripped -- a friend that leaves
+//                         costs the clause, never the class.
 //   --defer-ddic          keeps round 3's behaviour: every name of a
 //                         stubbed method is lazy, even the dictionary's.
 //   --max-stub-rounds <n> the cap of the stub rounds above (default 5, and
@@ -229,14 +246,15 @@
 // --allow-in-repo, the password from VSP_HANA_PASSWORD only) --
 // test/hana-closure.mjs, fixtures ZOSD_H5C_*; the real iteration is dell's,
 // on the bed.
-import {copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
+import {copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {join, resolve} from "node:path";
 import {runsAs} from "./osd-main.mjs";
 import {validationMessage} from "./hana-ddic-gen.mjs";
 import {islandClassPaths, planStubPass, registeredServiceClasses, serviceGuardBySuffixOnly, dropPresentNames, frameworkGapList, objectFilePresent} from "./hana-closure-stubs.mjs";
-import {buildCheck, ddicWritten, ensureLayers, islandObjectCount, islandShrinkCheck, mergeInputs} from "./hana-closure-merge.mjs";
-import {dumperConfigured, dumpRound, printedCommand} from "./hana-closure-dumper.mjs";
-import {classifyFindings, exclusionCandidates, exclusionDecisions, nameFromAbapFile, parseFindings} from "./hana-closure-exclude.mjs";
+import {buildCheck, ddicWritten, ensureLayers, generationOf, islandBasenames, islandObjectCount, islandShrinkCheck, mergeInputs} from "./hana-closure-merge.mjs";
+import {dumperConfigured, dumpRound, printedCommand, provenanceFor} from "./hana-closure-dumper.mjs";
+import {cascadeOf, classifyFindings, exclusionCandidates, nameFromAbapFile, parseFindings} from "./hana-closure-exclude.mjs";
+import {analyseIsland, graphDecide, mergeNames, requestKindOf, structuralRegistry, waitsOf, writeClosureRecord} from "./hana-closure-graph.mjs";
 
 // ------------------------------------------------------------ findings ----
 
@@ -245,37 +263,10 @@ import {classifyFindings, exclusionCandidates, exclusionDecisions, nameFromAbapF
 // size budget stays honest); re-exported here so every reader -- the tests,
 // tools/hana-closure-merge.mjs, the probes -- keeps one import path.
 export {parseFindings, classifyFindings, nameFromAbapFile} from "./hana-closure-exclude.mjs";
-
-// ------------------------------------------------------------ the island --
-
-/** the file basenames of the island -- gen/hana-src/** and gen/hana-ddic/*.
- *  The closure is scoped to it: a finding whose file is one of these
- *  basenames is the service's and is classified; src/, packs/ and other
- *  gen/ findings are the tree's own and never enter a request. The
- *  validation's file names are bare basenames (the transpiler reports the
- *  name only), so "under gen/hana-src/*" is decided by membership in this
- *  set, not by a path prefix on the finding -- and a basename both an island
- *  layer and src/ carry is the island's, the later layer wins the build
- *  anyway. Reads the tree's folders, nothing else. */
-export function islandBasenames(root) {
-  const names = new Set();
-  const walk = (dir) => {
-    let entries;
-    try {
-      entries = readdirSync(dir, {withFileTypes: true});
-    } catch (error) {
-      if (error.code === "ENOENT") return;
-      throw error;
-    }
-    for (const entry of entries) {
-      if (entry.isDirectory()) walk(join(dir, entry.name));
-      else names.add(entry.name);
-    }
-  };
-  walk(join(root, "gen", "hana-src"));
-  walk(join(root, "gen", "hana-ddic"));
-  return names;
-}
+// the island's basename set lives with the merge module's other island
+// facts (islandObjectCount, ddicWritten) since FIX-1; re-exported here so
+// every reader -- the tests, the probes -- keeps one import path
+export {islandBasenames} from "./hana-closure-merge.mjs";
 
 // ------------------------------------------------------------- request ----
 
@@ -293,7 +284,10 @@ const TADIR = ["TABL", "DTEL", "DOMA", "TTYP", "SHLP", "CLAS", "INTF", "FUGR", "
  *  the gaps. Pure. */
 export function tadirKinds(kind, finding) {
   if (kind === "ddic") {
-    const kinds = ["TABL", "DTEL", "TTYP"];
+    // H5x-2: the structural ask carries no DOMA precision (the UnknownType's
+    // error text says `lookup` for every kind-less miss), so the kind-less
+    // triple grew DOMA -- the dumper answers what exists, per kind
+    const kinds = ["TABL", "DTEL", "TTYP", "DOMA"];
     if (/search[ -]?help/i.test(String(finding ?? ""))) kinds.push("SHLP");
     return kinds;
   }
@@ -374,23 +368,10 @@ const saveState = (out, state) => {
   writeFileSync(join(out, "state.json"), JSON.stringify(state, null, 2) + "\n");
 };
 
-// the identity of the inputs the findings came from, for the request's
-// `generation`: the sha256 the dump->layers converter recorded of the
-// dump's manifest.json, copied into gen/hana-src/manifest.json by the
-// merge; empty when no merge has written one yet. (The build here is
-// validationMessage over the tree -- it writes no manifest of its own; the
-// dump's is the manifest on the path.)
-const generationOf = (root) => {
-  try {
-    const manifest = JSON.parse(readFileSync(join(root, "gen", "hana-src", "manifest.json"), "utf8"));
-    return String(manifest.dump?.manifest_sha256 ?? "");
-  } catch {
-    return "";
-  }
-};
-
-const provenanceFor = (iteration) =>
-  `hana-closure iteration ${iteration}: the closure request's names (tools/hana-closure.mjs)`;
+// the request's `generation` (the merge manifest's sha) and the dumper
+// round's provenance live with their modules since FIX-1: generationOf in
+// tools/hana-closure-merge.mjs (it reads the merge's own manifest),
+// provenanceFor in tools/hana-closure-dumper.mjs (the dumper's contract)
 
 // the dumper round and the by-hand command live in
 // tools/hana-closure-dumper.mjs since H5x-1: their own package, the size
@@ -493,6 +474,10 @@ export async function run(args = process.argv.slice(2), options = {}) {
 
   // the dumper budget of this run; a resumed run has its own
   let rounds = 0;
+  // the walk's stubs, across iterations (H5x-2: closure-stubs.json is the
+  // WALK's record -- an earlier iteration's stubs must not fall out of it
+  // when a later iteration writes its own decision)
+  const stubRecords = [];
   for (;;) {
     // what the dump's own manifest says the dictionary answered, read on
     // every continuation: every name in closure.missing (the requested
@@ -586,16 +571,25 @@ export async function run(args = process.argv.slice(2), options = {}) {
     // finding outside gen/hana-src or gen/hana-ddic is the tree's own
     // business, counted once, never asked
     const island = islandBasenames(root);
-    // this ITERATION's exclusions (fix round 2, item 2): cleared and
-    // re-decided from scratch whenever the island grows -- an object
-    // excluded on an incomplete island comes back once its roots arrive.
-    // The wipe makes the first validation of this iteration read no stale
-    // record; the stub rounds re-decide and write the last decision.
+    // this ITERATION's exclusions: cleared and re-decided whenever the
+    // island grows; the wipe makes the first validation read no stale
+    // record, the graph rounds write the last decision.
     const excludedRecords = [];
     const excludedObjects = new Set();
-    if (stubUnresolved === true) writeFileSync(join(out, "closure-stubs.json"), "[]\n");
+    if (stubUnresolved === true) writeClosureRecord(out, {stubRecords, excludedRecords, waits: []});
+    // the structural pass (H5x-2): one SyntaxLogic pass per island object
+    // over the build's own file set -- the names' primary source and the
+    // graph decision's input, in both modes
+    const analysis = analyseIsland({reg: await structuralRegistry(root, say),
+      root, classPaths: islandClassPaths(root)});
     let all = parseFindings(await validationMessage(root, join(out, "closure-stubs.json")));
     let findings = all.filter((f) => island.has(f.file));
+    // FIX-1: this iteration's analysis errors, keyed by file ("red, unknown
+    // cause" -- kept, never excluded); without --stub-unresolved this is the
+    // record's only write, the audit trail of what the walk could not analyse
+    const errorRecords = new Map((analysis.errors ?? []).map((e) => [e.file, e]));
+    if (stubUnresolved === false && errorRecords.size > 0) writeClosureRecord(out,
+      {stubRecords, excludedRecords, waits: [], errors: [...errorRecords.values()]});
     // lazy activation (--stub-unresolved) as fix round 1 corrects it: a
     // method keeps its body only while a DDIC name of its is still pending
     // in THIS iteration's request; nameless, present-only, resolved-but-
@@ -604,9 +598,11 @@ export async function run(args = process.argv.slice(2), options = {}) {
     // the framework work list; a class whose definition findings name
     // nothing still pending is EXCLUDED in a quiescent round (registered
     // service's own classes fail the run instead)
-    const stubRecords = [];
     const deferredPairs = new Map();
     const eagerNames = new Map();
+    // the objects whose planning threw this iteration (FIX-1): out of the
+    // decision's material entirely -- kept in the build, never excluded
+    const planErrored = new Set();
     let stubRounds = 0;
     let frameworkGaps = 0;
     let cycles = 0;
@@ -629,8 +625,24 @@ export async function run(args = process.argv.slice(2), options = {}) {
         state.missing[name] === undefined && state.refused[name] === undefined &&
         excludedObjects.has(name) === false &&
         (state.asked[name] === undefined || resolvedSet.has(name) === false);
+      // a name gone from the build -- excluded, or answered
+      // missing/refused: the FRIENDS strip's predicate
+      const goneOf = (name) => excludedObjects.has(name) === true ||
+        state.missing[name] !== undefined || state.refused[name] !== undefined;
       // this run's framework gaps: one entry per distinct nameless finding text
       const gapFindings = new Map();
+      const analysisObjects = analysis.objects;
+      const byObject = new Map(analysisObjects.map((o) => [o.object, o]));
+      const defNamesOf = (o) => (o.unknowns ?? []).filter((u) => u.level === "definition")
+        .map((u) => ({name: u.name, kind: requestKindOf(u.name, u), via: u.via}));
+      const upsertRecord = (rec) => {
+        const at = excludedRecords.findIndex((r) => r.object === rec.object);
+        if (at >= 0) excludedRecords[at] = rec;
+        else excludedRecords.push(rec);
+      };
+      const writeRecord = () =>
+        writeClosureRecord(out, {stubRecords, excludedRecords, waits: waitsOf(analysisObjects, pendingAtFixedPoint),
+          errors: [...errorRecords.values()]});
       for (;;) {
         const byFile = new Map();
         for (const f of findings) {
@@ -657,11 +669,26 @@ export async function run(args = process.argv.slice(2), options = {}) {
               say(`stub: ${basename} could not be read; its findings stay in the request`);
               continue;
             }
-            const plan = planStubPass({source, findings: list, basename,
-              missingOf: (name) => state.missing[name] !== undefined,
-              asked: (name) => state.asked[name] !== undefined,
-              refusedOf: (name) => state.refused[name] !== undefined,
-              islandFiles, excludedObjects, deferDdic});
+            const object = objectOf(basename);
+            if (planErrored.has(object) === true) continue;
+            const refs = byObject.get(object)?.unknowns ?? [];
+            let plan;
+            try {
+              plan = planStubPass({source, findings: list, basename, refs,
+                missingOf: (name) => state.missing[name] !== undefined,
+                asked: (name) => state.asked[name] !== undefined,
+                refusedOf: (name) => state.refused[name] !== undefined,
+                islandFiles, excludedObjects, deferDdic, goneOf});
+            } catch (error) {
+              // FIX-1: one file's planning must not stop the walk -- recorded,
+              // the object leaves the decision material (kept, never excluded)
+              const message = String(error?.message ?? error);
+              const file = path.slice(root.length + 1);
+              say(`stub: ${basename} could not be planned (${message}); its findings stay in the request, the object stays in the build`);
+              errorRecords.set(file, {file, error: message});
+              planErrored.add(object);
+              continue;
+            }
             for (const n of plan.nameless) {
               const entry = gapFindings.get(n.finding) ??
                 {finding: n.finding, ...(n.member !== undefined ? {member: n.member} : {}), used_by: []};
@@ -671,64 +698,121 @@ export async function run(args = process.argv.slice(2), options = {}) {
             if (plan.unparseable === true) {
               say(`stub: ${basename} does not parse; its findings stay in the request`);
             }
-            planned.push({basename, object: objectOf(basename), file: path.slice(root.length + 1), path, source,
+            planned.push({basename, object, file: path.slice(root.length + 1), path, source,
               plan, unmatched: plan.unparseable === true ? list : plan.unmatched});
           }
         }
-        // a file whose definition findings name nothing still pending is
-        // exclusion material: its stubs are held back (applying them would
-        // rewrite a file the decision keeps whole)
-        const held = exclusionCandidates({files: planned, pendingOf: pendingAtFixedPoint});
-        const applied = [];
-        for (const entry of planned) {
-          if (entry.plan.unparseable === true || held.has(entry.object) === true) continue;
-          if (entry.plan.source !== entry.source) writeFileSync(entry.path, entry.plan.source);
-          for (const stub of entry.plan.stubs) {
-            applied.push(stub.className);
-            stubRecords.push({level: "method", file: entry.file, class: stub.className, method: stub.method, missing: stub.missing, finding: stub.finding});
-          }
-          for (const nk of entry.plan.deferred) deferredPairs.set(nk.name, {name: nk.name, kind: nk.kind, finding: nk.finding});
-          for (const e of entry.plan.eager) eagerNames.set(e.name, e);
-        }
-        let excludedNow = 0;
-        if (applied.length === 0 && planned.length > 0) {
-          // quiescent: no method stub applied this round -- the exclusion
-          // findings are then not cascades of a body another stub removes;
-          // the whole island is decided at once, dependents next round
-          const decision = exclusionDecisions({files: planned,
-            pendingOf: pendingAtFixedPoint,
-            presentFile: (name, kind) => objectFilePresent(name, kind, islandFiles) === true,
-            missingOf: (name) => state.missing[name] !== undefined,
-            refusedOf: (name) => state.refused[name] !== undefined,
-            askedOf: (name) => state.asked[name] !== undefined,
-            resolvedOf: (name) => resolvedSet.has(name),
-            excludedObjects, guard,
-            guardMode: guardBySuffix === true ? "suffix" : "registration"});
-          if (decision.blocked !== true) {
-            for (const rec of decision.records) {
-              const at = excludedRecords.findIndex((r) => r.object === rec.object);
-              if (at >= 0) excludedRecords[at] = rec;
-              else excludedRecords.push(rec);
-              if (rec.level === "definition") {
-                excludedObjects.add(rec.object);
-                excludedNow += 1;
-                say(`excluded: ${rec.object} (${rec.file}): definition-level finding(s) -- the file stays in its layer on disk, the build is kept from it`);
-              } else if (rec.level === "cascade") {
-                say(rec.excluded === true
-                  ? `excluded: ${rec.object} (${rec.file}): cascade of ${rec.of.join(", ")} -- the file leaves the build with them`
-                  : `cascade: ${rec.object} (${rec.file}): recorded, falls with ${rec.of.join(", ")} (re-evaluated next round)`);
-                if (rec.excluded === true) {
-                  excludedObjects.add(rec.object);
-                  excludedNow += 1;
-                }
-              } else {
-                cycles = Math.max(cycles, rec.members.length);
-                say(`cycle: ${rec.members.join(", ")} -- kept in the build (a residual cycle is a checker limit, not a reason to exclude)`);
+        // the decision's material: every island object's definition-level
+        // references (the graph), beside this round's findings outside
+        // every method body -- signature-line findings are the stub pass's
+        const planByFile = new Map(planned.map((p) => [p.basename, p]));
+        const objects = analysisObjects.filter((o) => planErrored.has(o.object) === false).map((o) => {
+          const sigLines = new Set(o.signatureLines ?? []);
+          const entry = {object: o.object, defNames: defNamesOf(o),
+            edges: (o.edges ?? []).filter((e) => e.level === "definition").map((e) => e.to),
+            friends: o.friends ?? [], nameless: [], findings: []};
+          for (const base of o.files ?? []) {
+            const p = planByFile.get(base);
+            for (const f of (p !== undefined ? p.plan.unmatched : [])) {
+              if (sigLines.has(f.line) === true) continue;
+              entry.findings.push(f.raw);
+              // a super or friend wording names nothing the classifier
+              // could ask (both names travel structurally): never a
+              // nameless root -- the strip and the graph handle them
+              const tag = cascadeOf(f.message);
+              if (tag !== "friend" && tag !== "super" && classifyFindings([f]).names.length === 0) {
+                entry.nameless.push(f.raw);
               }
             }
           }
+          return entry;
+        });
+        // a file whose definition material is settled holds its stubs back
+        // for the decision (the hold) -- but a blocked decision decides
+        // nothing and a decided file that STAYS needs its stubs: they
+        // apply then (S-2.2)
+        const candidateFiles = [];
+        for (const p of planned) {
+          const existing = candidateFiles.find((c) => c.object === p.object);
+          if (existing === undefined) {
+            candidateFiles.push({object: p.object, defNames: defNamesOf(byObject.get(p.object) ?? {}), unmatched: [...p.unmatched]});
+          } else {
+            existing.unmatched.push(...p.unmatched);
+          }
         }
-        if (applied.length === 0 && excludedNow === 0) {
+        const held = exclusionCandidates({files: candidateFiles, pendingOf: pendingAtFixedPoint});
+        const applied = [];
+        let friendStrips = 0;
+        const applyPlans = (entries) => {
+          for (const entry of entries) {
+            if (entry.plan.unparseable === true) continue;
+            if (entry.plan.source !== entry.source) writeFileSync(entry.path, entry.plan.source);
+            friendStrips += entry.plan.friendsStripped?.length ?? 0;
+            for (const stub of entry.plan.stubs) {
+              applied.push(entry.object);
+              stubRecords.push({object: entry.object, file: entry.file, class: stub.className,
+                method: stub.method, missing: stub.missing, finding: stub.finding,
+                ...(stub.signature === true ? {signature: true} : {})});
+            }
+            for (const nk of entry.plan.deferred) deferredPairs.set(nk.name, {name: nk.name, kind: nk.kind, finding: nk.finding});
+            for (const e of entry.plan.eager) eagerNames.set(e.name, e);
+          }
+        };
+        applyPlans(planned.filter((p) => held.has(p.object) === false));
+        let excludedNow = 0;
+        if (applied.length === 0 && planned.length > 0) {
+          // quiescent: no stub applied this round -- the whole island is
+          // decided at once, dependents falling with their roots in the
+          // same decision (the graph needs no transpiler roundtrip)
+          const decision = graphDecide({objects,
+            pendingOf: pendingAtFixedPoint,
+            statusOf: (name, kind) => excludedObjects.has(name) === true ? "excluded"
+              : objectFilePresent(name, kind, islandFiles) === true ? "present" : "absent",
+            guard,
+            guardMode: guardBySuffix === true ? "suffix" : "registration"});
+          if (decision.blocked === true) {
+            // S-2.2: nothing is decided this round -- the hold limbo would
+            // leave a capped run red forever; the held files' stubs and
+            // strips apply after all (the decision re-reads the island
+            // next round from whatever the sources then are)
+            applyPlans(planned.filter((p) => held.has(p.object) === true));
+          } else {
+            for (const r of decision.roots) {
+              const o = byObject.get(r.object);
+              upsertRecord({level: "definition", object: r.object, file: o.file, kind: o.kind,
+                missing: r.missing, findings: objects.find((x) => x.object === r.object)?.findings ?? []});
+              excludedObjects.add(r.object);
+              excludedNow += 1;
+              say(`excluded: ${r.object} (${o.file}): its definition references ${r.missing.join(", ") || "nothing it can reach (nameless findings)"} -- the file stays in its layer on disk, the build is kept from it`);
+            }
+            for (const c of decision.cascades) {
+              const o = byObject.get(c.object);
+              upsertRecord({level: "cascade", object: c.object, file: o.file, kind: o.kind, of: c.of,
+                findings: objects.find((x) => x.object === c.object)?.findings ?? [], excluded: true});
+              excludedObjects.add(c.object);
+              excludedNow += 1;
+              say(`excluded: ${c.object} (${o.file}): cascade of ${c.of.join(", ")} -- the file leaves the build with them`);
+            }
+            for (const cy of decision.cycles) {
+              cycles = Math.max(cycles, cy.members.length);
+              const findingsMap = {};
+              for (const m of cy.members) findingsMap[m] = objects.find((x) => x.object === m)?.findings ?? [];
+              upsertRecord({level: "cycle", members: cy.members, kept: true, findings: findingsMap});
+              say(`cycle: ${cy.members.join(", ")} -- kept in the build (a residual cycle is a checker limit, not a reason to exclude)`);
+            }
+            for (const s of decision.strips) {
+              const o = byObject.get(s.object);
+              upsertRecord({level: "cascade", object: s.object, file: o.file, kind: o.kind, of: s.of,
+                edge: "friends", action: "strip-friends",
+                findings: objects.find((x) => x.object === s.object)?.findings ?? [], excluded: false});
+              say(`friends: ${s.object} strips GLOBAL FRIENDS ${s.of.join(", ")} (a friend that leaves costs the clause, not the class)`);
+            }
+            // the held files that STAY in the build get their plans after
+            // all -- only an excluded file's plans are moot
+            applyPlans(planned.filter((p) => held.has(p.object) === true && excludedObjects.has(p.object) === false));
+          }
+        }
+        if (applied.length === 0 && excludedNow === 0 && friendStrips === 0) {
           say(`stub: ${byFile.size} class file(s) name findings, but none could be stubbed (definition-level, or awaiting the dumper's DDIC answer); the names stay in the request`);
           break;
         }
@@ -738,29 +822,33 @@ export async function run(args = process.argv.slice(2), options = {}) {
         for (const [cls, count] of perClass) {
           say(`stub round ${stubRounds}: ${cls}: ${count} method(s) stubbed (generation ${generationOf(root) || "none"})`);
         }
-        if (excludedNow > 0 || gapFindings.size > 0 || excludedRecords.length > 0) {
+        if (excludedNow > 0 || gapFindings.size > 0 || excludedRecords.length > 0 || friendStrips > 0) {
           // the seam reads closure-stubs.json: written before the
           // revalidation, so the findings leave at once
-          writeFileSync(join(out, "closure-stubs.json"), JSON.stringify([...stubRecords, ...excludedRecords], null, 2) + "\n");
+          writeRecord();
           writeFileSync(join(out, "framework-gaps.json"), JSON.stringify(frameworkGapList(gapFindings), null, 2) + "\n");
         }
         all = parseFindings(await validationMessage(root, join(out, "closure-stubs.json")));
         findings = all.filter((f) => island.has(f.file));
       }
-      writeFileSync(join(out, "closure-stubs.json"), JSON.stringify([...stubRecords, ...excludedRecords], null, 2) + "\n");
+      writeRecord();
       writeFileSync(join(out, "framework-gaps.json"),
         JSON.stringify(frameworkGapList(gapFindings, (file) => guard.has(objectOf(file))), null, 2) + "\n");
       frameworkGaps = gapFindings.size;
     }
     const unscoped = all.length - findings.length;
-    const classified = classifyFindings(findings);
+    // the names: the references first, then the text fallback for the
+    // findings no reference carries (H5x-2)
+    const {names: structuralNames, structuralCount, rest} = mergeNames(
+      {analysis, findings, classPaths: islandClassPaths(root)});
+    const classified = classifyFindings(rest);
     // H5x-1: a name whose object is in the island -- by file name for
     // CLAS/INTF, by the XML present for the DDIC kinds -- is never
     // requested and never a gap, whatever asked for it before: the finding
     // is a CASCADE of that object's own findings, counted below as
     // "cascade (present)". An object excluded this run is out of the
     // build; its name rides the request's excluded key instead.
-    const {names, present} = dropPresentNames(classified.names, island, excludedObjects);
+    const {names, present} = dropPresentNames([...structuralNames, ...classified.names], island, excludedObjects);
     const cascades = classified.cascades;
     const unclassified = classified.unclassified;
     // and the stubs' eager DDIC names (H5x-1): asked like any classified name
@@ -823,7 +911,7 @@ export async function run(args = process.argv.slice(2), options = {}) {
     const writtenDdic = ddicWritten(root);
     const ddicCounts = TADIR.filter((k) => (state.resolved?.[k] ?? []).length > 0)
       .map((k) => `${k} ${state.resolved[k].length}/${writtenDdic[k]?.size ?? 0}`).join(", ");
-    say(`iteration ${state.iteration}: ${fresh.length} new name(s), ${gaps.length} gap(s), ${unscoped} outside the island (not asked), ${refusedGaps.length} merge-refusal gap(s), ${cascades} cascade finding(s) skipped, ${unclassified.length} unclassified${stubUnresolved === true ? `, ${deferredOnly.length} deferred by stubs, ${stubRecords.length} stubbed method(s), framework gaps: ${frameworkGaps}${cycles > 0 ? `, ${cycles} cycle member(s) kept` : ""}` : ""}, ${objects.total} island object(s)${gapKinds !== "" ? `, gaps by kind: ${gapKinds}` : ""}${ddicCounts !== "" ? `, DDIC resolved/written: ${ddicCounts}` : ""}, ${present} cascade (present)${excludedRecords.length > 0 ? `, ${excludedRecords.length} excluded` : ""}${stubUnresolved === true && guardBySuffix === true ? ", service guard: by suffix, no registration" : ""}`);
+    say(`iteration ${state.iteration}: ${fresh.length} new name(s), ${gaps.length} gap(s), ${unscoped} outside the island (not asked), ${refusedGaps.length} merge-refusal gap(s), ${cascades} cascade finding(s) skipped, ${structuralCount} structural, ${unclassified.length} unclassified${stubUnresolved === true ? `, ${deferredOnly.length} deferred by stubs, ${stubRecords.length} stubbed method(s), framework gaps: ${frameworkGaps}${cycles > 0 ? `, ${cycles} cycle member(s) kept` : ""}` : ""}, ${objects.total} island object(s)${gapKinds !== "" ? `, gaps by kind: ${gapKinds}` : ""}${ddicCounts !== "" ? `, DDIC resolved/written: ${ddicCounts}` : ""}, ${present} cascade (present)${excludedRecords.length > 0 ? `, ${excludedRecords.filter((r) => r.level !== "cycle").length} excluded` : ""}${stubUnresolved === true && guardBySuffix === true ? ", service guard: by suffix, no registration" : ""}`);
     for (const line of unclassified) say(`unclassified: ${line}`);
 
     if (fresh.length === 0) {
@@ -842,12 +930,14 @@ export async function run(args = process.argv.slice(2), options = {}) {
     const freshCount = fresh.length;
     const request = requestFor({iteration, generation: generationOf(root), fresh, asked: state.asked, gaps,
       ...(stubUnresolved === true ? {deferred: deferredOnly} : {}),
-      // the request's excluded key carries the definition-level roots of
-      // the LAST decision only -- cascade members are not excluded on their
-      // own account, cycles are no exclusion at all (fix round 2, items 2+3)
-      ...(excludedRecords.some((r) => r.level === "definition") === true
-        ? {excluded: excludedRecords.filter((r) => r.level === "definition")
-          .map((r) => ({name: r.object, kind: /\.intf\.abap$/.test(r.file) === true ? "intf" : "clas"}))}
+      // the request's excluded key carries the LAST decision's excluded
+      // objects -- the roots and the cascades that fall with them (their
+      // names are out of the build either way); cycles are no exclusion at
+      // all, and a FRIENDS strip is a record, not an exclusion
+      ...(excludedRecords.some((r) => r.level === "definition" || r.level === "cascade") === true
+        ? {excluded: excludedRecords
+          .filter((r) => r.level === "definition" || (r.level === "cascade" && r.excluded === true))
+          .map((r) => ({name: r.object, kind: r.kind === "INTF" ? "intf" : "clas"}))}
         : {})});
     writeFileSync(requestPath, JSON.stringify(request, null, 2) + "\n");
     say(`request ${iteration}: ${freshCount} new name(s) -> ${requestPath}`);
