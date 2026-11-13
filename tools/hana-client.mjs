@@ -358,8 +358,8 @@ export class HanaDatabaseClient {
     this.readOnly = input.readOnly ?? (this.existingSchema && process.env.OSD_HANA_WRITE !== "1");
     // H3: the logon client (OSD_CLIENT) and our own schema (HANA_OWN_SCHEMA).
     // In existing-schema mode connect() refuses to start without a client:
-    // the shadow views filter MANDT = SESSION_CONTEXT('CLIENT'), and a NULL
-    // client reads every client-dependent table as empty.
+    // each shadow view filters its table's DD03L client column on
+    // SESSION_CONTEXT('CLIENT'); a NULL client reads every one as empty.
     this.logonClient = input.client ?? process.env.OSD_CLIENT ?? "";
     this.ownSchema = String(input.ownSchema ?? process.env.HANA_OWN_SCHEMA ?? "").toUpperCase();
     this.shadowTables = input.shadowTables ?? [];
@@ -693,9 +693,9 @@ export class HanaDatabaseClient {
     try {
       return await ensureShadowFor(this, {own: this.ownSchema, tenant: this.schema, name});
     } catch (fallbackError) {
-      // the fallback's own DD02L / SYS.VIEWS / SYS.SYNONYMS read failed: the
-      // caller's statement keeps its own error -- a 259 stays that 259. The
-      // flag above is what stopped the recursion (probe at f0a248af1: 199
+      if (fallbackError?.code === "HANA_NO_CLIENT_COLUMN") throw fallbackError; // ours, no CLNT key: refused by name
+      // otherwise the fallback's own DD* / SYS read failed: the statement keeps
+      // its 259. The flag above stopped the recursion (probe at f0a248af1: 199
       // DD02L reads); this is logged, not swallowed silent.
       if (this.trace) console.error(`shadow fallback for ${name} failed: ${fallbackError?.message ?? fallbackError}`);
       return false;
