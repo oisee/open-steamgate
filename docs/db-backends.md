@@ -437,9 +437,27 @@ the generation knows (`ddicTables()` in `tools/hana-shadow-schema.mjs` walks
 the same layers the build does), `connect()` makes sure our own schema holds
 
 ```
-CREATE VIEW "<own>"."T" AS SELECT * FROM "<tenant>"."T" WHERE MANDT = SESSION_CONTEXT('CLIENT')   -- DD02L.CLIDEP = 'X'
+CREATE VIEW "<own>"."T" AS SELECT * FROM "<tenant>"."T" WHERE "<C>" = SESSION_CONTEXT('CLIENT')   -- DD02L.CLIDEP = 'X'
 CREATE SYNONYM "<own>"."T" FOR "<tenant>"."T"                                                    -- otherwise
 ```
+
+where `<C>` is the table's own client column, read off the tenant's DD03L
+(active version): the first key field, in `POSITION` order, whose `DATATYPE`
+is `CLNT` (`clientField` in `tools/hana-ddic-map.mjs`, read in chunks beside
+the `DD02L` read). It is not assumed to be `MANDT`: on the bed a whole family
+of client-dependent tables names it `CLIENT`, and `MANDANT`, `CLNT`, `RCLNT`
+occur too. Until 2026-11-13 the view was hard-coded on `MANDT`, and for any
+other name HANA refused the `CREATE VIEW` (no such column): in the eager set
+that error ended `connect()`, and in the lazy half the fallback swallowed it
+and the caller got the original 259, as if the table did not exist. A table
+`DD02L` calls client-dependent with **no** `CLNT` key field (a few on the
+bed carry something else first) is refused by name, with code
+`HANA_NO_CLIENT_COLUMN`: no shadow object at all — a synonym would read
+every client's rows, and a view on a guessed column is a wrong answer
+dressed as a right one. The eager set says the refused names on stderr and
+the connect goes on (any view or synonym an older build left for such a
+table is dropped); a statement that then touches one gets the refusal, by
+name, instead of a 259.
 
 and then `SET SCHEMA "<own>"`. Joins, FOR ALL ENTRIES and aggregates inherit
 the predicate; no generated SQL changes anywhere. Creation is idempotent:
@@ -449,10 +467,13 @@ is recreated with `CREATE OR REPLACE`. HANA holds the view's query string —
 the text after `AS`, with `*` expanded into the quoted column list — in
 `DEFINITION`, and "current" is decided structurally: whitespace-normalised,
 the query must select anything (`*` or any quoted column list) from
-`"<tenant>"."<T>"` with `WHERE MANDT = SESSION_CONTEXT('CLIENT')`. The FROM
+`"<tenant>"."<T>"` with `WHERE "<C>" = SESSION_CONTEXT('CLIENT')`, `<C>` the
+same DD03L column the view is created with (quoted, or bare for the views
+made on `MANDT` before the column came from DD03L). The FROM
 target and the predicate decide, the projection is HANA's to spell, and a
-view pointing at another schema or table, or filtering by a hard-coded
-client, is recreated. A connect that finds the view current sends nothing
+view pointing at another schema or table, filtering by a hard-coded
+client, or filtering on a column that is not the table's client column, is
+recreated. A connect that finds the view current sends nothing
 (fix round 2: comparing the whole `CREATE` text recreated every view on
 every connect; fix round 3, bed-measured 2026-11-12: comparing even the
 query text did the same, because HANA stores the expanded columns — and two
@@ -494,7 +515,8 @@ schema.
 The lazy half: a statement that fails with HANA error 259 (invalid table
 name) carries the table name in the error; when the tenant's `DD02L` holds
 that name, the shadow object is created and the statement retried — once,
-and only once. The name is read from the error, never from the statement.
+and only once. The lazy half reads the same DD03L client column, and makes
+or checks the view by the same rule as the eager set. The name is read from the error, never from the statement.
 
 The DDIC the build knows comes from the real system:
 `tools/hana-ddic-gen.mjs` reads the tenant's DD03L and writes
