@@ -184,6 +184,8 @@ describe("hana-serve: the driver channel of the HANA client", () => {
         sent.push(sql);
         if (/^\s*SELECT/i.test(sql) === false) return cb(undefined, 1);
         if (/SYS\.(VIEWS|SYNONYMS)/i.test(sql)) return cb(undefined, []);
+        // the client column is the table's own key field of type CLNT (DD03L)
+        if (/"DD03L"/i.test(sql)) return cb(undefined, [{TABNAME: "ZOSD_B3_T", POSITION: "0001", FIELDNAME: "MANDT", KEYFLAG: "X", DATATYPE: "CLNT"}]);
         if (/DD02L/i.test(sql)) return cb(undefined, [{TABNAME: "ZOSD_B3_T", CLIDEP: "X"}]);
         if (sql.includes("OSD_TRACE_PROBE")) return cb(undefined, [{PROBE: "OSD_TRACE_PROBE"}]);
         return cb(undefined, []);
