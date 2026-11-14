@@ -4710,3 +4710,51 @@ Not an anomaly, recorded for porting: on 7.58, `FIND ... REGEX` (POSIX) raises a
 - Upstream issue: needs a branch in abaplint/transpiler after a critic pass
 - Regression-test location: the ABAP unit class above, the transpiler's unit and requires tests
 - Upstream version containing a fix: unknown
+
+### ANOMALY-2026-11-14-class-constructor-targets -- a class constructor runs at load before the class it creates
+
+- Status: `local fix, not pushed` (oisee/transpiler, branch fix/class-constructor-requires, 3cdb24b7 on top of pin 4g)
+- Discovery date: `2026-11-14`
+- Affected versions: the pinned transpiler (oisee/transpiler 9437debe, local/osd-build-4g)
+- Affected ABAP statement, runtime API or adapter: `CREATE OBJECT go TYPE zcl_later` (or `NEW`, `zcl_later=>m( )`) inside a CLASS_CONSTRUCTOR
+- Minimal ABAP reproducer: transpiler test/unit.ts "test-cc-load-order" (zcl_a_buffer's class constructor creates zcl_b_store)
+- Exact command used to run it: `node tools/osd-generation-check.mjs output --json` over the island: `abap.Classes.<class> is not a constructor`
+- Expected SAP behaviour: a class constructor runs at the class's first use, after every class it names is there
+- Actual open-abap behaviour: it runs when its module loads; a named class is not among the module's requires, so a build that loads modules by name ran it before the class existed
+- Impact on open-steamgate: the SEGW sample's island did not load
+- Smallest safe workaround: none in this tree; the transpiler commit above adds the classes a class constructor names to its module's requires
+- Upstream issue: branch inside abaplint/transpiler after a critic pass
+- Regression-test location: the transpiler test above
+- Upstream version containing a fix: unknown
+
+### ANOMALY-2026-11-14-form-field-names-encoded -- a form field's name arrives undecoded
+
+- Status: `workaround`
+- Discovery date: `2026-11-14`
+- Affected versions: the pinned express-icf-shim / open-abap-core `get_form_fields_cs`
+- Affected ABAP statement, runtime API or adapter: `server->request->get_form_fields_cs( )` for `?%24top=2`
+- Minimal ABAP reproducer: `GET .../PartnerSet?%24top=1` against the gateway (ZCL_OSD_H5X_TEST encoded_option_names builds the options table by hand)
+- Exact command used to run it: curl against tools/hana-serve.mjs: `$top=2` answered 2 rows, `%24top=2` answered 21
+- Expected SAP behaviour: the name is decoded; `%24top` is `$top`
+- Actual open-abap behaviour: the name stays `%24top`; the option is ignored without a word and the whole set comes back
+- Impact on open-steamgate: a client that encodes `$` (URLSearchParams does) silently loses every system query option
+- Smallest safe workaround: `ZCL_STG_URL=>OPTION` decodes a name that carries `%`
+- Upstream issue: needs an issue (express-icf-shim or open-abap-core) after a critic pass
+- Regression-test location: `ZCL_OSD_H5X_TEST` (encoded_option_names)
+- Upstream version containing a fix: unknown
+
+### ANOMALY-2026-11-14-default-association-set -- create_association ignores iv_def_assoc_set
+
+- Status: `workaround`
+- Discovery date: `2026-11-14`
+- Affected versions: the pinned open-abap-odata (bd9f1fb) `zcl_oao_model`
+- Affected ABAP statement, runtime API or adapter: `model->create_association( ... iv_def_assoc_set = abap_true )` (the interface's default), and a function import with only `set_return_entity_type`
+- Minimal ABAP reproducer: a SEGW-generated MPC that creates no association set of its own
+- Exact command used to run it: `$metadata` of the SEGW sample over the bed, diffed with tools/odata-metadata-diff.mjs against a system's
+- Expected SAP behaviour: one `<association>_AssocSet` (cut to 40 characters) per such association, between the types' entity sets; a function import's EntitySet is the return type's set
+- Actual open-abap behaviour: no AssociationSet at all (20 missing), no EntitySet on 4 function imports
+- Impact on open-steamgate: 24 structure differences in the sample's `$metadata`
+- Smallest safe workaround: the overlay `src/gateway/compat/zcl_oao_model.clas.abap` (compat README)
+- Upstream issue: one small PR to open-abap-odata after a critic pass
+- Regression-test location: `ZCL_OSD_H5X_TEST` (default_sets_in_metadata); the `$metadata` diff on the bed (structure 0)
+- Upstream version containing a fix: unknown

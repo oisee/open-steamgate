@@ -216,12 +216,13 @@ export function unsupportedStubs(source, filename = "zcl_stub.clas.abap", kinds 
  *  cannot structure, then the statements the transpiler refuses
  *  (`unsupported`, abaplint statement names), stubbed and recorded in
  *  `stubMap` before the structural pass reads the island. */
-export function islandPrePass({root, unsupported = [], stubMap, say = () => {}}) {
+export function islandPrePass({root, unsupported = [], constructors = [], stubMap, say = () => {}}) {
   for (const [base, paths] of islandClassPaths(root)) {
     if (/\.clas\.abap$/.test(base) === false) continue;
     for (const path of [...paths].sort()) {
       const passes = [["structure", (src) => structureStubs(src, base)],
-        ["unsupported", (src) => unsupportedStubs(src, base, unsupported)]];
+        ["unsupported", (src) => unsupportedStubs(src, base, unsupported)],
+        ["constructor", (src) => constructorStub(src, base, constructors)]];
       for (const [label, pass] of passes) {
         const plan = pass(readFileSync(path, "utf8"));
         if (plan === undefined) continue;
@@ -234,6 +235,40 @@ export function islandPrePass({root, unsupported = [], stubMap, say = () => {}})
       }
     }
   }
+}
+
+/** a class constructor that failed the generation's load (an exception no
+ *  stub raised -- RTTI over a type the island lacks, say), given the signal
+ *  stub: on a system it runs at first use, here at load, and a class the
+ *  read path never uses must not stop the load. `constructors`: the object
+ *  names the walk learned from the load check (state.constructors). Pure. */
+export function constructorStub(source, filename, constructors = []) {
+  const object = nameFromAbapFile(filename.replace(/\..*$/, ""));
+  if (constructors.includes(object) === false) return undefined;
+  const block = methodBlocks(source, filename).find((b) => b.className === object && b.method === "CLASS_CONSTRUCTOR");
+  if (block === undefined || block.endStart.row - block.headerEnd.row < 2) return undefined;
+  const finding = {rule: "load", file: filename, line: block.headerEnd.row + 1, structure: true,
+    message: "the class constructor failed the generation's load", raw: `load, class constructor of ${object}, ${filename}`};
+  const plan = stubBodies(source, [finding], filename);
+  return plan.stubs.length === 0 ? undefined : {source: plan.source, stubs: plan.stubs};
+}
+
+/** what a failed fixed point teaches the walk, once per kind or class: a
+ *  statement the transpiler refuses (the build's error) or a class
+ *  constructor that failed the load (the load check). Mutates state; the
+ *  line to say, or undefined when there is nothing new to learn. */
+export function learnFromFailure(state, {buildError, load} = {}) {
+  const kind = unsupportedStatementOf(buildError?.message);
+  if (kind !== undefined && (state.unsupported ?? []).includes(kind) === false) {
+    state.unsupported = [...(state.unsupported ?? []), kind];
+    return `unsupported: the transpiler refuses the ${kind} statement -- the methods holding it are stubbed, the pass repeats`;
+  }
+  const ctor = load?.loads === false ? load.constructor : undefined;
+  if (ctor !== undefined && (state.constructors ?? []).includes(ctor) === false) {
+    state.constructors = [...(state.constructors ?? []), ctor];
+    return `constructor: ${ctor}'s class constructor failed the load (${load.error}) -- it signals instead, the pass repeats`;
+  }
+  return undefined;
 }
 
 /** the statement kind of a transpiler refusal in a build's output, or

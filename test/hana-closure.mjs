@@ -6,7 +6,7 @@ import {basename, join} from "node:path";
 import {fileURLToPath} from "node:url";
 import {classifyFindings, islandBasenames, parseFindings, requestFor, run, tadirKinds} from "../tools/hana-closure.mjs";
 import {dumperCommand, parseEnvFile} from "../tools/hana-closure-dumper.mjs";
-import {methodBlocks, planStubPass, structureStubs, stubBodies, stubNamesText, unclosedBlocks, unsupportedStatementOf, unsupportedStubs} from "../tools/hana-closure-stubs.mjs";
+import {methodBlocks, planStubPass, structureStubs, stubBodies, stubNamesText, unclosedBlocks, unsupportedStatementOf, unsupportedStubs, constructorStub, learnFromFailure} from "../tools/hana-closure-stubs.mjs";
 import {buildVerdict, islandObjectCount, islandShrinkCheck, layersDdicCount} from "../tools/hana-closure-merge.mjs";
 import {ddicFields, tablXml} from "../tools/hana-ddic-map.mjs";
 
@@ -2603,6 +2603,10 @@ process.exit(0);
       const own = ownConfig(root, config, layers(root, config), join(root, "output"));
       expect(own.exclude_filter).to.include(`(^|/)gen/hana-src/000-h5c-main/src/zcl_h5c_defex\\.clas\\.abap$`);
       expect(own.exclude_filter, "the object's XML leaves with it").to.include(`(^|/)gen/hana-src/000-h5c-main/src/zcl_h5c_defex\\.clas\\.xml$`);
+      // and the loop's own validation selects the same files the build does
+      const {validationListing} = await import("../tools/hana-ddic-gen.mjs");
+      const validation = validationListing(root, config, layers(root, config));
+      expect(validation.exclude_filter, "the validation keeps the object's XML out too").to.include(`(^|/)gen/hana-src/000-h5c-main/src/zcl_h5c_defex\\.clas\\.xml$`);
     } finally {
       rmSync(root, {recursive: true, force: true});
     }
@@ -4510,5 +4514,45 @@ describe("hana-closure: a statement the transpiler refuses is stubbed where it s
     expect(plan.source).to.not.contain("LOAD REPORT");
     expect(plan.source).to.contain("the transpiler does not support the LoadReport statement");
     expect(plan.source).to.contain("    rv = 1.");
+  });
+});
+
+describe("hana-closure: a class constructor that fails the load signals instead (H5x-4 B4)", () => {
+  // bed: a test-data class's class constructor ran RTTI over itself at load;
+  // a parameter type the island lacks raised a classic exception and the
+  // generation did not load, although the read path never uses that class
+  const source = [
+    "CLASS zcl_osd_b4_ctor DEFINITION PUBLIC.",
+    "  PUBLIC SECTION.",
+    "    CLASS-METHODS class_constructor.",
+    "    CLASS-DATA gv_names TYPE string.",
+    "ENDCLASS.",
+    "CLASS zcl_osd_b4_ctor IMPLEMENTATION.",
+    "  METHOD class_constructor.",
+    "    DATA lo_descr TYPE REF TO cl_abap_classdescr.",
+    "    lo_descr ?= cl_abap_typedescr=>describe_by_name( 'ZCL_OSD_B4_CTOR' ).",
+    "    gv_names = lo_descr->absolute_name.",
+    "  ENDMETHOD.",
+    "ENDCLASS.",
+    ""].join("\n");
+
+  it("learns the class from the load check once, and a refused statement once", () => {
+    const state = {};
+    const load = {loads: false, error: "the import failed (exit 1): ClassicError", constructor: "ZCL_OSD_B4_CTOR"};
+    expect(learnFromFailure(state, {load})).to.match(/ZCL_OSD_B4_CTOR's class constructor failed the load/);
+    expect(state.constructors).to.deep.equal(["ZCL_OSD_B4_CTOR"]);
+    expect(learnFromFailure(state, {load}), "a class met twice is not learned again: the walk stops").to.equal(undefined);
+    expect(learnFromFailure(state, {load: {loads: true}})).to.equal(undefined);
+    expect(learnFromFailure(state, {buildError: new Error("osd-build: FAILED: Statement LoadReport not supported, LOAD REPORT x")})).to.match(/LoadReport/);
+    expect(state.unsupported).to.deep.equal(["LoadReport"]);
+  });
+
+  it("gives that class constructor the signal stub, and no other class one", () => {
+    expect(constructorStub(source, "zcl_osd_b4_ctor.clas.abap", [])).to.equal(undefined);
+    expect(constructorStub(source, "zcl_osd_b4_ctor.clas.abap", ["ZCL_OSD_OTHER"])).to.equal(undefined);
+    const plan = constructorStub(source, "zcl_osd_b4_ctor.clas.abap", ["ZCL_OSD_B4_CTOR"]);
+    expect(plan.stubs.map((s) => s.method)).to.deep.equal(["CLASS_CONSTRUCTOR"]);
+    expect(plan.source).to.contain("zcx_osd_not_activated=>signal( 'the class constructor failed the generation''s load' ).");
+    expect(plan.source).to.not.contain("describe_by_name");
   });
 });
