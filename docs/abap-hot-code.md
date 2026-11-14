@@ -1,6 +1,6 @@
 # How to write hot ABAP for this runtime
 
-Current build pin: `local/osd-build-4g` at `9437debeecc3b48969a012777c37fe2cd3b9680b` (`local/osd-build-4f` plus interface constants from other constants, ANORMALIES `intf-const-from-const`; 4f = `local/osd-build-4e` plus the `[]` suffix fix and the class-pool load order, ANORMALIES `table-body-suffix-js` and `local-inherits-owner`; `local/osd-build-4c` plus the two SELECT loop commits below it; upstream main `8824945a` after 2.14.19, parser 2.120.94; [transpiler-pin-4.md](transpiler-pin-4.md)).
+Current build pin: `local/osd-build-4h` at `c84497b4b97d2990cfd094cd72bb036193bbf0f4` (`local/osd-build-4f` plus interface constants from other constants and its critic round, ANORMALIES `intf-const-from-const`; 4f = `local/osd-build-4e` plus the `[]` suffix fix and the class-pool load order, ANORMALIES `table-body-suffix-js` and `local-inherits-owner`; `local/osd-build-4c` plus the two SELECT loop commits below it; upstream main `8824945a` after 2.14.19, parser 2.120.94; [transpiler-pin-4.md](transpiler-pin-4.md)).
 The measurements below are historical snapshots; see [the pin move report](transpiler-pin-2.md).
 
 *Measured 2026-09-17 on one 16-core x86-64 workstation under Node 26, against
