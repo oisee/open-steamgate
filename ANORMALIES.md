@@ -4697,16 +4697,18 @@ Not an anomaly, recorded for porting: on 7.58, `FIND ... REGEX` (POSIX) raises a
 
 ### ANOMALY-2026-11-14-intf-const-from-const -- an interface constant whose VALUE is another object's constant throws at load
 
-- Status: `fixed in the pin` (oisee/transpiler `local/osd-build-4g` `9437debe`; not upstream)
+- Status: `fixed in the pin` (oisee/transpiler `local/osd-build-4i` `28b6944e` (the fix is `c84497b4`), on `9437debe` of `local/osd-build-4g`; not upstream)
 - Discovery date: `2026-11-14`
 - Affected versions: the pinned transpiler up to oisee/transpiler d2e9f22c (packages/transpiler/src/structures/interface.ts, requires.ts)
 - Affected ABAP statement, runtime API or adapter: `CONSTANTS y TYPE string VALUE zif_c=>x.` in an interface
-- Minimal ABAP reproducer: `test/unit/zif_osd_iconst_a`, `zif_osd_iconst_b`, `zif_osd_iconst_c`, `zcl_osd_iconst_src`, tested by `zcl_osd_iconst_test`; transpiler unit tests test-74..80
+- Minimal ABAP reproducer: `test/unit/zif_osd_iconst_a`, `zif_osd_iconst_b`, `zif_osd_iconst_c`, `zcl_osd_iconst_src`, tested by `zcl_osd_iconst_test` (a chain, a read-back, a component read and a component declared, a class constant set at load, a class constant two hops away); transpiler unit tests test-74..83
 - Exact command used to run it: `node tools/osd-generation-check.mjs output` over a build holding the reproducer
 - Expected SAP behaviour: the constant has the referenced constant's value
 - Actual open-abap behaviour: `zif_b.zif_b$y.set(abap.Classes['ZIF_C'].x)` -- an interface member is `zif_c$x`, so the read is undefined and the module throws a TypeError while init.mjs imports; and an interface module imports nothing, so the referenced object may load after it anyway. 27 such constants in 25 interfaces of the HANA island
 - The fix (4g): the VALUE chain is followed to the constant that declares the value. An interface literal is written as the literal (interfaces run no code, so it is the value, and no load-time edge exists, also between two interfaces naming each other's constants). A class constant, which a class may set at run time (the kernel's `cl_abap_char_utilities=>newline` is set in its class constructor), is read at load from that class, which the interface module now requires; a class module never imports an interface, so the edge cannot close a cycle
-- Smallest safe workaround: none needed with the 4g pin
+- Fixed with it (critic round, 4h): a component chain (`VALUE zif_a=>gs-comp`) folds to the component's literal, or reads the component at load -- 4g read the whole structure, and a string target took every component's characters (`vw` for `v`). A chain that comes back to a constant it already passed never reaches a value: illegal ABAP that abaplint's syntax check accepts (only its opt-in `cyclic_oo` rule names it); 4g emitted two interfaces that await each other and the generation never loaded (exit 13); 4h refuses the transpile with the chain named (`constant chain ZIF_X=>C -> ZIF_Y=>D -> ZIF_X=>C never reaches a value`).
+- Same family, class side (4h): a CLASS constant whose VALUE chain runs further than abaplint follows (two interfaces out) got no value at all -- abaplint's resolver bottoms out and setValues writes nothing, so the constant stayed initial, silently (before this pin too). 4h folds it when the chain ends in an interface literal. The two sides still differ for a class constant set at run time: an interface constant reads it at load (the class constructor's value), a class constant with the same declaration keeps abaplint's compile-time value (the placeholder). Say so if the class side is ever unified.
+- Smallest safe workaround: none needed with the 4h pin
 - Upstream issue: needs a branch in abaplint/transpiler after a critic pass
 - Regression-test location: the ABAP unit class above, the transpiler's unit and requires tests
 - Upstream version containing a fix: unknown
@@ -4757,4 +4759,21 @@ Not an anomaly, recorded for porting: on 7.58, `FIND ... REGEX` (POSIX) raises a
 - Smallest safe workaround: the overlay `src/gateway/compat/zcl_oao_model.clas.abap` (compat README)
 - Upstream issue: one small PR to open-abap-odata after a critic pass
 - Regression-test location: `ZCL_OSD_H5X_TEST` (default_sets_in_metadata); the `$metadata` diff on the bed (structure 0)
+
+### ANOMALY-2026-11-14-cctor-load-order -- a class constructor ran at load before the class it creates existed
+
+- Status: `fixed in the pin` (oisee/transpiler `local/osd-build-4i` `28b6944e`: `5678066f` from the HANA track, made cycle-free by `17162d2c`, ordered by `28b6944e`; not upstream)
+- Discovery date: `2026-11-14`
+- Affected versions: the pinned transpiler up to oisee/transpiler c84497b4
+- Affected ABAP statement, runtime API or adapter: `CREATE OBJECT ... TYPE zcl_b`, `NEW zcl_b( )`, `zcl_b=>m( )` inside a CLASS_CONSTRUCTOR
+- Minimal ABAP reproducer: transpiler unit tests test-cc-load-order, test-84 (two constructors naming each other's classes), test-85 (a constructor creating its own subclass), test-86 (a ring of three), test-87 (a subclass constructor reading its queued superclass's static), test-88/test-92 (another pool's constructor reading a queued pool's static, the reader sorted before the release), test-89 (each runs once), test-90 (a constructor reading an interface constant), test-91 (an interface constant from a queued class's constant)
+- Exact command used to run it: importing init.mjs of the HANA island generation
+- Expected SAP behaviour: a class constructor runs on first use of the class; the classes it names exist
+- Actual open-abap behaviour: the class constructor runs when its module loads, and a class it named whose module loads later was not there: `abap.Classes.<class> is not a constructor`. Requiring that module (5678066f) can close an import cycle -- mutual constructors, a constructor creating its subclass, a ring -- and then the modules await each other (exit 13)
+- The fix (4h): the requirement is decided once per run over the whole registry against the real load-time edges; one that would close a cycle is not taken, and that pool's class constructors wait in a queue and run at the end of the module of the class they named, once every class they name is registered
+- Critic round 2 (4i): the queue released a pool when the class it named had REGISTERED, not when the class constructors it depends on had RUN. Two silent wrong values followed: a subclass's class constructor ran before its queued superclass's and read the superclass's static unset (ABAP runs them top-down); another pool's class constructor read a queued pool's static before the queue released it. Now what depends on a queued class constructor waits for it to have run -- a subclass's constructor, a constructor naming the class, an interface constant read from that class's constant -- and the queue runs them in that order, each once. A class constructor naming an interface now requires it as well.
+- The remaining difference, deliberate: this runtime runs every class constructor at load, in dependency order; ABAP runs it on first use. A first-use trigger would need every static access to await the (asynchronous) constructor. A class constructor that, mid-way, uses a class whose own constructor needs the first one sees the other's statics as set so far -- in ABAP the inner constructor runs nested at the point of use, here before or after the outer one. Anything still queued when init.mjs has imported everything is an error naming the pools and what they wait for, never a silent initial value.
+- Smallest safe workaround: none needed with the 4i pin
+- Upstream issue: needs a branch in abaplint/transpiler after a critic pass
+- Regression-test location: the transpiler's unit tests above; `test/generation-check.mjs` (0 cycles)
 - Upstream version containing a fix: unknown
