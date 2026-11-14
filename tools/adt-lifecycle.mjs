@@ -4,7 +4,7 @@ import {createRequire} from 'node:module';
 import {mkdirSync, writeFileSync} from 'node:fs';
 import {startLifecycleServer, lifecycleIdentity} from './adt-lifecycle-server.mjs';
 import {MISSING_VALIDATIONS, checkReport, renderReport, checkVspSyntax} from './adt-lifecycle-report.mjs';
-import {vspClient, CALL_TIMEOUT_S, ddlsCallTimeoutS} from './adt-lifecycle-vsp.mjs';
+import {vspClient, CALL_TIMEOUT_S, ddlsCallTimeoutS, warmReadyTimeoutS} from './adt-lifecycle-vsp.mjs';
 import {resolve, join} from 'node:path';
 const url = process.env.URL ?? `http://127.0.0.1:${process.env.STG_PORT ?? 8099}`;
 const target = new URL(url);
@@ -79,7 +79,7 @@ async function warmOperation(f, work) {
 async function warmReady(f) {
  let prepared=false;
  // Inspect compiler availability rather than a fixed delay (server local status).
- const until=Date.now()+90000;
+ const until=Date.now()+warmReadyTimeoutS()*1000;
  while(Date.now()<until) {
   const r=await serving();
   if(r.warm?.state === 'primed') return;
