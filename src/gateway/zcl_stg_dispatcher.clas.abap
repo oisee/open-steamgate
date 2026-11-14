@@ -414,14 +414,19 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
                                      it_options = it_options ).
     ls_service = zcl_stg_model_info=>get( ls_request-service ).
     zcl_stg_json=>register_sets( ls_service-entity_sets ).
-    lv_base    = |{ origin( iv_host ) }/sap/opu/odata/sap/{ ls_service-name }|.
+* the answer's URLs repeat the prefix the request came in on: /sap/ or the
+* namespace of the service (/sap/opu/odata/<NS>/<Service>, ZCL_STG_URL)
+    lv_base    = |{ origin( iv_host ) }{ ls_request-prefix }/{ ls_service-name }|.
     lv_method  = to_upper( iv_method ).
 
     IF ls_request-is_metadata = abap_true.
       rs_response-status       = 200.
       rs_response-reason       = 'OK'.
       rs_response-content_type = 'application/xml'.
-      rs_response-body         = zcl_oao_http_handler=>handle( iv_path )-data.
+* the model writer reads the service out of a /sap/ path only; the service
+* is the one this request named, whichever prefix it came in on
+      rs_response-body         = zcl_oao_http_handler=>handle(
+        |/sap/opu/odata/sap/{ ls_request-service }/$metadata| )-data.
       RETURN.
     ENDIF.
 
@@ -442,7 +447,7 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
       rs_response = zcl_stg_batch=>handle( iv_body         = iv_body
                                             iv_body_x       = iv_body_x
                                            iv_content_type = iv_content_type
-                                           iv_service_path = |/sap/opu/odata/sap/{ ls_service-name }|
+                                           iv_service_path = |{ ls_request-prefix }/{ ls_service-name }|
                                            iv_host         = iv_host ).
       RETURN.
     ENDIF.

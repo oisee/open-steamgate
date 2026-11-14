@@ -9,6 +9,7 @@ CLASS ltcl_url DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
     METHODS quoted_key FOR TESTING RAISING cx_static_check.
     METHODS typed_keys_and_bad_quote FOR TESTING RAISING cx_static_check.
     METHODS not_odata FOR TESTING RAISING cx_static_check.
+    METHODS namespace_route FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 
 CLASS ltcl_url IMPLEMENTATION.
@@ -160,6 +161,38 @@ CLASS ltcl_url IMPLEMENTATION.
                                         exp = abap_true ).
   ENDMETHOD.
 
+  METHOD namespace_route.
+    DATA ls_request TYPE zcl_stg_url=>ty_request.
+
+* /sap/opu/odata/<NS>/<Service>: the namespace takes the place of "sap", the
+* service is still the external name
+    ls_request = zcl_stg_url=>parse( '/sap/opu/odata/OSDNS/ZSTG_DEMO_SRV/TravelSet/$count' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_request-service
+                                        exp = 'ZSTG_DEMO_SRV' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_request-namespace
+                                        exp = 'OSDNS' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_request-prefix
+                                        exp = '/sap/opu/odata/OSDNS' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_request-entity_set
+                                        exp = 'TravelSet' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_request-is_count
+                                        exp = abap_true ).
+    ls_request = zcl_stg_url=>parse( '/sap/opu/odata/OSDNS/ZSTG_DEMO_SRV/$metadata' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_request-is_metadata
+                                        exp = abap_true ).
+* the /sap/ prefix is no namespace
+    ls_request = zcl_stg_url=>parse( '/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet' ).
+    cl_abap_unit_assert=>assert_initial( ls_request-namespace ).
+    cl_abap_unit_assert=>assert_equals( act = ls_request-prefix
+                                        exp = '/sap/opu/odata/sap' ).
+* and SAP in another case is the same /sap/: one spelling of the prefix, so
+* a service does not live under two addresses in the answers
+    ls_request = zcl_stg_url=>parse( '/sap/opu/odata/SAP/ZSTG_DEMO_SRV/TravelSet' ).
+    cl_abap_unit_assert=>assert_initial( ls_request-namespace ).
+    cl_abap_unit_assert=>assert_equals( act = ls_request-prefix
+                                        exp = '/sap/opu/odata/sap' ).
+  ENDMETHOD.
+
   METHOD not_odata.
     DATA lx_error TYPE REF TO zcx_stg_error.
 
@@ -281,6 +314,7 @@ CLASS ltcl_dispatch DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FI
     METHODS unknown_key FOR TESTING RAISING cx_static_check.
     METHODS unknown_service FOR TESTING RAISING cx_static_check.
     METHODS post_not_implemented FOR TESTING RAISING cx_static_check.
+    METHODS namespace_prefix FOR TESTING RAISING cx_static_check.
 
     METHODS get
       IMPORTING
@@ -291,6 +325,23 @@ CLASS ltcl_dispatch DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FI
 ENDCLASS.
 
 CLASS ltcl_dispatch IMPLEMENTATION.
+
+  METHOD namespace_prefix.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+
+* a service addressed in a namespace answers there, and its entries name
+* the address they were read under rather than /sap/
+    ls_response = get( '/sap/opu/odata/OSDNS/ZSTG_DEMO_SRV/$metadata' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 200 ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '<EntitySet Name="TravelSet" EntityType="ZSTG_DEMO_SRV.Travel"' ) ).
+    ls_response = get( iv_path  = '/sap/opu/odata/OSDNS/ZSTG_DEMO_SRV/TravelSet'
+                       iv_query = `$top=1&$select=TravelId` ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 200 ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '/sap/opu/odata/OSDNS/ZSTG_DEMO_SRV/TravelSet(' ) ).
+    cl_abap_unit_assert=>assert_false( boolc( ls_response-body CS '/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet(' ) ).
+  ENDMETHOD.
 
   METHOD setup.
 * the value help of the demo is a search help, its provider comes from the
@@ -926,6 +977,7 @@ CLASS ltcl_batch DEFINITION FOR TESTING DURATION SHORT RISK LEVEL DANGEROUS FINA
     METHODS binary_and_boundary_text FOR TESTING RAISING cx_static_check.
     METHODS closing_boundary_at_end FOR TESTING RAISING cx_static_check.
     METHODS retrieve_parts FOR TESTING RAISING cx_static_check.
+    METHODS retrieve_under_namespace FOR TESTING RAISING cx_static_check.
     METHODS changeset_ok FOR TESTING RAISING cx_static_check.
     METHODS changeset_fails_as_a_whole FOR TESTING RAISING cx_static_check.
     METHODS boundary_missing_is_400 FOR TESTING RAISING cx_static_check.
@@ -1066,6 +1118,25 @@ CLASS ltcl_batch IMPLEMENTATION.
     cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"__count":"1"' ) ).
     cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"Description":"Aarhus to Odense"' ) ).
     cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS 'DataServiceVersion: 2.0' ) ).
+  ENDMETHOD.
+
+  METHOD retrieve_under_namespace.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+    DATA lv_body     TYPE string.
+
+* a batch posted under a namespace prefix: its relative inner requests are
+* joined onto that prefix, and the entries they answer name it too
+    lv_body = crlf( `--b|Content-Type: application/http|Content-Transfer-Encoding: binary||GET TravelSet('T0003') HTTP/1.1||--b--|` ).
+    ls_response = zcl_stg_dispatcher=>dispatch( iv_method       = 'POST'
+                                                iv_path         = '/sap/opu/odata/OSDNS/ZSTG_DEMO_SRV/$batch'
+                                                iv_body         = lv_body
+                                                iv_content_type = 'multipart/mixed; boundary=b' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 202 ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS 'HTTP/1.1 200 OK' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '"Description":"Aarhus to Odense"' ) ).
+    cl_abap_unit_assert=>assert_true( boolc( ls_response-body CS '/sap/opu/odata/OSDNS/ZSTG_DEMO_SRV/TravelSet(' ) ).
+    cl_abap_unit_assert=>assert_false( boolc( ls_response-body CS '/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet(' ) ).
   ENDMETHOD.
 
   METHOD changeset_ok.
