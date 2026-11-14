@@ -22,7 +22,7 @@
 //           (init.mjs); exit 13 is the unsettled top-level await.
 // The build runs syntax and cycles over a new generation before it is named
 // (tools/osd-build.mjs), hana-serve before it imports one; the CLI runs all
-// three: `node tools/osd-generation-check.mjs [output] [--no-load]`.
+// three: `node tools/osd-generation-check.mjs [output] [--no-load] [--json]`.
 //
 // A module already known not to parse is named in
 // tools/osd-generation-check.allow.json with its reason and its anomaly; an
@@ -237,6 +237,20 @@ export function describe(result) {
   return lines;
 }
 
+/** one line for a report: the first thing that stops the generation from
+ *  loading -- a module that does not parse, a cycle, or the import's first
+ *  error with the module and line it names; undefined when it loads */
+export function firstLoadError(result) {
+  if (result.ok === true) return undefined;
+  const statics = describe({...result, load: undefined});
+  if (statics.length > 0) return statics[0];
+  const load = result.load ?? {};
+  const lines = String(load.stderr ?? "").split("\n").map((l) => l.trim()).filter((l) => l !== "");
+  const error = lines.find((l) => /^(?:[A-Za-z]*Error\b|Warning: Detected|not activated)/.test(l)) ?? lines[0];
+  const at = lines.find((l) => /^file:\/\/.+:\d+$/.test(l));
+  return [load.reason, error, at === undefined ? undefined : `at ${at.replace(/^.*\//, "")}`].filter((x) => x !== undefined).join(": ");
+}
+
 /** for a host about to import a generation, and for the build: throw rather
  *  than hang or serve half a system */
 export function assertLoadable(dir, {log = () => {}, ...options} = {}) {
@@ -258,6 +272,12 @@ if (runsAs("osd-generation-check.mjs")) {
   const args = process.argv.slice(2);
   const dir = args.find((a) => !a.startsWith("--")) ?? "output";
   const result = checkGeneration(dir, {load: !args.includes("--no-load")});
+  if (args.includes("--json")) {
+    // the closure's fixed point reads this (tools/hana-closure-merge.mjs loadCheckOf)
+    console.log(JSON.stringify({ok: result.ok, modules: result.modules, cycles: result.cycles, syntax: result.syntax,
+      latent: result.latent, loads: result.ok, load_error: firstLoadError(result)}));
+    process.exit(result.ok ? 0 : 1);
+  }
   for (const line of describe(result)) console.log(line);
   for (const t of result.tolerated) console.log(`known not to parse (allow list): ${t.module}`);
   for (const l of result.latent) console.log(`does not parse, not loaded at start: ${l.module}: ${l.message}`);

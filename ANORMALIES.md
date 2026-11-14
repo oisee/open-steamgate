@@ -4660,3 +4660,19 @@ Not an anomaly, recorded for porting: on 7.58, `FIND ... REGEX` (POSIX) raises a
 - Upstream issue: needs a branch in abaplint/transpiler after a critic pass
 - Regression-test location: `test/generation-check.mjs`, the ABAP unit class above, transpiler test/unit.ts test-71..73
 - Upstream version containing a fix: unknown
+
+### ANOMALY-2026-11-14-intf-const-from-const -- an interface constant whose VALUE is another object's constant throws at load
+
+- Status: `fixed in the pin` (oisee/transpiler `local/osd-build-4g` `9437debe`; not upstream)
+- Discovery date: `2026-11-14`
+- Affected versions: the pinned transpiler up to oisee/transpiler d2e9f22c (packages/transpiler/src/structures/interface.ts, requires.ts)
+- Affected ABAP statement, runtime API or adapter: `CONSTANTS y TYPE string VALUE zif_c=>x.` in an interface
+- Minimal ABAP reproducer: `test/unit/zif_osd_iconst_a`, `zif_osd_iconst_b`, `zif_osd_iconst_c`, `zcl_osd_iconst_src`, tested by `zcl_osd_iconst_test`; transpiler unit tests test-74..80
+- Exact command used to run it: `node tools/osd-generation-check.mjs output` over a build holding the reproducer
+- Expected SAP behaviour: the constant has the referenced constant's value
+- Actual open-abap behaviour: `zif_b.zif_b$y.set(abap.Classes['ZIF_C'].x)` -- an interface member is `zif_c$x`, so the read is undefined and the module throws a TypeError while init.mjs imports; and an interface module imports nothing, so the referenced object may load after it anyway. 27 such constants in 25 interfaces of the HANA island
+- The fix (4g): the VALUE chain is followed to the constant that declares the value. An interface literal is written as the literal (interfaces run no code, so it is the value, and no load-time edge exists, also between two interfaces naming each other's constants). A class constant, which a class may set at run time (the kernel's `cl_abap_char_utilities=>newline` is set in its class constructor), is read at load from that class, which the interface module now requires; a class module never imports an interface, so the edge cannot close a cycle
+- Smallest safe workaround: none needed with the 4g pin
+- Upstream issue: needs a branch in abaplint/transpiler after a critic pass
+- Regression-test location: the ABAP unit class above, the transpiler's unit and requires tests
+- Upstream version containing a fix: unknown
