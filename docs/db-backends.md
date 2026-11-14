@@ -536,6 +536,17 @@ the transpiler and the store alike. Everything is exercised with fakes and
 fixtures (`test/hana-ddic-gen.mjs`, `test/hana-shadow-schema.mjs`); no HANA
 is reachable from CI, and the acceptance runs on the bed.
 
+The control that the filter works, on a bed:
+`node tools/hana-client-control.mjs --table <T> --clients 000,001`, with the
+env of the mode. Per client it opens a session the way the runtime does and
+counts `<T>` through our own schema, then reads the tenant directly (rows per
+DD03L client column, and the total). It passes only when every client's count
+is the tenant's count for that client, the shadow object is a view, and the
+counts differ from each other and from the total -- so a table holding one
+client's rows cannot pass: a missing filter would read the same numbers. It
+refuses to run outside the shadow-schema mode. Tests over a fake database in
+`test/hana-client-control.mjs`.
+
 Not covered, as decided when the mechanism was chosen (2026-11-11): `CLIENT
 SPECIFIED` — reading across all clients would want a synonym-read variant
 per table, countable in the corpus before anyone needs it; and writes into
