@@ -50,10 +50,12 @@ What it answers now, besides the GETs of milestone 2:
 
 | request | answer |
 |---|---|
-| `/app/...` | the static files of `webapp/`; `--app <name>=<dir>` mounts a folder outside the tree at `/app/<name>/` (SAPUI5 itself comes from the CDN, as for every app here) |
+| `/app/...` | the static files of `webapp/`; `--app <name>=<dir>` mounts a folder outside the tree at `/app/<name>/` (SAPUI5 itself comes from the CDN, as for every app here). A file is served only when its real path is inside the mount's real path -- a symlink out of the mount is not followed -- and never a dotfile or a directory |
 | `HEAD` | the GET without its body; `x-csrf-token: Fetch` gets the token the ordinary server hands out |
-| `POST .../$batch` | admitted only when **every** part is a GET; a changeset or any other method refuses the whole batch with 405 before a line of ABAP runs |
-| another `sap-client` | 400 (`OSD/CLIENT`): the host serves the one client `OSD_CLIENT` names, and before this a request naming another client was answered out of this client's rows |
+| `POST .../$batch` | admitted only when **every** part is a GET; a changeset, any other method or an `X-HTTP-Method(-Override)` header refuses the whole batch with 405 before a line of ABAP runs; an absolute part URL outside the batched service, 400 |
+| `X-HTTP-Method(-Override)` | 405 on any request: it would make the request another method than it says |
+| function imports | a GET import is a read like any GET; a POST import is refused by the method rule (405), in a batch or not |
+| another `sap-client` | 400 (`OSD/CLIENT`), named by URL option, header or cookie, on the request or inside a batch part: the host serves the one client `OSD_CLIENT` names, and before this a request naming another client was answered out of this client's rows |
 | `--register <SRV>=<MPC>,<DPC>` | registers a service the SEGW registry does not hold (the twin) |
 
 Tests: `test/hana-serve.mjs` (fake DatabaseClient; a batch with a POST part
@@ -91,8 +93,9 @@ fake DatabaseClient that answers SQL (`test/fixtures/hana-serve/
 twin-client.mjs`: the tree's SQLite client over the twin's seeded tables,
 every write refused -- the host says "DATABASE IS NOT HANA"), and expects
 `test/e2e/fixtures/h5x-app.expect.json`. It asserts: each header label is in
-`$metadata` and in none of the app's files; the rows cell by cell and in
-order; a sort the user makes in the column header's menu (the first row, and
+`$metadata` and in none of the app's files; exactly the expected headers (an
+extra column fails) and every row with exactly that many cells, cell by
+cell and in order; a sort the user makes in the column header's menu (the first row, and
 `$orderby` in a batch part); a filter the user makes (the rows, and
 `$filter` in a batch part); the object page and the sub-list's rows through
 the navigation; at least one `$batch`, every part a GET, no changeset, no

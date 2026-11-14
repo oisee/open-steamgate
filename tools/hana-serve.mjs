@@ -32,15 +32,20 @@
 //   - the static files of webapp/ under /app/ (the SAPUI5 resources come
 //     from the CDN, as for every app of the tree), and `--app <name>=<dir>`
 //     mounts a folder that is not in the tree at /app/<name>/ -- the way a
-//     private app configuration for a real service is served on a bed;
+//     private app configuration for a real service is served on a bed.
+//     A file is served only when its real path is inside the mount's real
+//     path (a symlink out of the mount is not followed), never a dotfile
+//     (staticFile);
 //   - HEAD, answered as the GET it stands for without a body, so a CSRF
 //     token fetch (`x-csrf-token: Fetch`) is answered the way the ordinary
 //     server answers it;
 //   - `POST .../$batch` when EVERY part is a GET: the body is read before a
 //     line of ABAP runs, and a changeset or any other method in it refuses
-//     the whole batch with 405 (batchRefusal);
-//   - one client: a request naming another `sap-client` (URL option or
-//     header) than OSD_CLIENT is refused with 400 instead of being answered
+//     the whole batch with 405 (batchRefusal), as does X-HTTP-Method(-Override)
+//     on the request or a part; an absolute part URL outside the batched
+//     service is refused with 400;
+//   - one client: a request naming another `sap-client` (URL option,
+//     header or cookie, also inside a batch part) than OSD_CLIENT is refused with 400 instead of being answered
 //     out of this client's rows (clientRefusal);
 //   - `--register <SERVICE>=<MPC>,<DPC>` registers a service the SEGW
 //     registry does not hold (the test's twin under test/hana-m2), said on
@@ -69,9 +74,9 @@
 // `--client-module <file>` replaces the HANA client with the module's
 // `createClient(options)` -- a fake DatabaseClient for the test
 // (test/hana-serve.mjs); it is said on startup, loudly.
-import {existsSync, mkdirSync, rmSync} from "node:fs";
+import {existsSync, mkdirSync, realpathSync, rmSync, statSync} from "node:fs";
 import {createServer} from "node:http";
-import {dirname, join, resolve} from "node:path";
+import {dirname, join, resolve, sep} from "node:path";
 import {pathToFileURL} from "node:url";
 import {runsAs} from "./osd-main.mjs";
 import {readTrace} from "./osd-sql-trace.mjs";
@@ -234,14 +239,23 @@ export function clientRefusal({query = {}, headers = {}} = {}, client) {
   const fromQuery = query["sap-client"];
   for (const value of Array.isArray(fromQuery) ? fromQuery : [fromQuery]) if (value !== undefined) asked.push(String(value));
   if (headers["sap-client"] !== undefined) asked.push(String(headers["sap-client"]));
+  // a system also takes the client from a cookie; nothing here reads one,
+  // and a request that names another client in one is still refused
+  for (const pair of String(headers.cookie ?? "").split(";")) {
+    const at = pair.indexOf("=");
+    if (at > 0 && pair.slice(0, at).trim().toLowerCase() === "sap-client") asked.push(decodeURIComponent(pair.slice(at + 1).trim()));
+  }
   const other = asked.map((v) => v.trim()).filter((v) => v !== "" && v !== String(client));
   if (other.length === 0) return undefined;
   return `hana-serve serves client ${client} only and this request names sap-client=${other[0]}: it is not answered out of client ${client}'s rows`;
 }
 
-/** The parts of a multipart/mixed $batch body: each part's own headers,
- *  and for an application/http part its request line. A changeset is a
- *  part whose content type is multipart/mixed itself. */
+/** the headers that would make a request another method than it says */
+export const METHOD_OVERRIDES = ["x-http-method", "x-http-method-override"];
+
+/** The parts of a multipart/mixed $batch body: for an application/http
+ *  part its request line and the request's own headers (names lower case).
+ *  A changeset is a part whose content type is multipart/mixed itself. */
 export function batchParts(contentType, body) {
   const boundary = /boundary=(?:"([^"]+)"|([^;\s]+))/i.exec(String(contentType ?? ""));
   if (boundary === null) return undefined;
@@ -259,31 +273,97 @@ export function batchParts(contentType, body) {
       parts.push({changeset: true, type});
       continue;
     }
-    const line = rest.split(/\r?\n/).find((l) => l.trim() !== "") ?? "";
-    const [method = "", url = ""] = line.trim().split(/\s+/);
-    parts.push({changeset: false, type, method: method.toUpperCase(), url});
+    const lines = rest.split(/\r?\n/);
+    const first = lines.findIndex((l) => l.trim() !== "");
+    const [method = "", url = ""] = (first < 0 ? "" : lines[first]).trim().split(/\s+/);
+    const headers = {};
+    for (const l of first < 0 ? [] : lines.slice(first + 1)) {
+      if (l.trim() === "") break;
+      const colon = l.indexOf(":");
+      if (colon > 0) headers[l.slice(0, colon).trim().toLowerCase()] = l.slice(colon + 1).trim();
+    }
+    parts.push({changeset: false, type, method: method.toUpperCase(), url, headers});
   }
   return parts;
 }
 
 /** Why a $batch may not reach the ABAP, or undefined: {status, message}.
  *  Only a batch of GET parts is a read; one part that is not -- a
- *  changeset, a POST, anything unreadable -- refuses the whole batch, so
- *  nothing of it runs. `client` also checks each part's own sap-client. */
-export function batchRefusal(contentType, body, client) {
+ *  changeset, a POST, a method override, anything unreadable -- refuses
+ *  the whole batch, so nothing of it runs. `client` also checks each part's
+ *  own sap-client (URL option, header, cookie); `servicePath` (the batched
+ *  service, "/sap/opu/odata/sap/<SRV>") confines an absolute part URL to
+ *  that service, as a system does. */
+export function batchRefusal(contentType, body, client, servicePath) {
   const parts = batchParts(contentType, body);
   if (parts === undefined) return {status: 400, message: "hana-serve: a $batch needs a multipart/mixed content type with a boundary"};
   if (parts.length === 0) return {status: 400, message: "hana-serve: a $batch without a part"};
   for (const [i, part] of parts.entries()) {
     if (part.changeset) return {status: 405, message: `hana-serve is read-only: part ${i + 1} of this $batch is a changeset, and a changeset writes; the whole batch is refused`};
     if (part.method !== "GET") return {status: 405, message: `hana-serve is read-only: part ${i + 1} of this $batch is ${part.method || "not a request"}, not GET; the whole batch is refused`};
+    const override = METHOD_OVERRIDES.find((name) => part.headers?.[name] !== undefined);
+    if (override !== undefined) return {status: 405, message: `hana-serve is read-only: part ${i + 1} of this $batch carries ${override}, which makes a GET another method; the whole batch is refused`};
+    if (servicePath !== undefined && /^(\/|[a-z]+:)/i.test(part.url)) {
+      const path = part.url.replace(/^[a-z]+:\/\/[^/]*/i, "").split("?")[0];
+      const own = String(servicePath).replace(/\/$/, "");
+      if (path !== own && !path.startsWith(`${own}/`)) return {status: 400, message: `hana-serve: part ${i + 1} of this $batch addresses ${path}, outside the batched service ${own}; the whole batch is refused`};
+    }
     if (client !== undefined) {
       const query = Object.fromEntries(new URLSearchParams(part.url.split("?")[1] ?? ""));
-      const other = clientRefusal({query}, client);
+      const other = clientRefusal({query, headers: part.headers}, client);
       if (other !== undefined) return {status: 400, message: `${other} (part ${i + 1} of the $batch)`};
     }
   }
   return undefined;
+}
+
+/** The file a static request under a mount may be answered with, or
+ *  undefined. `rel` is the request path below the mount, still encoded.
+ *  Refused: a NUL, a segment that starts with a dot (dotfiles, `..`), and
+ *  -- the reason this is not express.static -- any file whose REAL path is
+ *  not inside the mount's real path: a symlink in the mounted folder that
+ *  points out of it is not followed out. Directories are not listed. */
+export function staticFile(mount, rel) {
+  let decoded;
+  try { decoded = decodeURIComponent(String(rel)); } catch { return undefined; }
+  if (decoded.includes("\0") || decoded.includes("\\")) return undefined;
+  const segments = decoded.split("/").filter((s) => s !== "");
+  if (segments.length === 0 || segments.some((s) => s.startsWith("."))) return undefined;
+  let root;
+  let real;
+  try {
+    root = realpathSync(mount);
+    real = realpathSync(resolve(root, ...segments));
+  } catch {
+    return undefined;
+  }
+  if (real !== root && !real.startsWith(root.endsWith(sep) ? root : root + sep)) return undefined;
+  try {
+    if (!statSync(real).isFile()) return undefined;
+  } catch {
+    return undefined;
+  }
+  return real;
+}
+
+/** an express middleware serving a mount through staticFile, GET and HEAD */
+function mountStatic(mount) {
+  return (req, res, next) => {
+    if (req.method !== "GET" && req.method !== "HEAD") { next(); return; }
+    const file = staticFile(mount, req.path);
+    if (file === undefined) { next(); return; }
+    res.sendFile(file, {dotfiles: "allow"}, (error) => { if (error && !res.headersSent) next(); });
+  };
+}
+
+/** What a runtime error says: its message, or -- a transpiled ABAP
+ *  exception carries none -- its class name, never an empty string */
+export function runtimeText(e) {
+  const text = String(e?.message?.get?.() ?? e?.message ?? "").trim();
+  if (text !== "") return text;
+  const name = e?.constructor?.name;
+  if (name && name !== "Object" && name !== "Error") return `${name.toUpperCase()} raised and not caught`;
+  return String(e ?? "an unknown runtime error");
 }
 
 /** Register services the SEGW registry does not hold: "SRV=MPC,DPC". */
@@ -400,10 +480,10 @@ export async function serve({root = process.cwd(), port = 3040, clientModule, en
   // the static files: an app folder named by --app first, then webapp/
   const {rootWebappOf} = await import("./osd-system.mjs");
   for (const one of apps) {
-    app.use(`/app/${one.name}`, express.static(resolve(root, one.dir)));
+    app.use(`/app/${one.name}`, mountStatic(resolve(root, one.dir)));
     log(`hana-serve: /app/${one.name}/ is ${resolve(root, one.dir)} (--app)`);
   }
-  app.use("/app", express.static(rootWebappOf(root, env)));
+  app.use("/app", mountStatic(rootWebappOf(root, env)));
   app.all(/^\/sap\/opu\/odata\/[^/]+\/[^/]+/, async (req, res) => {
     const client = String(env.OSD_CLIENT);
     const otherClient = clientRefusal({query: req.query, headers: req.headers}, client);
@@ -412,9 +492,14 @@ export async function serve({root = process.cwd(), port = 3040, clientModule, en
       return;
     }
     const isBatch = /\/\$batch\/?$/.test(req.path);
+    const override = METHOD_OVERRIDES.find((name) => req.headers[name] !== undefined);
+    if (override !== undefined) {
+      refuse(res, 405, "OSD/READ_ONLY", `hana-serve is read-only and refuses ${override}: it makes a request another method than it says`, {allow: "GET, HEAD"});
+      return;
+    }
     if (req.method === "POST" && isBatch) {
       const body = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : "";
-      const batch = batchRefusal(req.headers["content-type"], body, client);
+      const batch = batchRefusal(req.headers["content-type"], body, client, req.path.replace(/\/\$batch\/?$/, ""));
       if (batch !== undefined) {
         refuse(res, batch.status, batch.status === 405 ? "OSD/READ_ONLY" : (batch.status === 400 && /client/.test(batch.message) ? "OSD/CLIENT" : "OSD/BAD_BATCH"), batch.message, {allow: "GET, HEAD, POST"});
         return;
@@ -436,7 +521,7 @@ export async function serve({root = process.cwd(), port = 3040, clientModule, en
       }), `hana-serve: a ${isBatch ? "$batch of GETs" : req.method}`);
     } catch (e) {
       if (!res.headersSent) {
-        res.status(500).type("application/json").send(JSON.stringify({error: {code: "OSD/RUNTIME", message: {lang: "en", value: String(e?.message?.get?.() ?? e?.message ?? e)}}}));
+        res.status(500).type("application/json").send(JSON.stringify({error: {code: "OSD/RUNTIME", message: {lang: "en", value: runtimeText(e)}}}));
       }
       console.error("hana-serve: runtime error:", e);
     }

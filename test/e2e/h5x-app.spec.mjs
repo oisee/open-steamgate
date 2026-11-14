@@ -116,10 +116,13 @@ async function readTable(page, scope) {
   return {headers, rows};
 }
 
-/** the expected cells of a row, read off the rendered cells: each expected
- *  cell must be the text of the cell in its column (ResponsiveTable renders
- *  one td per column, in LineItem order) */
-const cellsOf = (rows, width) => rows.map((r) => r.slice(0, width));
+/** the rows as rendered, every row checked to carry exactly `width` cells
+ *  (ResponsiveTable renders one td per column, in LineItem order): a column
+ *  nobody expected, or one missing, is a failure and not a slice */
+function cellsOf(rows, width) {
+  for (const [i, row] of rows.entries()) expect(row.length, `row ${i + 1} has ${row.length} cells, expected ${width}: ${JSON.stringify(row)}`).toBe(width);
+  return rows;
+}
 
 test("the read-only app: list, sort, filter, object page, sub-list -- every read a GET in a $batch", async ({page}) => {
   // 0. the labels are the service's, not the app's: each header is a
@@ -141,8 +144,9 @@ test("the read-only app: list, sort, filter, object page, sub-list -- every read
   await expect(table(page).locator(ROW).first()).toBeVisible();
   await expect(table(page).locator(ROW)).toHaveCount(want.list.rows.length);
   const list = await readTable(page);
-  const width = want.list.rows[0].length;
-  expect(list.headers.slice(0, want.list.headers.length)).toEqual(want.list.headers);
+  const width = want.list.headers.length;
+  // exactly these headers, in this order: an extra column is a failure
+  expect(list.headers).toEqual(want.list.headers);
   expect(cellsOf(list.rows, width)).toEqual(want.list.rows);
   if (want.list.count !== undefined) {
     // the inline count the table shows in its title: "(6)"
@@ -180,7 +184,7 @@ test("the read-only app: list, sort, filter, object page, sub-list -- every read
   const subTable = page.locator("section, .sapUxAPObjectPageSection").filter({has: page.locator(ROW)}).locator("table").filter({visible: true}).last();
   await expect(subTable.locator(ROW)).toHaveCount(want.object.subRows.length);
   const sub = await readTable(page, subTable);
-  if (want.object.subHeaders) expect(sub.headers.slice(0, want.object.subHeaders.length)).toEqual(want.object.subHeaders);
+  if (want.object.subHeaders) expect(sub.headers).toEqual(want.object.subHeaders);
   expect(cellsOf(sub.rows, want.object.subRows[0].length)).toEqual(want.object.subRows);
   expect(net.parts().some((p) => p.url.includes(`/${want.object.navigation}`)), net.parts().map((p) => p.url).join("\n")).toBe(true);
 
