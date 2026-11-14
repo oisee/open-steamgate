@@ -783,6 +783,188 @@ ENDCLASS.`,
       [["ZCL_H5G_FULL", "CLAS"], ["ZIF_H5G_PRESENT", "INTF"]]);
   });
 
+  it("references(): an INTERFACES include is asked as INTF, and an interface's METHODS parameter types are read (H5x-4 B1)", async () => {
+    // bed run 21's shape at fixture scale: an interface that includes
+    // another one the build lacks, and an interface whose METHODS parameter
+    // is typed off an absent interface. Inside an INTERFACE definition the
+    // checker stops at the first unknown include and records nothing, and
+    // an interface's parameters live on its definition only -- neither
+    // reached the request, the control build named both, rc=1.
+    const abaplint = await import("@abaplint/core");
+    const graph = await import("../tools/hana-closure-graph.mjs");
+    const reg = new abaplint.Registry(new abaplint.Config(JSON.stringify({
+      global: {files: "/**/*.*"},
+      syntax: {version: abaplint.Version.OpenABAP, errorNamespace: "."},
+      rules: {},
+    })));
+    const F = {
+      "zif_h5c_inc_present.intf.abap": `
+INTERFACE zif_h5c_inc_present PUBLIC.
+  TYPES ty_h5c TYPE i.
+ENDINTERFACE.`,
+      "zif_h5c_inc_outer.intf.abap": `
+INTERFACE zif_h5c_inc_outer PUBLIC.
+  TYPES ty_h5c_one TYPE i.
+  TYPES ty_h5c_two TYPE i.
+  INTERFACES zif_h5c_inc_present.
+  INTERFACES zif_h5c_inc_missing.
+  INTERFACES zif_h5c_inc_missing2.
+ENDINTERFACE.`,
+      "zif_h5c_inc_sig.intf.abap": `
+INTERFACE zif_h5c_inc_sig PUBLIC.
+  METHODS get_it EXPORTING et_h5c TYPE zif_h5c_inc_qual_missing=>tt_h5c.
+ENDINTERFACE.`,
+      // a class's locals define an interface of their own: no global ask
+      "zcl_h5c_inc_local.clas.abap": `
+CLASS zcl_h5c_inc_local DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    METHODS run_it.
+ENDCLASS.
+CLASS zcl_h5c_inc_local IMPLEMENTATION.
+  METHOD run_it.
+    RETURN.
+  ENDMETHOD.
+ENDCLASS.`,
+      "zcl_h5c_inc_local.clas.locals_def.abap": `
+INTERFACE lif_h5c_local.
+  METHODS go.
+ENDINTERFACE.
+CLASS lcl_h5c_local DEFINITION.
+  PUBLIC SECTION.
+    INTERFACES lif_h5c_local.
+ENDCLASS.`,
+    };
+    for (const [name, src] of Object.entries(F)) reg.addFile(new abaplint.MemoryFile(name, src));
+    reg.parse();
+    const outer = graph.references(reg, "zif_h5c_inc_outer.intf.abap");
+    expect(outer.map((r) => [r.name, r.level, r.via, r.ooType, r.line]), "both missing includes, none of the present one").to.deep.equal([
+      ["ZIF_H5C_INC_MISSING", "definition", "interfaces", "INTF", 6],
+      ["ZIF_H5C_INC_MISSING2", "definition", "interfaces", "INTF", 7],
+    ]);
+    expect(graph.requestKindOf("ZIF_H5C_INC_MISSING", outer[0]), "asked as INTF").to.equal("intf");
+    const edges = graph.analyseObject(reg, "zif_h5c_inc_outer.intf.abap").perFile.get("zif_h5c_inc_outer.intf.abap").edges;
+    expect(edges.filter((e) => e.level === "definition").map((e) => e.to), "a present include is a definition edge").to.include("ZIF_H5C_INC_PRESENT");
+    const sig = graph.references(reg, "zif_h5c_inc_sig.intf.abap");
+    expect(sig.map((r) => [r.name, r.level, r.via, r.method, r.var]), "the parameter's qualified type top").to.deep.equal([
+      ["ZIF_H5C_INC_QUAL_MISSING", "signature", "qual", "GET_IT", "ET_H5C"],
+    ]);
+    expect(graph.references(reg, "zcl_h5c_inc_local.clas.abap").filter((r) => /LIF_H5C/.test(r.name)), "a local interface is never asked").to.deep.equal([]);
+    // and the loop's merge: the finding of the include sits on the
+    // INTERFACE statement's line (measured), structural-matched by name
+    const findings = parseFindings([
+      "check_syntax, Interface zif_h5c_inc_missing unknown, zif_h5c_inc_outer.intf.abap:2",
+    ].join("\n"));
+    const analysis = graph.analyseIsland({reg, root: "/r", classPaths: new Map([
+      ["zif_h5c_inc_outer.intf.abap", ["/r/gen/hana-src/000-x/src/zif_h5c_inc_outer.intf.abap"]],
+    ])});
+    const merged = graph.mergeNames({analysis, findings, classPaths: new Map([["zif_h5c_inc_outer.intf.abap", []]])});
+    expect(merged.names.map((n) => [n.name, n.kind])).to.deep.equal([["ZIF_H5C_INC_MISSING", "intf"], ["ZIF_H5C_INC_MISSING2", "intf"]]);
+    expect(merged.structuralCount, "the include's finding is structural, never unclassified").to.equal(1);
+    // one definition edge per present include (the scope walk may carry it too)
+    expect(edges.filter((e) => e.to === "ZIF_H5C_INC_PRESENT" && e.level === "definition")).to.have.lengthOf(1);
+  });
+
+  it("mergeNames matches an INTERFACES include's finding on its exact name only -- a name it merely prefixes is still asked (critic M1, #939)", async () => {
+    const abaplint = await import("@abaplint/core");
+    const graph = await import("../tools/hana-closure-graph.mjs");
+    const reg = new abaplint.Registry(new abaplint.Config(JSON.stringify({
+      global: {files: "/**/*.*"},
+      syntax: {version: abaplint.Version.OpenABAP, errorNamespace: "."},
+      rules: {},
+    })));
+    reg.addFile(new abaplint.MemoryFile("zif_h5r_long.intf.abap", [
+      "INTERFACE zif_h5r_long PUBLIC.",
+      "  INTERFACES zif_h5r_x.",
+      "  TYPES ty_h5r_1 TYPE i.",
+      "  TYPES ty_h5r_2 TYPE i.",
+      "  TYPES ty_h5r_3 TYPE i.",
+      "  TYPES ty_h5r_4 TYPE i.",
+      "  TYPES ty_h5r_5 TYPE i.",
+      "  TYPES ty_h5r_6 TYPE i.",
+      "  TYPES ty_h5r_7 TYPE i.",
+      "  METHODS m.",
+      "ENDINTERFACE.",
+    ].join("\n")));
+    reg.parse();
+    const classPaths = new Map([["zif_h5r_long.intf.abap", ["/r/gen/hana-src/000-x/src/zif_h5r_long.intf.abap"]]]);
+    const analysis = graph.analyseIsland({reg, root: "/r", classPaths});
+    const findings = parseFindings([
+      "check_syntax, Interface zif_h5r_x unknown, zif_h5r_long.intf.abap:1",
+      "check_syntax, Unknown class zif_h5r_x_lcl, zif_h5r_long.intf.abap:10",
+      "check_syntax, Interface zif_h5r_x_tt unknown, zif_h5r_long.intf.abap:10",
+    ].join("\n"));
+    const merged = graph.mergeNames({analysis, findings, classPaths});
+    expect(merged.structuralCount, "only the include's own finding is structural").to.equal(1);
+    expect(merged.rest.map((f) => f.line)).to.deep.equal([10, 10]);
+    expect(classifyFindings(merged.rest).names.map((n) => [n.name, n.kind]), "the prefixed names are asked").to.deep.equal(
+      [["ZIF_H5R_X_LCL", "clas"], ["ZIF_H5R_X_TT", "intf"]]);
+  });
+
+  it("the fallback asks `Interface X unknown` as INTF when no reference carried it (H5x-4 B1)", () => {
+    const {names, unclassified} = classifyFindings(parseFindings([
+      "check_syntax, Interface ZIF_H5C_INC_TEXT unknown, zif_h5c_inc_text.intf.abap:2",
+      "check_syntax, Unknown class zcl_h5c_inc_text, zcl_h5c_inc_user.clas.abap:9",
+    ].join("\n")));
+    expect(names.map((n) => [n.name, n.kind])).to.deep.equal([["ZIF_H5C_INC_TEXT", "intf"], ["ZCL_H5C_INC_TEXT", "clas"]]);
+    expect(unclassified).to.deep.equal([]);
+  });
+
+  it("the stub record holds each (class, method) once: latest finding wins, rounds counted (H5x-4 B1)", async () => {
+    const {recordStub, stubList} = await import("../tools/hana-closure-report.mjs");
+    const {frameworkGapList} = await import("../tools/hana-closure-stubs.mjs");
+    const record = new Map();
+    // bed run 21: the same method re-stubbed once per iteration
+    for (let round = 1; round <= 3; round++) {
+      recordStub(record, {object: "ZCL_H5C_SVC_DPC_EXT", class: "ZCL_H5C_SVC_DPC_EXT", method: "HEADS_GET_ENTITY", missing: [`R${round}`], finding: `f${round}`});
+    }
+    recordStub(record, {object: "ZCL_H5C_SVC_DPC_EXT", class: "ZCL_H5C_SVC_DPC_EXT", method: "ORDERS_GET_ENTITY", missing: [], finding: "g"});
+    recordStub(record, {object: "ZCL_H5C_SVC_DPC_EXT", class: "lcl_h5c_helper", method: "ORDERS_GET_ENTITY", missing: [], finding: "h"});
+    const list = stubList(record);
+    expect(list).to.have.lengthOf(3);
+    expect(list[0]).to.include({method: "HEADS_GET_ENTITY", finding: "f3", rounds: 3});
+    expect(list[0].missing).to.deep.equal(["R3"]);
+    expect(list.map((s) => s.rounds)).to.deep.equal([3, 1, 1]);
+    // a framework gap's use is listed once, however many rounds met it
+    const gaps = new Map([["Method \"x\" not found", {finding: "Method \"x\" not found", used_by: [
+      {file: "a.clas.abap", line: 3, method: "M"}, {file: "a.clas.abap", line: 3, method: "M"}, {file: "a.clas.abap", line: 9, method: "N"}]}]]);
+    expect(frameworkGapList(gaps)[0].used_by).to.have.lengthOf(2);
+  });
+
+  it("the run summary fails on a missing or excluded seed class and on a stubbed --require-unstubbed method (H5x-4 B1)", async () => {
+    const {closureSummary, unstubbedGlob, takeAll} = await import("../tools/hana-closure-report.mjs");
+    const seeds = new Set(["ZCL_H5C_SVC_DPC", "ZCL_H5C_SVC_DPC_EXT", "ZCL_H5C_SVC_MPC"]);
+    const island = new Set(["ZCL_H5C_SVC_DPC", "ZCL_H5C_SVC_DPC_EXT", "ZCL_H5C_SVC_MPC"]);
+    const stubs = [
+      {object: "ZCL_H5C_SVC_DPC_EXT", class: "ZCL_H5C_SVC_DPC_EXT", method: "HEADS_GET_ENTITY", rounds: 2},
+      {object: "ZCL_H5C_OTHER", class: "ZCL_H5C_OTHER", method: "X_GET_ENTITYSET", rounds: 1},
+    ];
+    const base = {iterations: 4, islandObjects: {total: 9}, seeds, present: (n) => island.has(n), excluded: new Set(), stubs,
+      gaps: [{name: "ZOSD_H5C_GAP", kind: "TTYP", first_finding: "x"}]};
+    const ok = closureSummary({...base, requireUnstubbed: ["*_GET_ENTITYSET"]});
+    expect(ok.failures, "a non-seed GET_ENTITYSET stub is no seed failure").to.deep.equal([]);
+    expect(ok).to.include({fixed_point: true, iterations: 4, stubs_unique: 2});
+    expect(ok.seed).to.deep.equal({classes: [...seeds].sort(), stubbed_methods: [{class: "ZCL_H5C_SVC_DPC_EXT", method: "HEADS_GET_ENTITY"}]});
+    expect(ok.gaps).to.deep.equal([{name: "ZOSD_H5C_GAP", kind: "TTYP"}]);
+    const stubbed = closureSummary({...base, requireUnstubbed: ["*_GET_ENTITY", "*_GET_ENTITYSET"]});
+    expect(stubbed.failures).to.have.lengthOf(1);
+    expect(stubbed.failures[0]).to.include("*_GET_ENTITY").and.include("ZCL_H5C_SVC_DPC_EXT=>HEADS_GET_ENTITY");
+    const missing = closureSummary({...base, present: (n) => n !== "ZCL_H5C_SVC_MPC" && island.has(n)});
+    expect(missing.failures).to.deep.equal(["seed class ZCL_H5C_SVC_MPC is not an island object"]);
+    // a base derived off an _EXT name, named by no source: absent is no failure
+    const derived = closureSummary({...base, named: new Set(["ZCL_H5C_SVC_DPC_EXT", "ZCL_H5C_SVC_MPC"]),
+      present: (n) => n !== "ZCL_H5C_SVC_DPC" && island.has(n)});
+    expect(derived.failures).to.deep.equal([]);
+    const excluded = closureSummary({...base, excluded: new Set(["ZCL_H5C_SVC_DPC"])});
+    expect(excluded.failures).to.deep.equal(["seed class ZCL_H5C_SVC_DPC is excluded from the build"]);
+    expect(excluded.excluded).to.deep.equal(["ZCL_H5C_SVC_DPC"]);
+    expect(unstubbedGlob("zcl_h5c_svc_dpc_ext=>heads_*")("ZCL_H5C_SVC_DPC_EXT", "HEADS_GET_ENTITY")).to.equal(true);
+    expect(unstubbedGlob("*_GET_ENTITYSET")("ZCL_H5C_SVC_DPC_EXT", "HEADS_GET_ENTITY")).to.equal(false);
+    expect(unstubbedGlob("HEADS_GET_ENTIT?")("Z", "heads_get_entity")).to.equal(true);
+    const args = ["--require-unstubbed", "a", "--x", "--require-unstubbed", "b"];
+    expect(takeAll(args, "--require-unstubbed")).to.deep.equal(["a", "b"]);
+    expect(args).to.deep.equal(["--x"]);
+  });
+
   it("stripFriends and cutSignatureParams: the clause or the parameter goes, the statement stays", async () => {
     const {stripFriends, cutSignatureParams} = await import("../tools/hana-closure-graph.mjs");
     const source = [
@@ -3260,6 +3442,155 @@ process.exit(0);
     }
   });
 
+  it("H5x-4 B1: an interface's INTERFACES include is asked as INTF and arrives -- the fixed point carries it, the summary says so", async function () {
+    this.timeout(300000);
+    // bed run 21: the fixed point stood with the control build rc=1 on two
+    // `Interface X unknown` includes nobody had asked for. Now the include
+    // is a code-kind ask, the dump brings it, and the control is green.
+    const OUTER = [
+      `INTERFACE zif_h5c_inc_outer PUBLIC.`,
+      `  INTERFACES zif_h5c_inc_inner.`,
+      `  TYPES ty_h5c TYPE i.`,
+      `ENDINTERFACE.`,
+      ``,
+    ].join("\n");
+    const INNER = [
+      `INTERFACE zif_h5c_inc_inner PUBLIC.`,
+      `  TYPES ty_h5c_inner TYPE i.`,
+      `ENDINTERFACE.`,
+      ``,
+    ].join("\n");
+    const root = scratch(OUTER, "zif_h5c_inc_outer", {islandExt: "intf"});
+    writeFileSync(join(root, "island", "zif_h5c_inc_inner.intf.abap"), INNER);
+    fixtureDump(join(root, "dump-001"));
+    const env = writeFakes(root, envFor(root, {island: "zif_h5c_inc_outer.intf.abap", convBFiles: ["zif_h5c_inc_inner.intf.abap"]}));
+    const said = [];
+    try {
+      const result = await run(["--dump", join(root, "dump-001"), "--system", "h5c", "--stub-unresolved"], {root, env, say: (m) => said.push(m)});
+      expect(result.stopped).to.equal("fixed-point");
+      expect(result.iteration).to.equal(2);
+      const request = JSON.parse(readFileSync(outFile(root, "closure-request.json"), "utf8"));
+      expect(request.requested.INTF, "the include is asked under INTF").to.deep.equal(["ZIF_H5C_INC_INNER"]);
+      expect(said.some((l) => /unclassified:/.test(l)), "nothing unclassified").to.equal(false);
+      expect(said.some((l) => /excluded:/.test(l)), "nothing excluded").to.equal(false);
+      expect(existsSync(join(root, "gen", "hana-src", "000-h5c-main", "src", "zif_h5c_inc_inner.intf.abap")), "the include is an island object").to.equal(true);
+      const summary = JSON.parse(readFileSync(outFile(root, "closure-summary.json"), "utf8"));
+      expect(summary).to.include({fixed_point: true, iterations: 2, stubs_unique: 0});
+      expect(summary.island_objects, "both interfaces").to.equal(2);
+      expect(summary.excluded).to.deep.equal([]);
+      expect(summary.failures).to.deep.equal([]);
+    } finally {
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
+
+  // the seed service's DPC_EXT at fixture scale: one entity-set read that
+  // calls a class the tree does not have (a code-kind miss: stubbed,
+  // deferred), and a definition-level table on its companion so the walk
+  // takes a second iteration and re-lays the island -- the re-stub bed run
+  // 21 recorded once per iteration
+  const SVC_DPC_EXT_SOURCE = [
+    `CLASS zcl_h5c_svc_dpc_ext DEFINITION PUBLIC FINAL CREATE PUBLIC.`,
+    `  PUBLIC SECTION.`,
+    `    METHODS items_get_entityset.`,
+    `    METHODS items_get_entity.`,
+    `ENDCLASS.`,
+    `CLASS zcl_h5c_svc_dpc_ext IMPLEMENTATION.`,
+    `  METHOD items_get_entityset.`,
+    `    RETURN.`,
+    `  ENDMETHOD.`,
+    `  METHOD items_get_entity.`,
+    `    zcl_h5c_far=>run_it( ).`,
+    `  ENDMETHOD.`,
+    `ENDCLASS.`,
+    ``,
+  ].join("\n");
+  const SVC_DPC_SOURCE = [
+    `CLASS zcl_h5c_svc_dpc DEFINITION PUBLIC CREATE PUBLIC.`,
+    `  PUBLIC SECTION.`,
+    `    DATA gv_h5c TYPE zosd_h5c_def.`,
+    `ENDCLASS.`,
+    `CLASS zcl_h5c_svc_dpc IMPLEMENTATION.`,
+    `ENDCLASS.`,
+    ``,
+  ].join("\n");
+
+  it("H5x-4 B1: a method re-stubbed in every iteration is recorded once, with its rounds; the summary lists the seed's stubs", async function () {
+    this.timeout(300000);
+    const root = scratch(SVC_DPC_EXT_SOURCE, "zcl_h5c_svc_dpc_ext", {island2Name: "zcl_h5c_svc_dpc.clas.abap", island2Source: SVC_DPC_SOURCE});
+    fixtureDump(join(root, "dump-001"));
+    const env = writeFakes(root, envFor(root, {island: "zcl_h5c_svc_dpc_ext.clas.abap", island2Name: "zcl_h5c_svc_dpc.clas.abap"}));
+    const said = [];
+    try {
+      const result = await run(["--dump", join(root, "dump-001"), "--system", "h5c", "--stub-unresolved",
+        "--require-unstubbed", "*_GET_ENTITYSET"], {root, env, say: (m) => said.push(m)});
+      expect(result.stopped).to.equal("fixed-point");
+      expect(result.iteration, "the island was re-laid once").to.equal(2);
+      const stubs = JSON.parse(readFileSync(outFile(root, "closure-stubs.json"), "utf8")).stubs;
+      expect(stubs.map((s) => [s.class, s.method, s.rounds])).to.deep.equal([["ZCL_H5C_SVC_DPC_EXT", "ITEMS_GET_ENTITY", 2]]);
+      expect(said.filter((l) => /^iteration /.test(l)).every((l) => / 1 stubbed method\(s\)/.test(l)), "the line counts unique pairs").to.equal(true);
+      const summary = JSON.parse(readFileSync(outFile(root, "closure-summary.json"), "utf8"));
+      expect(summary).to.include({stubs_unique: 1, iterations: 2});
+      expect(summary.seed).to.deep.equal({classes: ["ZCL_H5C_SVC_DPC", "ZCL_H5C_SVC_DPC_EXT"],
+        stubbed_methods: [{class: "ZCL_H5C_SVC_DPC_EXT", method: "ITEMS_GET_ENTITY"}]});
+      expect(summary.failures).to.deep.equal([]);
+    } finally {
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
+
+  it("H5x-4 B1: --require-unstubbed fails the fixed point on a stubbed seed method, after writing the summary", async function () {
+    this.timeout(300000);
+    const root = scratch(SVC_DPC_EXT_SOURCE, "zcl_h5c_svc_dpc_ext", {island2Name: "zcl_h5c_svc_dpc.clas.abap", island2Source: SVC_DPC_SOURCE});
+    fixtureDump(join(root, "dump-001"));
+    const env = writeFakes(root, envFor(root, {island: "zcl_h5c_svc_dpc_ext.clas.abap", island2Name: "zcl_h5c_svc_dpc.clas.abap"}));
+    try {
+      let error;
+      try {
+        await run(["--dump", join(root, "dump-001"), "--system", "h5c", "--stub-unresolved",
+          "--require-unstubbed", "*_GET_ENTITYSET", "--require-unstubbed", "*_get_entity"], {root, env, say: () => {}});
+      } catch (e) {
+        error = e;
+      }
+      expect(error, "the run fails").to.not.equal(undefined);
+      expect(String(error.message)).to.include("--require-unstubbed *_get_entity").and.include("ZCL_H5C_SVC_DPC_EXT=>ITEMS_GET_ENTITY");
+      expect(String(error.message), "the glob that holds is not a failure").to.not.include("*_GET_ENTITYSET:");
+      const summary = JSON.parse(readFileSync(outFile(root, "closure-summary.json"), "utf8"));
+      expect(summary.failures).to.have.lengthOf(1);
+    } finally {
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
+
+  it("H5x-4 B1: a registered seed class missing from the island fails the fixed point", async function () {
+    this.timeout(300000);
+    // the registration names an MPC_EXT the dumps never brought; the
+    // DPC_EXT alone is there -- its derived DPC base, named by nobody, is
+    // not required (an _EXT's own superclass ask covers a real one)
+    const root = scratch(SVC_DPC_EXT_SOURCE, "zcl_h5c_svc_dpc_ext");
+    mkdirSync(join(root, "gen", "hana-segw"), {recursive: true});
+    writeFileSync(join(root, "gen", "hana-segw", "from-dump.json"), JSON.stringify({services: [
+      {service: "h5c", version: "0001", dpc: "ZCL_H5C_SVC_DPC_EXT", mpc: "ZCL_H5C_SVC_MPC_EXT"},
+    ]}) + "\n");
+    fixtureDump(join(root, "dump-001"));
+    const env = writeFakes(root, envFor(root, {island: "zcl_h5c_svc_dpc_ext.clas.abap"}));
+    try {
+      let error;
+      try {
+        await run(["--dump", join(root, "dump-001"), "--system", "h5c", "--stub-unresolved"], {root, env, say: () => {}});
+      } catch (e) {
+        error = e;
+      }
+      expect(error, "the run fails").to.not.equal(undefined);
+      expect(String(error.message)).to.include("seed class ZCL_H5C_SVC_MPC_EXT is not an island object");
+      const summary = JSON.parse(readFileSync(outFile(root, "closure-summary.json"), "utf8"));
+      expect(summary.failures).to.deep.equal(["seed class ZCL_H5C_SVC_MPC_EXT is not an island object"]);
+      expect(summary.seed.classes).to.deep.equal(["ZCL_H5C_SVC_DPC", "ZCL_H5C_SVC_DPC_EXT", "ZCL_H5C_SVC_MPC", "ZCL_H5C_SVC_MPC_EXT"]);
+    } finally {
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
+
   it("fix2 item 7: the seed classes' nameless stubs lead framework-gaps.json, flagged seed", async function () {
     this.timeout(300000);
     const NAMELESS = (name, member) => [
@@ -3850,6 +4181,15 @@ process.exit(0);
       ["zcl_h5c_test_dep.clas.abap", DEP_SOURCE],
       ["zcl_h5c_svc_dpc.clas.abap", SVC_SOURCE],
       ["zcl_h5c_svc_dpc_ext.clas.abap", SVC_EXT_SOURCE],
+      // the registration's MPC: a registered seed class must be an island
+      // object, or the fixed point fails (H5x-4 B1's summary guard)
+      ["zcl_h5c_svc_mpc.clas.abap", [
+        `CLASS zcl_h5c_svc_mpc DEFINITION PUBLIC CREATE PUBLIC.`,
+        `ENDCLASS.`,
+        `CLASS zcl_h5c_svc_mpc IMPLEMENTATION.`,
+        `ENDCLASS.`,
+        ``,
+      ].join("\n")],
       ["zcl_h5c_keep.clas.abap", KEEP_SOURCE],
     ];
     const root = scratch(INTF_AUNIT_SOURCE, "if_aunit_h5c_test", {islandExt: "intf",

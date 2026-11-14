@@ -12,6 +12,7 @@
 //   node tools/hana-closure.mjs --dump <dir> --system <prefix>
 //        [--out <dir>] [--max-iterations <n>] [--dry-run]
 //        [--stub-unresolved] [--max-stub-rounds <n>] [--defer-ddic]
+//        [--require-unstubbed <glob>]...
 //
 //   --dump <dir>          the current dump directory (iteration 1's input;
 //                         what `vsp hana dump` wrote for the service, the
@@ -116,6 +117,16 @@
 //                         stubbed method is lazy, even the dictionary's.
 //   --max-stub-rounds <n> the cap of the stub rounds above (default 5, and
 //                         only read with --stub-unresolved).
+//   --require-unstubbed <glob>
+//                         repeatable: the fixed point FAILS when a seed
+//                         class's method matching the glob (`*_GET_ENTITYSET`;
+//                         `CLASS=>METHOD` with `=>`) is stubbed. Every fixed
+//                         point writes closure-summary.json beside the record
+//                         (tools/hana-closure-report.mjs) and fails as well
+//                         when a seed class -- the registered service's
+//                         MPC/DPC/_EXT -- is not an island object or is
+//                         excluded: a green build without the service is the
+//                         false green this guards against (H5x-4 B1).
 //
 // The layers accumulate (round 4): every dump is converted first, into
 // .local/hana-closure/layers-<NNN>/ (OSD_HANA_CONVERTER through
@@ -262,11 +273,12 @@ import {copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync
 import {join, resolve} from "node:path";
 import {runsAs} from "./osd-main.mjs";
 import {validationMessage} from "./hana-ddic-gen.mjs";
-import {islandClassPaths, planStubPass, registeredServiceClasses, serviceGuardBySuffixOnly, dropPresentNames, frameworkGapList, objectFilePresent} from "./hana-closure-stubs.mjs";
+import {islandClassPaths, planStubPass, registeredServiceClasses, seedClasses, serviceGuardBySuffixOnly, dropPresentNames, frameworkGapList, objectFilePresent} from "./hana-closure-stubs.mjs";
 import {buildCheck, ddicWritten, ensureLayers, generationOf, islandBasenames, islandObjectCount, islandShrinkCheck, mergeInputs} from "./hana-closure-merge.mjs";
 import {dumperConfigured, dumpRound, printedCommand, provenanceFor} from "./hana-closure-dumper.mjs";
 import {cascadeOf, classifyFindings, exclusionCandidates, nameFromAbapFile, parseFindings} from "./hana-closure-exclude.mjs";
 import {analyseIsland, graphDecide, mergeNames, requestKindOf, structuralRegistry, testCodeObjects, waitsOf, writeClosureRecord} from "./hana-closure-graph.mjs";
+import {closureSummary, has, loadState, recordStub, saveState, stubList, take, takeAll, writeClosureSummary} from "./hana-closure-report.mjs";
 
 // ------------------------------------------------------------ findings ----
 
@@ -367,18 +379,8 @@ export function requestFor({iteration, generation, fresh, asked, gaps, deferred,
 
 // ---------------------------------------------------------------- loop ----
 
-const loadState = (out) => {
-  try {
-    return JSON.parse(readFileSync(join(out, "state.json"), "utf8"));
-  } catch (error) {
-    if (error.code === "ENOENT") return undefined;
-    throw error;
-  }
-};
-
-const saveState = (out, state) => {
-  writeFileSync(join(out, "state.json"), JSON.stringify(state, null, 2) + "\n");
-};
+// the state file and the argv helpers live in tools/hana-closure-report.mjs
+// since H5x-4 B1, with the stub record and the run summary
 
 // the request's `generation` (the merge manifest's sha) and the dumper
 // round's provenance live with their modules since FIX-1: generationOf in
@@ -388,22 +390,6 @@ const saveState = (out, state) => {
 // the dumper round and the by-hand command live in
 // tools/hana-closure-dumper.mjs since H5x-1: their own package, the size
 // budget stays honest
-
-function take(args, name) {
-  const at = args.indexOf(name);
-  if (at < 0) return undefined;
-  const value = args[at + 1];
-  if (value === undefined || value.startsWith("--")) throw new Error(`hana-closure: ${name} needs a value`);
-  args.splice(at, 2);
-  return value;
-}
-
-function has(args, flag) {
-  const at = args.indexOf(flag);
-  if (at < 0) return false;
-  args.splice(at, 1);
-  return true;
-}
 
 /** one iteration to the fixed point, or one stop on the way to it. The
  *  result says which: "fixed-point" (everything the closure names is in the
@@ -420,6 +406,7 @@ export async function run(args = process.argv.slice(2), options = {}) {
   const maxStubRounds = Number(take(args, "--max-stub-rounds") ?? "5");
   const stubUnresolved = has(args, "--stub-unresolved");
   const deferDdic = has(args, "--defer-ddic");
+  const requireUnstubbed = takeAll(args, "--require-unstubbed");
   const dryRun = has(args, "--dry-run");
   if (args.length > 0) throw new Error(`hana-closure: unknown option ${args.find((a) => a.startsWith("--")) ?? args[0]}`);
   if (Number.isInteger(maxIterations) === false || maxIterations < 0) {
@@ -488,8 +475,10 @@ export async function run(args = process.argv.slice(2), options = {}) {
   let rounds = 0;
   // the walk's stubs, across iterations (H5x-2: closure-stubs.json is the
   // WALK's record -- an earlier iteration's stubs must not fall out of it
-  // when a later iteration writes its own decision)
-  const stubRecords = [];
+  // when a later iteration writes its own decision), once per (class,
+  // method): a re-laid island stubs the same method again (H5x-4 B1)
+  const stubMap = new Map();
+  const stubRecords = () => stubList(stubMap);
   for (;;) {
     // what the dump's own manifest says the dictionary answered, read on
     // every continuation: every name in closure.missing (the requested
@@ -588,7 +577,7 @@ export async function run(args = process.argv.slice(2), options = {}) {
     // record, the graph rounds write the last decision.
     const excludedRecords = [];
     const excludedObjects = new Set();
-    if (stubUnresolved === true) writeClosureRecord(out, {stubRecords, excludedRecords, waits: []});
+    if (stubUnresolved === true) writeClosureRecord(out, {stubRecords: stubRecords(), excludedRecords, waits: []});
     // the structural pass (H5x-2): one SyntaxLogic pass per island object
     // over the build's own file set -- the names' primary source and the
     // graph decision's input, in both modes
@@ -601,7 +590,7 @@ export async function run(args = process.argv.slice(2), options = {}) {
     // record's only write, the audit trail of what the walk could not analyse
     const errorRecords = new Map((analysis.errors ?? []).map((e) => [e.file, e]));
     if (stubUnresolved === false && errorRecords.size > 0) writeClosureRecord(out,
-      {stubRecords, excludedRecords, waits: [], errors: [...errorRecords.values()]});
+      {stubRecords: stubRecords(), excludedRecords, waits: [], errors: [...errorRecords.values()]});
     // lazy activation (--stub-unresolved) as fix round 1 corrects it: a
     // method keeps its body only while a DDIC name of its is still pending
     // in THIS iteration's request; nameless, present-only, resolved-but-
@@ -654,7 +643,7 @@ export async function run(args = process.argv.slice(2), options = {}) {
         else excludedRecords.push(rec);
       };
       const writeRecord = () =>
-        writeClosureRecord(out, {stubRecords, excludedRecords,
+        writeClosureRecord(out, {stubRecords: stubRecords(), excludedRecords,
           waits: waitsOf(analysisObjects.filter((o) => testExcluded.has(o.object) === false), pendingAtFixedPoint),
           errors: [...errorRecords.values()]});
       // H5x-3, fix round 1: the island's test code is a class whose OWN
@@ -804,7 +793,7 @@ export async function run(args = process.argv.slice(2), options = {}) {
             friendStrips += entry.plan.friendsStripped?.length ?? 0;
             for (const stub of entry.plan.stubs) {
               applied.push(entry.object);
-              stubRecords.push({object: entry.object, file: entry.file, class: stub.className,
+              recordStub(stubMap, {object: entry.object, file: entry.file, class: stub.className,
                 method: stub.method, missing: stub.missing, finding: stub.finding,
                 ...(stub.signature === true ? {signature: true} : {})});
             }
@@ -973,7 +962,7 @@ export async function run(args = process.argv.slice(2), options = {}) {
     const writtenDdic = ddicWritten(root);
     const ddicCounts = TADIR.filter((k) => (state.resolved?.[k] ?? []).length > 0)
       .map((k) => `${k} ${state.resolved[k].length}/${writtenDdic[k]?.size ?? 0}`).join(", ");
-    say(`iteration ${state.iteration}: ${fresh.length} new name(s), ${gaps.length} gap(s), ${unscoped} outside the island (not asked), ${refusedGaps.length} merge-refusal gap(s), ${cascades} cascade finding(s) skipped, ${structuralCount} structural, ${unclassified.length} unclassified${stubUnresolved === true ? `, ${deferredOnly.length} deferred by stubs, ${stubRecords.length} stubbed method(s), framework gaps: ${frameworkGaps}${cycles > 0 ? `, ${cycles} cycle member(s) kept` : ""}` : ""}, ${objects.total} island object(s)${gapKinds !== "" ? `, gaps by kind: ${gapKinds}` : ""}${ddicCounts !== "" ? `, DDIC resolved/written: ${ddicCounts}` : ""}, ${present} cascade (present)${excludedRecords.length > 0 ? `, ${excludedRecords.filter((r) => r.level !== "cycle").length} excluded` : ""}${stubUnresolved === true && guardBySuffix === true ? ", service guard: by suffix, no registration" : ""}`);
+    say(`iteration ${state.iteration}: ${fresh.length} new name(s), ${gaps.length} gap(s), ${unscoped} outside the island (not asked), ${refusedGaps.length} merge-refusal gap(s), ${cascades} cascade finding(s) skipped, ${structuralCount} structural, ${unclassified.length} unclassified${stubUnresolved === true ? `, ${deferredOnly.length} deferred by stubs, ${stubMap.size} stubbed method(s), framework gaps: ${frameworkGaps}${cycles > 0 ? `, ${cycles} cycle member(s) kept` : ""}` : ""}, ${objects.total} island object(s)${gapKinds !== "" ? `, gaps by kind: ${gapKinds}` : ""}${ddicCounts !== "" ? `, DDIC resolved/written: ${ddicCounts}` : ""}, ${present} cascade (present)${excludedRecords.length > 0 ? `, ${excludedRecords.filter((r) => r.level !== "cycle").length} excluded` : ""}${stubUnresolved === true && guardBySuffix === true ? ", service guard: by suffix, no registration" : ""}`);
     for (const line of unclassified) say(`unclassified: ${line}`);
 
     if (fresh.length === 0) {
@@ -983,8 +972,11 @@ export async function run(args = process.argv.slice(2), options = {}) {
       const build = buildCheck({root, env, say});
       if (build.findings > 0) say(`build: exited ${build.status} with ${build.findings} finding(s) -- exit 1 with findings only, the fixed point stands`);
       say(`fixed point: every unresolved name has been asked and nothing new is named; ${gaps.length + refusedGaps.length} gap(s) -> ${join(out, "closure-gaps.json")}`);
+      const seeds = seedClasses(root);
+      writeClosureSummary(out, closureSummary({iterations: state.iteration, islandObjects: objects.total, seeds: seeds.all, named: seeds.named,
+        present: (name) => objectFilePresent(name, "clas", island), excluded: excludedObjects, stubs: stubRecords(), gaps: [...gaps, ...refusedGaps], requireUnstubbed}));
       return {stopped: "fixed-point", iteration: state.iteration, gaps: [...gaps, ...refusedGaps], cascades, unclassified, unscoped,
-        ...(stubUnresolved === true ? {stubs: stubRecords, stubRounds} : {})};
+        ...(stubUnresolved === true ? {stubs: stubRecords(), stubRounds} : {})};
     }
 
     const iteration = state.iteration + 1;
