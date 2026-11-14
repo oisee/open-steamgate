@@ -191,6 +191,7 @@ CLASS zcl_stg_odata_client IMPLEMENTATION.
     DATA lo_context  TYPE REF TO zcl_stg_request_context.
     DATA lt_orderby  TYPE /iwbep/t_mgw_tech_order.
     DATA ls_orderby  LIKE LINE OF lt_orderby.
+    DATA ls_property TYPE zcl_stg_model_info=>ty_property.
     DATA lv_top      TYPE string.
     DATA lv_skip     TYPE i.
     DATA lv_body     TYPE string.
@@ -231,6 +232,12 @@ CLASS zcl_stg_odata_client IMPLEMENTATION.
     LOOP AT lt_orderby INTO ls_orderby.
       IF ls_option-value IS NOT INITIAL.
         ls_option-value = |{ ls_option-value },|.
+      ENDIF.
+* the technical order names ABAP fields; the other service is asked by the
+* OData name of the same property of the local set
+      READ TABLE ls_set-properties INTO ls_property WITH KEY fieldname = ls_orderby-property.
+      IF sy-subrc = 0.
+        ls_orderby-property = ls_property-name.
       ENDIF.
       ls_option-value = |{ ls_option-value }{ ls_orderby-property } { to_lower( ls_orderby-order ) }|.
     ENDLOOP.
