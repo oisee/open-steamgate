@@ -132,6 +132,12 @@ log for the cancel marker before treating a cancellation as flakiness.
 `test/adt-lifecycle-report.mjs` pins the values, the three call sites and
 the ceiling ("DDLS call timeout margin").
 
+The interface family's create+write+activate call takes the same budget
+(2026-11-14): 51-72 s on good CI runs, cut at 90.0 s on slow runners three times
+on 2026-11-13. The first creation in the family builds cold, as a DDLS
+activation does; the interface's edits and explicit activation keep 90 s. The
+same test pins it (the `(f, op)` form of `vspTimeout`, one `'create'` call site).
+
 `test/adt-lifecycle-report.mjs` transcribes the real #635/#633/#636 tables as
 JSON fixtures (all QUIET), injects one 2x operation slowdown (WARN), uniform
 1.6x runner slowdown (QUIET), isolated sample outliers, and five-run history
