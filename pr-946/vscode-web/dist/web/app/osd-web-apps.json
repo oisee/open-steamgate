@@ -1,0 +1,21 @@
+{
+  "components": {
+    "stg.analytics": "analytics/",
+    "stg.booking": "booking/",
+    "osd.h5x": "h5x/",
+    "stg.icf": "icf/",
+    "stg.travel": "",
+    "stg.segw": "segw/",
+    "stg.status": "status/",
+    "stg.taxi": "taxi/",
+    "osd.travel4": "travel4/",
+    "osd.trip4": "trip4/",
+    "stg.workbench": "workbench/",
+    "l3.fleet2": "zosd_fleet2/",
+    "l3.fleet2.set": "zosd_fleet2_s/",
+    "osd.zvdb": "zvdb/",
+    "osd.zvdb.quality": "zvdb/quality/"
+  },
+  "sandboxConfigPath": "/appconfig/fioriSandboxConfig.json",
+  "sandboxConfigBody": "{}\n"
+}
