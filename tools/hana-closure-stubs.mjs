@@ -34,11 +34,12 @@
 // interface whose DEFINITION references a missing name is excluded -- by
 // the graph decision (tools/hana-closure-graph.mjs graphDecide) over the
 // whole island, not by this file.
-import {readdirSync, readFileSync} from "node:fs";
+import {readdirSync, readFileSync, writeFileSync} from "node:fs";
 import {join} from "node:path";
 import * as abaplint from "@abaplint/core";
 import {classifyFindings, nameFromAbapFile} from "./hana-closure-exclude.mjs";
 import {requestKindOf, stripFriends, cutSignatureParams} from "./hana-closure-graph.mjs";
+import {recordStub} from "./hana-closure-report.mjs";
 
 // the island class and interface files a stub pass may rewrite or exclude:
 // gen/hana-src/**/*.clas.abap, the locals includes beside them, and the
@@ -105,6 +106,254 @@ export function methodBlocks(source, filename = "zcl_stub.clas.abap") {
     }
   }
   return blocks;
+}
+
+// the block statements a method body opens and closes, by abaplint's
+// statement names: closer -> opener
+const BLOCK_CLOSERS = {EndIf: "If", EndLoop: "Loop", EndTry: "Try", EndDo: "Do", EndWhile: "While",
+  EndCase: "Case", EndSelect: "SelectLoop", EndAt: "At", EndProvide: "Provide", EndOn: "OnChange"};
+const BLOCK_OPENERS = new Set(Object.values(BLOCK_CLOSERS));
+
+/** where a file abaplint cannot STRUCTURE goes wrong, per method (H5x-4
+ *  B4): a statement that parses, but as the opener of a block nothing in
+ *  its method closes, or a closer whose opener is another. A `structure`
+ *  finding names line 1 of the file -- no method -- so the stub pass could
+ *  never place it and it stayed "unclassified" for good (bed runs 21-22:
+ *  `SELECT SINGLE f CONNECTION (c) FROM t ...`, which abaplint's single-row
+ *  grammar admits only with CONNECTION after FROM, read as a SELECT loop
+ *  without ENDSELECT). Only the pairs above are tracked: a method whose
+ *  trouble is anything else is not located, and the finding stays where
+ *  it was. Pure: [{method, line, statement}] in source order. */
+export function unclosedBlocks(source, filename = "zcl_stub.clas.abap") {
+  const reg = new abaplint.Registry().addFile(new abaplint.MemoryFile(filename, source)).parse();
+  const found = [];
+  for (const file of reg.getFirstObject()?.getABAPFiles() ?? []) {
+    let method;
+    let stack = [];
+    let broken;
+    for (const st of file.getStatements()) {
+      const kind = st.get().constructor.name;
+      if (kind === "MethodImplementation") {
+        method = String(st.getTokens()[1]?.getStr() ?? "").toUpperCase();
+        stack = [];
+        broken = undefined;
+        continue;
+      }
+      if (method === undefined) continue;
+      if (kind === "EndMethod") {
+        const at = broken ?? stack[0];
+        if (at !== undefined) found.push({method, line: at.line, statement: at.statement});
+        method = undefined;
+        continue;
+      }
+      if (broken !== undefined) continue;
+      const here = {line: st.getStart().getRow(), statement: kind};
+      if (BLOCK_OPENERS.has(kind) === true) {
+        stack.push(here);
+      } else if (BLOCK_CLOSERS[kind] !== undefined) {
+        const open = stack.pop();
+        if (open === undefined || open.statement !== BLOCK_CLOSERS[kind]) broken = open ?? here;
+      }
+    }
+  }
+  return found;
+}
+
+/** the structure pre-pass (H5x-4 B4): a class file abaplint cannot
+ *  structure, with its unclosed blocks stubbed -- run BEFORE the structural
+ *  analysis, which reads nothing of a file it cannot structure: the bed's
+ *  test-utility class kept its definition-level names (a RAISING of a class
+ *  nobody asked for) out of every request while its methods were stubbed
+ *  only later in the iteration. undefined when the file structures (or
+ *  nothing can be located); else {source, stubs}. Pure. */
+export function structureStubs(source, filename = "zcl_stub.clas.abap") {
+  let located;
+  try {
+    located = unclosedBlocks(source, filename);
+  } catch {
+    return undefined;
+  }
+  if (located.length === 0) return undefined;
+  const findings = located.map((at) => ({rule: "structure", file: filename, line: at.line, structure: true,
+    message: `abaplint cannot structure ${filename}: it reads the ${at.statement} statement at line ${at.line} of ${at.method} as a block its method never closes`,
+    raw: `structure, ${at.statement} not closed in ${at.method}, ${filename}:${at.line}`}));
+  const plan = stubBodies(source, findings, filename);
+  return plan.stubs.length === 0 ? undefined : {source: plan.source, stubs: plan.stubs};
+}
+
+/** the methods holding a statement the pinned transpiler refuses
+ *  ("Statement LoadReport not supported" -- a build failure with no
+ *  finding, so neither the validation nor the stub pass ever sees it),
+ *  stubbed: `kinds` are abaplint statement names the walk has met in such
+ *  a refusal (state.unsupported, H5x-4 B4). undefined when the file holds
+ *  none; else {source, stubs}. Pure. */
+export function unsupportedStubs(source, filename = "zcl_stub.clas.abap", kinds = []) {
+  if (kinds.length === 0) return undefined;
+  const wanted = new Set(kinds);
+  let reg;
+  try {
+    reg = new abaplint.Registry().addFile(new abaplint.MemoryFile(filename, source)).parse();
+  } catch {
+    return undefined;
+  }
+  const findings = [];
+  for (const file of reg.getFirstObject()?.getABAPFiles() ?? []) {
+    for (const st of file.getStatements()) {
+      const kind = st.get().constructor.name;
+      if (wanted.has(kind) === false) continue;
+      const line = st.getStart().getRow();
+      findings.push({rule: "unsupported", file: filename, line, structure: true,
+        message: `the transpiler does not support the ${kind} statement (line ${line})`,
+        raw: `unsupported, Statement ${kind} not supported, ${filename}:${line}`});
+    }
+  }
+  if (findings.length === 0) return undefined;
+  const plan = stubBodies(source, findings, filename);
+  return plan.stubs.length === 0 ? undefined : {source: plan.source, stubs: plan.stubs};
+}
+
+/** the pre-pass over every island class file (H5x-4 B4): a file abaplint
+ *  cannot structure, then the statements the transpiler refuses
+ *  (`unsupported`, abaplint statement names), stubbed and recorded in
+ *  `stubMap` before the structural pass reads the island. */
+export function islandPrePass({root, unsupported = [], constructors = [], stubMap, say = () => {}}) {
+  for (const [base, paths] of islandClassPaths(root)) {
+    if (/\.clas\.abap$/.test(base) === false) continue;
+    for (const path of [...paths].sort()) {
+      const passes = [["structure", (src) => structureStubs(src, base)],
+        ["unsupported", (src) => unsupportedStubs(src, base, unsupported)],
+        ["constructor", (src) => constructorStub(src, base, constructors)]];
+      for (const [label, pass] of passes) {
+        const plan = pass(readFileSync(path, "utf8"));
+        if (plan === undefined) continue;
+        writeFileSync(path, plan.source);
+        for (const stub of plan.stubs) {
+          recordStub(stubMap, {object: nameFromAbapFile(base.replace(/\..*$/, "")), file: path.slice(root.length + 1),
+            class: stub.className, method: stub.method, missing: [], finding: stub.finding});
+        }
+        say(`${label}: ${base}: ${plan.stubs.map((s) => s.method).join(", ")} stubbed (${plan.stubs[0].reason})`);
+      }
+    }
+  }
+}
+
+/** a class constructor that failed the generation's load (an exception no
+ *  stub raised -- RTTI over a type the island lacks, say), given the signal
+ *  stub: on a system it runs at first use, here at load, and a class the
+ *  read path never uses must not stop the load. `constructors`: the object
+ *  names the walk learned from the load check (state.constructors). Pure. */
+export function constructorStub(source, filename, constructors = []) {
+  const object = nameFromAbapFile(filename.replace(/\..*$/, ""));
+  if (constructors.includes(object) === false) return undefined;
+  const block = methodBlocks(source, filename).find((b) => b.className === object && b.method === "CLASS_CONSTRUCTOR");
+  if (block === undefined || block.endStart.row - block.headerEnd.row < 2) return undefined;
+  const finding = {rule: "load", file: filename, line: block.headerEnd.row + 1, structure: true,
+    message: "the class constructor failed the generation's load", raw: `load, class constructor of ${object}, ${filename}`};
+  const plan = stubBodies(source, [finding], filename);
+  return plan.stubs.length === 0 ? undefined : {source: plan.source, stubs: plan.stubs};
+}
+
+/** what a failed fixed point teaches the walk, once per kind or class: a
+ *  statement the transpiler refuses (the build's error) or a class
+ *  constructor that failed the load (the load check). Mutates state; the
+ *  line to say, or undefined when there is nothing new to learn. */
+export function learnFromFailure(state, {buildError, load} = {}) {
+  const kind = unsupportedStatementOf(buildError?.message);
+  if (kind !== undefined && (state.unsupported ?? []).includes(kind) === false) {
+    state.unsupported = [...(state.unsupported ?? []), kind];
+    return `unsupported: the transpiler refuses the ${kind} statement -- the methods holding it are stubbed, the pass repeats`;
+  }
+  const ctor = load?.loads === false ? load.constructor : undefined;
+  if (ctor !== undefined && (state.constructors ?? []).includes(ctor) === false) {
+    state.constructors = [...(state.constructors ?? []), ctor];
+    return `constructor: ${ctor}'s class constructor failed the load (${load.error}) -- it signals instead, the pass repeats`;
+  }
+  return undefined;
+}
+
+/** the statement kind of a transpiler refusal in a build's output, or
+ *  undefined. Pure. */
+export function unsupportedStatementOf(text) {
+  return /Statement (\w+) not supported/.exec(String(text ?? ""))?.[1];
+}
+
+/** a file-level `structure` finding (no method on its line) as one finding
+ *  per method unclosedBlocks locates, at the offending statement's line,
+ *  so the stub pass places it like any other; a finding it cannot locate
+ *  comes back as it was. Pure. */
+export function locateStructureFindings(source, findings, filename = "zcl_stub.clas.abap") {
+  if (findings.some((f) => f.rule === "structure") === false) return findings;
+  let located;
+  try {
+    located = unclosedBlocks(source, filename);
+  } catch {
+    return findings;
+  }
+  const out = [];
+  for (const f of findings) {
+    if (f.rule !== "structure" || located.length === 0) {
+      out.push(f);
+      continue;
+    }
+    for (const at of located) {
+      out.push({...f, line: at.line, structure: true,
+        message: `${f.message}: abaplint reads the ${at.statement} statement at line ${at.line} of ${at.method} as a block its method never closes`});
+    }
+  }
+  return out;
+}
+
+/** the class-constructor paths of one class file (B6): per class, the
+ *  methods its CLASS_CONSTRUCTOR reaches through calls of the same class
+ *  (transitively, the constructor included), the stub raise text of every
+ *  method whose body already is a stub raise, and whether the constructor
+ *  already is the signal stub. A class constructor runs when its module
+ *  loads -- in this runtime and, as the first use of the class, on a system
+ *  -- so a raise anywhere on that path stops the generation from loading.
+ *  Calls are read off abaplint's MethodName expressions; a call into
+ *  another class is not followed (the load check in the summary catches
+ *  one). Pure. */
+export function constructorPaths(source, filename = "zcl_stub.clas.abap") {
+  const reg = new abaplint.Registry().addFile(new abaplint.MemoryFile(filename, source)).parse();
+  const calls = new Map();
+  const raised = new Map();
+  const signalled = new Set();
+  for (const file of reg.getFirstObject()?.getABAPFiles() ?? []) {
+    let impl = "";
+    let method;
+    for (const st of file.getStatements()) {
+      const kind = st.get().constructor.name;
+      if (kind === "ClassImplementation") impl = String(st.getTokens()[1]?.getStr() ?? "").toUpperCase();
+      else if (kind === "MethodImplementation") method = String(st.getTokens()[1]?.getStr() ?? "").toUpperCase();
+      else if (kind === "EndMethod") method = undefined;
+      else if (method !== undefined) {
+        const key = `${impl}|${method}`;
+        const list = calls.get(key) ?? new Set();
+        for (const m of st.findAllExpressions(abaplint.Expressions.MethodName)) list.add(m.getFirstToken().getStr().toUpperCase());
+        calls.set(key, list);
+        const tokens = st.getTokens().map((t) => t.getStr().toUpperCase());
+        if (kind === "Raise" && tokens.includes("ZCX_OSD_NOT_ACTIVATED")) {
+          const text = st.getTokens().map((t) => t.getStr()).find((t) => t.startsWith("'"));
+          raised.set(key, text === undefined ? "" : text.slice(1, -1));
+        }
+        if (method === "CLASS_CONSTRUCTOR" && tokens.join(" ").includes("ZCX_OSD_NOT_ACTIVATED => SIGNAL")) signalled.add(impl);
+      }
+    }
+  }
+  const reach = new Map();
+  for (const key of calls.keys()) {
+    const [cls, m] = key.split("|");
+    if (m !== "CLASS_CONSTRUCTOR") continue;
+    const seen = new Set(["CLASS_CONSTRUCTOR"]);
+    const queue = ["CLASS_CONSTRUCTOR"];
+    while (queue.length > 0) {
+      for (const next of calls.get(`${cls}|${queue.shift()}`) ?? []) {
+        if (seen.has(next) === false && calls.has(`${cls}|${next}`)) { seen.add(next); queue.push(next); }
+      }
+    }
+    reach.set(cls, seen);
+  }
+  return {reach, raised, signalled};
 }
 
 // the offsets of one parsed position over the source (the rewrite cuts all
@@ -207,7 +456,12 @@ const applyStubs = (source, stubs) => {
   for (const stub of [...stubs].sort((a, b) => offsetAt(source, b.headerEnd) - offsetAt(source, a.headerEnd))) {
     const indent = (/^[ \t]*/.exec(lines[stub.endStart.row - 1] ?? "") ?? [""])[0];
     const text = stub.missing.length > 0 ? stubNamesText(stub.missing) : stub.reason;
-    const body = `\n${indent}  RAISE EXCEPTION TYPE zcx_osd_not_activated EXPORTING missing = '${text}'.\n${indent}`;
+    // a class constructor runs when its module loads: its stub signals and
+    // returns, it never raises (constructorPaths below)
+    const statement = stub.method === "CLASS_CONSTRUCTOR"
+      ? `zcx_osd_not_activated=>signal( '${text}' ).`
+      : `RAISE EXCEPTION TYPE zcx_osd_not_activated EXPORTING missing = '${text}'.`;
+    const body = `\n${indent}  ${statement}\n${indent}`;
     const start = offsetAt(source, stub.headerEnd);
     const end = offsetAt(source, stub.endStart);
     out = out.slice(0, start) + body + out.slice(end);
@@ -427,6 +681,8 @@ export function planStubPass({source, findings, basename, refs = [], missingOf =
   // the class)
   const friends = stripFriends(source, basename, goneOf);
   const work = friends.source;
+  // a file-level structure finding, placed in the methods it comes from
+  findings = locateStructureFindings(work, findings, basename);
   let blocks;
   try {
     blocks = methodBlocks(work, basename);
@@ -436,6 +692,12 @@ export function planStubPass({source, findings, basename, refs = [], missingOf =
     // definition-level reference
     return {unparseable: true, source, stubs: [], unmatched: findings, eager: [], deferred: [], nameless: [], friendsStripped: []};
   }
+  // the class-constructor paths (B6): what a class constructor reaches runs
+  // at load, so a name it waits for is eager even when it names code, and
+  // once nothing is pending a raise on the path turns the constructor itself
+  // into the signal stub
+  const paths = constructorPaths(work, basename);
+  const onConstructorPath = (block) => paths.reach.get(block.className)?.has(block.method) === true;
   const presentFile = (name, kind) => objectFilePresent(name, kind, islandFiles) === true;
   const pending = (name, kind) => pendingOf(name, kind, {asked, missingOf, refusedOf, presentFile, excludedObjects});
   const present = (name, kind) => presentFile(name, kind) === true && excludedObjects.has(name) === false;
@@ -509,12 +771,25 @@ export function planStubPass({source, findings, basename, refs = [], missingOf =
     const collectNameless = () => {
       for (const f of inside) {
         if (refMatched(methodRefs, f) === true || fallbackNames.some((n) => n.finding === f.raw) === true) continue;
+        // a parse the build cannot structure is not a member the
+        // framework lacks: it is stubbed, never a framework gap
+        if (f.structure === true) continue;
         const member = memberOf(f.message);
         nameless.push({finding: f.message, ...(member !== undefined ? {member} : {}), line: f.line, method: stub.method});
       }
     };
     const code = missingKinds.filter((nk) => isCodeKind(nk.kind) === true);
     const ddic = missingKinds.filter((nk) => isCodeKind(nk.kind) === false);
+    if (onConstructorPath(block) === true && missingKinds.some((nk) => pending(nk.name, nk.kind) === true)) {
+      // on a class constructor's path every pending name is asked now, code
+      // kinds included, and the body stays one more round: the dumper may
+      // still bring what the constructor needs at load
+      for (const nk of missingKinds) {
+        if (pending(nk.name, nk.kind) === true) eager.push(forName(nk));
+      }
+      dropped += 1;
+      continue;
+    }
     if (deferDdic === true) {
       // --defer-ddic: round 3's behaviour -- every name of a stubbed
       // method is lazy, even the dictionary's
@@ -560,6 +835,26 @@ export function planStubPass({source, findings, basename, refs = [], missingOf =
   // (reading 'length')`, first iteration, right after the first build; a
   // single signature stub never even reaches applyStubs' sort comparator,
   // which is why the signature-cut scenario stayed green while the bed died).
+  // a class constructor whose path holds a stub raise -- one applied now or
+  // one already in the source -- becomes the signal stub itself, carrying
+  // the names the path waits for: the miss is recorded, the load goes on
+  for (const [cls, reach] of paths.reach) {
+    if (paths.signalled.has(cls) === true) continue;
+    const ctor = blocks.find((b) => b.className === cls && b.method === "CLASS_CONSTRUCTOR");
+    if (ctor === undefined) continue;
+    const now = [...stubs, ...sigStubs].filter((st) => st.className === cls && reach.has(st.method) === true);
+    if (now.some((st) => st.method === "CLASS_CONSTRUCTOR") === true) continue;
+    const before = [...reach].filter((m) => paths.raised.has(`${cls}|${m}`) === true && now.some((st) => st.method === m) === false);
+    if (now.length === 0 && before.length === 0) continue;
+    const missing = [...new Set(now.flatMap((st) => st.missing))];
+    const texts = [...now.filter((st) => st.missing.length === 0).map((st) => st.reason),
+      ...before.map((m) => paths.raised.get(`${cls}|${m}`))].filter((t) => t !== "");
+    const methods = [...now.map((st) => st.method), ...before].join(", ");
+    stubs.push({...ctor, missing, missingKinds: [], finding: `class constructor reaches stubbed ${methods}`,
+      // the texts are ABAP literal contents already (a stub's reason, a raise
+      // read off the source), quotes doubled: used as they are
+      reason: texts[0] ?? stubReasonText(`class constructor reaches stubbed ${methods}`), constructorPath: true});
+  }
   const allStubs = [...stubs, ...sigStubs];
   let outSource = work;
   if (allStubs.length > 0) outSource = applyStubs(outSource, allStubs);
