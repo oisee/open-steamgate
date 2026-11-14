@@ -6,7 +6,7 @@ import {existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {fileURLToPath} from "node:url";
-import {checkTrace, countWrites, isShadowDdl, refusal, rfcRefusal, TRACE_PROBE_SQL} from "../tools/hana-serve.mjs";
+import {batchParts, batchRefusal, checkTrace, clientRefusal, countWrites, isShadowDdl, parseApps, parseRegistrations, refusal, rfcRefusal, TRACE_PROBE_SQL} from "../tools/hana-serve.mjs";
 import {installBindStructureLog} from "../tools/osd-bind-structure-log.mjs";
 import {installSqlTrace, readTrace} from "../tools/osd-sql-trace.mjs";
 
@@ -21,12 +21,19 @@ import {installSqlTrace, readTrace} from "../tools/osd-sql-trace.mjs";
 //   - $metadata and a GET under /sap/opu/odata/sap/ AND under a namespace
 //     prefix, answered by the ABAP request path, the entries naming the
 //     prefix they were read under;
-//   - 405 for anything but GET;
+//   - 405 for anything but GET, HEAD and a $batch of GETs; a $batch with
+//     any other part refused whole, before the ABAP;
+//   - HEAD answered like the GET (a CSRF fetch gets its token), no body;
+//   - another sap-client than OSD_CLIENT refused with 400;
+//   - the static files of webapp/ under /app/;
 //   - a boot that writes nothing (the fake would throw; the host counts);
 //   - OSD_SQL_TRACE=1 writes a trace that carries its positive control,
 //     and --check-trace fails one that does not.
 // Mutation, measured when this was written: one write added to the boot
 // (a db.insert after the registry) and this suite goes red at "boots".
+// Mutation (milestone 3), measured: the batchRefusal check in serve()
+// removed -> "refuses a $batch with a POST part ... before the ABAP" goes
+// red (the batch is answered and its GET part reached the database).
 const root = fileURLToPath(new URL("..", import.meta.url));
 const output = join(root, "output");
 const tool = join(root, "tools", "hana-serve.mjs");
@@ -278,6 +285,52 @@ describe("bind_structure made loud (tools/osd-bind-structure-log.mjs)", () => {
   });
 });
 
+describe("hana-serve: one client, GET-only $batch (the pure parts)", () => {
+  const batch = (parts, boundary = "batch_1") => `${parts.map((p) => `--${boundary}\r\n${p}`).join("")}--${boundary}--\r\n`;
+  const get = (url) => `Content-Type: application/http\r\nContent-Transfer-Encoding: binary\r\n\r\nGET ${url} HTTP/1.1\r\nAccept: application/json\r\n\r\n\r\n`;
+  const post = (url) => `Content-Type: application/http\r\nContent-Transfer-Encoding: binary\r\n\r\nPOST ${url} HTTP/1.1\r\nContent-Type: application/json\r\n\r\n{}\r\n`;
+  const changeset = (inner) => `Content-Type: multipart/mixed; boundary=changeset_1\r\n\r\n${batch([inner], "changeset_1")}\r\n`;
+  const type = "multipart/mixed; boundary=batch_1";
+
+  it("refuses another client, by URL option or header, and lets this one and none through", () => {
+    expect(clientRefusal({query: {}}, "100")).to.equal(undefined);
+    expect(clientRefusal({query: {"sap-client": "100"}}, "100")).to.equal(undefined);
+    expect(clientRefusal({query: {"sap-client": ""}}, "100")).to.equal(undefined);
+    expect(clientRefusal({query: {"sap-client": "200"}}, "100")).to.match(/serves client 100 only .* sap-client=200/);
+    expect(clientRefusal({query: {"sap-client": ["100", "200"]}}, "100")).to.match(/sap-client=200/);
+    expect(clientRefusal({headers: {"sap-client": "999"}}, "100")).to.match(/sap-client=999/);
+  });
+
+  it("reads the parts of a batch, a changeset as one part", () => {
+    expect(batchParts(type, batch([get("PartnerSet?$top=2"), get("PartnerSet/$count")]))).to.deep.equal([
+      {changeset: false, type: "application/http", method: "GET", url: "PartnerSet?$top=2"},
+      {changeset: false, type: "application/http", method: "GET", url: "PartnerSet/$count"},
+    ]);
+    expect(batchParts(type, batch([changeset(post("PartnerSet"))])).map((p) => p.changeset)).to.deep.equal([true]);
+    expect(batchParts("multipart/mixed", "")).to.equal(undefined);
+    // a quoted boundary, LF line ends
+    expect(batchParts("multipart/mixed; boundary=\"b q\"", "--b q\nContent-Type: application/http\n\nGET A HTTP/1.1\n\n--b q--\n")).to.deep.equal([
+      {changeset: false, type: "application/http", method: "GET", url: "A"},
+    ]);
+  });
+
+  it("admits a batch of GETs only: a POST part, a changeset, no part or no boundary refuse the whole", () => {
+    expect(batchRefusal(type, batch([get("PartnerSet?$top=2"), get("PartnerSet/$count")]), "100")).to.equal(undefined);
+    expect(batchRefusal(type, batch([get("PartnerSet"), post("PartnerSet")]), "100")).to.deep.equal({status: 405, message: "hana-serve is read-only: part 2 of this $batch is POST, not GET; the whole batch is refused"});
+    expect(batchRefusal(type, batch([changeset(get("PartnerSet"))]), "100").message).to.match(/part 1 of this \$batch is a changeset/);
+    expect(batchRefusal(type, "--batch_1--\r\n", "100")).to.deep.equal({status: 400, message: "hana-serve: a $batch without a part"});
+    expect(batchRefusal("application/json", "{}", "100").status).to.equal(400);
+    expect(batchRefusal(type, batch([get("PartnerSet?sap-client=200")]), "100")).to.deep.include({status: 400});
+  });
+
+  it("parses --register and --app", () => {
+    expect(parseRegistrations(["zosd_x_srv=ZCL_X_MPC,zcl_x_dpc"])).to.deep.equal([{service: "ZOSD_X_SRV", mpc: "ZCL_X_MPC", dpc: "ZCL_X_DPC"}]);
+    expect(() => parseRegistrations(["ZOSD_X_SRV=ZCL_X_MPC"])).to.throw(/--register takes/);
+    expect(parseApps(["bed=../private/app"])).to.deep.equal([{name: "bed", dir: "../private/app"}]);
+    expect(() => parseApps(["../x"])).to.throw(/--app takes/);
+  });
+});
+
 describe("hana-serve over a fake DatabaseClient", function () {
   this.timeout(180000);
   let child;
@@ -285,16 +338,18 @@ describe("hana-serve over a fake DatabaseClient", function () {
   let lines = [];
   let dir;
   let traceFile;
+  let fakeLog;
 
   before(async function () {
     if (!existsSync(join(output, "init.mjs"))) this.skip();
     dir = mkdtempSync(join(tmpdir(), "hana-serve-"));
     traceFile = join(dir, "trace.ndjson");
+    fakeLog = join(dir, "fake.log");
     const env = {...process.env};
     for (const name of ["STG_DB", "STG_SQL_TRACE", "STG_DB_TRACE", "OSD_HANA_WRITE", "STG_DB_FRESH", "OSD_BIND", "STG_TABLE_PROXY", "STG_RFC_PROXY"]) delete env[name];
     Object.assign(env, {
       HANA_EXISTING_SCHEMA: "1", OSD_CLIENT: "100", HANA_SCHEMA: "OSDB3TENANT", HANA_OWN_SCHEMA: "OSDB3OWN",
-      OSD_SQL_TRACE: "1", OSD_SQL_TRACE_FILE: traceFile, OSD_OUTPUT: output,
+      OSD_SQL_TRACE: "1", OSD_SQL_TRACE_FILE: traceFile, OSD_OUTPUT: output, FAKE_CLIENT_LOG: fakeLog,
     });
     child = spawn(process.execPath, [tool, "--port", "0", "--client-module", "test/fixtures/hana-serve/fake-client.mjs"],
       {cwd: root, env, stdio: ["ignore", "pipe", "pipe"]});
@@ -365,8 +420,63 @@ describe("hana-serve over a fake DatabaseClient", function () {
     expect(answer.err).to.match(/refuses outbound RFC destinations: ZOSD_B3_OUT \(live\)/);
   });
 
+  const demoReads = () => (existsSync(fakeLog) ? readFileSync(fakeLog, "utf8").split("\n").filter((l) => l === "select zstg_demo").length : 0);
+  const boundary = "batch_b6";
+  const batchOf = (parts) => `${parts.map((p) => `--${boundary}\r\n${p}`).join("")}--${boundary}--\r\n`;
+  const getPart = (url) => `Content-Type: application/http\r\nContent-Transfer-Encoding: binary\r\n\r\nGET ${url} HTTP/1.1\r\nAccept: application/json\r\n\r\n\r\n`;
+  const postBatch = (body) => fetch(`${base}/sap/opu/odata/sap/ZSTG_DEMO_SRV/$batch`, {method: "POST", headers: {"content-type": `multipart/mixed; boundary=${boundary}`, "x-csrf-token": "open-steamgate"}, body});
+
+  it("answers HEAD with a CSRF fetch like the ordinary server: the token, no body", async () => {
+    const answer = await fetch(`${base}/sap/opu/odata/sap/ZSTG_DEMO_SRV/`, {method: "HEAD", headers: {"x-csrf-token": "Fetch"}});
+    expect(answer.status).to.equal(200);
+    expect(answer.headers.get("x-csrf-token")).to.equal("open-steamgate");
+    expect(await answer.text()).to.equal("");
+    const set = await fetch(`${base}/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet`, {method: "HEAD"});
+    expect(set.status).to.equal(200);
+  });
+
+  it("answers a $batch whose parts are all GETs, through the ABAP", async () => {
+    const before = demoReads();
+    const answer = await postBatch(batchOf([getPart("TravelSet?$top=1&$format=json"), getPart("TravelSet/$count")]));
+    expect(answer.status).to.equal(202);
+    const text = await answer.text();
+    expect(text.match(/HTTP\/1\.1 200/g)?.length).to.equal(2);
+    expect(text).to.contain("T0101");
+    expect(demoReads()).to.be.greaterThan(before);
+  });
+
+  it("refuses a $batch with a POST part or a changeset whole, before the ABAP", async () => {
+    const before = demoReads();
+    const post = `Content-Type: application/http\r\nContent-Transfer-Encoding: binary\r\n\r\nPOST TravelSet HTTP/1.1\r\nContent-Type: application/json\r\n\r\n{"TravelId":"T0999"}\r\n`;
+    const mixed = await postBatch(batchOf([getPart("TravelSet?$top=1"), post]));
+    expect(mixed.status).to.equal(405);
+    expect((await mixed.json()).error).to.deep.include({code: "OSD/READ_ONLY"});
+    const changeset = `Content-Type: multipart/mixed; boundary=cs_b6\r\n\r\n--cs_b6\r\n${post}--cs_b6--\r\n\r\n`;
+    const cs = await postBatch(batchOf([getPart("TravelSet?$top=1"), changeset]));
+    expect(cs.status).to.equal(405);
+    // the GET part beside it never ran: the database saw no read of it
+    expect(demoReads()).to.equal(before);
+  });
+
+  it("refuses another sap-client with 400 and answers its own", async () => {
+    const other = await fetch(`${base}/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet?$format=json&sap-client=200`);
+    expect(other.status).to.equal(400);
+    expect((await other.json()).error).to.deep.include({code: "OSD/CLIENT"});
+    const header = await fetch(`${base}/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet?$format=json`, {headers: {"sap-client": "999"}});
+    expect(header.status).to.equal(400);
+    const own = await fetch(`${base}/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet?$format=json&sap-client=100`);
+    expect(own.status).to.equal(200);
+  });
+
+  it("serves the static files of webapp/ under /app/", async () => {
+    const manifest = await fetch(`${base}/app/h5x/manifest.json`);
+    expect(manifest.status).to.equal(200);
+    expect((await manifest.json())["sap.app"].id).to.equal("osd.h5x");
+    expect((await fetch(`${base}/app/h5x/none.json`)).status).to.equal(404);
+  });
+
   it("refuses anything but GET with 405, before the ABAP", async () => {
-    for (const method of ["POST", "PUT", "PATCH", "DELETE", "MERGE"]) {
+    for (const method of ["POST", "PUT", "PATCH", "DELETE", "MERGE", "OPTIONS"]) {
       const answer = await fetch(`${base}/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet`, {method, body: method === "DELETE" ? undefined : "{}"});
       expect(answer.status, method).to.equal(405);
     }

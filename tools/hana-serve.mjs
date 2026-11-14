@@ -28,11 +28,30 @@
 //      request (tools/osd-dialog-step.mjs), under /sap/opu/odata/sap/<SRV>
 //      and /sap/opu/odata/<namespace>/<SRV> (ZCL_STG_URL reads both).
 //
+// What else it serves (milestone 3, so a Fiori Elements app runs on it):
+//   - the static files of webapp/ under /app/ (the SAPUI5 resources come
+//     from the CDN, as for every app of the tree), and `--app <name>=<dir>`
+//     mounts a folder that is not in the tree at /app/<name>/ -- the way a
+//     private app configuration for a real service is served on a bed;
+//   - HEAD, answered as the GET it stands for without a body, so a CSRF
+//     token fetch (`x-csrf-token: Fetch`) is answered the way the ordinary
+//     server answers it;
+//   - `POST .../$batch` when EVERY part is a GET: the body is read before a
+//     line of ABAP runs, and a changeset or any other method in it refuses
+//     the whole batch with 405 (batchRefusal);
+//   - one client: a request naming another `sap-client` (URL option or
+//     header) than OSD_CLIENT is refused with 400 instead of being answered
+//     out of this client's rows (clientRefusal);
+//   - `--register <SERVICE>=<MPC>,<DPC>` registers a service the SEGW
+//     registry does not hold (the test's twin under test/hana-m2), said on
+//     startup.
+//
 // What it refuses: to start outside existing-schema mode (and with the
 // write guard lifted, OSD_HANA_WRITE=1), with an outbound RFC destination
 // (live, record or fallback in the destinations file) or an RFC/table proxy
-// configured -- read-only toward every system, not only the database -- any method but GET (405, before a
-// line of ABAP runs), and a boot that wrote anything. Every statement on
+// configured -- read-only toward every system, not only the database -- any method but GET and HEAD
+// and a GET-only $batch (405, before a line of ABAP runs), another client (400), and a boot that wrote
+// anything. Every statement on
 // the DatabaseClient interface is counted; a write during the boot -- which
 // would have been refused by the guard, or swallowed somewhere as subrc 4 --
 // stops the host before it listens. It binds to loopback unless OSD_BIND
@@ -205,8 +224,89 @@ export function checkTrace(entries, {ownSchema} = {}) {
   return {ok: problems.length === 0, problems, channels, writes, refused, shadowDdl};
 }
 
+/** Why a request names a client this host does not serve, or undefined.
+ *  The host serves ONE client (OSD_CLIENT, fixed at boot): a system would
+ *  log the request on to the client it names, this host cannot, and
+ *  answering out of its own client's rows is the silent wrong answer. An
+ *  empty value is no value (the logon default). */
+export function clientRefusal({query = {}, headers = {}} = {}, client) {
+  const asked = [];
+  const fromQuery = query["sap-client"];
+  for (const value of Array.isArray(fromQuery) ? fromQuery : [fromQuery]) if (value !== undefined) asked.push(String(value));
+  if (headers["sap-client"] !== undefined) asked.push(String(headers["sap-client"]));
+  const other = asked.map((v) => v.trim()).filter((v) => v !== "" && v !== String(client));
+  if (other.length === 0) return undefined;
+  return `hana-serve serves client ${client} only and this request names sap-client=${other[0]}: it is not answered out of client ${client}'s rows`;
+}
+
+/** The parts of a multipart/mixed $batch body: each part's own headers,
+ *  and for an application/http part its request line. A changeset is a
+ *  part whose content type is multipart/mixed itself. */
+export function batchParts(contentType, body) {
+  const boundary = /boundary=(?:"([^"]+)"|([^;\s]+))/i.exec(String(contentType ?? ""));
+  if (boundary === null) return undefined;
+  const marker = `--${boundary[1] ?? boundary[2]}`;
+  const text = String(body ?? "");
+  const pieces = text.split(marker).slice(1);
+  const parts = [];
+  for (const piece of pieces) {
+    if (piece.startsWith("--")) break; // the closing delimiter
+    const at = piece.search(/\r?\n\r?\n/);
+    const head = at < 0 ? piece : piece.slice(0, at);
+    const rest = at < 0 ? "" : piece.slice(at).replace(/^\r?\n\r?\n/, "");
+    const type = /^content-type:\s*([^\r\n]*)/im.exec(head)?.[1]?.trim() ?? "";
+    if (/^multipart\/mixed/i.test(type)) {
+      parts.push({changeset: true, type});
+      continue;
+    }
+    const line = rest.split(/\r?\n/).find((l) => l.trim() !== "") ?? "";
+    const [method = "", url = ""] = line.trim().split(/\s+/);
+    parts.push({changeset: false, type, method: method.toUpperCase(), url});
+  }
+  return parts;
+}
+
+/** Why a $batch may not reach the ABAP, or undefined: {status, message}.
+ *  Only a batch of GET parts is a read; one part that is not -- a
+ *  changeset, a POST, anything unreadable -- refuses the whole batch, so
+ *  nothing of it runs. `client` also checks each part's own sap-client. */
+export function batchRefusal(contentType, body, client) {
+  const parts = batchParts(contentType, body);
+  if (parts === undefined) return {status: 400, message: "hana-serve: a $batch needs a multipart/mixed content type with a boundary"};
+  if (parts.length === 0) return {status: 400, message: "hana-serve: a $batch without a part"};
+  for (const [i, part] of parts.entries()) {
+    if (part.changeset) return {status: 405, message: `hana-serve is read-only: part ${i + 1} of this $batch is a changeset, and a changeset writes; the whole batch is refused`};
+    if (part.method !== "GET") return {status: 405, message: `hana-serve is read-only: part ${i + 1} of this $batch is ${part.method || "not a request"}, not GET; the whole batch is refused`};
+    if (client !== undefined) {
+      const query = Object.fromEntries(new URLSearchParams(part.url.split("?")[1] ?? ""));
+      const other = clientRefusal({query}, client);
+      if (other !== undefined) return {status: 400, message: `${other} (part ${i + 1} of the $batch)`};
+    }
+  }
+  return undefined;
+}
+
+/** Register services the SEGW registry does not hold: "SRV=MPC,DPC". */
+export function parseRegistrations(values = []) {
+  return values.map((value) => {
+    const m = /^([^=\s]+)=([^,\s]+),([^,\s]+)$/.exec(String(value));
+    if (m === null) throw new Error(`--register takes <SERVICE>=<MPC>,<DPC>, not ${value}`);
+    return {service: m[1].toUpperCase(), mpc: m[2].toUpperCase(), dpc: m[3].toUpperCase()};
+  });
+}
+
+/** Extra app folders: "name=dir", served at /app/<name>/. */
+export function parseApps(values = []) {
+  return values.map((value) => {
+    const m = /^([A-Za-z0-9_-]+)=(.+)$/.exec(String(value));
+    if (m === null) throw new Error(`--app takes <name>=<dir>, not ${value}`);
+    return {name: m[1], dir: m[2]};
+  });
+}
+
 /** Boot the generation and listen. Returns {server, url, close, stats, bindLog}. */
-export async function serve({root = process.cwd(), port = 3040, clientModule, env = process.env, log = console.log} = {}) {
+export async function serve({root = process.cwd(), port = 3040, clientModule, env = process.env, log = console.log,
+  register = [], apps = []} = {}) {
   const refused = refusal(env);
   if (refused !== undefined) throw new Error(refused);
   const {loadDestinations} = await import("./rfc-replay.mjs");
@@ -269,6 +369,12 @@ export async function serve({root = process.cwd(), port = 3040, clientModule, en
   await initializeABAP();
   if (built === 0) throw new Error("hana-serve: test/setup.mjs did not build the client through the factory seam -- is STG_DB=hana reaching it?");
   await dialogStep(() => zcl_stg_segw_registry.register(), "hana-serve: the SEGW registry");
+  for (const one of register) {
+    const string = (v) => new abap.types.String().set(v);
+    await dialogStep(() => abap.Classes.ZCL_OAO_REGISTRY.register({iv_service: string(one.service), iv_mpc: string(one.mpc), iv_dpc: string(one.dpc)}),
+      `hana-serve: register ${one.service}`);
+    log(`hana-serve: registered ${one.service} -> MPC ${one.mpc}, DPC ${one.dpc} (--register, not from the SEGW registry)`);
+  }
 
   // the positive control, through the ABAP's own connection
   const db = abap.context.databaseConnections.DEFAULT;
@@ -287,20 +393,47 @@ export async function serve({root = process.cwd(), port = 3040, clientModule, en
   const app = express();
   app.disable("x-powered-by");
   app.use(express.raw({type: "*/*", limit: "1mb"}));
+  const refuse = (res, status, code, message, headers = {}) => {
+    res.status(status).set(headers).type("application/json")
+      .send(JSON.stringify({error: {code, message: {lang: "en", value: message}}}));
+  };
+  // the static files: an app folder named by --app first, then webapp/
+  const {rootWebappOf} = await import("./osd-system.mjs");
+  for (const one of apps) {
+    app.use(`/app/${one.name}`, express.static(resolve(root, one.dir)));
+    log(`hana-serve: /app/${one.name}/ is ${resolve(root, one.dir)} (--app)`);
+  }
+  app.use("/app", express.static(rootWebappOf(root, env)));
   app.all(/^\/sap\/opu\/odata\/[^/]+\/[^/]+/, async (req, res) => {
-    if (req.method !== "GET") {
-      res.status(405).set("allow", "GET").type("application/json")
-        .send(JSON.stringify({error: {code: "OSD/READ_ONLY", message: {lang: "en", value: `hana-serve is read-only and answers GET only, not ${req.method}`}}}));
+    const client = String(env.OSD_CLIENT);
+    const otherClient = clientRefusal({query: req.query, headers: req.headers}, client);
+    if (otherClient !== undefined) {
+      refuse(res, 400, "OSD/CLIENT", otherClient);
       return;
     }
+    const isBatch = /\/\$batch\/?$/.test(req.path);
+    if (req.method === "POST" && isBatch) {
+      const body = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : "";
+      const batch = batchRefusal(req.headers["content-type"], body, client);
+      if (batch !== undefined) {
+        refuse(res, batch.status, batch.status === 405 ? "OSD/READ_ONLY" : (batch.status === 400 && /client/.test(batch.message) ? "OSD/CLIENT" : "OSD/BAD_BATCH"), batch.message, {allow: "GET, HEAD, POST"});
+        return;
+      }
+    } else if (req.method !== "GET" && req.method !== "HEAD") {
+      refuse(res, 405, "OSD/READ_ONLY", `hana-serve is read-only and answers GET, HEAD and a $batch of GETs only, not ${req.method}`, {allow: "GET, HEAD"});
+      return;
+    }
+    // HEAD is the GET without its body: the ABAP sees a GET (the dispatcher
+    // knows no HEAD), node's response to a HEAD drops the body
+    const asked = req.method === "HEAD" ? Object.create(req, {method: {value: "GET"}}) : req;
     const before = stats.writes.length;
     try {
       await dialogStep(() => cl_express_icf_shim.run({
-        req,
+        req: asked,
         res,
         class: "ZCL_STG_HTTP_HANDLER",
         base: new abap.types.String().set("/sap/opu/odata"),
-      }), "hana-serve: a GET");
+      }), `hana-serve: a ${isBatch ? "$batch of GETs" : req.method}`);
     } catch (e) {
       if (!res.headersSent) {
         res.status(500).type("application/json").send(JSON.stringify({error: {code: "OSD/RUNTIME", message: {lang: "en", value: String(e?.message?.get?.() ?? e?.message ?? e)}}}));
@@ -308,12 +441,12 @@ export async function serve({root = process.cwd(), port = 3040, clientModule, en
       console.error("hana-serve: runtime error:", e);
     }
     if (stats.writes.length > before) {
-      console.error(`hana-serve: a GET of ${req.path} asked for ${stats.writes.length - before} write(s): ${stats.writes.slice(before).map((w) => `${w.method} ${w.kind}${w.refused ? ` [refused: ${w.refused}]` : ""}`).join(", ")}`);
+      console.error(`hana-serve: a ${req.method} of ${req.path} asked for ${stats.writes.length - before} write(s): ${stats.writes.slice(before).map((w) => `${w.method} ${w.kind}${w.refused ? ` [refused: ${w.refused}]` : ""}`).join(", ")}`);
     }
     if (/\/\$metadata\/?$/.test(req.path)) log(bindLog.line());
   });
   app.all("*", (req, res) => {
-    res.status(404).type("text/plain").send("hana-serve answers /sap/opu/odata/<namespace or sap>/<SERVICE>/... only\n");
+    res.status(404).type("text/plain").send("hana-serve answers /sap/opu/odata/<namespace or sap>/<SERVICE>/... and the static files under /app/ only\n");
   });
 
   const server = createServer(app);
@@ -350,7 +483,9 @@ if (runsAs("hana-serve.mjs")) {
   }
   const portFlag = flag("port");
   try {
-    await serve({port: Number(portFlag ?? process.env.STG_PORT ?? 3040), clientModule: flag("client-module")});
+    const all = (name) => argv.flatMap((a, i) => (a === `--${name}` ? [argv[i + 1]] : []));
+    await serve({port: Number(portFlag ?? process.env.STG_PORT ?? 3040), clientModule: flag("client-module"),
+      register: parseRegistrations(all("register")), apps: parseApps(all("app"))});
   } catch (e) {
     console.error(e?.message ?? e);
     process.exit(1);
