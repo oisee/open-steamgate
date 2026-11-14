@@ -253,6 +253,10 @@ export async function serve({root = process.cwd(), port = 3040, clientModule, en
     await ensureSourceBuild(root, env);
   }
   if (!existsSync(join(output, "init.mjs"))) throw new Error(`hana-serve: no generation at ${output} (npm run transpile first)`);
+  // an import cycle hangs this boot rather than failing it: the open
+  // connection keeps the event loop alive. Refuse first, naming the cycle.
+  const {assertLoadable} = await import("./osd-generation-check.mjs");
+  assertLoadable(output, {log: (m) => console.error(`hana-serve: ${m}`)});
   const from = (file) => import(pathToFileURL(join(output, file)).href);
   const {initializeABAP} = await from("init.mjs");
   const {cl_express_icf_shim} = await from("cl_express_icf_shim.clas.mjs");
