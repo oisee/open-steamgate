@@ -13,6 +13,8 @@ CLASS ltcl_read DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
     METHODS order_is_in_abap_names FOR TESTING RAISING cx_static_check.
     METHODS encoded_option_names FOR TESTING RAISING cx_static_check.
     METHODS default_sets_in_metadata FOR TESTING RAISING cx_static_check.
+    METHODS malformed_option_name FOR TESTING RAISING cx_static_check.
+    METHODS client_order_maps_back FOR TESTING RAISING cx_static_check.
 
     METHODS get
       IMPORTING
@@ -242,6 +244,54 @@ CLASS ltcl_read IMPLEMENTATION.
          iv_text = `<End EntitySet="OrderSet" Role="ToRole_Assoc_Partner_Orders_With_A_Long_Name"/>` ).
     has( iv_body = ls_response-body
          iv_text = `<FunctionImport Name="Partner_Touch" ReturnType="ZOSD_H5X.Partner" EntitySet="PartnerSet"` ).
+  ENDMETHOD.
+
+  METHOD malformed_option_name.
+* %zz is no escape: the option is ignored, as a system ignores it -- the
+* decoder would throw on it (500)
+    DATA lt_options  TYPE tihttpnvp.
+    DATA ls_option   TYPE ihttpnvp.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+
+    ls_option-name  = '%zztop'.
+    ls_option-value = '1'.
+    APPEND ls_option TO lt_options.
+    ls_option-name  = '%'.
+    ls_option-value = '1'.
+    APPEND ls_option TO lt_options.
+    ls_response = zcl_stg_dispatcher=>dispatch( iv_method  = 'GET'
+                                                iv_path    = c_base
+                                                it_options = lt_options ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 200
+                                        msg = ls_response-body ).
+    has( iv_body = ls_response-body
+         iv_text = `"PartnerID":"0000000004"` ).
+  ENDMETHOD.
+
+  METHOD client_order_maps_back.
+* the in-process OData client asks the other service by OData names: a
+* field by its property, a complex path by its OData path
+    DATA ls_service TYPE zcl_stg_model_info=>ty_service.
+    DATA ls_set     TYPE zcl_stg_model_info=>ty_entity_set.
+    DATA lt_orderby TYPE /iwbep/t_mgw_tech_order.
+    DATA ls_orderby LIKE LINE OF lt_orderby.
+
+    ls_service = zcl_stg_model_info=>get( 'ZOSD_H5X_SRV' ).
+    ls_set = zcl_stg_model_info=>find_set( is_service    = ls_service
+                                           iv_entity_set = 'PartnerSet' ).
+    ls_orderby-property      = 'PARTNER_ID'.
+    ls_orderby-property_path = 'PARTNER_ID'.
+    ls_orderby-order         = 'desc'.
+    APPEND ls_orderby TO lt_orderby.
+    CLEAR ls_orderby.
+    ls_orderby-property_path = 'ADDRESS-CITY'.
+    ls_orderby-order         = 'asc'.
+    APPEND ls_orderby TO lt_orderby.
+    cl_abap_unit_assert=>assert_equals(
+      act = zcl_stg_odata_client=>orderby_option( it_orderby = lt_orderby
+                                                  is_set     = ls_set )
+      exp = `PartnerID desc,Address/City asc` ).
   ENDMETHOD.
 
 ENDCLASS.

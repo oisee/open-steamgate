@@ -4713,7 +4713,7 @@ Not an anomaly, recorded for porting: on 7.58, `FIND ... REGEX` (POSIX) raises a
 
 ### ANOMALY-2026-11-14-class-constructor-targets -- a class constructor runs at load before the class it creates
 
-- Status: `local fix, not pushed` (oisee/transpiler, branch fix/class-constructor-requires, 3cdb24b7 on top of pin 4g)
+- Status: `fixed in a pin` (oisee/transpiler `local/osd-build-4h`, #941's head 7c59f51f; first written as the local commit 3cdb24b7 on top of pin 4g)
 - Discovery date: `2026-11-14`
 - Affected versions: the pinned transpiler (oisee/transpiler 9437debe, local/osd-build-4g)
 - Affected ABAP statement, runtime API or adapter: `CREATE OBJECT go TYPE zcl_later` (or `NEW`, `zcl_later=>m( )`) inside a CLASS_CONSTRUCTOR
@@ -4722,7 +4722,7 @@ Not an anomaly, recorded for porting: on 7.58, `FIND ... REGEX` (POSIX) raises a
 - Expected SAP behaviour: a class constructor runs at the class's first use, after every class it names is there
 - Actual open-abap behaviour: it runs when its module loads; a named class is not among the module's requires, so a build that loads modules by name ran it before the class existed
 - Impact on open-steamgate: the SEGW sample's island did not load
-- Smallest safe workaround: none in this tree; the transpiler commit above adds the classes a class constructor names to its module's requires
+- Smallest safe workaround: none needed with pin 4h; the pinned commit adds the classes a class constructor names to its module's requires
 - Upstream issue: branch inside abaplint/transpiler after a critic pass
 - Regression-test location: the transpiler test above
 - Upstream version containing a fix: unknown
