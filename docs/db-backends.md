@@ -981,6 +981,19 @@ pinned core, the carriers are:
 | the same for a qualified type (`TYPE zif=>field`: `Could not resolve top X, resolveTypeChain`, `REF, unable to resolve x`) | `could not resolve top X`, `unable to resolve x` |
 | the parsed CLASS DEFINITION statement's `INHERITING FROM` — the scope records nothing here | `Super class "X" not found or contains errors` |
 | the same statement's `GLOBAL FRIENDS` names — collected as soft names (below) | `Friend class X does not exist` |
+| every `INTERFACES x.` statement, in a class **and inside an INTERFACE definition** — an absent `x` is a definition-level INTF ask, a present one a definition edge (H5x-4 B1) | `Interface X unknown` |
+| a global interface's METHODS parameters, read off the interface's definition (signature level, with the method) | `Contains unknown, Could not resolve top X` (unknown_types) |
+
+The last two rows are bed run 21's: the walk reached a fixed point at
+iteration 10 while the control build stayed rc=1 on three findings naming
+two interfaces nobody had asked for. Inside an interface the checker stops
+at the first unknown include and records nothing at all, and an
+interface's parameters are no scope var (a class's are vars of the METHOD
+scope; an interface has no method scope), so neither reached the request.
+The include's finding sits on the INTERFACE statement's line, not the
+include's, so it is structural-matched by the name alone; `Interface X
+unknown` also has a text branch now (INTF), the fallback for a finding no
+reference carried.
 
 And what NO scope records, measured: a SELECT's table (the INTO variable's
 error names none), `STANDARD TABLE OF` a missing name, and the
@@ -1149,7 +1162,12 @@ them), and a raise that is immediately `CATCH`ed (the signal already
 left — the property `$batch` cannot defeat). The stubbed source is written back into the island
 file — generated content, so rewriting in place is what the merge does
 anyway — and recorded in `gen/hana-closure/closure-stubs.json`'s `stubs`
-section, `{object, file, class, method, missing, finding, signature?}` —
+section, `{object, file, class, method, missing, finding, signature?,
+rounds}` — ONCE per (class, method): a dumper round re-lays the island, so
+the same method is stubbed again every iteration, and bed run 21 recorded
+298 entries for 101 unique pairs; the latest round's finding wins and
+`rounds` counts the re-stubs, and the iteration line's "stubbed method(s)"
+and `framework-gaps.json`'s `used_by` count unique pairs (H5x-4 B1) —
 H5x-2's record plus FIX-1's `errors` (`{roots, cascades, cycles, stubs,
 waits, errors, excluded}`), the WALK's: stubs from every iteration stay in
 it while each iteration writes its own decision beside them. The body
@@ -1266,6 +1284,19 @@ the round the decision actually runs — at a blocked decision the stubs
 apply after all, so a capped run leaves its stubbable files green instead
 of red forever (the bed's cl_epm_bo, run 16's 31 findings). One kind of
 object is never excluded: the walk's own seed classes, above.
+
+Every fixed point writes `closure-summary.json` beside the record
+(`tools/hana-closure-report.mjs`, H5x-4 B1): `{fixed_point, iterations,
+island_objects, stubs_unique, excluded, gaps, seed: {classes,
+stubbed_methods}, failures}` — the machine-readable answer to "does the
+island carry the service". It is the false-green guard: a green control
+build proves nothing when the service's own classes were excluded or their
+reads stubbed away, so the run exits non-zero, the summary on disk, when a
+seed class (the guard's set above) is excluded, when one a registration or
+an island file names is not an island object (a base derived off an _EXT
+name only when present), or when a seed method matching a
+`--require-unstubbed <glob>` (repeatable; `*_GET_ENTITYSET`, or
+`CLASS=>METHOD`) is stubbed.
 
 The names a stub waits for are not gaps: the service ACTIVATES without
 them, so they leave `requested` and the gaps file and travel in a new
