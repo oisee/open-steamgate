@@ -355,11 +355,22 @@ describe("DDLS call timeout margin",()=>{
   expect(ddlsCallTimeoutS({OSD_WARM_SPEED_FACTOR:"0.5"})).to.equal(240);
  });
  it("gives every VSP call of the DDLS family the measured budget and keeps the others at 90 s",()=>{
-  const budget = String.raw`timeout:vspTimeout\(f\)`;
+  const budget = String.raw`timeout:vspTimeout\(f(,'create')?\)`;
   expect(lifecycle.match(new RegExp(budget,"g"))).to.have.length(3);
-  expect(lifecycle).to.contain("const vspTimeout = f => f.type === 'DDLS' ? ddlsCallTimeoutS() : CALL_TIMEOUT_S");
+  // the create call names itself, so the interface's create gets the budget
+  // and its edits do not
+  expect(lifecycle.match(/timeout:vspTimeout\(f,'create'\)/g)).to.have.length(1);
+  expect(lifecycle).to.contain("const vspTimeout = (f, op) => f.type === 'DDLS' || (f.type === 'INTF' && op === 'create') ? ddlsCallTimeoutS() : CALL_TIMEOUT_S");
   expect(lifecycle).not.to.match(/timeout:\s*90\b/);
   expect(lifecycle).to.contain("import {vspClient, CALL_TIMEOUT_S, ddlsCallTimeoutS}");
+ });
+ it("gives the interface's create+write+activate the same budget (slow runners cut it at 90.0 s)",()=>{
+  const vspTimeout = new Function("ddlsCallTimeoutS","CALL_TIMEOUT_S",
+   "return " + /const vspTimeout = (\(f, op\) => [^;]+);/.exec(lifecycle)[1])(() => 240, 90);
+  expect(vspTimeout({type:"INTF"},"create")).to.equal(240);
+  expect(vspTimeout({type:"INTF"})).to.equal(90);
+  expect(vspTimeout({type:"CLAS"},"create")).to.equal(90);
+  expect(vspTimeout({type:"DDLS"})).to.equal(240);
  });
  it("never lets the client-side rpc ceiling be the binding budget",()=>{
   expect(vspClient).to.contain("Math.max(120000, (ddlsCallTimeoutS() + 60) * 1000)");
