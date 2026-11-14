@@ -273,8 +273,8 @@ import {copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync
 import {join, resolve} from "node:path";
 import {runsAs} from "./osd-main.mjs";
 import {validationMessage} from "./hana-ddic-gen.mjs";
-import {islandClassPaths, planStubPass, registeredServiceClasses, seedClasses, serviceGuardBySuffixOnly, dropPresentNames, frameworkGapList, objectFilePresent} from "./hana-closure-stubs.mjs";
-import {buildCheck, ddicWritten, ensureLayers, generationOf, islandBasenames, islandObjectCount, islandShrinkCheck, mergeInputs} from "./hana-closure-merge.mjs";
+import {islandClassPaths, planStubPass, registeredServiceClasses, seedClasses, serviceGuardBySuffixOnly, dropPresentNames, frameworkGapList, objectFilePresent, islandPrePass, learnFromFailure} from "./hana-closure-stubs.mjs";
+import {buildCheck, ddicWritten, ensureLayers, generationOf, islandBasenames, islandObjectCount, islandShrinkCheck, loadCheckOf, mergeInputs} from "./hana-closure-merge.mjs";
 import {dumperConfigured, dumpRound, printedCommand, provenanceFor} from "./hana-closure-dumper.mjs";
 import {cascadeOf, classifyFindings, exclusionCandidates, nameFromAbapFile, parseFindings} from "./hana-closure-exclude.mjs";
 import {analyseIsland, graphDecide, mergeNames, requestKindOf, structuralRegistry, testCodeObjects, waitsOf, writeClosureRecord} from "./hana-closure-graph.mjs";
@@ -578,6 +578,7 @@ export async function run(args = process.argv.slice(2), options = {}) {
     const excludedRecords = [];
     const excludedObjects = new Set();
     if (stubUnresolved === true) writeClosureRecord(out, {stubRecords: stubRecords(), excludedRecords, waits: []});
+    if (stubUnresolved === true) islandPrePass({root, unsupported: state.unsupported ?? [], constructors: state.constructors ?? [], stubMap, say}); // H5x-4 B4
     // the structural pass (H5x-2): one SyntaxLogic pass per island object
     // over the build's own file set -- the names' primary source and the
     // graph decision's input, in both modes
@@ -969,12 +970,23 @@ export async function run(args = process.argv.slice(2), options = {}) {
       // the positive control (round 4): a validation with no findings and a
       // broken build was bed run 4's false fixed point -- the build's own
       // exit must agree before the declaration
-      const build = buildCheck({root, env, say});
+      let build;
+      try {
+        build = buildCheck({root, env, say});
+      } catch (error) {
+        // a refused statement (no finding): learned once per kind, the pass repeats (B4)
+        const learned = stubUnresolved === true ? learnFromFailure(state, {buildError: error}) : undefined;
+        if (learned === undefined) throw error;
+        saveState(out, state); say(learned); continue;
+      }
       if (build.findings > 0) say(`build: exited ${build.status} with ${build.findings} finding(s) -- exit 1 with findings only, the fixed point stands`);
       say(`fixed point: every unresolved name has been asked and nothing new is named; ${gaps.length + refusedGaps.length} gap(s) -> ${join(out, "closure-gaps.json")}`);
       const seeds = seedClasses(root);
+      const load = build.status === 0 ? loadCheckOf({root, env, say}) : {loads: false, built: false, error: `not built: osd-build exited ${build.status} with ${build.findings} finding(s)`};
+      const learnedLoad = stubUnresolved === true ? learnFromFailure(state, {load}) : undefined;
+      if (learnedLoad !== undefined) { saveState(out, state); say(learnedLoad); continue; }
       writeClosureSummary(out, closureSummary({iterations: state.iteration, islandObjects: objects.total, seeds: seeds.all, named: seeds.named,
-        present: (name) => objectFilePresent(name, "clas", island), excluded: excludedObjects, stubs: stubRecords(), gaps: [...gaps, ...refusedGaps], requireUnstubbed}));
+        present: (name) => objectFilePresent(name, "clas", island), excluded: excludedObjects, stubs: stubRecords(), gaps: [...gaps, ...refusedGaps], requireUnstubbed, load}));
       return {stopped: "fixed-point", iteration: state.iteration, gaps: [...gaps, ...refusedGaps], cascades, unclassified, unscoped,
         ...(stubUnresolved === true ? {stubs: stubRecords(), stubRounds} : {})};
     }
