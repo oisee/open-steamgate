@@ -61,7 +61,7 @@ describe("generation check: a generation that cannot load is refused", function 
 
   it("names a module that is not JavaScript, unless the allow list names it; a stale entry is said", () => {
     const dir = fixture({
-      "init.mjs": `export const ok = 1;\n`,
+      "init.mjs": `await import("./zcl_s.clas.mjs");\n`,
       "zcl_s.clas.mjs": `class zcl_s {\n  static async m(INPUT) {\n    return INPUT.it_x[];\n  }\n}\n`,
       "zl_p.prog.mjs": `export const fine = 1;\n`,
     });
@@ -73,6 +73,19 @@ describe("generation check: a generation that cannot load is refused", function 
     expect(lenient.ok).to.equal(true);
     expect(lenient.tolerated.map((e) => e.module)).to.deep.equal(["zcl_s.clas.mjs"]);
     expect(lenient.stale).to.deep.equal(["zl_p.prog.mjs"]);
+  });
+
+  it("refuses a module a start loads, and only reports one that a run loads (a program)", () => {
+    const dir = fixture({
+      "init.mjs": `await import("./zcl_ok.clas.mjs");\n`,
+      "zcl_ok.clas.mjs": `export async function run() {\n  await import("./zl_report.prog.mjs");\n}\n`,
+      "zl_report.prog.mjs": `if (true) {\n  return;\n}\n`,
+    });
+    const result = checkGeneration(dir, {load: true, allow: []});
+    expect(result.ok, JSON.stringify(result)).to.equal(true);
+    expect(result.syntax).to.deep.equal([]);
+    expect(result.latent.map((e) => e.module)).to.deep.equal(["zl_report.prog.mjs"]);
+    expect(result.latent[0].message).to.match(/Illegal return/);
   });
 
   it("reports an import that throws as a load failure with its exit code", () => {

@@ -12,7 +12,9 @@
 //
 // Three checks, cheapest first:
 //   syntax  every module parsed as an ES module by V8 (what `node --check`
-//           does, in one child instead of one per file);
+//           does, in one child instead of one per file); a failure refuses
+//           when init.mjs or index.mjs reaches the module at load time, and
+//           is reported as latent when only a run imports it (a program);
 //   cycles  the top-level `await import("./x")` edges between modules: a
 //           cycle among them never settles once it is entered, so any cycle
 //           is a defect, named module by module;
@@ -187,18 +189,40 @@ export function readAllow(file = ALLOW_FILE) {
   return entries;
 }
 
+/** the modules a start loads: the roots and what they await at the top
+ *  level, transitively */
+export function reachable(edges, roots) {
+  const seen = new Set(roots);
+  const queue = [...roots];
+  while (queue.length > 0) {
+    for (const to of edges.get(queue.shift()) ?? []) if (!seen.has(to)) { seen.add(to); queue.push(to); }
+  }
+  return seen;
+}
+
+// What a start imports: the runtime's init and the unit harness. A program
+// is not among them -- it is imported when it is run -- so a program module
+// that does not parse is a latent defect, said but not a refusal (the
+// consumer pack carries three with the top-level RETURN of 2026-11-08). With
+// neither root present every module counts.
+export const ROOTS = ["init.mjs", "index.mjs"];
+
 export function checkGeneration(dir, {load = false, allow = readAllow(), entry = "init.mjs", timeoutMs, env, execPath} = {}) {
   const modules = modulesOf(dir);
   const syntax = syntaxErrors(dir, modules, {execPath});
-  const allowed = new Set(allow.map((a) => a.module));
-  const errors = syntax.errors.filter((e) => !allowed.has(e.module));
-  const tolerated = syntax.errors.filter((e) => allowed.has(e.module));
+  const edges = importEdges(dir, modules);
   const present = new Set(modules);
+  const roots = ROOTS.filter((root) => present.has(root));
+  const started = roots.length > 0 ? reachable(edges, roots) : present;
+  const allowed = new Set(allow.map((a) => a.module));
+  const errors = syntax.errors.filter((e) => !allowed.has(e.module) && started.has(e.module));
+  const latent = syntax.errors.filter((e) => !allowed.has(e.module) && !started.has(e.module));
+  const tolerated = syntax.errors.filter((e) => allowed.has(e.module));
   const stale = syntax.skipped ? [] : allow.filter((a) => present.has(a.module) && !syntax.errors.some((e) => e.module === a.module)).map((a) => a.module);
-  const cycles = findCycles(importEdges(dir, modules));
+  const cycles = findCycles(edges);
   const loaded = load ? loadCheck(dir, {entry, timeoutMs, env, execPath}) : undefined;
   const ok = errors.length === 0 && cycles.length === 0 && (loaded === undefined || loaded.ok);
-  return {ok, modules: modules.length, syntax: errors, syntaxSkipped: syntax.skipped, tolerated, stale, cycles, load: loaded};
+  return {ok, modules: modules.length, syntax: errors, latent, syntaxSkipped: syntax.skipped, tolerated, stale, cycles, load: loaded};
 }
 
 export function describe(result) {
@@ -219,6 +243,7 @@ export function assertLoadable(dir, {log = () => {}, ...options} = {}) {
   const result = checkGeneration(dir, options);
   if (result.syntaxSkipped) log(`generation-check: syntax skipped (${result.syntaxSkipped})`);
   for (const t of result.tolerated) log(`generation-check: known not to parse (allow list): ${t.module}`);
+  for (const l of result.latent) log(`generation-check: does not parse, not loaded at start (on demand only): ${l.module}: ${l.message}`);
   for (const s of result.stale) log(`generation-check: stale allow entry, ${s} parses now`);
   if (!result.ok) {
     const error = new Error(`the generation cannot load:\n  ${describe(result).join("\n  ")}`);
@@ -235,6 +260,7 @@ if (runsAs("osd-generation-check.mjs")) {
   const result = checkGeneration(dir, {load: !args.includes("--no-load")});
   for (const line of describe(result)) console.log(line);
   for (const t of result.tolerated) console.log(`known not to parse (allow list): ${t.module}`);
+  for (const l of result.latent) console.log(`does not parse, not loaded at start: ${l.module}: ${l.message}`);
   for (const s of result.stale) console.log(`stale allow entry: ${s} parses now`);
   if (result.syntaxSkipped) console.log(`syntax skipped: ${result.syntaxSkipped}`);
   const load = result.load === undefined ? "load not run" : result.load.ok ? "init.mjs loads" : "init.mjs does not load";
