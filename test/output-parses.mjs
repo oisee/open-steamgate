@@ -2,6 +2,7 @@ import {expect} from "chai";
 import {existsSync, readdirSync, readFileSync} from "node:fs";
 import {join} from "node:path";
 import {parse} from "acorn";
+import {readAllow} from "../tools/osd-generation-check.mjs";
 
 // **A green build is not a verdict on the artefact.** The transpiler wrote
 // six modules of packs/rap-flight that Node could not parse: `UPDATE dbtab
@@ -16,16 +17,14 @@ import {parse} from "acorn";
 // module the build wrote must parse.
 const OUTPUT = join(process.cwd(), "output");
 
-// The one module already broken on main, named here so that a second one is
-// a failure and not a longer list: ZL3_FLEET2's `RETURN.` at the top level
-// of the program is legal ABAP and the transpiler writes it as a top-level
-// JS `return`, which ESM forbids -- and nothing imports the module, so
-// nothing had noticed until this suite read it (ANORMALIES.md, 2026-11-08).
-// An entry without a date and a reason is a way of making the check green;
-// delete this one when that module is fixed.
-const KNOWN_BROKEN = new Map([
-  ["zl3_fleet2.prog.mjs", "RETURN at program top level, transpiler writes a top-level JS return (upstream: needs an issue)"],
-]);
+// The modules already broken on main, named so that one more is a failure
+// and not a longer list. The list is tools/osd-generation-check.allow.json,
+// the one the build's own check reads (tools/osd-generation-check.mjs), so
+// the two cannot disagree; today it holds ZL3_FLEET2, whose `RETURN.` at
+// the top level of the program is legal ABAP and becomes a top-level JS
+// `return`, which ESM forbids (ANORMALIES.md, 2026-11-08). An entry without
+// a reason is refused there; delete one when its module is fixed.
+const KNOWN_BROKEN = new Map(readAllow().map((entry) => [entry.module, entry.reason]));
 
 describe("every module the build wrote parses as JavaScript", function () {
   this.timeout(120000);
