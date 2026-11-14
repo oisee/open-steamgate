@@ -13,7 +13,7 @@
 // reads the unique pairs.
 //
 // The summary (gen/hana-closure/closure-summary.json, written at the fixed
-// point): {fixed_point, iterations, island_objects, stubs_unique, excluded,
+// point): {fixed_point, loads (+ load_error), iterations, island_objects, stubs_unique, excluded,
 // gaps, seed: {classes, stubbed_methods}, failures}. It is the false-green
 // guard of the brief: a green transpile proves nothing when the service's
 // own classes were excluded or their reads stubbed away, so the run FAILS
@@ -99,7 +99,7 @@ export function unstubbedGlob(glob) {
  *  ask covers it); `present(name)` -- an island object by file;
  *  `excluded` -- the excluded objects; `stubs` -- the unique stub list;
  *  `gaps` -- [{name, kind}]; `requireUnstubbed` -- the globs. Pure. */
-export function closureSummary({fixedPoint = true, iterations, islandObjects, seeds, named = seeds, present, excluded, stubs, gaps, requireUnstubbed = []}) {
+export function closureSummary({fixedPoint = true, iterations, islandObjects, seeds, named = seeds, present, excluded, stubs, gaps, requireUnstubbed = [], load}) {
   const seedList = [...(seeds ?? [])].map((s) => String(s).toUpperCase()).sort();
   const seedSet = new Set(seedList);
   const excludedList = [...(excluded ?? [])].map((s) => String(s).toUpperCase()).sort();
@@ -122,8 +122,14 @@ export function closureSummary({fixedPoint = true, iterations, islandObjects, se
       failures.push(`--require-unstubbed ${glob}: ${hit.length} seed method(s) stubbed: ${hit.map((s) => `${s.class}=>${s.method}`).join(", ")}`);
     }
   }
+  // B6: a fixed point whose build is green and whose generation does not
+  // import is not a service; a build that did not complete says so itself
+  if (load !== undefined && load.loads !== true && load.built !== false) {
+    failures.push(`the island generation does not load: ${load.error}`);
+  }
   return {
     fixed_point: fixedPoint,
+    ...(load !== undefined ? {loads: load.loads === true, ...(load.loads === true ? {} : {load_error: load.error})} : {}),
     iterations,
     island_objects: islandObjects,
     stubs_unique: (stubs ?? []).length,
