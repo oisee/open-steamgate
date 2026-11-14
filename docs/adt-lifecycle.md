@@ -138,6 +138,13 @@ on 2026-11-13. The first creation in the family builds cold, as a DDLS
 activation does; the interface's edits and explicit activation keep 90 s. The
 same test pins it (the `(f, op)` form of `vspTimeout`, one `'create'` call site).
 
+The wait for the warm compiler (`warmReady`) takes the same budget too
+(2026-11-14, `warmReadyTimeoutS`). On the slow runner of #942 (speed factor
+1.19) the interface's create took 101.7 s and pushed the warm compiler past its
+own deadline; it re-primed behind two 29-36 s verification comparisons, and the
+fixed 90 s wait ran out with no prime started. On green runs the same wait is
+about 54 s (a 29-37 s baseline activation and a 15-30 s prime).
+
 `test/adt-lifecycle-report.mjs` transcribes the real #635/#633/#636 tables as
 JSON fixtures (all QUIET), injects one 2x operation slowdown (WARN), uniform
 1.6x runner slowdown (QUIET), isolated sample outliers, and five-run history

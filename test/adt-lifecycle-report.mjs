@@ -1,6 +1,6 @@
 import {expect} from "chai";
 import {checkReport, metrics, renderReport, checkVspSyntax, timingReference, TIMING_RULE} from "../tools/adt-lifecycle-report.mjs";
-import {CALL_TIMEOUT_S, ddlsCallTimeoutS} from "../tools/adt-lifecycle-vsp.mjs";
+import {CALL_TIMEOUT_S, ddlsCallTimeoutS, warmReadyTimeoutS} from "../tools/adt-lifecycle-vsp.mjs";
 import {readFileSync, mkdtempSync, writeFileSync, rmSync} from "node:fs";
 import {spawnSync} from "node:child_process";
 import {tmpdir} from "node:os";
@@ -362,7 +362,7 @@ describe("DDLS call timeout margin",()=>{
   expect(lifecycle.match(/timeout:vspTimeout\(f,'create'\)/g)).to.have.length(1);
   expect(lifecycle).to.contain("const vspTimeout = (f, op) => f.type === 'DDLS' || (f.type === 'INTF' && op === 'create') ? ddlsCallTimeoutS() : CALL_TIMEOUT_S");
   expect(lifecycle).not.to.match(/timeout:\s*90\b/);
-  expect(lifecycle).to.contain("import {vspClient, CALL_TIMEOUT_S, ddlsCallTimeoutS}");
+  expect(lifecycle).to.contain("import {vspClient, CALL_TIMEOUT_S, ddlsCallTimeoutS, warmReadyTimeoutS}");
  });
  it("gives the interface's create+write+activate the same budget (slow runners cut it at 90.0 s)",()=>{
   const vspTimeout = new Function("ddlsCallTimeoutS","CALL_TIMEOUT_S",
@@ -371,6 +371,12 @@ describe("DDLS call timeout margin",()=>{
   expect(vspTimeout({type:"INTF"})).to.equal(90);
   expect(vspTimeout({type:"CLAS"},"create")).to.equal(90);
   expect(vspTimeout({type:"DDLS"})).to.equal(240);
+ });
+ it("waits for the warm compiler as long as a DDLS call may take (the #942 slow runner ran out at 90 s)",()=>{
+  expect(warmReadyTimeoutS({OSD_WARM_SPEED_FACTOR:"1"})).to.equal(240);
+  expect(warmReadyTimeoutS({OSD_WARM_SPEED_FACTOR:"1.19"})).to.equal(286);
+  expect(lifecycle).to.contain("const until=Date.now()+warmReadyTimeoutS()*1000;");
+  expect(lifecycle).not.to.match(/Date\.now\(\)\+90000/);
  });
  it("never lets the client-side rpc ceiling be the binding budget",()=>{
   expect(vspClient).to.contain("Math.max(120000, (ddlsCallTimeoutS() + 60) * 1000)");
