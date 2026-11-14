@@ -18,6 +18,9 @@ CLASS zcl_osd_h5x_dpc DEFINITION PUBLIC INHERITING FROM /iwbep/cl_mgw_push_abs_d
 *   be read as a set or a to-one step;
 * - a navigation that ends in a collection reads the set with one more
 *   condition, the parent's key on the join's alias;
+* - iv_source_name names the type the navigation starts from (the first
+*   row's source), empty on a direct read; a mismatch is refused here so a
+*   gateway that passes the wrong name fails the tests;
 * - the default order of the item set is two columns separated by a blank,
 *   and $orderby is concatenated the same way: legal Open SQL that SQL only
 *   takes with commas (ANORMALIES "dynamic-order-by-blanks").
@@ -49,6 +52,12 @@ CLASS zcl_osd_h5x_dpc DEFINITION PUBLIC INHERITING FROM /iwbep/cl_mgw_push_abs_d
     CLASS-METHODS not_found
       IMPORTING
         iv_what TYPE string
+      RAISING
+        /iwbep/cx_mgw_busi_exception.
+    CLASS-METHODS check_source_name
+      IMPORTING
+        iv_source_name TYPE string
+        it_path        TYPE /iwbep/t_mgw_tech_navi
       RAISING
         /iwbep/cx_mgw_busi_exception.
 
@@ -172,7 +181,20 @@ CLASS zcl_osd_h5x_dpc IMPLEMENTATION.
         message = |{ iv_what } not found|.
   ENDMETHOD.
 
+  METHOD check_source_name.
+    DATA ls_first LIKE LINE OF it_path.
+
+    READ TABLE it_path INTO ls_first INDEX 1.
+    IF iv_source_name <> ls_first-source_entity_type.
+      RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+        EXPORTING
+          message = |iv_source_name '{ iv_source_name }' is not the navigation's source '{ ls_first-source_entity_type }'|.
+    ENDIF.
+  ENDMETHOD.
+
   METHOD /iwbep/if_mgw_appl_srv_runtime~get_entityset.
+    check_source_name( iv_source_name = iv_source_name
+                       it_path        = io_tech_request_context->get_navigation_path( ) ).
 * a direct read has no source set; an answered one means "navigation"
     IF io_tech_request_context->get_source_entity_set_name( ) IS NOT INITIAL.
       resolve_navigation( EXPORTING io_entityset        = io_tech_request_context
@@ -206,6 +228,8 @@ CLASS zcl_osd_h5x_dpc IMPLEMENTATION.
     DATA ls_contact TYPE zcl_osd_h5x_mpc=>ts_contact.
     DATA ls_context TYPE /iwbep/if_mgw_appl_srv_runtime=>ty_s_mgw_response_context.
 
+    check_source_name( iv_source_name = iv_source_name
+                       it_path        = io_tech_request_context->get_navigation_path( ) ).
 * no source set: a direct read, keys from get_converted_keys
     IF io_tech_request_context->get_source_entity_set_name( ) IS NOT INITIAL.
       resolve_navigation( EXPORTING io_entity           = io_tech_request_context

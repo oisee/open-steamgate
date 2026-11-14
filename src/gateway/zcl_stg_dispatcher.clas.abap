@@ -1235,13 +1235,17 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
       ls_paging = lo_context->get_paging( ).
     ENDIF.
 
+* iv_source_name: on a navigation the entity type the path starts from,
+* empty on a direct read, as a system passes it (the create path did; the
+* reads passed nothing, and a provider that filters by it answered every
+* parent's children -- M3-B6 on the twin)
     lt_expand = expand_list( is_request ).
     IF lt_expand IS INITIAL OR is_request-is_count = abap_true.
       lo_dpc->get_entityset(
         EXPORTING
           iv_entity_name           = is_set-entity_type
           iv_entity_set_name       = is_set-name
-          iv_source_name           = ''
+          iv_source_name           = lo_context->mv_source_entity_type
           it_filter_select_options = lo_context->mt_filter
           is_paging                = ls_paging
           it_key_tab               = lo_context->mt_key_tab
@@ -1260,7 +1264,7 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
         EXPORTING
           iv_entity_name           = is_set-entity_type
           iv_entity_set_name       = is_set-name
-          iv_source_name           = ''
+          iv_source_name           = lo_context->mv_source_entity_type
           it_filter_select_options = lo_context->mt_filter
           is_paging                = ls_paging
           it_key_tab               = lo_context->mt_key_tab
@@ -1365,7 +1369,7 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
         EXPORTING
           iv_entity_name          = is_set-entity_type
           iv_entity_set_name      = is_set-name
-          iv_source_name          = ''
+          iv_source_name          = lo_context->mv_source_entity_type
           it_key_tab              = lo_context->mt_key_tab
           it_navigation_path      = lt_nav_path
           io_tech_request_context = lo_context
@@ -1376,7 +1380,7 @@ CLASS zcl_stg_dispatcher IMPLEMENTATION.
         EXPORTING
           iv_entity_name          = is_set-entity_type
           iv_entity_set_name      = is_set-name
-          iv_source_name          = ''
+          iv_source_name          = lo_context->mv_source_entity_type
           it_key_tab              = lo_context->mt_key_tab
           it_navigation_path      = lt_nav_path
           io_expand               = expand_tree_of( lt_expand )

@@ -30,6 +30,7 @@ CLASS ltcl_read DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
     METHODS expand_nested FOR TESTING RAISING cx_static_check.
     METHODS order_two_columns_default FOR TESTING RAISING cx_static_check.
     METHODS order_two_properties FOR TESTING RAISING cx_static_check.
+    METHODS nav_names_the_source FOR TESTING RAISING cx_static_check.
 
     METHODS get
       IMPORTING
@@ -595,6 +596,25 @@ CLASS ltcl_read IMPLEMENTATION.
             iv_second = `"Note":"one-thirty"` ).
     lacks( iv_body = ls_response-body
            iv_text = `one-twenty` ).
+  ENDMETHOD.
+
+  METHOD nav_names_the_source.
+* iv_source_name on a navigation read is the source type, as a system
+* passes it (the provider refuses any other name; without the fix the
+* reads passed '' and a provider filtering by it answered every parent's
+* children)
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+
+    ls_response = get( c_base && `('0000000001')/ToOrders` ).
+    ok( ls_response ).
+    ls_response = get( c_base && `('0000000001')/ToOrders/$count` ).
+    ok( ls_response ).
+    ls_response = get( `/sap/opu/odata/OSDNS/ZOSD_H5X_SRV/OrderSet('S3')/ToPartner` ).
+    ok( ls_response ).
+    ls_response = get( c_base && `('0000000001')/ToOrders('S1')/ToItems` ).
+    ok( ls_response ).
+    lacks( iv_body = ls_response-body
+           iv_text = `iv_source_name` ).
   ENDMETHOD.
 
 ENDCLASS.
