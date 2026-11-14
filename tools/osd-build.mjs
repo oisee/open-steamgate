@@ -51,6 +51,7 @@ import {toolCommand, hosted} from "./osd-host.mjs";
 import {runsAs} from "./osd-main.mjs";
 import {forPublishing} from "./osd-tmp.mjs";
 import {sourceBuildOverlay} from "./osd-source-build-view.mjs";
+import {assertLoadable} from "./osd-generation-check.mjs";
 
 // the tools this build runs before the transpiler, in the order the old npm
 // script ran them; each writes its part of gen/ and says so
@@ -839,6 +840,7 @@ export async function build(options = {}) {
     materializeSourceSnapshot(root, tmp); // Include compiler-only inputs such as $TMP's tadir.json on every build.
     completeSourceSnapshot(tmp);
     const objects = made.objects;
+    assertLoadable(join(tmp, "output"), {log}); // exit 0 is not a generation that loads: never named unless it parses, no import cycle
 
     const generated = readGeneratorLog(readsLog);
     readEntries.push(...generated.entries);
