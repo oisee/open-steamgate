@@ -1,0 +1,3 @@
+INTERFACE zif_osd_iconst_c PUBLIC.
+  CONSTANTS base TYPE string VALUE `c`.
+ENDINTERFACE.

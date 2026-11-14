@@ -274,7 +274,7 @@ import {join, resolve} from "node:path";
 import {runsAs} from "./osd-main.mjs";
 import {validationMessage} from "./hana-ddic-gen.mjs";
 import {islandClassPaths, planStubPass, registeredServiceClasses, seedClasses, serviceGuardBySuffixOnly, dropPresentNames, frameworkGapList, objectFilePresent, islandPrePass, unsupportedStatementOf} from "./hana-closure-stubs.mjs";
-import {buildCheck, ddicWritten, ensureLayers, generationOf, islandBasenames, islandObjectCount, islandShrinkCheck, mergeInputs} from "./hana-closure-merge.mjs";
+import {buildCheck, ddicWritten, ensureLayers, generationOf, islandBasenames, islandObjectCount, islandShrinkCheck, loadCheckOf, mergeInputs} from "./hana-closure-merge.mjs";
 import {dumperConfigured, dumpRound, printedCommand, provenanceFor} from "./hana-closure-dumper.mjs";
 import {cascadeOf, classifyFindings, exclusionCandidates, nameFromAbapFile, parseFindings} from "./hana-closure-exclude.mjs";
 import {analyseIsland, graphDecide, mergeNames, requestKindOf, structuralRegistry, testCodeObjects, waitsOf, writeClosureRecord} from "./hana-closure-graph.mjs";
@@ -578,8 +578,7 @@ export async function run(args = process.argv.slice(2), options = {}) {
     const excludedRecords = [];
     const excludedObjects = new Set();
     if (stubUnresolved === true) writeClosureRecord(out, {stubRecords: stubRecords(), excludedRecords, waits: []});
-    // the pre-pass (H5x-4 B4), before the structural pass reads the island
-    if (stubUnresolved === true) islandPrePass({root, unsupported: state.unsupported ?? [], stubMap, say});
+    if (stubUnresolved === true) islandPrePass({root, unsupported: state.unsupported ?? [], stubMap, say}); // H5x-4 B4
     // the structural pass (H5x-2): one SyntaxLogic pass per island object
     // over the build's own file set -- the names' primary source and the
     // graph decision's input, in both modes
@@ -986,8 +985,9 @@ export async function run(args = process.argv.slice(2), options = {}) {
       if (build.findings > 0) say(`build: exited ${build.status} with ${build.findings} finding(s) -- exit 1 with findings only, the fixed point stands`);
       say(`fixed point: every unresolved name has been asked and nothing new is named; ${gaps.length + refusedGaps.length} gap(s) -> ${join(out, "closure-gaps.json")}`);
       const seeds = seedClasses(root);
+      const load = build.status === 0 ? loadCheckOf({root, env, say}) : {loads: false, built: false, error: `not built: osd-build exited ${build.status} with ${build.findings} finding(s)`};
       writeClosureSummary(out, closureSummary({iterations: state.iteration, islandObjects: objects.total, seeds: seeds.all, named: seeds.named,
-        present: (name) => objectFilePresent(name, "clas", island), excluded: excludedObjects, stubs: stubRecords(), gaps: [...gaps, ...refusedGaps], requireUnstubbed}));
+        present: (name) => objectFilePresent(name, "clas", island), excluded: excludedObjects, stubs: stubRecords(), gaps: [...gaps, ...refusedGaps], requireUnstubbed, load}));
       return {stopped: "fixed-point", iteration: state.iteration, gaps: [...gaps, ...refusedGaps], cascades, unclassified, unscoped,
         ...(stubUnresolved === true ? {stubs: stubRecords(), stubRounds} : {})};
     }
