@@ -11,6 +11,8 @@ CLASS ltcl_read DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
     METHODS count_is_the_joined_rows FOR TESTING RAISING cx_static_check.
     METHODS filter_on_a_complex_path FOR TESTING RAISING cx_static_check.
     METHODS order_is_in_abap_names FOR TESTING RAISING cx_static_check.
+    METHODS encoded_option_names FOR TESTING RAISING cx_static_check.
+    METHODS default_sets_in_metadata FOR TESTING RAISING cx_static_check.
 
     METHODS get
       IMPORTING
@@ -198,6 +200,48 @@ CLASS ltcl_read IMPLEMENTATION.
          iv_text = `"PartnerID":"0000000004"` ).
     lacks( iv_body = ls_response-body
            iv_text = `"PartnerID":"0000000003"` ).
+  ENDMETHOD.
+
+  METHOD encoded_option_names.
+* %24top is $top: an options table as a server hands it over, names raw
+    DATA lt_options  TYPE tihttpnvp.
+    DATA ls_option   TYPE ihttpnvp.
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+
+    ls_option-name  = '%24top'.
+    ls_option-value = '1'.
+    APPEND ls_option TO lt_options.
+    ls_option-name  = '%24orderby'.
+    ls_option-value = 'PartnerID desc'.
+    APPEND ls_option TO lt_options.
+    ls_response = zcl_stg_dispatcher=>dispatch( iv_method  = 'GET'
+                                                iv_path    = c_base
+                                                it_options = lt_options ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 200
+                                        msg = ls_response-body ).
+    has( iv_body = ls_response-body
+         iv_text = `"PartnerID":"0000000004"` ).
+    lacks( iv_body = ls_response-body
+           iv_text = `"PartnerID":"0000000003"` ).
+  ENDMETHOD.
+
+  METHOD default_sets_in_metadata.
+* the association set the Gateway builds itself (name cut to 40), and the
+* return type's set on a function import that named only the type
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+
+    ls_response = get( '/sap/opu/odata/OSDNS/ZOSD_H5X_SRV/$metadata' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status
+                                        exp = 200 ).
+    has( iv_body = ls_response-body
+         iv_text = `<AssociationSet Name="Assoc_Partner_Orders_With_A_Long_Name_As" Association="ZOSD_H5X.Assoc_Partner_Orders_With_A_Long_Name"` ).
+    has( iv_body = ls_response-body
+         iv_text = `<End EntitySet="PartnerSet" Role="FromRole_Assoc_Partner_Orders_With_A_Long_Name"/>` ).
+    has( iv_body = ls_response-body
+         iv_text = `<End EntitySet="OrderSet" Role="ToRole_Assoc_Partner_Orders_With_A_Long_Name"/>` ).
+    has( iv_body = ls_response-body
+         iv_text = `<FunctionImport Name="Partner_Touch" ReturnType="ZOSD_H5X.Partner" EntitySet="PartnerSet"` ).
   ENDMETHOD.
 
 ENDCLASS.

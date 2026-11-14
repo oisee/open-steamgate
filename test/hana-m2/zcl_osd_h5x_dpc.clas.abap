@@ -40,6 +40,12 @@ CLASS zcl_osd_h5x_dpc IMPLEMENTATION.
     DATA lv_maxrows   TYPE i.
     DATA lv_count     TYPE i.
 
+* a direct read has no source set; a navigation would be resolved here
+* (the sample's shape: an answered source set means "navigation")
+    IF io_tech_request_context->get_source_entity_set_name( ) IS NOT INITIAL.
+      RETURN.
+    ENDIF.
+
     lv_where = to_sql( io_tech_request_context->get_osql_where_clause_convert( ) ).
     lt_orderby = io_tech_request_context->get_orderby( ).
     LOOP AT lt_orderby INTO ls_orderby.

@@ -213,12 +213,12 @@ CLASS zcl_stg_request_context IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD /iwbep/if_mgw_req_entityset~get_source_entity_set_name.
-    " the set a navigation started from; the set itself for a direct call
-    IF mv_source_entity_set IS NOT INITIAL.
-      rv_entity_set = mv_source_entity_set.
-    ELSE.
-      rv_entity_set = mv_entity_set.
-    ENDIF.
+* the set a navigation started from, and nothing for a direct call: a
+* SEGW sample's DPC reads "IS INITIAL" as "no navigation" and resolves a
+* navigation path otherwise -- with the set itself answered here, a direct
+* GET of its business set returned no rows (H5x-4 B4; the system answers
+* that GET with rows, so it answers no source set)
+    rv_entity_set = mv_source_entity_set.
   ENDMETHOD.
 
   METHOD /iwbep/if_mgw_req_entityset~get_top.

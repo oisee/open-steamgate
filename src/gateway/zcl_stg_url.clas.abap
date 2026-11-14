@@ -224,9 +224,17 @@ CLASS zcl_stg_url IMPLEMENTATION.
 
   METHOD option.
     DATA ls_option LIKE LINE OF is_request-options.
+    DATA lv_name   TYPE string.
 
     LOOP AT is_request-options INTO ls_option.
-      IF to_lower( ls_option-name ) = to_lower( iv_name ).
+* a client may encode the $ of a system query option (%24top): the name
+* is the decoded one, as on a system -- read raw, the option was ignored
+* without a word and the whole set came back (H5x-4 B4)
+      lv_name = ls_option-name.
+      IF lv_name CS '%'.
+        lv_name = cl_http_utility=>unescape_url( lv_name ).
+      ENDIF.
+      IF to_lower( lv_name ) = to_lower( iv_name ).
         rv_value = ls_option-value.
         RETURN.
       ENDIF.
