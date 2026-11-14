@@ -273,7 +273,7 @@ import {copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync
 import {join, resolve} from "node:path";
 import {runsAs} from "./osd-main.mjs";
 import {validationMessage} from "./hana-ddic-gen.mjs";
-import {islandClassPaths, planStubPass, registeredServiceClasses, seedClasses, serviceGuardBySuffixOnly, dropPresentNames, frameworkGapList, objectFilePresent} from "./hana-closure-stubs.mjs";
+import {islandClassPaths, planStubPass, registeredServiceClasses, seedClasses, serviceGuardBySuffixOnly, dropPresentNames, frameworkGapList, objectFilePresent, islandPrePass, unsupportedStatementOf} from "./hana-closure-stubs.mjs";
 import {buildCheck, ddicWritten, ensureLayers, generationOf, islandBasenames, islandObjectCount, islandShrinkCheck, mergeInputs} from "./hana-closure-merge.mjs";
 import {dumperConfigured, dumpRound, printedCommand, provenanceFor} from "./hana-closure-dumper.mjs";
 import {cascadeOf, classifyFindings, exclusionCandidates, nameFromAbapFile, parseFindings} from "./hana-closure-exclude.mjs";
@@ -578,6 +578,8 @@ export async function run(args = process.argv.slice(2), options = {}) {
     const excludedRecords = [];
     const excludedObjects = new Set();
     if (stubUnresolved === true) writeClosureRecord(out, {stubRecords: stubRecords(), excludedRecords, waits: []});
+    // the pre-pass (H5x-4 B4), before the structural pass reads the island
+    if (stubUnresolved === true) islandPrePass({root, unsupported: state.unsupported ?? [], stubMap, say});
     // the structural pass (H5x-2): one SyntaxLogic pass per island object
     // over the build's own file set -- the names' primary source and the
     // graph decision's input, in both modes
@@ -969,7 +971,18 @@ export async function run(args = process.argv.slice(2), options = {}) {
       // the positive control (round 4): a validation with no findings and a
       // broken build was bed run 4's false fixed point -- the build's own
       // exit must agree before the declaration
-      const build = buildCheck({root, env, say});
+      let build;
+      try {
+        build = buildCheck({root, env, say});
+      } catch (error) {
+        // a refused statement (no finding): learned once per kind, the pass repeats (B4)
+        const kind = unsupportedStatementOf(error?.message);
+        if (stubUnresolved !== true || kind === undefined || (state.unsupported ?? []).includes(kind) === true) throw error;
+        state.unsupported = [...(state.unsupported ?? []), kind];
+        saveState(out, state);
+        say(`unsupported: the transpiler refuses the ${kind} statement -- the methods holding it are stubbed, the pass repeats`);
+        continue;
+      }
       if (build.findings > 0) say(`build: exited ${build.status} with ${build.findings} finding(s) -- exit 1 with findings only, the fixed point stands`);
       say(`fixed point: every unresolved name has been asked and nothing new is named; ${gaps.length + refusedGaps.length} gap(s) -> ${join(out, "closure-gaps.json")}`);
       const seeds = seedClasses(root);

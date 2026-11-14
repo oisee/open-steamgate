@@ -4626,3 +4626,69 @@ Not an anomaly, recorded for porting: on 7.58, `FIND ... REGEX` (POSIX) raises a
 - Smallest safe workaround: the overlays; removal is "when the pin carries the members, drop the overlays and both exclusions" (`src/gateway/compat/README.md`).
 - Upstream: open-abap-odata, one small PR per member group; the dossier with the branch and commits is in `docs/upstream.md`.
 - Regression-test location: the three reproducers above, plus the island rule's own tests in `test/hana-closure.mjs` (H5x-3).
+
+## The SEGW sample's read over the bed (H5x-4 B4)
+
+### ANOMALY-2026-11-14-packed-21-format -- a DEC 21,7 value formats through a double
+
+- Status: `workaround`
+- Discovery date: `2026-11-14`
+- Affected versions: the pinned `@abaplint/runtime` (libs.lock.json)
+- Affected ABAP statement, runtime API or adapter: `lv_string = iv_packed` / `|{ iv_packed }|` for `TYPE p LENGTH 11 DECIMALS 7` (a long timestamp, `TIMESTAMPL`)
+- Minimal ABAP reproducer: `DATA lv_p TYPE p LENGTH 11 DECIMALS 7 VALUE '20210102030405.0000000'. DATA lv_s TYPE string. lv_s = lv_p.`
+- Exact command used to run it: a node probe over the runtime's `abap.types.Packed({length: 11, decimals: 7})`, set from the string, read back as a String
+- Expected SAP behaviour: `20210102030405.0000000`
+- Actual open-abap behaviour: `20210102030404.9995776` -- 21 digits do not fit a double
+- Impact on open-steamgate: every Edm.DateTime over a long timestamp (a SEGW sample's created/changed fields) serialised one second early
+- Smallest safe workaround: `ZCL_STG_JSON=>VALUE` takes a packed timestamp's whole seconds by a rounding move to `p LENGTH 8 DECIMALS 0` before formatting (fractions of a second are not written either way)
+- Upstream issue: needs an issue (abaplint/transpiler runtime) after a critic pass
+- Regression-test location: `ZCL_OSD_H5X_TEST` (ordered_page_with_address)
+- Upstream version containing a fix: unknown
+
+### ANOMALY-2026-11-14-select-single-connection -- SELECT SINGLE with CONNECTION before FROM parses as a SELECT loop
+
+- Status: `workaround`
+- Discovery date: `2026-11-14`
+- Affected versions: `@abaplint/core` 2.120.94
+- Affected ABAP statement, runtime API or adapter: `SELECT SINGLE f CONNECTION (lv_con) FROM t INTO v WHERE ...` (accepted by a system; the single-row grammar takes CONNECTION only after FROM)
+- Minimal ABAP reproducer: the class in test/hana-closure.mjs "a file abaplint cannot structure ..." (`ZCL_OSD_B4_CONN`)
+- Exact command used to run it: the island's control build (`npm run transpile`): `structure, Expected ENDMETHOD, <file>:1`
+- Expected SAP behaviour: one row read, no loop
+- Actual open-abap behaviour: the statement is a SelectLoop with no ENDSELECT; the class does not structure at all
+- Impact on open-steamgate: an island class pulled by the closure kept every bed control build red ("unclassified")
+- Smallest safe workaround: the closure's structure pre-pass stubs the methods whose blocks do not close (tools/hana-closure-stubs.mjs structureStubs), before the structural analysis
+- Upstream issue: needs an issue (abaplint/abaplint) after a critic pass
+- Regression-test location: test/hana-closure.mjs
+- Upstream version containing a fix: unknown
+
+### ANOMALY-2026-11-14-table-body-suffix-js -- `it_x[] IS SUPPLIED` and `RESULT (lt_x[])` reach JavaScript with the `[]`
+
+- Status: `local fix, not pushed`
+- Discovery date: `2026-11-14`
+- Affected versions: the pinned transpiler (oisee/transpiler 4e9b744d)
+- Affected ABAP statement, runtime API or adapter: `IF it_x[] IS SUPPLIED`, `boolc( et_x[] IS SUPPLIED )`, `CALL TRANSFORMATION ... RESULT (lt_x[])`
+- Minimal ABAP reproducer: transpiler test/operators/supplied.ts "a table parameter named with its body suffix"; single_statements.ts `RESULT (lt_rtab[])`
+- Exact command used to run it: `node --check` over the island's generated modules
+- Expected SAP behaviour: the suffix names the table body; the parameter is it_x
+- Actual open-abap behaviour: `INPUT.it_x[]` / `(lt_x[])` -- invalid JavaScript, the module does not load (V8 reports a private-field error elsewhere in the class)
+- Impact on open-steamgate: five island classes of the sample's dependency packages did not load
+- Smallest safe workaround: none in this tree; transpiler commit 081934c7 on branch fix/table-body-suffix-supplied (local), the pin not moved
+- Upstream issue: branch inside abaplint/transpiler after a critic pass
+- Regression-test location: the transpiler's own tests (above)
+- Upstream version containing a fix: unknown
+
+### ANOMALY-2026-11-14-local-inherits-owner -- a local class inheriting from its own global class deadlocks the module load
+
+- Status: `open`
+- Discovery date: `2026-11-14`
+- Affected versions: the pinned transpiler (packages/transpiler/src/requires.ts)
+- Affected ABAP statement, runtime API or adapter: `CLASS lcx_x DEFINITION INHERITING FROM zcx_x` in the locals of `zcx_x`
+- Minimal ABAP reproducer: a global exception class with a local subclass of itself in its locals_imp
+- Exact command used to run it: tools/hana-serve.mjs over the island generation (also with the fake client): the boot never returns; node: "unsettled top-level await"
+- Expected SAP behaviour: legal ABAP, the class loads
+- Actual open-abap behaviour: `zcx_x.clas.mjs` awaits its locals module before defining the class; the locals module awaits `zcx_x.clas.mjs` (requires.ts adds the global super of a local class even when it is the owner) -- a top-level-await cycle, neither settles
+- Impact on open-steamgate: the sample's generation cannot load; milestone 2 is blocked here
+- Smallest safe workaround: none yet (a transpiler layout change: the locals module must take the owner from abap.Classes and be imported after the class is registered)
+- Upstream issue: needs an issue / branch in abaplint/transpiler after a critic pass
+- Regression-test location: none yet
+- Upstream version containing a fix: unknown

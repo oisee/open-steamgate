@@ -34,11 +34,12 @@
 // interface whose DEFINITION references a missing name is excluded -- by
 // the graph decision (tools/hana-closure-graph.mjs graphDecide) over the
 // whole island, not by this file.
-import {readdirSync, readFileSync} from "node:fs";
+import {readdirSync, readFileSync, writeFileSync} from "node:fs";
 import {join} from "node:path";
 import * as abaplint from "@abaplint/core";
 import {classifyFindings, nameFromAbapFile} from "./hana-closure-exclude.mjs";
 import {requestKindOf, stripFriends, cutSignatureParams} from "./hana-closure-graph.mjs";
+import {recordStub} from "./hana-closure-report.mjs";
 
 // the island class and interface files a stub pass may rewrite or exclude:
 // gen/hana-src/**/*.clas.abap, the locals includes beside them, and the
@@ -105,6 +106,166 @@ export function methodBlocks(source, filename = "zcl_stub.clas.abap") {
     }
   }
   return blocks;
+}
+
+// the block statements a method body opens and closes, by abaplint's
+// statement names: closer -> opener
+const BLOCK_CLOSERS = {EndIf: "If", EndLoop: "Loop", EndTry: "Try", EndDo: "Do", EndWhile: "While",
+  EndCase: "Case", EndSelect: "SelectLoop", EndAt: "At", EndProvide: "Provide", EndOn: "OnChange"};
+const BLOCK_OPENERS = new Set(Object.values(BLOCK_CLOSERS));
+
+/** where a file abaplint cannot STRUCTURE goes wrong, per method (H5x-4
+ *  B4): a statement that parses, but as the opener of a block nothing in
+ *  its method closes, or a closer whose opener is another. A `structure`
+ *  finding names line 1 of the file -- no method -- so the stub pass could
+ *  never place it and it stayed "unclassified" for good (bed runs 21-22:
+ *  `SELECT SINGLE f CONNECTION (c) FROM t ...`, which abaplint's single-row
+ *  grammar admits only with CONNECTION after FROM, read as a SELECT loop
+ *  without ENDSELECT). Only the pairs above are tracked: a method whose
+ *  trouble is anything else is not located, and the finding stays where
+ *  it was. Pure: [{method, line, statement}] in source order. */
+export function unclosedBlocks(source, filename = "zcl_stub.clas.abap") {
+  const reg = new abaplint.Registry().addFile(new abaplint.MemoryFile(filename, source)).parse();
+  const found = [];
+  for (const file of reg.getFirstObject()?.getABAPFiles() ?? []) {
+    let method;
+    let stack = [];
+    let broken;
+    for (const st of file.getStatements()) {
+      const kind = st.get().constructor.name;
+      if (kind === "MethodImplementation") {
+        method = String(st.getTokens()[1]?.getStr() ?? "").toUpperCase();
+        stack = [];
+        broken = undefined;
+        continue;
+      }
+      if (method === undefined) continue;
+      if (kind === "EndMethod") {
+        const at = broken ?? stack[0];
+        if (at !== undefined) found.push({method, line: at.line, statement: at.statement});
+        method = undefined;
+        continue;
+      }
+      if (broken !== undefined) continue;
+      const here = {line: st.getStart().getRow(), statement: kind};
+      if (BLOCK_OPENERS.has(kind) === true) {
+        stack.push(here);
+      } else if (BLOCK_CLOSERS[kind] !== undefined) {
+        const open = stack.pop();
+        if (open === undefined || open.statement !== BLOCK_CLOSERS[kind]) broken = open ?? here;
+      }
+    }
+  }
+  return found;
+}
+
+/** the structure pre-pass (H5x-4 B4): a class file abaplint cannot
+ *  structure, with its unclosed blocks stubbed -- run BEFORE the structural
+ *  analysis, which reads nothing of a file it cannot structure: the bed's
+ *  test-utility class kept its definition-level names (a RAISING of a class
+ *  nobody asked for) out of every request while its methods were stubbed
+ *  only later in the iteration. undefined when the file structures (or
+ *  nothing can be located); else {source, stubs}. Pure. */
+export function structureStubs(source, filename = "zcl_stub.clas.abap") {
+  let located;
+  try {
+    located = unclosedBlocks(source, filename);
+  } catch {
+    return undefined;
+  }
+  if (located.length === 0) return undefined;
+  const findings = located.map((at) => ({rule: "structure", file: filename, line: at.line, structure: true,
+    message: `abaplint cannot structure ${filename}: it reads the ${at.statement} statement at line ${at.line} of ${at.method} as a block its method never closes`,
+    raw: `structure, ${at.statement} not closed in ${at.method}, ${filename}:${at.line}`}));
+  const plan = stubBodies(source, findings, filename);
+  return plan.stubs.length === 0 ? undefined : {source: plan.source, stubs: plan.stubs};
+}
+
+/** the methods holding a statement the pinned transpiler refuses
+ *  ("Statement LoadReport not supported" -- a build failure with no
+ *  finding, so neither the validation nor the stub pass ever sees it),
+ *  stubbed: `kinds` are abaplint statement names the walk has met in such
+ *  a refusal (state.unsupported, H5x-4 B4). undefined when the file holds
+ *  none; else {source, stubs}. Pure. */
+export function unsupportedStubs(source, filename = "zcl_stub.clas.abap", kinds = []) {
+  if (kinds.length === 0) return undefined;
+  const wanted = new Set(kinds);
+  let reg;
+  try {
+    reg = new abaplint.Registry().addFile(new abaplint.MemoryFile(filename, source)).parse();
+  } catch {
+    return undefined;
+  }
+  const findings = [];
+  for (const file of reg.getFirstObject()?.getABAPFiles() ?? []) {
+    for (const st of file.getStatements()) {
+      const kind = st.get().constructor.name;
+      if (wanted.has(kind) === false) continue;
+      const line = st.getStart().getRow();
+      findings.push({rule: "unsupported", file: filename, line, structure: true,
+        message: `the transpiler does not support the ${kind} statement (line ${line})`,
+        raw: `unsupported, Statement ${kind} not supported, ${filename}:${line}`});
+    }
+  }
+  if (findings.length === 0) return undefined;
+  const plan = stubBodies(source, findings, filename);
+  return plan.stubs.length === 0 ? undefined : {source: plan.source, stubs: plan.stubs};
+}
+
+/** the pre-pass over every island class file (H5x-4 B4): a file abaplint
+ *  cannot structure, then the statements the transpiler refuses
+ *  (`unsupported`, abaplint statement names), stubbed and recorded in
+ *  `stubMap` before the structural pass reads the island. */
+export function islandPrePass({root, unsupported = [], stubMap, say = () => {}}) {
+  for (const [base, paths] of islandClassPaths(root)) {
+    if (/\.clas\.abap$/.test(base) === false) continue;
+    for (const path of [...paths].sort()) {
+      const passes = [["structure", (src) => structureStubs(src, base)],
+        ["unsupported", (src) => unsupportedStubs(src, base, unsupported)]];
+      for (const [label, pass] of passes) {
+        const plan = pass(readFileSync(path, "utf8"));
+        if (plan === undefined) continue;
+        writeFileSync(path, plan.source);
+        for (const stub of plan.stubs) {
+          recordStub(stubMap, {object: nameFromAbapFile(base.replace(/\..*$/, "")), file: path.slice(root.length + 1),
+            class: stub.className, method: stub.method, missing: [], finding: stub.finding});
+        }
+        say(`${label}: ${base}: ${plan.stubs.map((s) => s.method).join(", ")} stubbed (${plan.stubs[0].reason})`);
+      }
+    }
+  }
+}
+
+/** the statement kind of a transpiler refusal in a build's output, or
+ *  undefined. Pure. */
+export function unsupportedStatementOf(text) {
+  return /Statement (\w+) not supported/.exec(String(text ?? ""))?.[1];
+}
+
+/** a file-level `structure` finding (no method on its line) as one finding
+ *  per method unclosedBlocks locates, at the offending statement's line,
+ *  so the stub pass places it like any other; a finding it cannot locate
+ *  comes back as it was. Pure. */
+export function locateStructureFindings(source, findings, filename = "zcl_stub.clas.abap") {
+  if (findings.some((f) => f.rule === "structure") === false) return findings;
+  let located;
+  try {
+    located = unclosedBlocks(source, filename);
+  } catch {
+    return findings;
+  }
+  const out = [];
+  for (const f of findings) {
+    if (f.rule !== "structure" || located.length === 0) {
+      out.push(f);
+      continue;
+    }
+    for (const at of located) {
+      out.push({...f, line: at.line, structure: true,
+        message: `${f.message}: abaplint reads the ${at.statement} statement at line ${at.line} of ${at.method} as a block its method never closes`});
+    }
+  }
+  return out;
 }
 
 // the offsets of one parsed position over the source (the rewrite cuts all
@@ -427,6 +588,8 @@ export function planStubPass({source, findings, basename, refs = [], missingOf =
   // the class)
   const friends = stripFriends(source, basename, goneOf);
   const work = friends.source;
+  // a file-level structure finding, placed in the methods it comes from
+  findings = locateStructureFindings(work, findings, basename);
   let blocks;
   try {
     blocks = methodBlocks(work, basename);
@@ -509,6 +672,9 @@ export function planStubPass({source, findings, basename, refs = [], missingOf =
     const collectNameless = () => {
       for (const f of inside) {
         if (refMatched(methodRefs, f) === true || fallbackNames.some((n) => n.finding === f.raw) === true) continue;
+        // a parse the build cannot structure is not a member the
+        // framework lacks: it is stubbed, never a framework gap
+        if (f.structure === true) continue;
         const member = memberOf(f.message);
         nameless.push({finding: f.message, ...(member !== undefined ? {member} : {}), line: f.line, method: stub.method});
       }
