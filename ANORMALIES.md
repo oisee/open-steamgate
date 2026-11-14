@@ -4663,7 +4663,7 @@ Not an anomaly, recorded for porting: on 7.58, `FIND ... REGEX` (POSIX) raises a
 
 ### ANOMALY-2026-11-14-intf-const-from-const -- an interface constant whose VALUE is another object's constant throws at load
 
-- Status: `fixed in the pin` (oisee/transpiler `local/osd-build-4h` `c84497b4`, on `9437debe` of `local/osd-build-4g`; not upstream)
+- Status: `fixed in the pin` (oisee/transpiler `local/osd-build-4h` `17162d2c` (the fix is `c84497b4`), on `9437debe` of `local/osd-build-4g`; not upstream)
 - Discovery date: `2026-11-14`
 - Affected versions: the pinned transpiler up to oisee/transpiler d2e9f22c (packages/transpiler/src/structures/interface.ts, requires.ts)
 - Affected ABAP statement, runtime API or adapter: `CONSTANTS y TYPE string VALUE zif_c=>x.` in an interface
@@ -4677,4 +4677,20 @@ Not an anomaly, recorded for porting: on 7.58, `FIND ... REGEX` (POSIX) raises a
 - Smallest safe workaround: none needed with the 4h pin
 - Upstream issue: needs a branch in abaplint/transpiler after a critic pass
 - Regression-test location: the ABAP unit class above, the transpiler's unit and requires tests
+- Upstream version containing a fix: unknown
+
+### ANOMALY-2026-11-14-cctor-load-order -- a class constructor ran at load before the class it creates existed
+
+- Status: `fixed in the pin` (oisee/transpiler `local/osd-build-4h` `17162d2c`: `5678066f` from the HANA track, made cycle-free by `17162d2c`; not upstream)
+- Discovery date: `2026-11-14`
+- Affected versions: the pinned transpiler up to oisee/transpiler c84497b4
+- Affected ABAP statement, runtime API or adapter: `CREATE OBJECT ... TYPE zcl_b`, `NEW zcl_b( )`, `zcl_b=>m( )` inside a CLASS_CONSTRUCTOR
+- Minimal ABAP reproducer: transpiler unit tests test-cc-load-order, test-84 (two constructors naming each other's classes), test-85 (a constructor creating its own subclass), test-86 (a ring of three)
+- Exact command used to run it: importing init.mjs of the HANA island generation
+- Expected SAP behaviour: a class constructor runs on first use of the class; the classes it names exist
+- Actual open-abap behaviour: the class constructor runs when its module loads, and a class it named whose module loads later was not there: `abap.Classes.<class> is not a constructor`. Requiring that module (5678066f) can close an import cycle -- mutual constructors, a constructor creating its subclass, a ring -- and then the modules await each other (exit 13)
+- The fix (4h): the requirement is decided once per run over the whole registry against the real load-time edges; one that would close a cycle is not taken, and that pool's class constructors wait in a queue and run at the end of the module of the class they named, once every class they name is registered
+- Smallest safe workaround: none needed with the 4h pin
+- Upstream issue: needs a branch in abaplint/transpiler after a critic pass
+- Regression-test location: the transpiler's unit tests above; `test/generation-check.mjs` (0 cycles)
 - Upstream version containing a fix: unknown
