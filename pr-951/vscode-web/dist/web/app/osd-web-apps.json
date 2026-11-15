@@ -2,6 +2,7 @@
   "components": {
     "stg.analytics": "analytics/",
     "stg.booking": "booking/",
+    "osd.h5x": "h5x/",
     "stg.icf": "icf/",
     "stg.travel": "",
     "stg.segw": "segw/",
