@@ -44,7 +44,6 @@
     "system-overview.js",
     "hana-sidecar.js",
     "osd/**",
-    "bin/**",
     "resources/**",
     "examples/**",
     "walkthrough/**",
