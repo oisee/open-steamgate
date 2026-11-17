@@ -3,8 +3,8 @@
   "artefact": "vscode-web",
   "files": {
     "CHANGELOG.md": "0b36c58edf08209fad35690844547a3b04403922fdac2be26ac859029398874a",
-    "README.md": "0bd1937ecbe3509f6ceafeb6bd637c3f9961310e0c42fd32f6ae75cb7c640c02",
-    "dist/web/.osd-provenance.json": "c5dc1a8da311c417561dc31f7d1aab0231b60835f01093fd340db05fd127005e",
+    "README.md": "9157f6c3fc0ec7caac48eaa5ebefbe493faf3af2fe00ed5407d7184433dd4153",
+    "dist/web/.osd-provenance.json": "e0a8e6469afde53ffcd25bda3cc20ace1844859487a8d2d5fa43033d9cfe23a3",
     "dist/web/app/Component.js": "20be20c142b6e50933603329fcf880590b8461bc9941512090d443a6dc5ae488",
     "dist/web/app/analytics/Component.js": "b83568419df2310442baca5ff3340d252630cbcaa21844c1830e4013b2ea3522",
     "dist/web/app/analytics/annotations/annotations.xml": "503ab445c00a46828d59388a86f6ab4b39dd10a9b6837b01ba924a7529e70428",
@@ -145,7 +145,7 @@
     "dist/web/app/zvdb/quality/manifest.json": "5b7b8d7358558eaa93f888c452173d6a8aa020fdc8e3de80e23be66d93b85331",
     "dist/web/app/zvdb/quality.json": "5800f8027da653eed074e92b5e557a58aac46ec4b26e5bb8bc5dd6bc10a0167d",
     "dist/web/duckdb-mvp.wasm": "45d72a81fba8e57693d890da837c7041310e385e75619a8559839b15388dfe97",
-    "dist/web/extension.js": "0a61078265e861a6fa397aae96a913cb5ae221c6c5523458fe19c5cb5f160631",
+    "dist/web/extension.js": "24d3552b98120824b539c5262ced6424109b5162438540cd15141ff97ee417a2",
     "dist/web/media/zlsd-music.w3mi.data.m4a": "746357151e1329b4592c687887df8afa0506eddaeb13dc6019baea375c27632a",
     "dist/web/media/zlsd-show.w3mi.data.gz": "15fc7d7481e35aa4d42adcd30a05771aaa291e0b0312ddcea65c1f1a457629b7",
     "dist/web/media/zo4d_00_sales@252epng.w3mi.data.png": "afbe0fcc94b2eaf9bf3c13b35834c13cd001848ebc37de45aa156919fbf44925",
@@ -308,7 +308,7 @@
     "walkthrough/try-it.md": "aac6258ab6f14560e66bfb3e834ac8cabe493a3e42fd42252bddc3541b33f896",
     "walkthrough/where-things-live.md": "e862db4bbd160a36b09bd20f04aa126f794ad7fe1d00c9505bdef2f1f9c8c670"
   },
-  "generation": "67e14af4f2ba5bc1",
+  "generation": "fa285e7a797404b6",
   "systemDigest": null,
   "systemPrivate": false,
   "inputs": [
