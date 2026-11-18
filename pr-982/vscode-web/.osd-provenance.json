@@ -4,7 +4,7 @@
   "files": {
     "CHANGELOG.md": "0b36c58edf08209fad35690844547a3b04403922fdac2be26ac859029398874a",
     "README.md": "9157f6c3fc0ec7caac48eaa5ebefbe493faf3af2fe00ed5407d7184433dd4153",
-    "dist/web/.osd-provenance.json": "d7f1edd1068a0abfb90b1c81811bd60b640ed5e42f79325b37fce187917bf38c",
+    "dist/web/.osd-provenance.json": "8d9a605ed312a7347f46185e36e4a914a69837f14c8fa5282e3d1c16a867248d",
     "dist/web/app/Component.js": "20be20c142b6e50933603329fcf880590b8461bc9941512090d443a6dc5ae488",
     "dist/web/app/analytics/Component.js": "b83568419df2310442baca5ff3340d252630cbcaa21844c1830e4013b2ea3522",
     "dist/web/app/analytics/annotations/annotations.xml": "503ab445c00a46828d59388a86f6ab4b39dd10a9b6837b01ba924a7529e70428",
@@ -145,7 +145,7 @@
     "dist/web/app/zvdb/quality/manifest.json": "5b7b8d7358558eaa93f888c452173d6a8aa020fdc8e3de80e23be66d93b85331",
     "dist/web/app/zvdb/quality.json": "5800f8027da653eed074e92b5e557a58aac46ec4b26e5bb8bc5dd6bc10a0167d",
     "dist/web/duckdb-mvp.wasm": "45d72a81fba8e57693d890da837c7041310e385e75619a8559839b15388dfe97",
-    "dist/web/extension.js": "fd56219369f7bcd0b83e468c229b9da985b4c33eefa6ba49ca8c2e1d7c95f9d1",
+    "dist/web/extension.js": "62dd2a9de1d1a3b0c293a441bfb8fa64f458155eb13b87bb66df1c0cb3a57522",
     "dist/web/media/zlsd-music.w3mi.data.m4a": "746357151e1329b4592c687887df8afa0506eddaeb13dc6019baea375c27632a",
     "dist/web/media/zlsd-show.w3mi.data.gz": "15fc7d7481e35aa4d42adcd30a05771aaa291e0b0312ddcea65c1f1a457629b7",
     "dist/web/media/zo4d_00_sales@252epng.w3mi.data.png": "afbe0fcc94b2eaf9bf3c13b35834c13cd001848ebc37de45aa156919fbf44925",
@@ -308,7 +308,7 @@
     "walkthrough/try-it.md": "aac6258ab6f14560e66bfb3e834ac8cabe493a3e42fd42252bddc3541b33f896",
     "walkthrough/where-things-live.md": "e862db4bbd160a36b09bd20f04aa126f794ad7fe1d00c9505bdef2f1f9c8c670"
   },
-  "generation": "03e10c8dba5bcedd",
+  "generation": "596267444fae51f6",
   "systemDigest": null,
   "systemPrivate": false,
   "inputs": [
