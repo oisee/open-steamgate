@@ -333,7 +333,12 @@ export class DuckDBDatabaseClient {
    *  the result as the engine's own chunks. Nothing is copied into row
    *  objects; a value leaves the engine's vector when somebody reads it, and
    *  `convert` is what query() applies to every value up front. The chunks
-   *  are an immutable result, alive for as long as something refers to them. */
+   *  are an immutable result -- but a vector is a VIEW of its chunk's memory
+   *  and does not keep the chunk alive: whoever holds a vector must hold
+   *  `owner` beside it. Without that the collector frees the chunk while its
+   *  vectors are still read, and the values that come back are whatever is
+   *  in that memory by then (found by two tests that re-insert rows selected
+   *  in their setup; nothing raised, the rows were simply different). */
   async selectChunks(options) {
     const sql = this.rewrite(options.select, options.primaryKey);
     if (this.trace) console.log(sql);
@@ -344,7 +349,7 @@ export class DuckDBDatabaseClient {
       throw await osqlSemanticsError(error);
     }
     const columns = result.deduplicatedColumnNames();
-    const chunks = result.chunks.map((chunk) => ({rowCount: chunk.rowCount, vectors: columns.map((_, i) => chunk.getColumnVector(i))}));
+    const chunks = result.chunks.map((chunk) => ({rowCount: chunk.rowCount, vectors: columns.map((_, i) => chunk.getColumnVector(i)), owner: chunk}));
     return {rowCount: result.currentRowCount, columns, chunks, convert: plain};
   }
 

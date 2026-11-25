@@ -217,11 +217,16 @@ export function installLazyItab(abap, {env = globalThis.process?.env ?? {}} = {}
   // ---- the chunk source: a row is (chunk, index). A column of a chunk
   // leaves the engine's vector in one go, the first time a field of it is
   // made (some 2000 values in a tight loop; item by item out of the loop
-  // of an ABAP program it was measured three times slower), and a column
-  // nobody reads never leaves it.
+  // of an ABAP program, a loop over every field of 100k rows took 1758 ms
+  // against 1235 ms this way), and a column nobody reads never leaves it.
   class ChunkShape extends Shape {
-    constructor(rowType, columns, vectors, convert) {
+    constructor(rowType, columns, chunk, convert) {
       super(rowType, columns);
+      const vectors = chunk.vectors;
+      // a vector does not keep its chunk alive (tools/duckdb-client.mjs,
+      // selectChunks): the chunk is held here for as long as a row of it is
+      this.owner = chunk.owner;
+      this.undecoded = columns.length;
       this.vectors = Object.create(null);
       columns.forEach((column, i) => { this.vectors[column] = vectors[i]; });
       this.decoded = Object.create(null);
@@ -236,6 +241,8 @@ export function installLazyItab(abap, {env = globalThis.process?.env ?? {}} = {}
       const values = new Array(count);
       for (let i = 0; i < count; i++) values[i] = convert(vector.getItem(i));
       this.vectors[key] = undefined;
+      // the last column out: nothing reads the engine's memory any more
+      if (--this.undecoded === 0) this.owner = undefined;
       counters.columnsDecoded++;
       return this.decoded[key] = values;
     }
@@ -293,7 +300,7 @@ export function installLazyItab(abap, {env = globalThis.process?.env ?? {}} = {}
       if (result.rowCount === 0) return nothing();
       if (runtimeOptions?.appending !== true) table.clear();
       for (const chunk of result.chunks) {
-        const shape = new ChunkShape(table.getRowType(), result.columns, chunk.vectors, result.convert);
+        const shape = new ChunkShape(table.getRowType(), result.columns, chunk, result.convert);
         for (let i = 0; i < chunk.rowCount; i++) append(new LazyRow(shape, i));
         count += chunk.rowCount;
       }
