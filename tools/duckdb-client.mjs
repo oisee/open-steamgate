@@ -329,6 +329,25 @@ export class DuckDBDatabaseClient {
     return {rows: await this.query(options.select)};
   }
 
+  /** RESEARCH (tools/osd-lazy-itab.mjs, docs/research-db-itab-shared-memory.md):
+   *  the result as the engine's own chunks. Nothing is copied into row
+   *  objects; a value leaves the engine's vector when somebody reads it, and
+   *  `convert` is what query() applies to every value up front. The chunks
+   *  are an immutable result, alive for as long as something refers to them. */
+  async selectChunks(options) {
+    const sql = this.rewrite(options.select, options.primaryKey);
+    if (this.trace) console.log(sql);
+    let result;
+    try {
+      result = await this.connection.runAndReadAll(sql);
+    } catch (error) {
+      throw await osqlSemanticsError(error);
+    }
+    const columns = result.deduplicatedColumnNames();
+    const chunks = result.chunks.map((chunk) => ({rowCount: chunk.rowCount, vectors: columns.map((_, i) => chunk.getColumnVector(i))}));
+    return {rowCount: result.currentRowCount, columns, chunks, convert: plain};
+  }
+
   async openCursor(options) {
     const rows = await this.query(this.rewrite(options.select, options.primaryKey));
     let offset = 0;

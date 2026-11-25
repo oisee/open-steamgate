@@ -347,6 +347,12 @@ export function installStoreDestination(abap, options = {}) {
 export async function setup(abap, schemas, insert) {
   installXStringBuffer(abap);
   await phase("database-setup", () => setupDatabase(abap, schemas, insert));
+  // RESEARCH, opt-in (docs/research-db-itab-shared-memory.md): SELECT INTO
+  // TABLE leaves the rows in the result and makes fields when they are read
+  if (globalThis.__stgPreview === undefined && globalThis.process?.env?.OSD_LAZY_ITAB === "1") {
+    const {installLazyItab} = await import("../tools/osd-lazy-itab.mjs");
+    installLazyItab(abap);
+  }
   // opt-in, Node only (the preview never installs it): a table of the allow
   // list that has no rows here is filled from this destination on its first
   // read (docs/rfc-proxy.md, "P2: tables"). After the database, whichever

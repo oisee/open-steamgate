@@ -29,11 +29,20 @@ import {fileURLToPath} from "node:url";
 import {performance} from "node:perf_hooks";
 
 const REPEAT = Number(process.env.SHMEM_REPEAT ?? 3);
-const STEPS = ["select_all", "count_lines", "read_sparse", "loop_one_field", "loop_all_fields", "abap_cube", "copy_table", "release", "select_narrow", "select_cube"];
+// label -> method. The table is copied twice: fresh, before anything read a
+// row, and again after every field of every row has been read.
+const PLAN = {select_all: "select_all", count_lines: "count_lines", copy_fresh: "copy_table", read_sparse: "read_sparse",
+  loop_one_field: "loop_one_field", loop_all_fields: "loop_all_fields", loop_again: "loop_all_fields", abap_cube: "abap_cube",
+  copy_read: "copy_table", release: "release", select_narrow: "select_narrow", select_cube: "select_cube"};
+const STEPS = Object.keys(PLAN);
 
 const heap = () => {
-  globalThis.gc();
-  globalThis.gc();
+  // SHMEM_NOGC=1 is for a CPU profile of a child: no forced collections, so
+  // the collector's share is the code's own (the heap columns mean nothing then)
+  if (process.env.SHMEM_NOGC !== "1") {
+    globalThis.gc();
+    globalThis.gc();
+  }
   const m = process.memoryUsage();
   return {heap_mb: m.heapUsed / 1048576, external_mb: (m.external + m.arrayBuffers) / 1048576, rss_mb: m.rss / 1048576};
 };
@@ -66,6 +75,8 @@ async function child() {
   else if (db.connection !== undefined) wrap(db.connection, "runAndReadAll", "engine");
   else throw new Error("measure: no engine to wrap on this client");
   wrap(db, "select", "client");
+  // the lazy path asks a client that has it for the engine's chunks instead
+  if (typeof db.selectChunks === "function") wrap(db, "selectChunks", "client");
   wrap(abap.statements, "select", "total");
 
   const out = {store: process.env.STG_DB ?? "sqlite", rows: Number(process.env.STG_DATA_SCALE ?? 0),
@@ -92,7 +103,7 @@ async function child() {
       Object.assign(t, {engine: 0, client: 0, total: 0, engineCalls: 0, clientCalls: 0, totalCalls: 0});
       const counters = lazy?.reset();
       const started = performance.now();
-      const answer = await bench[step]();
+      const answer = await bench[PLAN[step]]();
       const ms = performance.now() - started;
       const after = heap();
       const value = answer === undefined ? undefined : String(answer.get());
@@ -169,6 +180,10 @@ if (process.argv.includes("--child")) {
       }
     }
     console.log(["  heap MB", ...results.map((r) => f(r.steps[step].heap_mb))].join("\t"));
+    if (step === "select_all" || step === "copy_fresh") {
+      // outside the JS heap: array buffers and what the engine's addon reports to V8
+      console.log(["  external MB", ...results.map((r) => f(r.steps[step].external_mb))].join("\t"));
+    }
     if (results.some((r) => r.steps[step].lazy !== undefined)) {
       console.log(["  materialised", ...results.map((r) => (r.steps[step].lazy === undefined ? "-" : JSON.stringify(r.steps[step].lazy)))].join("\t"));
     }
