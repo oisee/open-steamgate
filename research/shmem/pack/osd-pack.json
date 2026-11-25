@@ -1,0 +1,5 @@
+{
+  "name": "shmem-bench",
+  "description": "Research only: the ABAP side of the SELECT-into-itab measurement (docs/research-db-itab-shared-memory.md). Opt-in through OSD_PACKS, never part of a default build",
+  "order": 900
+}
