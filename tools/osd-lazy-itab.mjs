@@ -322,7 +322,8 @@ export function installLazyItab(abap, {env = globalThis.process?.env ?? {}} = {}
   if (env.OSD_LAZY_ITAB_REPORT === "1") {
     globalThis.process?.on("exit", () => {
       fold();
-      console.log("osd-lazy-itab: " + JSON.stringify(totals));
+      // stderr: a benchmark child's stdout belongs to its parent
+      console.error("osd-lazy-itab: " + JSON.stringify(totals));
     });
   }
   globalThis.osdLazyItab = {reset: resetCounters, read: () => JSON.parse(JSON.stringify(counters))};

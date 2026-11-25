@@ -10,24 +10,28 @@ JavaScript object per field per row. Can the transpiled ABAP on Node share
 memory with the in-process engine (sql.js, DuckDB) instead, and is it
 worth it?
 
-**The answer in four lines.**
+**The answer in five lines.**
 
 1. Building the internal table is 42% of a `SELECT *` of a million rows on
    SQLite and 47% on DuckDB, and on DuckDB another 50% is the client
-   turning the result into row objects. The engine itself is 2% there. So
+   turning the result into row objects. The engine itself is 3% there. So
    yes, there is something to take.
 2. The PoC leaves the rows in the result as the engine gave it and makes a
    field when ABAP reads it. `SELECT *` of a million rows: 7.1 s to 4.3 s
-   on SQLite, 7.7 s to 0.44 s on DuckDB; heap after the SELECT 766 MB to
-   331 MB, and to 79 MB plus 206 MB of the engine's own buffers on DuckDB.
-   1163 ABAP Unit methods pass with it switched on.
+   on SQLite, 7.4 s to 0.44 s on DuckDB; heap after the SELECT 766 MB to
+   331 MB, and to 77 MB plus 206 MB of the engine's own buffers on DuckDB.
+   The ABAP Unit suite (1163 methods) gives the same result with it
+   switched on as without, on both engines.
 3. It is not free: a program that then reads every field of every row pays
-   the build inside its loop plus a toll, 13% more for the SELECT and the
-   loops together on both engines. And what ABAP does with the rows
+   the build inside its loop plus a toll: 13% more for the SELECT and the
+   loops together on SQLite, 8% on DuckDB. And what ABAP does with the rows
    afterwards costs more than the SELECT ever did, and no sharing touches
    that.
 4. For the cube it changes nothing, by measurement: the aggregation runs in
    the engine and the table that comes back has eight rows.
+5. Sharing the engine's memory produced one silent wrong answer on the way:
+   rows read out of memory the collector had already freed. A copy cannot
+   do that. It is fixed and it is the main thing this PoC has to teach.
 
 The numbers behind each line are below, and so is what the PoC does not
 cover.
@@ -37,9 +41,13 @@ cover.
 `research/shmem/measure.mjs`, one tool for every number in this file:
 
 ```
-OSD_PACKS=research/shmem/pack npm run transpile
+export OSD_PACKS=research/shmem/pack
+npm run transpile
 node research/shmem/measure.mjs 1000000 sqlite,duckdb eager,lazy
 ```
+
+(`OSD_PACKS` stays set: any tool that checks the build without it, the
+cube benchmark for one, makes the generation without the pack live again.)
 
 A child process per (engine, mode) boots the transpiled runtime the way
 `tools/bench-cube.mjs` does (`STG_DB`, `STG_DATA_SCALE`, the facts of
@@ -76,24 +84,24 @@ one INT4, one DEC 15,2), then what ABAP does with the table. Milliseconds.
 
 | | SQLite 100k | DuckDB 100k | SQLite 1M | DuckDB 1M |
 | --- | ---: | ---: | ---: | ---: |
-| **`SELECT *` INTO TABLE** | **713** | **778** | **7,134** | **7,692** |
-| &nbsp;&nbsp;engine | 391 (55%) | 29.0 (4%) | 3,584 (51%) | 184 (2%) |
-| &nbsp;&nbsp;rows (client) | 33.4 (5%) | 381 (49%) | 547 (8%) | 3,864 (50%) |
-| &nbsp;&nbsp;itab (runtime) | 288 (40%) | 368 (47%) | 2,953 (42%) | 3,614 (47%) |
-| &nbsp;&nbsp;heap after it, MB | 76.8 | 76.9 | 766 | 759 |
+| **`SELECT *` INTO TABLE** | **713** | **746** | **7,134** | **7,433** |
+| &nbsp;&nbsp;engine | 391 (55%) | 25.1 (3%) | 3,584 (51%) | 213 (3%) |
+| &nbsp;&nbsp;rows (client) | 33.4 (5%) | 367 (49%) | 547 (8%) | 3,763 (50%) |
+| &nbsp;&nbsp;itab (runtime) | 288 (40%) | 351 (47%) | 2,953 (42%) | 3,507 (47%) |
+| &nbsp;&nbsp;heap after it, MB | 76.8 | 76.9 | 766 | 762 |
 | `lines( )` | 0.05 | 0.05 | 0.05 | 0.06 |
-| copy of the table | 127 | 135 | 1,474 | 1,500 |
-| READ INDEX, every 1000th row | 0.54 | 0.54 | 5.94 | 6.03 |
-| LOOP, one field read | 64.5 | 72.3 | 579 | 558 |
-| LOOP, every field read | 346 | 339 | 3,246 | 3,053 |
-| LOOP + COLLECT by airline | 761 | 750 | 7,424 | 7,054 |
-| `SELECT airline seats` INTO TABLE | 222 | 188 | 2,170 | 2,059 |
-| the aggregation in Open SQL (GROUP BY) | 118 | 13.6 | 1,233 | 29.8 |
-| &nbsp;&nbsp;of which itab | 0.10 | 0.18 | 0.10 | 0.24 |
+| copy of the table | 127 | 126 | 1,474 | 1,352 |
+| READ INDEX, every 1000th row | 0.54 | 0.54 | 5.94 | 5.82 |
+| LOOP, one field read | 64.5 | 65.8 | 579 | 545 |
+| LOOP, every field read | 346 | 344 | 3,246 | 2,994 |
+| LOOP + COLLECT by airline | 761 | 748 | 7,424 | 6,927 |
+| `SELECT airline seats` INTO TABLE | 222 | 182 | 2,170 | 1,914 |
+| the aggregation in Open SQL (GROUP BY) | 118 | 11.8 | 1,233 | 26.5 |
+| &nbsp;&nbsp;of which itab | 0.10 | 0.17 | 0.10 | 0.18 |
 
 Read off the table:
 
-- **The engine is not the cost on DuckDB.** 0.18 s of 7.7 s. The other 98%
+- **The engine is not the cost on DuckDB.** 0.21 s of 7.4 s. The other 97%
   is two copies made one after the other: the result into row objects
   (`getRowObjects` plus a conversion per value), then the row objects into
   field objects.
@@ -111,7 +119,7 @@ Read off the table:
   than the whole SELECT. That is interpretation, not copying.
 - **The cube is not in this picture.** `select_cube` is the same
   aggregation written in Open SQL: the engine does it (1.2 s on SQLite,
-  30 ms on DuckDB) and building its eight-row table takes 0.1 to 0.2 ms.
+  27 ms on DuckDB) and building its eight-row table takes 0.1 to 0.2 ms.
 
 ## The ideas, and which one was built
 
@@ -130,6 +138,14 @@ any library**: `abap.statements.select` is replaced on the runtime object
 by `test/setup.mjs` when the switch is on, and a row is a `Structure` by
 prototype, so LOOP, READ, SORT, DELETE, MODIFY, INSERT, COLLECT, a copy
 and a comparison run the runtime's own code unchanged.
+
+The switches, all read once at start: `OSD_LAZY_ITAB=1` turns it on;
+`OSD_LAZY_ITAB_CHUNKS=0` keeps DuckDB on its row objects;
+`OSD_LAZY_ITAB_FULL_AFTER` is the share of a row's fields after which the
+row is made in full (0.5; at 100k rows on SQLite the first loop over every
+field took 752 ms with 0, 773 with 0.13, 754 and 829 in two runs with 0.5
+and 803 with 1, so it is not where the toll is); `OSD_LAZY_ITAB_REPORT=1` prints the counters
+at exit.
 
 How a row works:
 
@@ -165,42 +181,42 @@ Same instrument, same statistic, one run at a time.
 
 | | SQLite 100k | DuckDB 100k | SQLite 1M | DuckDB 1M |
 | --- | ---: | ---: | ---: | ---: |
-| `SELECT *` INTO TABLE | 713 → 407 | 778 → 43.3 | 7,134 → 4,254 | 7,692 → 443 |
-| &nbsp;&nbsp;engine | 391 → 350 | 29.0 → 27.0 | 3,584 → 3,713 | 184 → 194 |
-| &nbsp;&nbsp;rows | 33.4 → 32.1 | 381 → 6.70 | 547 → 509 | 3,864 → 101 |
-| &nbsp;&nbsp;itab | 288 → 16.2 | 368 → 8.91 | 2,953 → 188 | 3,614 → 151 |
-| &nbsp;&nbsp;heap after it, MB | 76.8 → 33.3 | 76.9 → 8.48 | 766 → 331 | 759 → 78.7 |
+| `SELECT *` INTO TABLE | 713 → 407 | 746 → 41.9 | 7,134 → 4,254 | 7,433 → 435 |
+| &nbsp;&nbsp;engine | 391 → 350 | 25.1 → 24.3 | 3,584 → 3,713 | 213 → 163 |
+| &nbsp;&nbsp;rows | 33.4 → 32.1 | 367 → 7.23 | 547 → 509 | 3,763 → 117 |
+| &nbsp;&nbsp;itab | 288 → 16.2 | 351 → 8.68 | 2,953 → 188 | 3,507 → 148 |
+| &nbsp;&nbsp;heap after it, MB | 76.8 → 33.3 | 76.9 → 8.50 | 766 → 331 | 762 → 77.0 |
 | &nbsp;&nbsp;external memory, MB | 0.00 → 0.00 | 0.00 → 20.6 | 0.00 → 0.00 | -0.01 → 206 |
-| copy of the fresh table | 127 → 20.7 | 135 → 21.3 | 1,474 → 202 | 1,500 → 192 |
-| &nbsp;&nbsp;heap with the copy, MB | 141 → 41.1 | 141 → 16.3 | 1,409 → 409 | 1,402 → 157 |
-| READ INDEX, every 1000th row | 0.54 → 0.81 | 0.54 → 11.8 | 5.94 → 7.79 | 6.03 → 30.5 |
-| LOOP, one field read | 64.5 → 112 | 72.3 → 115 | 579 → 1,001 | 558 → 981 |
-| &nbsp;&nbsp;heap after it, MB | 141 → 64.0 | 141 → 39.9 | 1,409 → 638 | 1,402 → 394 |
-| LOOP, every field read (first time) | 346 → 754 | 339 → 1,235 | 3,246 → 7,161 | 3,053 → 11,296 |
-| &nbsp;&nbsp;heap after it, MB | 141 → 103 | 141 → 98.5 | 1,409 → 1,027 | 1,402 → 980 |
-| the same LOOP again | 344 → 334 | 335 → 358 | 3,231 → 3,020 | 3,028 → 3,213 |
-| LOOP + COLLECT by airline | 761 → 721 | 750 → 735 | 7,424 → 7,020 | 7,054 → 7,435 |
-| copy of the table once read | 134 → 158 | 134 → 154 | 1,911 → 1,884 | 2,044 → 2,183 |
-| `SELECT airline seats` INTO TABLE | 222 → 135 | 188 → 23.6 | 2,170 → 1,313 | 2,059 → 218 |
-| the aggregation in Open SQL | 118 → 111 | 13.6 → 12.9 | 1,233 → 1,256 | 29.8 → 31.6 |
-| **sum: SELECT + LOOP one field** | 777 → 519 | 850 → 158 | 7,713 → 5,255 | 8,249 → 1,424 |
-| **sum: SELECT + copy** | 839 → 427 | 912 → 64.6 | 8,608 → 4,457 | 9,191 → 636 |
-| **sum: SELECT + both LOOPs (every field read)** | 1,123 → 1,273 | 1,189 → 1,393 | 10,959 → 12,416 | 11,302 → 12,720 |
+| copy of the fresh table | 127 → 20.7 | 126 → 19.9 | 1,474 → 202 | 1,352 → 169 |
+| &nbsp;&nbsp;heap with the copy, MB | 141 → 41.1 | 141 → 16.3 | 1,409 → 409 | 1,405 → 156 |
+| READ INDEX, every 1000th row | 0.54 → 0.81 | 0.54 → 11.5 | 5.94 → 7.79 | 5.82 → 25.2 |
+| LOOP, one field read | 64.5 → 112 | 65.8 → 108 | 579 → 1,001 | 545 → 849 |
+| &nbsp;&nbsp;heap after it, MB | 141 → 64.0 | 141 → 39.9 | 1,409 → 638 | 1,405 → 392 |
+| LOOP, every field read (first time) | 346 → 754 | 344 → 1,135 | 3,246 → 7,161 | 2,994 → 10,517 |
+| &nbsp;&nbsp;heap after it, MB | 141 → 103 | 141 → 98.6 | 1,409 → 1,027 | 1,405 → 978 |
+| the same LOOP again | 344 → 334 | 341 → 335 | 3,231 → 3,020 | 2,943 → 2,879 |
+| LOOP + COLLECT by airline | 761 → 721 | 748 → 748 | 7,424 → 7,020 | 6,927 → 7,013 |
+| copy of the table once read | 134 → 158 | 136 → 148 | 1,911 → 1,884 | 1,802 → 1,814 |
+| `SELECT airline seats` INTO TABLE | 222 → 135 | 182 → 22.5 | 2,170 → 1,313 | 1,914 → 204 |
+| the aggregation in Open SQL | 118 → 111 | 11.8 → 15.3 | 1,233 → 1,256 | 26.5 → 25.9 |
+| **sum: SELECT + LOOP one field** | 777 → 519 | 812 → 149 | 7,713 → 5,255 | 7,978 → 1,284 |
+| **sum: SELECT + copy** | 839 → 427 | 872 → 61.8 | 8,608 → 4,457 | 8,785 → 604 |
+| **sum: SELECT + both LOOPs (every field read)** | 1,123 → 1,273 | 1,156 → 1,284 | 10,959 → 12,416 | 10,972 → 11,801 |
 
 - **A SELECT nobody reads much of is where it pays**: at a million rows
   1.7 times faster on SQLite and 17 times on DuckDB, with less than half
   the heap. `lines( )` and a copy stay cheap, and the SELECT plus a loop
-  over one field is 32% less on SQLite and 83% less on DuckDB.
+  over one field is 32% less on SQLite and 84% less on DuckDB.
 - **A program that reads everything pays it back, with interest.** The
   first loop over every field of a lazy table is 2.2 times the eager loop
-  on SQLite and 3.7 times on DuckDB, because it is the eager loop plus the
+  on SQLite and 3.5 times on DuckDB, because it is the eager loop plus the
   build (plus, on DuckDB, the decoding the client used to do) plus the
   view's toll. The SELECT and both loops together are 13% slower than
-  eager on both engines at a million rows; the toll is about one
-  microsecond a row.
+  eager on SQLite and 8% on DuckDB at a million rows; the toll is one
+  microsecond a row on SQLite and a quarter of one on DuckDB.
 - **After that the table is an ordinary table**: `loop_again`,
   `abap_cube` and `copy_read` are within noise of eager.
-- **A sparse READ on DuckDB got slower** (6 ms to 31 ms for 1000 rows out
+- **A sparse READ on DuckDB got slower** (6 ms to 25 ms for 1000 rows out
   of a million): rows spread over the table decode one column of every
   chunk they fall into. Small in absolute terms, and the wrong direction.
 
@@ -208,11 +224,17 @@ Same instrument, same statistic, one run at a time.
 
 `npm run bench:cube`, the repository's own instrument, off and on:
 
-@@CUBE_TABLE@@
+| median of 5, ms, SQLite / DuckDB | 100k off | 100k on | 1M off | 1M on |
+| --- | ---: | ---: | ---: | ---: |
+| total | 32 / 14 | 26 / 15 | 162 / 18 | 157 / 15 |
+| by_airline | 117 / 22 | 117 / 22 | 1,225 / 31 | 1,240 / 28 |
+| by_airline_month_status | 268 / 98 | 262 / 104 | 2,339 / 110 | 2,368 / 105 |
+| filtered_by_month | 31 / 22 | 30 / 24 | 237 / 27 | 237 / 23 |
 
 No difference beyond noise, as predicted from the table above: the cube's
-SELECT returns the aggregated rows, and the PoC's counters for that run
-show @@CUBE_COUNTERS@@
+SELECT returns the aggregated rows. The PoC's counters for a whole run of
+the benchmark, per engine: 24 SELECTs went lazy, with 1854 rows between
+them. The switch was on and had nothing to work on.
 
 ## What it does not cover
 
@@ -236,7 +258,9 @@ a buffer table and loops over it.
 The ABAP Unit suite with the switch on, SQLite: **1163 methods, 0 failed**;
 1824 SELECTs went lazy (213,930 rows) and 2895 fell back (2473 not a table
 target, 202 include group, 133 unstructured, 82 positional, 5 hashed).
-On DuckDB: @@DUCKDB_UNIT@@
+On DuckDB, where every lazy SELECT takes the chunk path (1802 of them,
+215,832 rows): 1163 methods, **3 failed, the same three that fail there
+without the switch** (all in one class, a fleet proof, unrelated to this).
 
 `ZCL_OSD_SHMEM_BENCH=>SEMANTICS` runs some forty statements on selected
 tables (index and key reads, a change through a field symbol and its
@@ -246,7 +270,32 @@ ADJACENT DUPLICATES, APPEND LINES OF, sorted and hashed targets, INTO
 CORRESPONDING and APPENDING) and returns one text of 5487 characters. It is
 identical for SQLite and DuckDB, eager and lazy.
 
-What does change, and is not caught by a fallback:
+### What sharing the engine's memory cost: one silent wrong answer
+
+The first DuckDB run of that suite had five failures, not three. Two tests
+of one class select a table into an attribute in their setup, change the
+table, and in the teardown delete everything and insert the saved rows
+back. With the switch on the insert failed, and nothing had raised before
+it.
+
+A DuckDB vector is a **view** of its chunk's memory and does not keep the
+chunk alive. The PoC held the vectors of a result and not the chunks, so
+nothing stopped the collector from freeing a chunk whose rows had not been
+read yet, and a row read long after its SELECT was then made of whatever
+was in that memory. No exception from the read, no crash, different
+values. (The mechanism is inferred from the cure: the freed memory was not
+inspected.) The measurement runs had not shown it: there every row is read
+within seconds of its SELECT.
+
+The fix is one reference (`owner` in `selectChunks`, held by the chunk's
+shape until its last column has been decoded), and after it the suite has
+the three failures it has without the switch. It is written up here
+because it is the whole risk of this idea in one example: **a copy cannot
+dangle and a view can**, the failure is silent, and only a test that reads
+late finds it. Anything that goes further in this direction needs such a
+test before it needs a benchmark.
+
+### What does change, and is not caught by a fallback
 
 - **A value the type refuses raises where the field is first read**, not at
   the SELECT. Same exception, later place. A `TRY` around the SELECT alone
@@ -310,9 +359,9 @@ computed in the engine and in ABAP:
 
 | 1M facts, ms | SQLite | DuckDB |
 | --- | ---: | ---: |
-| aggregated in the engine (`select_cube`) | 1,233 | 29.8 |
-| fetched, aggregated in ABAP, eager | 14,558 (12x) | 14,746 (495x) |
-| fetched lazily, aggregated in ABAP, at least | 11,274 (9x) | 7,878 (249x) |
+| aggregated in the engine (`select_cube`) | 1,233 | 26.5 |
+| fetched, aggregated in ABAP, eager | 14,558 (12x) | 14,361 (541x) |
+| fetched lazily, aggregated in ABAP, at least | 11,274 (9x) | 7,448 (287x) |
 
 "At least": the COLLECT loop was timed on a table already read; on a
 fresh lazy table it also makes three fields of every row.
@@ -327,7 +376,7 @@ repository's answer to that question, not this.
 
 **As a general switch, not yet; as two narrow things, yes.**
 
-- Half of the DuckDB number is not laziness. `rows` is 3.9 s of 7.7 s
+- Half of the DuckDB number is not laziness. `rows` is 3.8 s of 7.4 s
   because `tools/duckdb-client.mjs` builds a row object per row and then
   maps every value of it again. How much of that a client converting
   column by column would take was not measured here; it is a change to our
@@ -336,7 +385,7 @@ repository's answer to that question, not this.
 - Lazy rows are the right tool for the code that selects wide and reads
   narrow: `SELECT *` followed by a loop over two fields, a table passed
   on and copied, a `lines( )`. It is the wrong tool for select-then-read-
-  everything, where it costs 13% more. Without a corpus count of
+  everything, where it costs 8 to 13% more. Without a corpus count of
   which shape real `_DPC_EXT` code has, switching it on for everything is
   a guess. The counters this PoC already has (`rowsFull` against
   `lazyRows`, per SELECT) are how to get that count from a real service.
