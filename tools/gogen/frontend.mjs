@@ -3972,6 +3972,8 @@ function localInterfaceConstant(id, attr, local, reg) {
     return convert(source(c.body.findDirectExpression(Expressions.Source), ctx, to), to);
   }
   if (c.kw === "VALUE") {
+    const fallback = valueFallback(c, ctx, inferred);
+    if (fallback !== undefined) return fallback;
     const to = namedType(c.typeNode, ctx, inferred);
     // @ts-expect-error -- abapiti form pending
     return valueBody(c.body, to, ctx, c.text);
@@ -5521,6 +5523,37 @@ function eventInfo(ctx, owner, evName) {
   return withSupplied(ctx.program, `${declaringClass(ctx.reg, clsName, "CONSTRUCTOR", "method") ?? clsName}=>CONSTRUCTOR`, own);
 }
 
+/**
+ * VALUE #( itab[ ... ] OPTIONAL ) and VALUE #( itab[ ... ]-comp DEFAULT d )
+ * (#996): the line (or its component) when the table expression finds one,
+ * else the initial value or d, and never CX_SY_ITAB_LINE_NOT_FOUND. Lowered
+ * as COND with line_exists, so the key values are evaluated for the test and
+ * again for the read. With # and no target type to infer from (an inline
+ * declaration), the type is the type of the table expression.
+ */
+/** @param {import("./frontend-types.ts").ConstructorItem} c @param {import("./frontend-types.ts").MethodContext} ctx @param {import("./ir.ts").Type} [inferred] @returns {import("./frontend-types.ts").ValueExpr | undefined} */ function valueFallback(c, ctx, inferred) {
+  const kids = c.body?.getChildren() ?? [];
+  const optional = kids.length === 2 && isTok(kids[1], "OPTIONAL");
+  const withDefault = kids.length === 3 && isTok(kids[1], "DEFAULT") && isExpr(kids[2], Expressions.Source);
+  if ((!optional && !withDefault) || !isExpr(kids[0], Expressions.Source)) return undefined;
+  const parts = kids[0].findDirectExpression(Expressions.FieldChain)?.getChildren() ?? [];
+  const at = parts.findIndex((p) => isExpr(p, Expressions.TableExpression));
+  if (at < 1) throw new Unsupported(`VALUE with ${optional ? "OPTIONAL" : "DEFAULT"} on something other than a table expression: ${c.text}`);
+  // only the first table expression is tested; a later one that misses would raise
+  if (parts.slice(at + 1).some((p) => isExpr(p, Expressions.TableExpression))) throw new Unsupported(`VALUE with ${optional ? "OPTIONAL" : "DEFAULT"} on a chain of table expressions: ${c.text}`);
+  // the key is evaluated for the test and again for the read
+  const te = parts[at];
+  if (isExpr(te, Expressions.TableExpression) && te.findAllExpressions(Expressions.MethodCallChain).length > 0) throw new Unsupported(`VALUE with ${optional ? "OPTIONAL" : "DEFAULT"} and a call in the key, which would run twice: ${c.text}`);
+  // @ts-expect-error -- abapiti form pending
+  const exists = tableExpressionExists(parts.slice(0, at), parts[at], ctx);
+  const to = c.typeNode.concatTokens() === "#" && inferred === undefined
+    ? source(kids[0], ctx).type
+    : namedType(c.typeNode, ctx, inferred);
+  const read = convert(source(kids[0], ctx, to), to);
+  const otherwise = withDefault ? convert(source(kids[2], ctx, to), to) : null;
+  return {e: "cond", branches: [{cond: exists, value: read}], else: otherwise, type: to};
+}
+
 /** @param {import("@abaplint/core").Nodes.ExpressionNode | null} body @param {import("./ir.ts").Type} to @param {import("./frontend-types.ts").MethodContext} ctx @param {string} text @returns {import("./frontend-types.ts").ValueExpr} */ function valueBody(body, to, ctx, text) {
   if (to.k === "table") {
     // VALUE #( ( ... ) ( ... ) ): one row per line, a structure or one value
@@ -6559,14 +6592,20 @@ const FUNCTIONS = {
   const fk = fc?.getChildren() ?? [];
   const te = fk.at(-1);
   if (!fc || !isExpr(te, Expressions.TableExpression)) throw new Unsupported(`line_exists form: ${chain.concatTokens()}`);
-  const table = fk.length === 2 ? sourceOperand(fk[0], ctx) : fieldChainParts(fk.slice(0, -1), () => fk.slice(0, -1).map((k) => k.concatTokens()).join(""), ctx);
-  if (table.type.k !== "table") throw new Unsupported("line_exists of a non-table");
+  return tableExpressionExists(fk.slice(0, -1), te, ctx);
+}
+
+/** whether a table expression finds a line: the table is the chain in front of
+ * it, the keys as in line_exists */
+/** @param {readonly (import("@abaplint/core").Nodes.ExpressionNode | import("@abaplint/core").Nodes.TokenNode)[]} head @param {import("@abaplint/core").Nodes.ExpressionNode} te @param {import("./frontend-types.ts").MethodContext} ctx @returns {import("./ir.ts").Condition} */ function tableExpressionExists(head, te, ctx) {
+  const table = head.length === 1 ? sourceOperand(head[0], ctx) : fieldChainParts(head, () => head.map((k) => k.concatTokens()).join(""), ctx);
+  if (table.type.k !== "table") throw new Unsupported("table expression on a non-table");
   const inner = te.getChildren().filter((c) => !isTok(c, "[") && !isTok(c, "]"));
   /** @type {import("./ir.ts").TableKey[]} */ const keys = [];
   for (let i = 0; i < inner.length; i += 3) {
     const comp = inner[i];
     if (!isExpr(comp, Expressions.ComponentChainSimple) || !isTok(inner[i + 1], "=") || !isExpr(inner[i + 2], Expressions.Source)) {
-      throw new Unsupported(`line_exists key form: ${te.concatTokens()}`);
+      throw new Unsupported(`table expression key form: ${te.concatTokens()}`);
     }
     const cname = upper(comp.concatTokens());
     if (cname === "TABLE_LINE") keys.push({line: true, value: convert(source(inner[i + 2], ctx, table.type.row), table.type.row)});
@@ -6575,7 +6614,7 @@ const FUNCTIONS = {
       keys.push({name: f.name, value: convert(source(inner[i + 2], ctx, f.type), f.type)});
     }
   }
-  if (keys.length === 0) throw new Unsupported(`line_exists key form: ${te.concatTokens()}`);
+  if (keys.length === 0) throw new Unsupported(`table expression key form: ${te.concatTokens()}`);
   return {c: "line_exists", table, keys};
 }
 
